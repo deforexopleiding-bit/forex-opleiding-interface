@@ -201,7 +201,17 @@ test('de tellers komen uit dezelfde functie als de lijst', () => {
   const tel = G.focusTelling(ALLE, ZICHTBAAR, NU);
   assert.equal(tel.venster_bijna_dicht, G.focusFilter(ALLE, ZICHTBAAR, 'venster_bijna_dicht', NU).length);
   assert.equal(tel.niet_gekoppeld, G.focusFilter(ALLE, ZICHTBAAR, 'niet_gekoppeld', NU).length);
-  assert.deepEqual(tel, { venster_bijna_dicht: 1, niet_gekoppeld: 2 });
+  assert.equal(tel.venster_bijna_dicht, 1);
+  assert.equal(tel.niet_gekoppeld, 2);
+  // Elke stand hoort een teller te hebben, afgeleid uit FOCUS_MODI in plaats
+  // van hier uitgeschreven. Een vast lijstje zou bij het volgende filter
+  // omvallen op de VORM en niet op een fout, en dan pas je de test aan zonder
+  // te kijken of de teller ook echt klopt.
+  for (const modus of G.FOCUS_MODI) {
+    if (modus === 'geen') continue;
+    assert.equal(typeof tel[modus], 'number', `teller voor ${modus} ontbreekt`);
+    assert.equal(tel[modus], G.focusFilter(ALLE, ZICHTBAAR, modus, NU).length, modus);
+  }
 });
 
 test('rommel als invoer levert een lege lijst op, geen uitzondering', () => {

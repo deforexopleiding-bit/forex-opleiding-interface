@@ -373,6 +373,87 @@ geen knop. Twee dingen die die knop goed moet doen:
 > wat er in totaal bestaat. Voor "is er meer" is `heeft_meer` het antwoord. Een
 > telling van alles zou een tweede opvraging kosten die niemand gebruikt.
 
+### G5 (de rest) — wacht op ons · wacht op klant · belofte vandaag
+
+De drie filters die er nog niet waren. Ze hoefden **geen** nieuwe tabel: de
+gegevens lagen er al en werden alleen niet gelezen.
+
+- `iris_gesprekken.status` — `cron-iris-werk` zet `wacht_op_ons` zodra er iets
+  binnenkomt, `iris-verstuur` zet `wacht_op_klant` zodra Iris iets stuurt.
+- `iris_beloftes` — een toezegging met een datum, status `actief`.
+
+**Wat er wél moest gebeuren, en waarom het filter zonder dat onbruikbaar was.**
+`wacht_op_klant` werd alleen door *Iris* gezet. Antwoordde een mens vanuit dit
+scherm, dan bleef het gesprek op `wacht_op_ons` staan. Het filter "wacht op ons"
+zou dus gesprekken blijven tonen die je net beantwoord hebt — en een filter dat
+je eigen werk niet ziet, leer je binnen een dag te negeren. `inbox-send` zet die
+stand nu ook, faalzacht (het bericht is op dat moment al bij Meta) en nooit over
+een stand heen die een mens bewust koos: `geregeld` en een lopende belofte
+blijven staan.
+
+**"Belofte vandaag" leunt op de beloftes zelf, niet op de status
+`belofte_loopt`.** Die status staat wel in de tabel maar wordt door niets gezet;
+een filter daarop zou altijd leeg zijn, en dat leert je binnen een dag dat het
+scherm niet klopt.
+
+**Vandaag is de lokale dag.** Met `toISOString()` zou een toezegging voor morgen
+er om half elf 's avonds al als "vandaag" uitzien. Dat is de off-by-one waar dit
+project eerder op stukliep; hier zou hij een belofte een dag te vroeg laten
+oplichten.
+
+**De opvraging gaat in blokken van 150.** De lijst kan tot 1000 gesprekken
+teruggeven, en een `.in()` met 1000 sleutels van ruim veertig tekens wordt een
+URL van tientallen kilobytes — die knapt ergens tussen PostgREST en de proxy,
+niet met een nette fout maar met een lege lijst of een 414. Bij de 115
+gesprekken van vandaag is het gewoon één blok.
+
+Lukt de hele omweg niet, dan krijgt elke regel géén werkstand en toont de lijst
+wat hij altijd toonde. Uitdrukkelijk in zijn geheel: een halve uitkomst zou
+erger zijn, want dan verbergt een filter een gesprek omdat het toevallig in het
+blok zat dat misging. Om dezelfde reden krijgt een gesprek dat Iris nog niet
+gezien heeft `null` als stand en niet `nieuw` — niet-weten is geen status.
+
+### G4 — wie pakt dit op?
+
+Nergens stond van wie een gesprek was. Bij twee mensen op één postbus is dat
+geen randgeval maar de normale gang van zaken: twee mensen antwoorden, of
+niemand doet het omdat allebei aannemen dat de ander al bezig is.
+
+Het veld bestond al — `iris_gesprekken.toegewezen_aan`, met NULL als "Iris houdt
+het vast, er is nog geen mens aan toegewezen". Er was alleen niets dat het zette
+of toonde. Dus ook hier: **geen migratie**.
+
+**In de kop een keuzelijst, in de lijst de initialen.** De lijst is waar je
+scant, dus daar hoort te staan van wie iets is — maar alleen de initialen, want
+een hele naam duwt de klantnaam uit beeld en dat is juist waar je op zoekt. De
+volledige naam staat in de tooltip en in de kop van het gesprek.
+
+Een gewone `<select>` en geen eigen uitklapmenu: die werkt met het toetsenbord,
+sluit vanzelf bij scrollen, en heeft geen van de `position:fixed`-kunstgrepen
+nodig die elders in dit bestand staan.
+
+**`finance.inbox.send`, hetzelfde recht als antwoorden.** Wie mag antwoorden mag
+het ook claimen; dat is precies dezelfde groep mensen, dus geen nieuw recht en
+geen migratie. Om diezelfde reden zit de lijst met mensen in dít endpoint en
+niet in een beheer-endpoint: wie de inbox bedient heeft geen beheerrechten, en
+zonder die lijst kan hij niets kiezen.
+
+**Een viewer staat er niet bij.** Die mag niet antwoorden, dus een gesprek aan
+hem toewijzen betekent dat het stil blijft liggen bij iemand die er niets mee
+kan — het ziet eruit alsof het belegd is, en dat is erger dan onbelegd. De
+server controleert dat zelf en vertrouwt er niet op dat het scherm alleen
+geldige mensen aanbiedt.
+
+**"Niemand" is een keuze, geen ontbrekende waarde.** Terug naar Iris moet
+kunnen. Zou een lege waarde als "veld vergeten" gelezen worden, dan kun je een
+toewijzing nooit meer weghalen.
+
+**Nooit stil slagen.** Een gesprek dat Iris nog niet verwerkt heeft, heeft geen
+rij in `iris_gesprekken` — dan kán er niets toegewezen worden. Dat geeft een
+`409` met een eigen code terug en het scherm zegt wat er aan de hand is, want
+"opgeslagen!" gevolgd door een leeg vakje na de volgende verversing is erger dan
+een foutmelding: dan denk je dat het belegd is.
+
 ---
 
 ## Wat er nog ligt
@@ -383,8 +464,6 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
-| G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
-| G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
 | G8 | paginering van de LIJST | de draad is gedaan (zie hierboven); de gesprekslijst haalt nog altijd `limit=1000` in één keer op, en waarschuwt daar zelf voor met `capOverflowWarning` |
 
 ---

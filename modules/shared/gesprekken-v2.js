@@ -167,7 +167,17 @@
    * hangt af van de gekozen stand, en staat hier in één functie in plaats van
    * verspreid door de opmaak.
    */
-  const FOCUS_MODI = ['geen', 'venster_bijna_dicht', 'niet_gekoppeld'];
+  /* De drie erbij (G5-rest) leunen op de werkstand die het lijst-endpoint
+     meestuurt: iris_status uit iris_gesprekken, en belofte_vandaag uit
+     iris_beloftes. Die gegevens bestonden al; ze werden alleen niet gelezen.
+
+     'belofte_vandaag' komt NIET uit de status 'belofte_loopt'. Die staat wel
+     in de tabel maar wordt door niets gezet, en een filter dat altijd leeg is
+     leert je binnen een dag dat het scherm niet klopt. */
+  const FOCUS_MODI = [
+    'geen', 'venster_bijna_dicht', 'niet_gekoppeld',
+    'wacht_op_ons', 'wacht_op_klant', 'belofte_vandaag',
+  ];
 
   /** Een onbekende stand is 'geen'. Zo kan een oude bladwijzer niets breken. */
   function leesFocus(ruw) {
@@ -193,6 +203,12 @@
         });
       case 'niet_gekoppeld':
         return allesArr.filter((c) => c && !c.customer_id);
+      case 'wacht_op_ons':
+        return zichtArr.filter((c) => c && c.iris_status === 'wacht_op_ons');
+      case 'wacht_op_klant':
+        return zichtArr.filter((c) => c && c.iris_status === 'wacht_op_klant');
+      case 'belofte_vandaag':
+        return zichtArr.filter((c) => c && c.belofte_vandaag === true);
       default:
         return zichtArr;
     }
@@ -209,6 +225,9 @@
     return {
       venster_bijna_dicht: focusFilter(alle, zichtbaar, 'venster_bijna_dicht', nu).length,
       niet_gekoppeld: focusFilter(alle, zichtbaar, 'niet_gekoppeld', nu).length,
+      wacht_op_ons: focusFilter(alle, zichtbaar, 'wacht_op_ons', nu).length,
+      wacht_op_klant: focusFilter(alle, zichtbaar, 'wacht_op_klant', nu).length,
+      belofte_vandaag: focusFilter(alle, zichtbaar, 'belofte_vandaag', nu).length,
     };
   }
 
