@@ -3196,6 +3196,9 @@
     _searchTimer:  null,
     statusFilter:  'all',              // SURFACE A: default = ALLE (v1-parity)
     sortMode:      'latest',           // BROK WB-FIX-2 #7: default = laatste bericht (meest recent boven)
+    // G5-deels, alleen actief achter GESPREKKEN_V2. 'geen' = de lijst zoals
+    // hij altijd was; een gekozen stand versmalt of vervangt 'em.
+    focusFilter:   'geen',
     autoOpenedFirst: false,            // SURFACE A: auto-open first conv na eerste fetch
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
@@ -3287,26 +3290,52 @@
   // wij tonen alleen wanbetaler-convs (is_debtor=true) + client-side searchQ +
   // sortMode 'unread_first' (v1-default). Fallback: als backend nog geen is_debtor
   // meelevert (legacy respons), val terug op overzicht-intersect zoals eerder.
-  function _selectVisibleInboxItems(items) {
+  //
+  // G5-deels (2026-09-22): het zoeken gebeurt nu VÓÓR de wanbetaler-poort in
+  // plaats van erna. Voor de gewone lijst maakt dat niets uit — beide filters
+  // staan los van elkaar, dus de volgorde waarin je ze toepast geeft dezelfde
+  // verzameling. Het maakt wél uit voor de stand 'niet gekoppeld', die juist
+  // de gesprekken toont die de wanbetaler-poort wegfiltert: zonder deze
+  // volgorde zou een zoekterm daar niets doen en zag je resultaten die er niet
+  // bij horen.
+  function _selectVisibleInboxItems(items, { negeerFocus = false } = {}) {
+    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
+    const alle = q
+      ? items.filter((c) => (
+          (c.customer_name || '') + ' ' +
+          (c.display_name  || '') + ' ' +
+          (c.phone_number  || '')
+        ).toLowerCase().includes(q))
+      : items;
+
     const hasDebtorFlag = items.some((c) => 'is_debtor' in c);
     let out;
     if (hasDebtorFlag) {
-      out = items.filter((c) => !!c.is_debtor);
+      out = alle.filter((c) => !!c.is_debtor);
     } else {
       // Fallback (legacy respons): overzicht-intersect als voorheen.
       const wbCids = new Set(asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)));
       out = wbCids.size
-        ? items.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
-        : items;
+        ? alle.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
+        : alle;
     }
-    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
-    if (q) {
-      out = out.filter((c) => (
-        (c.customer_name || '') + ' ' +
-        (c.display_name  || '') + ' ' +
-        (c.phone_number  || '')
-      ).toLowerCase().includes(q));
-    }
+    // G5-deels — de twee standen die met de huidige gegevens al kunnen.
+    // Staat de vlag uit, dan is `modus` altijd 'geen' en geeft focusFilter
+    // letterlijk `out` terug: zelfde lijst, zelfde volgorde.
+    //
+    // `alle` gaat er óók in, en dat is met opzet: 'niet gekoppeld' moet juist
+    // de gesprekken tonen die deze lijst normaal wegfiltert. Een gesprek zonder
+    // klant heeft geen open facturen, dus is_debtor is onwaar — zoeken bínnen
+    // de bestaande selectie zou altijd nul opleveren en eruitzien alsof er
+    // niets aan de hand is.
+    //
+    // `negeerFocus` is voor de tellers op de knoppen zelf: die moeten weten
+    // hoe groot de lijst ZONDER stand is, anders telt een actieve stand
+    // zichzelf.
+    const gv = negeerFocus ? null : _gv2();
+    const focusModus = gv ? (_ui.inbox.focusFilter || 'geen') : 'geen';
+    if (gv && focusModus !== 'geen') out = gv.focusFilter(alle, out, focusModus);
+
     const mode = _ui.inbox.sortMode || 'unread_first';
     out = out.slice().sort((a, b) => {
       const ta = a.last_activity_at ? Date.parse(a.last_activity_at) : (a.last_message_at ? Date.parse(a.last_message_at) : 0);
@@ -3605,6 +3634,19 @@
     // totdat een andere event (bv. fetch-return) een render triggerde.
     try { window.DFO?.render?.(); } catch (_) {}
     _fetchInboxConvs();
+  };
+  /* G5-deels. Nog een keer op dezelfde knop zet 'em weer uit — een filter
+     waar je alleen uit komt door een ándere knop te zoeken, blijft per
+     ongeluk aan staan en dan lijkt de lijst leeg. Geen refetch nodig: de
+     selectie gebeurt op de lijst die er al is. */
+  window.__wbxInboxFocus = (val) => {
+    const gv = _gv2();
+    if (!gv) return;                       // knop bestaat niet zonder de vlag
+    const gewenst = gv.leesFocus(val);
+    _ui.inbox.focusFilter = (_ui.inbox.focusFilter === gewenst) ? 'geen' : gewenst;
+    _ui.inbox.selectedConv = null;
+    _ui.inbox.autoOpenedFirst = false;
+    try { window.DFO?.render?.(); } catch (_) {}
   };
   window.__wbxInboxToggleChannel = (ch) => {
     _ui.inbox.compose.channel = String(ch || 'wa');
@@ -4085,7 +4127,18 @@
     // Volledige logic in _selectVisibleInboxItems zodat _fetchInboxConvs auto-
     // open dezelfde criteria hanteert.
     const items = _selectVisibleInboxItems(asArr(st.items));
-    if (!items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen wanbetaler-gesprekken in dit filter.</div>`;
+    if (!items.length) {
+      // De lege tekst moet kloppen met wat er gefilterd is. "Geen
+      // wanbetaler-gesprekken" onder de stand 'niet gekoppeld' is ronduit
+      // verwarrend: die stand zoekt juist buiten de wanbetalers.
+      const modus = _gesprekkenV2() ? (_ui.inbox.focusFilter || 'geen') : 'geen';
+      const tekst = modus === 'niet_gekoppeld'
+        ? 'Geen gesprekken zonder klantkoppeling.'
+        : (modus === 'venster_bijna_dicht'
+          ? 'Geen gesprek waarvan het venster binnen twee uur dichtgaat.'
+          : 'Geen wanbetaler-gesprekken in dit filter.');
+      return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
+    }
     return items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
@@ -4191,6 +4244,14 @@
     return _live.inbox.convs.v2 === true && !!(window.GESPREKKEN_V2 && window.GESPREKKEN_V2.vensterStand);
   }
 
+  /* Het hulpscript, of niets. Alle aanroepen lopen hierlangs zodat
+     `window.GESPREKKEN_V2` in dit bestand op precies twee plekken staat — hier
+     en in de poort hierboven. Een aanroep die de poort omzeilt is dan geen
+     kwestie van goed lezen meer, maar van een test die omvalt. */
+  function _gv2() {
+    return _gesprekkenV2() ? window.GESPREKKEN_V2 : null;
+  }
+
   function _inboxThreadHtml(convId) {
     if (!convId) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">← Kies een gesprek links.</div>`;
     const loading = _live.inbox.thread.loading[convId];
@@ -4205,6 +4266,7 @@
       queueMicrotask(() => _fetchInboxNoreply(convId));
     }
     const noreplyBanner = _inboxNoreplyBannerHtml(convId);
+    const gvDraad = _gv2();
     return noreplyBanner + items.map((m) => {
       const isOut = m.direction === 'outbound' || m.direction === 'out';
       const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
@@ -4223,8 +4285,8 @@
       // uit als een afgeleverd bericht: je denkt dat je geantwoord hebt. De
       // gegevens stonden er al (whatsapp_messages.status + failed_reason), ze
       // werden alleen niet getoond.
-      const stand = _gesprekkenV2() && window.GESPREKKEN_V2.toontVerzendStand(m)
-        ? window.GESPREKKEN_V2.verzendStand(m.meta?.status, m.meta?.failed_reason)
+      const stand = (gvDraad && gvDraad.toontVerzendStand(m))
+        ? gvDraad.verzendStand(m.meta?.status, m.meta?.failed_reason)
         : null;
       const standKleur = stand
         ? (stand.kleur === 'rood' ? 'var(--rose,#D14343)' : (stand.kleur === 'blue' ? 'var(--blue)' : 'var(--text-3)'))
@@ -4576,6 +4638,30 @@
       return `<button class="chip${isOn ? ' on' : ''}" style="font-size:10.5px;padding:2px 7px" onclick="__wbxInboxSort('${v}')" title="${esc(l)}">${esc(l)}</button>`;
     };
 
+    // G5-deels — twee standen die met de huidige gegevens al kunnen. Alleen
+    // zichtbaar achter GESPREKKEN_V2; staat de vlag uit, dan is deze hele rij
+    // een lege string en verandert er niets aan de kop.
+    //
+    // De teller staat op de knop zelf. Een filter zonder getal moet je
+    // aanklikken om te weten of het iets oplevert, en dat doe je dus niet —
+    // waarna het gat waar het filter voor bedoeld was gewoon blijft bestaan.
+    let focusRij = '';
+    const gvFocus = _gv2();
+    if (gvFocus) {
+      const alle = asArr(_live.inbox.convs.items);
+      const basis = _selectVisibleInboxItems(alle, { negeerFocus: true });
+      const tel = gvFocus.focusTelling(alle, basis);
+      const focusBtn = (v, l, n, titel) => {
+        const isOn = _ui.inbox.focusFilter === v;
+        return `<button class="chip${isOn ? ' on' : ''}" style="font-size:10.5px;padding:2px 7px" onclick="__wbxInboxFocus('${v}')" title="${esc(titel)}">${esc(l)} <b style="font-weight:700">${n}</b></button>`;
+      };
+      focusRij = `<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:9.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Focus</span>
+        ${focusBtn('venster_bijna_dicht', 'Venster bijna dicht', tel.venster_bijna_dicht, 'Minder dan twee uur over om vrije tekst te sturen. Nogmaals klikken zet het filter uit.')}
+        ${focusBtn('niet_gekoppeld', 'Niet gekoppeld', tel.niet_gekoppeld, 'Gesprekken zonder klant. Die staan normaal NIET in deze lijst — er zijn geen open facturen om ze binnen te halen. Nogmaals klikken zet het filter uit.')}
+      </div>`;
+    }
+
     return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
       <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
         <div style="width:320px;min-width:260px;max-width:38%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
@@ -4592,6 +4678,7 @@
               ${sortBtn('unread_first', 'Ongelezen eerst')}
               ${sortBtn('latest', 'Laatste bericht')}
             </div>
+            ${focusRij}
           </div>
           <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
         </div>
@@ -4646,9 +4733,8 @@
     // last_inbound_at al in de lijst meekomt. De aftreksom is kleiner dan het
     // gat. Is de vlag uit, of weten we het laatste inkomende bericht niet, dan
     // staat hier letterlijk de badge van hiervoor.
-    const vst = _gesprekkenV2()
-      ? window.GESPREKKEN_V2.vensterStand(row.last_inbound_at || conv?.last_inbound_at || null)
-      : null;
+    const gvKop = _gv2();
+    const vst = gvKop ? gvKop.vensterStand(row.last_inbound_at || conv?.last_inbound_at || null) : null;
     let window24;
     if (vst && vst.bekend && vst.open) {
       // Bijna dicht wordt amber terwijl het nog open is — dat is het moment

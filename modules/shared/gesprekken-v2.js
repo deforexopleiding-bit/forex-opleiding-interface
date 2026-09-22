@@ -141,6 +141,77 @@
     }
   }
 
+  /**
+   * ── G5, het deel dat nu al kan ────────────────────────────────────────────
+   *
+   * De filters in de gesprekslijst zijn status en zoeken. Wat ontbreekt is
+   * precies waar je op wilt filteren: wacht op ons · wacht op klant · venster
+   * bijna dicht · belofte vandaag · niet gekoppeld.
+   *
+   * Twee daarvan kunnen met de gegevens die er nu al zijn. De andere drie
+   * hebben een toestand per gesprek nodig (G4) en komen later.
+   *
+   * LET OP HET VERSCHIL tussen de twee die hier staan — het is geen detail:
+   *
+   *   `venster_bijna_dicht` VERSMALT de lijst die je al zag.
+   *   `niet_gekoppeld`      VERVANGT hem, en toont juist wat je nooit zag.
+   *
+   * Een gesprek zonder klantkoppeling heeft geen openstaande facturen, dus
+   * `is_debtor` is onwaar en de wanbetalerslijst laat 'em weg. Dat is geen
+   * fout in die lijst — het is de reden dat zulke gesprekken ongezien blijven
+   * liggen. Een filter dat binnen de bestaande selectie zoekt zou daarom
+   * altijd nul opleveren en eruitzien alsof er niets aan de hand is.
+   *
+   * Vandaar twee lijsten als invoer: `alle` (alles wat het endpoint gaf) en
+   * `zichtbaar` (wat de lijst normaal toont). Welke van de twee de bron is,
+   * hangt af van de gekozen stand, en staat hier in één functie in plaats van
+   * verspreid door de opmaak.
+   */
+  const FOCUS_MODI = ['geen', 'venster_bijna_dicht', 'niet_gekoppeld'];
+
+  /** Een onbekende stand is 'geen'. Zo kan een oude bladwijzer niets breken. */
+  function leesFocus(ruw) {
+    const s2 = String(ruw ?? '').trim().toLowerCase();
+    return FOCUS_MODI.includes(s2) ? s2 : 'geen';
+  }
+
+  /**
+   * @param {Array} alle        alle gesprekken uit het lijst-antwoord
+   * @param {Array} zichtbaar   wat de lijst normaal toont (wanbetalers)
+   * @param {string} modus      een van FOCUS_MODI
+   * @param {number} [nu]       epoch-ms
+   * @returns {Array}
+   */
+  function focusFilter(alle, zichtbaar, modus, nu) {
+    const allesArr = Array.isArray(alle) ? alle : [];
+    const zichtArr = Array.isArray(zichtbaar) ? zichtbaar : [];
+    switch (leesFocus(modus)) {
+      case 'venster_bijna_dicht':
+        return zichtArr.filter((c) => {
+          const v = vensterStand(c && c.last_inbound_at, nu);
+          return v.bekend && v.open && v.bijnaDicht;
+        });
+      case 'niet_gekoppeld':
+        return allesArr.filter((c) => c && !c.customer_id);
+      default:
+        return zichtArr;
+    }
+  }
+
+  /**
+   * Hoeveel gesprekken vallen er onder elke stand?
+   *
+   * Loopt via focusFilter, zodat de teller op de knop niet uit de pas kan
+   * lopen met wat je ziet als je 'em indrukt. Twee keer dezelfde regel
+   * uitschrijven is precies hoe dat wél gebeurt.
+   */
+  function focusTelling(alle, zichtbaar, nu) {
+    return {
+      venster_bijna_dicht: focusFilter(alle, zichtbaar, 'venster_bijna_dicht', nu).length,
+      niet_gekoppeld: focusFilter(alle, zichtbaar, 'niet_gekoppeld', nu).length,
+    };
+  }
+
   /** Alleen uitgaande WhatsApp heeft een verzendstatus. Mail en inkomend niet. */
   function toontVerzendStand(bericht) {
     if (!bericht) return false;
@@ -149,7 +220,11 @@
     return richting === 'out' || richting === 'outbound';
   }
 
-  const API = { VENSTER_MS, BIJNA_DICHT_MS, vensterStand, duurKort, verzendStand, toontVerzendStand };
+  const API = {
+    VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI,
+    vensterStand, duurKort, verzendStand, toontVerzendStand,
+    leesFocus, focusFilter, focusTelling,
+  };
 
   if (typeof window !== 'undefined') window.GESPREKKEN_V2 = API;
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

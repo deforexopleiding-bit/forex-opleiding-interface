@@ -107,6 +107,44 @@ te sterk — de E-mail-module heeft alle zeven postbussen. Het gat was kleiner d
 opgeschreven, en dat staat nu ook zo in
 [`02-gesprekken-audit.md`](02-gesprekken-audit.md).
 
+### G5 (deels) — twee filters die nu al kunnen
+
+**Was:** de gesprekslijst filtert op status en zoekterm. Waar je écht op wilt
+filteren — wacht op ons · wacht op klant · venster bijna dicht · belofte vandaag
+· niet gekoppeld — kon niet.
+
+**Nu:** twee van de vijf, als een rij **Focus**-knoppen met een teller erop. Een
+filter zonder getal moet je aanklikken om te weten of het iets oplevert, en dat
+doe je dus niet — waarna het gat waar het filter voor bedoeld was gewoon blijft
+bestaan. Nog eens klikken zet de stand weer uit.
+
+Let op het verschil tussen de twee, want het is geen detail:
+
+| Stand | Wat hij doet |
+|---|---|
+| **Venster bijna dicht** | *versmalt* de lijst die je al zag: minder dan twee uur over om vrije tekst te sturen. |
+| **Niet gekoppeld** | *vervangt* hem, en toont juist wat je nooit zag. |
+
+Een gesprek zonder klantkoppeling heeft geen openstaande facturen, dus
+`is_debtor` is onwaar en de wanbetalerslijst laat 'em weg. Dat is geen fout in
+die lijst — het is de reden dat zulke gesprekken ongezien blijven liggen. Een
+filter dat binnen de bestaande selectie zoekt zou daarom altijd nul opleveren en
+eruitzien alsof er niets aan de hand is.
+
+Twee gevolgen die het opschrijven waard zijn:
+
+- **Het zoeken gebeurt nu vóór de wanbetaler-poort** in plaats van erna. Voor de
+  gewone lijst maakt dat niets uit (beide filters staan los van elkaar), maar
+  zonder die volgorde zou een zoekterm in de stand "niet gekoppeld" niets doen.
+- **De lege-lijst-tekst hoort bij de stand.** "Geen wanbetaler-gesprekken" onder
+  een stand die juist buiten de wanbetalers kijkt, is ronduit verwarrend.
+
+En één ding dat onderweg strakker werd: alle aanroepen van het hulpscript lopen
+nu via `_gv2()`, dat het script teruggeeft óf niets. Daardoor staat
+`window.GESPREKKEN_V2` in `wanbetalers-v2.js` op precies twee plekken, en is een
+aanroep die de vlag omzeilt geen kwestie van goed lezen meer maar van een test
+die omvalt.
+
 ---
 
 ## Wat er nog ligt
@@ -118,7 +156,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | G1 | microfoon overal waar tekst kan | vraagt `OPENAI_API_KEY`; die zet Maxim |
 | G2 | ongedaan-venster van 30 seconden | raakt de verzendweg; eigen PR waard |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
-| G5 | fijnere filters | twee ervan kunnen nu al (venster, niet gekoppeld), de rest heeft G4 nodig |
+| G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
 | G6 | mail aan het contact, niet aan de klant | raakt `inbox-thread-unified` dieper |
 | G7 | IMAP `APPEND` naar Verzonden | raakt `send-email.js` |
 | G8 | paginering en trager pollen | het grootste getal (≈ 54 MB per uur per tabblad), en de grootste ingreep |
