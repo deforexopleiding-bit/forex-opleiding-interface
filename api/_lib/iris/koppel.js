@@ -30,6 +30,7 @@
 
 import { stripToDigits, last9Digits } from '../phone-normalize.js';
 import { veiligZoekwoord } from './zoekfilter.js';
+import { customerDisplayName } from '../customer-name.js';
 
 /** Mailadres normaliseren. Leeg of onzin wordt een lege tekst. */
 export function normaliseerEmail(ruw) {
@@ -117,7 +118,12 @@ export function kiesKandidaat(kandidaten) {
  * met een landcode die er soms wel en soms niet staat. Dezelfde afweging als
  * customer-check-duplicate.js en findCustomerByPhone in de webhook.
  *
- * @returns {Promise<{status, id, reden, kandidaten}>}
+ * @returns {Promise<{gelezen, status, id, reden, kandidaten}>}
+ *
+ * `gelezen: false` betekent: we konden niet kijken. Dat is uitdrukkelijk iets
+ * anders dan "gekeken en niemand gevonden", en het verschil is belangrijk —
+ * een verdict dat uit een onleesbare bron komt mag geen bestaande koppeling
+ * overschrijven en mag ook niet als vaststaand antwoord opgeslagen worden.
  */
 export async function zoekKlant(supabase, { email, telefoon } = {}) {
   const mail = normaliseerEmail(email);
@@ -132,35 +138,42 @@ export async function zoekKlant(supabase, { email, telefoon } = {}) {
 
   let rijen;
   try {
+    // KOLOMNAMEN. `customers` heeft GEEN kolom `name` — dat stond hier eerst,
+    // en daardoor gaf élke opvraging een fout en kwam élk gesprek op "niet
+    // gekoppeld" te staan. De naam is samengesteld: company_name voor een
+    // bedrijf, voornaam + achternaam voor een particulier. Die samenstelling
+    // staat al in api/_lib/customer-name.js en wordt door de rest van het
+    // systeem gebruikt; Iris hoort daar geen tweede versie van te maken.
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, email, phone')
+      .select('id, is_company, first_name, last_name, company_name, email, phone')
       .is('archived_at', null)
       .is('anonymized_at', null);
     if (error) {
       console.error('[iris/koppel] klanten lezen mislukt:', error.message);
-      return { status: 'onbekend', id: null, reden: 'klanten niet gelezen: ' + error.message, kandidaten: [] };
+      return { gelezen: false, status: 'onbekend', id: null, reden: 'klanten niet gelezen: ' + error.message, kandidaten: [] };
     }
     rijen = data || [];
   } catch (e) {
     console.error('[iris/koppel] uitzondering bij klanten lezen:', e?.message || e);
-    return { status: 'onbekend', id: null, reden: 'klanten niet gelezen', kandidaten: [] };
+    return { gelezen: false, status: 'onbekend', id: null, reden: 'klanten niet gelezen', kandidaten: [] };
   }
 
   const kandidaten = [];
   for (const r of rijen) {
+    const naam = customerDisplayName(r, '') || null;
     if (mail && normaliseerEmail(r.email) === mail) {
-      kandidaten.push({ id: r.id, naam: r.name, score: 'email' });
+      kandidaten.push({ id: r.id, naam, score: 'email' });
       continue;
     }
     if (tel) {
       const m = telefoonMatch(tel, r.phone);
-      if (m) kandidaten.push({ id: r.id, naam: r.name, score: m });
+      if (m) kandidaten.push({ id: r.id, naam, score: m });
     }
   }
 
   const keuze = kiesKandidaat(kandidaten);
-  return { ...keuze, kandidaten };
+  return { gelezen: true, ...keuze, kandidaten };
 }
 
 /**
@@ -209,17 +222,53 @@ export async function zorgVoorContact(supabase, { email, telefoon, naam } = {}) 
       const voor = emails.size + telefoons.size;
       if (mail) emails.add(mail);
       if (tel) telefoons.add(tel);
-      if (emails.size + telefoons.size !== voor || (naam && !c.weergavenaam)) {
+
+      // NOG NIET GEKOPPELD? DAN OPNIEUW PROBEREN.
+      //
+      // Hier zat een gat dat pas op productie zichtbaar werd. Een contact
+      // kreeg zijn koppelstatus één keer, bij het aanmaken, en daarna nooit
+      // meer. Ging het zoeken toen mis — een verkeerde kolomnaam, een
+      // haperende verbinding — dan bleef dat contact voor altijd "onbekend",
+      // ook nadat de oorzaak allang verholpen was. Eén slechte minuut werd
+      // een blijvende toestand.
+      //
+      // Nu probeert elk volgend bericht het opnieuw, zolang er nog geen klant
+      // aan hangt. Dat is goedkoop (het gebeurt alleen voor contacten zonder
+      // koppeling) en het maakt het geheel zelfherstellend: de fout repareren
+      // is genoeg, er hoeft niemand iets na te lopen.
+      //
+      // Andersom geldt óók iets: een geslaagde koppeling wordt nooit
+      // teruggedraaid door een mislukte opvraging. Zie `gelezen` hieronder.
+      let extra = null;
+      if (!c.customer_id) {
+        const opnieuw = await zoekKlant(supabase, { email: mail, telefoon: tel });
+        if (opnieuw.gelezen && (opnieuw.status !== c.koppelstatus || opnieuw.id)) {
+          extra = {
+            customer_id: opnieuw.status === 'gekoppeld' ? opnieuw.id : null,
+            koppelstatus: opnieuw.status,
+            koppel_reden: opnieuw.reden,
+          };
+          if (!c.weergavenaam && opnieuw.kandidaten?.[0]?.naam) {
+            extra.weergavenaam = opnieuw.kandidaten[0].naam;
+          }
+        }
+      }
+
+      const moetBij = emails.size + telefoons.size !== voor || (naam && !c.weergavenaam) || extra;
+      if (moetBij) {
+        const velden = {
+          emails: [...emails],
+          telefoons: [...telefoons],
+          weergavenaam: c.weergavenaam || naam || null,
+          bijgewerkt_op: new Date().toISOString(),
+          ...(extra || {}),
+        };
         const { error: bijFout } = await supabase
           .from('iris_contacten')
-          .update({
-            emails: [...emails],
-            telefoons: [...telefoons],
-            weergavenaam: c.weergavenaam || naam || null,
-            bijgewerkt_op: new Date().toISOString(),
-          })
+          .update(velden)
           .eq('id', c.id);
         if (bijFout) console.warn('[iris/koppel] contact aanvullen mislukt:', bijFout.message);
+        else if (extra) Object.assign(c, extra);
       }
       return { ...c, emails: [...emails], telefoons: [...telefoons] };
     }

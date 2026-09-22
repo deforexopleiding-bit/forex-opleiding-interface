@@ -25,6 +25,8 @@
 // Geen berekende adviezen, geen "hij zou nu gebeld moeten worden". Dit is een
 // kaart, geen mening. De mening komt van de classificatie en van de mens.
 
+import { customerDisplayName } from '../customer-name.js';
+
 const DAG_MS = 24 * 3600 * 1000;
 const MAX_FACTUREN = 25;
 
@@ -156,13 +158,18 @@ export async function bouwDossier(supabase, contact, { lmsClient = null, nu = ne
 
 async function haalKlant(supabase, id) {
   try {
+    // KOLOMNAMEN. Geen `name` — die kolom bestaat niet. Zie de toelichting in
+    // _lib/iris/koppel.js; de weergavenaam wordt samengesteld met de gedeelde
+    // helper, zodat een bedrijf zijn bedrijfsnaam houdt en een particulier
+    // zijn voor- en achternaam.
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, email, phone, created_at')
+      .select('id, is_company, first_name, last_name, company_name, email, phone, created_at')
       .eq('id', id)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return data || null;
+    if (!data) return null;
+    return { ...data, naam: customerDisplayName(data, '') || null };
   } catch (e) {
     console.error('[iris/dossier] klant:', e?.message || e);
     return null;
