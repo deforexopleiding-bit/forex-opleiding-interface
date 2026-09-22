@@ -251,8 +251,15 @@ nakijken. Dat is iets anders dan "er is niets aan de hand".
 **"Iris schrijft niets."** Kijk of `ANTHROPIC_API_KEY` in Vercel staat. Zonder
 die sleutel komt er een melding in plaats van een concept.
 
-**"De microfoon doet niets."** Eerste keer: de browser vraagt toestemming.
-Daarna: `OPENAI_API_KEY` moet in Vercel staan. Typen werkt altijd.
+**"De microfoon doet niets."** Eerste keer: de browser vraagt toestemming —
+zeg ja. Werkt het daarna nog niet, kijk dan welke browser je gebruikt: het
+meeluisteren zit in **Chrome en Edge**. Safari en Firefox hebben het niet, en
+dan blijft typen over.
+
+Waarom de browser en niet een dienst: we gebruiken alleen Anthropic, en Claude
+kan geen opname beluisteren. De browser kan dat wel, gratis en zonder extra
+sleutel. De tekst die eruit komt gaat daarna gewoon naar Claude, net als wat je
+typt.
 
 **"Er komt niets binnen."** Kijk in het logboek of er werkrondes langskomen. Het
 ochtendrapport meldt het ook als er in 24 uur geen enkel bericht binnenkwam.

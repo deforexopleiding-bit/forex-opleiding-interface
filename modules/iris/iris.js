@@ -98,7 +98,13 @@
       recorder: null,      // de MediaRecorder zelf
       stukken: [],         // de opgenomen brokken
       verstuurt: null,     // gesprek waarvoor een verzending loopt
+      herkenner: null,     // de Web Speech-herkenner, als die de weg is
     },
+
+    // Welke weg neemt spraak naar tekst? Eén keer vragen per paginabezoek.
+    // 'openai' als er een sleutel is, anders de browser. Zie
+    // api/_lib/iris/spraak.js voor waarom de sleutel wint.
+    spraak: { route: null, opgehaald: false, bezig: false },
 
     // Het ongedaan-venster. Eén tegelijk: er kan er maar één aftellen.
     ongedaan: null,        // { conceptId, gesprekId, tot, timer }
@@ -113,6 +119,7 @@
       neemtOp: false,
       recorder: null,
       stukken: [],
+      herkenner: null,
     },
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
@@ -303,25 +310,71 @@
     // Dezelfde val die _shared-v2.js met stableSearch oplost.
   };
 
+  /* ── Spraak naar tekst: welke weg ─────────────────────────────────────
+     Maxim gebruikt alleen Anthropic, en de Anthropic-API doet geen spraak
+     naar tekst. Dus luistert de browser mee (Web Speech, nl-BE). Staat er
+     tóch een OPENAI_API_KEY, dan wint die: nauwkeuriger bij eigennamen, en
+     hij werkt ook in Safari en Firefox.
+
+     De server weet van de sleutel, de browser weet van zichzelf. Daarom
+     wordt de weg één keer per paginabezoek opgevraagd en daarna onthouden —
+     en pas bij de eerste klik op de microfoon, zodat wie nooit inspreekt er
+     ook geen opvraging voor doet. */
+
+  async function haalSpraakRoute() {
+    const st = S.spraak;
+    if (st.opgehaald || st.bezig) return st.route;
+    st.bezig = true;
+    try {
+      const j = await haal('/api/iris-transcribe');
+      st.route = j && j.openai === true ? 'openai' : 'browser';
+    } catch (e) {
+      // Kunnen we het niet vragen, dan nemen we de weg die geen server nodig
+      // heeft. Een microfoon die niets doet omdat een opvraging faalde, is
+      // erger dan een microfoon die het via de browser probeert.
+      console.warn('[iris] spraakweg niet opgehaald, browser gebruikt:', e?.message || e);
+      st.route = 'browser';
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+    }
+    return st.route;
+  }
+
+  /** De gekozen weg voor deze klik, met de browser erbij gewogen. */
+  function spraakWeg(route) {
+    const S2 = window.IRIS_SPRAAK;
+    if (!S2) return route === 'openai' ? 'openai' : 'geen';
+    return S2.kiesRoute({ openai: route === 'openai', browserKan: S2.browserKanSpraak(window) });
+  }
+
+  const GEEN_SPRAAK =
+    'Deze browser kan niet meeluisteren. Chrome en Edge wel — of typen, dat werkt altijd.';
+
   /**
    * De microfoon.
    *
-   * MediaRecorder neemt op in de browser; de ruwe brok gaat als body naar
-   * /api/iris-transcribe. Geen base64: dat maakt een opname een derde groter
-   * en moet aan twee kanten omgezet worden.
+   * Twee wegen, één knop. Via de browser komt de tekst binnen terwijl je
+   * praat; via OpenAI pas als je stopt. In beide gevallen gaat de tekst
+   * daarna naar Claude, precies zoals eerst.
    *
-   * Gaat er iets mis — geen toestemming, geen microfoon, geen sleutel — dan
-   * blijft typen gewoon werken. Spraak is een versnelling, geen voorwaarde.
+   * Gaat er iets mis — geen toestemming, geen microfoon, geen van beide
+   * wegen — dan blijft typen gewoon werken. Spraak is een versnelling, geen
+   * voorwaarde.
    */
   window.__irisMicrofoon = async () => {
     const gesprek = S.gekozen;
     if (!gesprek) return;
 
     // Al bezig? Dan stoppen we, en dat is de hele knop.
-    if (S.schrijf.opname === gesprek && S.schrijf.recorder) {
-      try { S.schrijf.recorder.stop(); } catch (_) {}
-      return;
+    if (S.schrijf.opname === gesprek) {
+      if (S.schrijf.herkenner) { try { S.schrijf.herkenner.stop(); } catch (_) {} return; }
+      if (S.schrijf.recorder)  { try { S.schrijf.recorder.stop(); } catch (_) {} return; }
     }
+
+    const weg = spraakWeg(await haalSpraakRoute());
+    if (weg === 'geen') { toast(GEEN_SPRAAK, 'warn'); return; }
+    if (weg === 'browser') { startBrowserSpraak(gesprek); return; }
 
     if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
       toast('Deze browser kan niet opnemen. Typen kan wel.', 'warn');
@@ -382,6 +435,57 @@
 
     recorder.start();
   };
+
+  /**
+   * Meeluisteren via de browser.
+   *
+   * Anders dan de opname-weg komt de tekst hier binnen terwijl je praat. Dat
+   * is niet alleen sneller maar ook eerlijker: je ziet meteen of de microfoon
+   * de goede is en of je verstaan wordt, in plaats van dat pas te merken als
+   * je al klaar bent.
+   *
+   * De tussenstand gaat rechtstreeks in het tekstvak, niet via een
+   * hertekening. Een hertekening bij elk woord gooit de cursor eruit en laat
+   * het veld springen — dezelfde val waar __irisInstructie hierboven voor
+   * waarschuwt.
+   */
+  function startBrowserSpraak(gesprek) {
+    const SP = window.IRIS_SPRAAK;
+    const h = SP && SP.maakHerkenner(window, { taal: SP.TAAL });
+    if (!h) { toast(GEEN_SPRAAK, 'warn'); return; }
+
+    const beginTekst = S.schrijf.instructie[gesprek] || '';
+    S.schrijf.herkenner = h;
+    S.schrijf.opname = gesprek;
+    hertekenen();
+
+    const schrijfInVeld = (tekst) => {
+      S.schrijf.instructie[gesprek] = tekst;
+      const el = document.getElementById('irisInstructie');
+      if (el && el.value !== tekst) el.value = tekst;
+    };
+
+    h.onTekst((alles, tussentijds) => {
+      // Wat er al stond blijft staan: inspreken vult aan, het wist niet.
+      schrijfInVeld(SP.voegSamen(SP.voegSamen(beginTekst, alles), tussentijds));
+    });
+
+    h.onFout((tekst) => { toast(tekst, 'warn'); });
+
+    h.onEinde(async (alles) => {
+      S.schrijf.herkenner = null;
+      S.schrijf.opname = null;
+      const volledig = SP.voegSamen(beginTekst, alles);
+      schrijfInVeld(volledig);
+      hertekenen();
+      if (!String(alles || '').trim()) { toast('Er is niets verstaan.', 'warn'); return; }
+      // Meteen doorschrijven: inspreken en dan nóg een keer klikken is precies
+      // de handeling die we wilden weghalen.
+      await schrijfNu(gesprek, 'spraak');
+    });
+
+    h.start();
+  }
 
   async function schrijfNu(gesprek, bron) {
     const instructie = S.schrijf.instructie[gesprek] || '';
@@ -586,9 +690,57 @@
    * weken" en "verleng de toegang van Sara met twee weken" zijn twee
    * verschillende mensen.
    */
+  /**
+   * Meeluisteren voor een opdracht.
+   *
+   * Hetzelfde als in de Post, met één verschil dat blijft: hier wordt er NIET
+   * meteen doorgeschreven. Een opdracht is iets wat je eerst wilt teruglezen —
+   * "verleng de toegang van Sarah met twee weken" en "verleng de toegang van
+   * Sara met twee weken" zijn twee verschillende mensen.
+   */
+  function startBrowserOpdracht() {
+    const st = S.opdrachten;
+    const SP = window.IRIS_SPRAAK;
+    const h = SP && SP.maakHerkenner(window, { taal: SP.TAAL });
+    if (!h) { toast(GEEN_SPRAAK, 'warn'); return; }
+
+    const beginTekst = st.nieuw || '';
+    st.herkenner = h;
+    st.neemtOp = true;
+    hertekenen();
+
+    const schrijfInVeld = (tekst) => {
+      st.nieuw = tekst;
+      const el = document.getElementById('irisOpdrachtVeld');
+      if (el && el.value !== tekst) el.value = tekst;
+    };
+
+    h.onTekst((alles, tussentijds) => {
+      schrijfInVeld(SP.voegSamen(SP.voegSamen(beginTekst, alles), tussentijds));
+    });
+    h.onFout((tekst) => { toast(tekst, 'warn'); });
+    h.onEinde((alles) => {
+      st.herkenner = null;
+      st.neemtOp = false;
+      schrijfInVeld(SP.voegSamen(beginTekst, alles));
+      if (!String(alles || '').trim()) toast('Er is niets verstaan.', 'warn');
+      hertekenen();
+    });
+
+    h.start();
+  }
+
   window.__irisOpdrachtMic = async () => {
     const st = S.opdrachten;
-    if (st.neemtOp && st.recorder) { try { st.recorder.stop(); } catch (_) {} return; }
+    if (st.neemtOp) {
+      if (st.herkenner) { try { st.herkenner.stop(); } catch (_) {} return; }
+      if (st.recorder)  { try { st.recorder.stop(); } catch (_) {} return; }
+    }
+
+    const weg = spraakWeg(await haalSpraakRoute());
+    if (weg === 'geen') { toast(GEEN_SPRAAK, 'warn'); return; }
+    if (weg === 'browser') { startBrowserOpdracht(); return; }
+
     if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
       toast('Deze browser kan niet opnemen. Typen kan wel.', 'warn'); return;
     }

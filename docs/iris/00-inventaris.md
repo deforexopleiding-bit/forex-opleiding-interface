@@ -499,7 +499,7 @@ uit staan.
 | Wat | Waarom | Wanneer |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | staat er al (Joost, Simone) — niets te doen | — |
-| `OPENAI_API_KEY` | spraak naar tekst | fase 4 |
+| `OPENAI_API_KEY` | spraak naar tekst — **optioneel, en niet gezet** | vervallen; zie hieronder |
 | `IRIS_AAN` | hoofdschakelaar, default uit | fase 1 |
 | `GESPREKKEN_V2` | nieuwe gesprekken-weergave naast de oude | fase 3 |
 | `IRIS_PAUZEERT_JOOST` | belofte laat de aanmaanmotor zwijgen | fase 6 |
@@ -507,3 +507,16 @@ uit staan.
 | Migraties draaien | ik heb geen databank-toegang | per fase, ik meld het |
 | Templates bij Meta | alleen als er echt geen passende bestaat | fase 10 |
 | Autonomie aanzetten | per categorie, pas als hij het vertrouwt | fase 11 |
+
+> **Besluit, 22 september: geen OpenAI.** Maxim gebruikt alleen Anthropic. Dat
+> heeft één gevolg dat je moet weten: de Anthropic-API doet **geen spraak naar
+> tekst** — Claude kan een opname niet beluisteren. De microfoon loopt daarom
+> via de **Web Speech API van de browser** (`nl-BE`, Chrome en Edge). Wat
+> daaruit komt gaat daarna gewoon naar Claude.
+>
+> `api/iris-transcribe.js` blijft staan als optionele weg: is er ooit tóch een
+> `OPENAI_API_KEY`, dan wint die (nauwkeuriger bij eigennamen, en hij werkt in
+> élke browser). Is hij er niet, dan is dat **een keuze en geen storing**, en
+> hoort er dus ook geen foutmelding op het scherm te komen. Het scherm vraagt
+> de weg vooraf op met een GET in plaats van een opname te sturen en op een 503
+> te stuiten.

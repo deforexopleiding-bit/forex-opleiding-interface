@@ -1,12 +1,25 @@
 // api/iris-transcribe.js
 //
-// Spraak naar tekst.
+// Spraak naar tekst — de OPTIONELE weg.
 //
+//   GET   → { route: 'openai'|'browser', openai: boolean }
 //   POST  met de ruwe audio in de body en een Content-Type van audio/*
 //   ?taal=nl        (standaard)
 //   ?model=…        (standaard uit iris_instellingen, anders gpt-4o-transcribe)
 //
 // Recht: iris.post.beantwoorden.
+//
+// ── DIT ENDPOINT IS NIET MEER DE HOOFDWEG ────────────────────────────────────
+// Maxim gebruikt alleen Anthropic, en de Anthropic-API doet geen spraak naar
+// tekst. De microfoon loopt daarom standaard via de Web Speech API van de
+// browser (Chrome en Edge). Dit endpoint blijft staan voor het geval er ooit
+// een OPENAI_API_KEY is: gpt-4o-transcribe is nauwkeuriger bij eigennamen en
+// werkt in élke browser, ook Safari en Firefox.
+//
+// Vandaar de GET. Het scherm vraagt éérst welke weg het moet nemen, in plaats
+// van een opname te sturen en op een 503 te stuiten. Geen sleutel is namelijk
+// geen storing maar een keuze, en dat hoort de gebruiker niet als foutmelding
+// te zien.
 //
 // ── WAAROM DE RUWE BODY EN GEEN BASE64 IN JSON ───────────────────────────────
 // Base64 maakt een opname een derde groter en moet aan beide kanten omgezet
@@ -24,6 +37,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
+import { openaiBeschikbaar, spraakRoute } from './_lib/iris/spraak.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -77,9 +91,9 @@ async function leesBody(req) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Alleen POST' });
+  if (req.method !== 'POST' && req.method !== 'GET') {
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Alleen GET en POST' });
   }
 
   const supabase = createUserClient(req);
@@ -89,13 +103,21 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (iris.post.beantwoorden)' });
   }
 
+  // GET — welke weg moet het scherm nemen? Altijd 200: er valt hier niets te
+  // mislukken, en een foutcode zou het scherm laten denken dat er iets stuk is.
+  if (req.method === 'GET') {
+    return res.status(200).json({ route: spraakRoute(), openai: openaiBeschikbaar() });
+  }
+
   const sleutel = (process.env.OPENAI_API_KEY || '').trim();
   if (!sleutel) {
-    // Een duidelijk onderscheid tussen "niet ingesteld" en "ging stuk". De
-    // eerste is iets voor Maxim, de tweede iets voor ons.
+    // GEEN storing. Het scherm hoort hier niet te komen (de GET hierboven
+    // stuurt 'em naar de browser), en als het toch gebeurt is het antwoord
+    // "neem de andere weg" en niet "er is iets mis".
     return res.status(503).json({
-      error: 'OPENAI_API_KEY niet geconfigureerd',
-      uitleg: 'Spraak naar tekst loopt via OpenAI. Zet de sleutel in Vercel; tot die tijd kan er getypt worden.',
+      error: 'De OpenAI-weg staat uit',
+      route: 'browser',
+      uitleg: 'Er is geen OPENAI_API_KEY ingesteld — dat is een keuze, geen storing. Spraak loopt via de browser.',
     });
   }
 
