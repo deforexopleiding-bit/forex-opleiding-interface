@@ -71,15 +71,22 @@
     //                   level). Send-flow: als gezet, wordt toegevoegd als
     //                   P-Asserted-Identity + Remote-Party-ID header in de
     //                   SIP INVITE (mirror follow-up.html:7359-7374).
-    // v=1da: lineOverride + selectedCallerId gepersisteerd in localStorage
-    // zodat de user zijn keuze niet elke call opnieuw hoeft te maken.
-    // Read-once bij init met try/catch (private browsing → fallback).
-    lineOverride   : (function () {
-      try {
-        const v = localStorage.getItem('klx-softphone-line');
-        return (v === 'nl' || v === 'be' || v === 'auto') ? v : 'auto';
-      } catch (_) { return 'auto'; }
-    })(),
+    // ── DE LIJNKEUZE GELDT VOOR ÉÉN GESPREK ────────────────────────────
+    //
+    // Hij stond in localStorage, en dan wint één handmatige keuze VOOR ALTIJD
+    // van het landnummer. Wie ooit een keer handmatig BE koos, belde daarna
+    // elke Nederlandse lead over de Belgische lijn — en mensen nemen veel
+    // minder vaak op bij een buitenlands nummer. Precies de conversie die de
+    // automatische keuze moest opleveren, andersom.
+    //
+    // Het venster staat nu bij elk gesprek weer op automatisch. Overschrijven
+    // kan nog steeds, en de keuze blijft staan zolang dat gesprek loopt; bij
+    // het volgende bepaalt het landnummer weer.
+    //
+    // Het UITGAANDE NUMMER blijft wél onthouden (per lijn). Dat is een andere
+    // vraag: welke lijn hoort bij deze lead is per lead anders, met welk nummer
+    // Dave belt is een vaste voorkeur.
+    lineOverride   : 'auto',
     numberOverride : null,
     // HET UITGAANDE NUMMER, PER LIJN ONTHOUDEN.
     //
@@ -880,11 +887,11 @@
   function openSheet(customer) {
     const sheet = ensureSheet();
     state.activeCustomer = customer || null;
-    // Reset numberOverride bij nieuwe klant zodat vorige call niet lekt
-    // naar deze sessie. lineOverride BEHOUDEN — die is gepersisteerd in
-    // localStorage zodat de user zijn NL/BE-keuze niet elke call opnieuw
-    // hoeft te maken (v=1da).
+    // Alles wat bij het VORIGE gesprek hoorde gaat weg. Ook de lijnkeuze: die
+    // geldt voor één gesprek, zodat het landnummer van de volgende lead weer
+    // beslist. Zie de kop bij lineOverride.
     state.numberOverride = null;
+    state.lineOverride   = 'auto';
     state.lastError      = null;
     const nm = String(customer?.name || '').trim();
     const t = document.getElementById('klxCallSheetTitle');
@@ -1015,8 +1022,8 @@
       lineSel.addEventListener('change', (e) => {
         const v = String(e.target.value || 'auto');
         state.lineOverride = v;
-        // v=1da: onthoud de keuze cross-call/cross-session.
-        try { localStorage.setItem('klx-softphone-line', v); } catch (_) { /* private mode */ }
+        // NIET opslaan. Zie de kop bij lineOverride: een bewaarde keuze wint
+        // voor altijd van het landnummer, en dat kost opnames.
         renderSheet();
       });
     }
