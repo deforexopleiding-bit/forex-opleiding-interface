@@ -228,6 +228,45 @@ Eén bericht tegelijk: zolang er eentje aftelt, staat de schrijfbalk op de telle
 Een tweede beginnen terwijl de eerste nog terug kan, maakt van "welke haal ik
 terug?" een raadsel.
 
+### G6 — mail bij een gesprek dat nog geen klant heeft
+
+**Was:** `inbox-thread-unified` haalde de mail op met `.eq('customer_id', …)`.
+Geen klantkoppeling betekende dus: geen mail in de draad.
+
+Dat is omgekeerd aan wat je nodig hebt. Juist bij een gesprek dat nog niet
+gekoppeld is, wil je álle context die er is — misschien staat in een mail van
+vorige week precies wie dit is. Je kreeg een kale WhatsApp-draad en mocht zelf
+gaan zoeken, en dat is het moment waarop mensen het opgeven.
+
+**Nu:** is er geen klant, dan loopt de draad langs **`iris_contacten`** — één
+rij per persoon, met zijn adressen én zijn nummers, ook zonder klant. Precies
+waar die tabel voor gemaakt is, en wat de audit zelf voorschrijft.
+
+Dat is een afhankelijkheid van Iris, en die is bewust. Draait Iris niet, dan
+vindt de omweg niets en blijft de draad zoals hij was: geen fout, geen melding,
+alleen niets extra's.
+
+Drie randen die vastliggen in tests, want daar kan deze brug de **verkeerde**
+mail in een draad zetten — erger dan geen mail:
+
+- **Twee contacten op hetzelfde nummer levert er geen op.** Dat hoort niet te
+  kunnen; gebeurt het toch, dan kiezen we er geen.
+- **Een adres met een komma komt er niet door.** Een komma hakt de
+  `or()`-reeks van PostgREST in tweeën, en dan zoekt de opvraging iets anders
+  dan bedoeld. Zelfde les als in `_lib/iris/zoekfilter.js`.
+- **Nooit met een lege filter zoeken.** Een lege `or()` is een opvraging
+  *zonder* filter, en die geeft alle mail van iedereen terug.
+
+Met een klant blijft de bestaande weg staan: die kijkt naar wat er aan de
+*klant* hangt, en dat is meer dan wat er aan één persoon hangt.
+
+> **Terzijde, en het opschrijven waard.** `iris_contacten.telefoons` bevat
+> alleen cijfers, zonder plus — `normaliseerTelefoon()` is `stripToDigits`. Het
+> commentaar bij die kolom in de migratie zegt "E.164 met een plus ervoor" en
+> dat klopt dus niet. Wie daarop afgaat zoekt op `+32…`, vindt niets, en
+> concludeert ten onrechte dat er geen contact is. Staat nu als waarschuwing bij
+> de functie die de rijen vult.
+
 ---
 
 ## Wat er nog ligt
@@ -240,7 +279,6 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
-| G6 | mail aan het contact, niet aan de klant | raakt `inbox-thread-unified` dieper |
 | G7 | IMAP `APPEND` naar Verzonden | raakt `send-email.js` |
 | G8 | paginering | het pollen is gedaan (zie hierboven); de lijst haalt nog altijd `limit=1000` in één keer op |
 

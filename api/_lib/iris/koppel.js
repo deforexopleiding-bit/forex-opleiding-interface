@@ -45,6 +45,12 @@ export function normaliseerTelefoon(ruw) {
   return stripToDigits(ruw);
 }
 
+// LET OP, voor wie `iris_contacten.telefoons` bevraagt: hier staat ALLEEN
+// CIJFERS in, zonder plus. Het commentaar bij die kolom in de migratie zegt
+// "E.164 met een plus ervoor" — dat klopt niet met wat deze functie oplevert,
+// en deze functie is wat de rijen vult. Wie op `+32…` zoekt vindt niets en
+// concludeert ten onrechte dat er geen contact is.
+
 /**
  * Vergelijk twee telefoonnummers en zeg HOE goed ze matchen.
  *

@@ -26,6 +26,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
+import { mailadressenVan, telefoonSleutels, viaContactZoeken, orReeks } from './_lib/gesprekken-mailkoppel.js';
 import { pickEmailPreviewBody } from './_lib/email-body-strip.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -97,6 +99,66 @@ export default async function handler(req, res) {
     // stond alleen in email_replies (opgeslagen door send-email.js).
     // Zonder deze fetch was de thread eenzijdig (alleen inkomend).
     let emailReplies = [];
+
+    // G6 — geen klant? Dan via het contact. Zie _lib/gesprekken-mailkoppel.js
+    // voor waarom dat juist bij een ONgekoppeld gesprek uitmaakt. Levert deze
+    // omweg niets op, dan gedraagt de draad zich als altijd.
+    let contactAdressen = [];
+    if (includeEmail && viaContactZoeken({
+      customerId: conv.customer_id,
+      telefoon: conv.phone_number,
+      vlagAan: gesprekkenV2Aan(),
+    })) {
+      try {
+        const sleutels = telefoonSleutels(conv.phone_number);
+        let contact = null;
+        for (const sleutel of [sleutels.volledig, sleutels.staart]) {
+          if (!sleutel || contact) continue;
+          const { data } = await supabaseAdmin
+            .from('iris_contacten')
+            .select('id, emails')
+            .contains('telefoons', [sleutel])
+            .limit(2);
+          // Twee contacten op hetzelfde nummer hoort niet te kunnen. Gebeurt
+          // het toch, dan kiezen we er geen — een draad vullen met de mail van
+          // misschien-iemand-anders is erger dan een lege draad.
+          if (Array.isArray(data) && data.length === 1) contact = data[0];
+        }
+        contactAdressen = mailadressenVan(contact);
+      } catch (cEx) {
+        // Faalzacht: de WhatsApp-draad staat hier niet op te wachten.
+        console.warn('[inbox-thread-unified] contact-mailkoppeling:', cEx?.message || cEx);
+      }
+    }
+
+    // De reeksen apart, en alleen zoeken als er echt iets te zoeken valt. Een
+    // lege or() is een opvraging ZONDER filter, en die geeft alle mail van
+    // iedereen terug — precies de fout die je pas merkt als er een vreemde in
+    // de draad staat.
+    const orInkomend = orReeks('from_address', contactAdressen);
+    const orUitgaand = orReeks('to_address', contactAdressen);
+    if (includeEmail && orInkomend && orUitgaand) {
+      try {
+        const { data: eMsgs, error: eErr } = await supabaseAdmin
+          .from('email_messages')
+          .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category, attachments')
+          .or(orInkomend)
+          .order('date_received', { ascending: true });
+        if (eErr) console.warn('[inbox-thread-unified] contact-mail fetch:', eErr.message);
+        else emailMsgs = eMsgs || [];
+
+        const { data: replies, error: rErr } = await supabaseAdmin
+          .from('email_replies')
+          .select('id, email_id, email_subject, final_reply, from_address, to_address, cc_address, sent_at, sent_by_id, attachments')
+          .or(orUitgaand)
+          .order('sent_at', { ascending: true });
+        if (rErr) console.warn('[inbox-thread-unified] contact-replies fetch:', rErr.message);
+        else emailReplies = replies || [];
+      } catch (mEx) {
+        console.warn('[inbox-thread-unified] contact-mail uitzondering:', mEx?.message || mEx);
+      }
+    }
+
     if (includeEmail && conv.customer_id) {
       const { data: eMsgs, error: eErr } = await supabaseAdmin
         .from('email_messages')
