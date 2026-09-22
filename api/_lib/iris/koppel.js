@@ -129,14 +129,34 @@ export async function zoekKlant(supabase, { email, telefoon } = {}) {
   const mail = normaliseerEmail(email);
   const tel = normaliseerTelefoon(telefoon);
 
+  // `gelezen: true` — we hébben gekeken; er viel alleen niets mee te zoeken.
+  // Dat is een uitspraak, geen storing, en mag dus wél opgeslagen worden.
   if (!mail && !tel) {
-    return { status: 'onbekend', id: null, reden: 'geen e-mailadres en geen telefoonnummer', kandidaten: [] };
+    return { gelezen: true, status: 'onbekend', id: null, reden: 'geen e-mailadres en geen telefoonnummer', kandidaten: [] };
   }
+  // Zonder databank-client hebben we juist NIET kunnen kijken.
   if (!supabase) {
-    return { status: 'onbekend', id: null, reden: 'geen databank-client', kandidaten: [] };
+    return { gelezen: false, status: 'onbekend', id: null, reden: 'geen databank-client', kandidaten: [] };
   }
 
-  let rijen;
+  const stand = await haalKlantenlijst(supabase);
+  if (!stand.gelezen) return { gelezen: false, status: 'onbekend', id: null, reden: stand.reden, kandidaten: [] };
+  return zoekKlantIn(stand.rijen, { email: mail, telefoon: tel });
+}
+
+/**
+ * Haal de klantenlijst één keer op.
+ *
+ * Apart van het zoeken, zodat een ronde die honderden contacten nakijkt niet
+ * honderden keren het hele klantbestand ophaalt. Dat is geen theoretische
+ * zuinigheid: bij 254 contacten en een paar duizend klanten haalt Vercel de
+ * dertig seconden niet, en dan ziet degene die op de knop drukte helemaal
+ * niets — ook niet wat er wél gelukt was.
+ *
+ * @returns {Promise<{gelezen: boolean, rijen: Array, reden: string|null}>}
+ */
+export async function haalKlantenlijst(supabase) {
+  if (!supabase) return { gelezen: false, rijen: [], reden: 'geen databank-client' };
   try {
     // KOLOMNAMEN. `customers` heeft GEEN kolom `name` — dat stond hier eerst,
     // en daardoor gaf élke opvraging een fout en kwam élk gesprek op "niet
@@ -151,16 +171,30 @@ export async function zoekKlant(supabase, { email, telefoon } = {}) {
       .is('anonymized_at', null);
     if (error) {
       console.error('[iris/koppel] klanten lezen mislukt:', error.message);
-      return { gelezen: false, status: 'onbekend', id: null, reden: 'klanten niet gelezen: ' + error.message, kandidaten: [] };
+      return { gelezen: false, rijen: [], reden: 'klanten niet gelezen: ' + error.message };
     }
-    rijen = data || [];
+    return { gelezen: true, rijen: data || [], reden: null };
   } catch (e) {
     console.error('[iris/koppel] uitzondering bij klanten lezen:', e?.message || e);
-    return { gelezen: false, status: 'onbekend', id: null, reden: 'klanten niet gelezen', kandidaten: [] };
+    return { gelezen: false, rijen: [], reden: 'klanten niet gelezen' };
+  }
+}
+
+/**
+ * Zoek de klant in een al opgehaalde lijst.
+ *
+ * Zuivere functie: geen databank, dus na te rekenen zonder er een bij de hand
+ * te hebben. Dit is waar de eigenlijke beoordeling gebeurt.
+ */
+export function zoekKlantIn(rijen, { email, telefoon } = {}) {
+  const mail = normaliseerEmail(email);
+  const tel = normaliseerTelefoon(telefoon);
+  if (!mail && !tel) {
+    return { gelezen: true, status: 'onbekend', id: null, reden: 'geen e-mailadres en geen telefoonnummer', kandidaten: [] };
   }
 
   const kandidaten = [];
-  for (const r of rijen) {
+  for (const r of (Array.isArray(rijen) ? rijen : [])) {
     const naam = customerDisplayName(r, '') || null;
     if (mail && normaliseerEmail(r.email) === mail) {
       kandidaten.push({ id: r.id, naam, score: 'email' });
@@ -207,7 +241,7 @@ export async function zorgVoorContact(supabase, { email, telefoon, naam } = {}) 
     if (!orDelen.length) return null;
     const { data: bestaand, error: zoekFout } = await supabase
       .from('iris_contacten')
-      .select('id, customer_id, emails, telefoons, koppelstatus, weergavenaam')
+      .select('id, customer_id, emails, telefoons, koppelstatus, koppel_reden, weergavenaam')
       .or(orDelen.join(','))
       .limit(2);
     if (zoekFout) {
@@ -242,7 +276,13 @@ export async function zorgVoorContact(supabase, { email, telefoon, naam } = {}) 
       let extra = null;
       if (!c.customer_id) {
         const opnieuw = await zoekKlant(supabase, { email: mail, telefoon: tel });
-        if (opnieuw.gelezen && (opnieuw.status !== c.koppelstatus || opnieuw.id)) {
+        // DE REDEN WORDT ALTIJD OVERSCHREVEN, ook als de stand hetzelfde
+        // blijft. Anders blijft de reden van de vórige poging staan, en dat
+        // is precies wat er op productie gebeurde: de dossierkaart bleef
+        // "klanten niet gelezen: column customers.name does not exist" tonen
+        // nadat die fout allang weg was. Een reden hoort bij de beoordeling
+        // waar hij uit komt, niet bij de rij waar hij ooit in beland is.
+        if (opnieuw.gelezen) {
           extra = {
             customer_id: opnieuw.status === 'gekoppeld' ? opnieuw.id : null,
             koppelstatus: opnieuw.status,
@@ -251,6 +291,11 @@ export async function zorgVoorContact(supabase, { email, telefoon, naam } = {}) 
           if (!c.weergavenaam && opnieuw.kandidaten?.[0]?.naam) {
             extra.weergavenaam = opnieuw.kandidaten[0].naam;
           }
+          // Niets veranderd? Dan ook niet schrijven.
+          if (extra.customer_id === c.customer_id
+            && extra.koppelstatus === c.koppelstatus
+            && extra.koppel_reden === c.koppel_reden
+            && !extra.weergavenaam) extra = null;
         }
       }
 
