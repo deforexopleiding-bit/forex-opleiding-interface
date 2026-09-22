@@ -40,6 +40,73 @@
   const esc = (window.KV && window.KV.esc) || ((s) => String(s == null ? '' : s));
   const toast = (m, t) => { try { window.KV && window.KV.toast && window.KV.toast(m, t ? { tone: t } : undefined); } catch (_) {} };
 
+  /* ── De breedtes van de Post ──────────────────────────────────────────
+     Dit stond eerst als één inline grid-regel:
+
+       minmax(260px,320px) minmax(0,1fr) minmax(240px,300px)
+
+     Op een laptop van 994px breed, met de zijbalk van de schil ernaast,
+     blijft er voor die drie kolommen te weinig over. De twee buitenste
+     houden hun ondergrens vast, en de middelste — `minmax(0,1fr)` — geeft
+     als enige mee. Die kromp tot 22 pixels: een tekstvak van 22 pixels en
+     een microfoonknop die eronder buiten beeld viel, op y≈1450.
+
+     Een inline stijl kan geen mediaquery dragen, dus staat het hier. Drie
+     regels, en één principe: DE DRAAD GEEFT NOOIT ALS EERSTE MEE. Daar wordt
+     gelezen en geantwoord; de lijst en de dossierkaart zijn eromheen.
+
+       ≥1200px   lijst · draad · dossier naast elkaar
+       900-1199  lijst · draad, en de dossierkaart schuift onder de draad
+                 zodra je erom vraagt
+       <900px    stappen: eerst de lijst, dan de draad, met een weg-terug
+
+     De draad houdt in elke stand een ondergrens (420 / 360 / de volle
+     breedte), zodat er altijd plaats is om te antwoorden. */
+  const POST_CSS = `<style>
+    .iris-post{
+      display:grid;
+      grid-template-columns:minmax(260px,320px) minmax(420px,1fr) minmax(260px,320px);
+      height:calc(100vh - 168px);
+      min-height:420px;
+      border-top:1px solid var(--border);
+    }
+    /* min-height:0 is hier geen franje. Zonder die regel weigert een
+       rastercel kleiner te worden dan zijn inhoud, en dan scrollt de draad
+       niet maar groeit hij — met de schrijfbalk ergens onder de vouw. */
+    .iris-post > *{min-width:0;min-height:0;overflow:hidden}
+    .iris-post-lijst{border-right:1px solid var(--border)}
+    .iris-post-draad{border-right:1px solid var(--border)}
+    .iris-post-dossier{overflow-y:auto}
+    .iris-dossier-knop{display:none}
+    .iris-terug-knop{display:none}
+
+    @media (max-width:1199px){
+      .iris-post{
+        grid-template-columns:minmax(220px,280px) minmax(360px,1fr);
+        grid-template-rows:minmax(0,1fr) auto;
+      }
+      .iris-post-lijst{grid-column:1;grid-row:1 / -1}
+      .iris-post-draad{grid-column:2;grid-row:1;border-right:none}
+      .iris-post-dossier{grid-column:2;grid-row:2;display:none;border-top:1px solid var(--border);max-height:42vh}
+      .iris-post.dossier-open .iris-post-dossier{display:block}
+      .iris-dossier-knop{display:inline-flex}
+    }
+
+    @media (max-width:899px){
+      .iris-post{
+        grid-template-columns:minmax(0,1fr);
+        grid-template-rows:minmax(0,1fr) auto;
+        height:calc(100vh - 150px);
+      }
+      .iris-post-lijst{grid-column:1;grid-row:1 / -1;border-right:none}
+      .iris-post-draad{display:none}
+      .iris-post.heeft-keuze .iris-post-lijst{display:none}
+      .iris-post.heeft-keuze .iris-post-draad{display:block;grid-column:1;grid-row:1}
+      .iris-post-dossier{grid-column:1;grid-row:2}
+      .iris-terug-knop{display:inline-flex}
+    }
+  </style>`;
+
   const POLL_MS = 30_000;
   const TABS = [
     ['post', 'Post', I.mail],
@@ -125,6 +192,9 @@
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
     droogtest: { bezig: false, fout: null, data: null, opgehaald: false },
     herkoppel: { bezig: false, fout: null, uitkomst: null },
+    // Staat de dossierkaart open? Alleen van belang als hij niet als eigen
+    // kolom past — boven 1200px staat hij er altijd en doet deze vlag niets.
+    dossierOpen: false,
     logboek: { bezig: false, fout: null, items: [], opgehaald: false, alleenFouten: false },
   };
 
@@ -245,6 +315,19 @@
     if (t === 'opdrachten'   && !S.opdrachten.opgehaald)   haalOpdrachten();
     if (t === 'belrij'       && !S.belrij.opgehaald)       haalBelrij();
     if (t === 'logboek'      && !S.logboek.opgehaald)      haalLogboek();
+    hertekenen();
+  };
+
+  window.__irisDossier = () => {
+    S.dossierOpen = !S.dossierOpen;
+    hertekenen();
+  };
+
+  /* Terug naar de lijst. Alleen zichtbaar op een smal scherm, waar de lijst en
+     de draad stappen zijn in plaats van kolommen. */
+  window.__irisTerug = () => {
+    S.gekozen = null;
+    S.dossierOpen = false;
     hertekenen();
   };
 
@@ -1085,7 +1168,10 @@
         </div>`
       : '';
 
-    return `<div style="display:flex;flex-direction:column;height:100%;border-right:1px solid var(--border);min-width:0">
+    // Geen eigen rechterrand meer: die hoort bij de KOLOM, want alleen daar
+    // is bekend of er rechts nog iets staat. Op een smal scherm is de lijst
+    // het hele scherm en zou een rand aan de rechterkant nergens op slaan.
+    return `<div style="display:flex;flex-direction:column;height:100%;min-width:0">
       ${filterBalk()}
       <div id="irisLijst" style="flex:1;overflow-y:auto">${binnen}</div>
       ${pagina}
@@ -1126,12 +1212,19 @@
     const v = st.data.venster || {};
     const verzenden = st.data.verzenden || {};
 
+    // De twee knoppen staan er altijd in; de stijl bepaalt of ze zichtbaar
+    // zijn. Zo hoeft het scherm niet te weten hoe breed het is — dat weet de
+    // browser beter, en hij weet het ook nog als iemand het venster versleept.
     const kop = `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;gap:9px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm iris-terug-knop" style="font-size:11.5px;padding:3px 9px"
+        onclick="__irisTerug()" title="Terug naar de lijst">← Lijst</button>
       <b style="font-size:13px">${esc(g.naam || 'Onbekend')}</b>
       ${vensterMerk(v)}
       <span style="font-size:11px;color:var(--text-3)">${esc(g.status || '')}</span>
       <div style="flex:1"></div>
       ${g.categorie ? `<span style="font-size:11px;color:var(--text-3)">${esc(CATEGORIE_LABELS[g.categorie] || g.categorie)}</span>` : ''}
+      <button class="btn btn-ghost btn-sm iris-dossier-knop" style="font-size:11.5px;padding:3px 9px"
+        onclick="__irisDossier()" title="De dossierkaart open- of dichtklappen">${S.dossierOpen ? 'Dossier ▴' : 'Dossier ▾'}</button>
     </div>`;
 
     const berichten = (st.data.berichten || []);
@@ -1745,10 +1838,17 @@
 
     let binnen;
     if (S.tab === 'post') {
-      binnen = `<div style="display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr) minmax(240px,300px);height:calc(100vh - 168px);min-height:420px;border-top:1px solid var(--border)">
-        ${lijstKolom()}
-        <div style="min-width:0;border-right:1px solid var(--border)">${draadKolom()}</div>
-        <div style="min-width:0">${dossierKolom()}</div>
+      // De klassen doen het werk; de breedtes staan in POST_CSS hieronder.
+      // Inline stijlen kunnen geen mediaquery dragen, en dat was precies het
+      // probleem: één vaste kolomverdeling die bij 994px de draad tot 22 pixels
+      // samenkneep.
+      const klassen = ['iris-post'];
+      if (S.gekozen) klassen.push('heeft-keuze');
+      if (S.dossierOpen) klassen.push('dossier-open');
+      binnen = `<div class="${klassen.join(' ')}">
+        <div class="iris-post-lijst">${lijstKolom()}</div>
+        <div class="iris-post-draad">${draadKolom()}</div>
+        <div class="iris-post-dossier">${dossierKolom()}</div>
       </div>`;
     } else if (S.tab === 'instellingen') {
       binnen = instellingenTab();
@@ -1762,7 +1862,8 @@
       binnen = logboekTab();
     }
 
-    return `<div style="display:flex;flex-direction:column;min-height:0">
+    return `${POST_CSS}
+    <div style="display:flex;flex-direction:column;min-height:0">
       <div style="padding:14px 20px 10px">
         <div style="font-size:18px;font-weight:700;margin-bottom:3px">Iris</div>
         <div style="font-size:12px;color:var(--text-3);margin-bottom:11px">

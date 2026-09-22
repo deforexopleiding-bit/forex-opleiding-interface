@@ -89,6 +89,7 @@ function ongedefinieerdeAanroepen(pad) {
     if (naam.startsWith('__iris')) continue;     // staan op window, via onclick-tekst
     const ervoor = code.slice(0, m.index);
     if (/[.\w$]$/.test(ervoor)) continue;        // eigenschap (x.foo) of deel van een naam
+    if (/@$/.test(ervoor)) continue;             // CSS-at-regel: @media (…), @supports (…)
     const laatsteWoord = ervoor.match(/([A-Za-z_$][\w$]*)\s*$/);
     if (laatsteWoord && !WOORD_ERVOOR.has(laatsteWoord[1])) continue;
     mist.add(naam);
