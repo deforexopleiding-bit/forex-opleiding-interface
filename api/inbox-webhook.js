@@ -24,6 +24,7 @@
 // Conversation upsert is 2-step (select-then-update/insert) zodat we
 // concurrent webhooks veilig kunnen samenvoegen.
 
+import { customerDisplayName } from './_lib/customer-name.js';
 import {
   verifyWebhookSubscription,
   verifyWebhookSignature,
@@ -1711,12 +1712,16 @@ export default async function handler(req, res) {
                     .maybeSingle();
                   const mentorUserId = ob?.mentor_user_id || null;
                   if (mentorUserId) {
+                    // `customers` heeft geen kolom `name`; die stond hier wel,
+                    // dus gaf deze opvraging altijd een fout en kreeg de mentor
+                    // een telefoonnummer in de titel in plaats van een naam.
                     const { data: custRow } = await supabaseAdmin
                       .from('customers')
-                      .select('name')
+                      .select('id, is_company, first_name, last_name, company_name')
                       .eq('id', conv.customerId)
                       .maybeSingle();
-                    const klantnaam = custRow?.name || (contact?.profile?.name || phoneE164Plus);
+                    const klantnaam = customerDisplayName(custRow, '')
+                      || (contact?.profile?.name || phoneE164Plus);
                     const preview80 = String(insRes.body || '').trim().slice(0, 80);
                     createNotification({
                       toUserId:       mentorUserId,

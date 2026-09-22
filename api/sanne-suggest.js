@@ -31,6 +31,7 @@
 //   502  Anthropic-fout
 //   500  onverwachte fout
 
+import { customerDisplayName } from './_lib/customer-name.js';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { anthropicStructuredOutput, AnthropicClientError } from './_lib/anthropic-client.js';
@@ -136,7 +137,9 @@ async function lookupCustomer(supabase, fromAddress) {
   if (!fromAddress) return null;
   const { data } = await supabase
     .from('customers')
-    .select('id, name, email, phone, status')
+    // Geen kolom `name` — die bestaat niet. De weergavenaam wordt samengesteld
+    // met de gedeelde helper; zie api/_lib/customer-name.js.
+    .select('id, is_company, first_name, last_name, company_name, email, phone, status')
     .ilike('email', fromAddress).limit(2);
   if (!Array.isArray(data) || data.length !== 1) return null; // ambiguïteit -> geen match
   return data[0];
@@ -205,7 +208,7 @@ function renderPersonaSystem(config, email, customer) {
     .replace(/\{\{from_address\}\}/g,  email.from_address || '')
     .replace(/\{\{received_at\}\}/g,   email.date_received || '')
     .replace(/\{\{subject\}\}/g,       email.subject || '')
-    .replace(/\{\{customer_name\}\}/g, customer?.name || '(onbekend)')
+    .replace(/\{\{customer_name\}\}/g, customerDisplayName(customer, '') || '(onbekend)')
     .replace(/\{\{customer_status\}\}/g, customer?.status || '(geen klant-koppeling)');
 }
 
@@ -222,7 +225,7 @@ function buildUserMessage(email, customer) {
     'Categorie (auto): ' + (email.category || '—'),
     '',
     customer
-      ? `=== KLANT-CONTEXT ===\nGekoppeld aan klant: ${customer.name || customer.email} (id=${customer.id})\nStatus: ${customer.status || '—'}`
+      ? `=== KLANT-CONTEXT ===\nGekoppeld aan klant: ${customerDisplayName(customer, '') || customer.email} (id=${customer.id})\nStatus: ${customer.status || '—'}`
       : '=== KLANT-CONTEXT ===\nGeen klant-koppeling.',
     '',
     '=== INHOUD ===',
@@ -325,7 +328,8 @@ export default async function handler(req, res) {
     let customer = null;
     if (email.customer_id) {
       const { data } = await supabaseAdmin.from('customers')
-        .select('id, name, email, phone, status').eq('id', email.customer_id).maybeSingle();
+        .select('id, is_company, first_name, last_name, company_name, email, phone, status')
+        .eq('id', email.customer_id).maybeSingle();
       customer = data || null;
     }
     if (!customer) {

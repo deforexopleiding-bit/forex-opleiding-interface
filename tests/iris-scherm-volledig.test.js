@@ -136,3 +136,18 @@ test('elk tabblad met een eigen lijst haalt die ook op', () => {
       `tabwissel naar "${tab}" haalt niets op`);
   }
 });
+
+test('elke __iris-knop in de opmaak bestaat ook op window', () => {
+  // De vorige versie van dit bestand sloeg namen die met `__iris` beginnen
+  // over, omdat ze via een onclick-tekst worden aangeroepen en dus nooit als
+  // gewone aanroep in de code staan. Daardoor bleef `__irisAutonomie`
+  // onopgemerkt: de knoppen om een categorie op uit / concept / zelf te zetten
+  // riepen een functie aan die niet bestond. Precies dezelfde soort fout als
+  // de drie ontbrekende tabbladen, één laag dieper.
+  const bron = readFileSync(join(ROOT, 'modules/iris/iris.js'), 'utf8');
+  const gedefinieerd = new Set([...bron.matchAll(/window\.(__iris[A-Za-z]*)\s*=/g)].map((m) => m[1]));
+  const gebruikt = new Set([...bron.matchAll(/on(?:click|input|change)="(__iris[A-Za-z]*)\(/g)].map((m) => m[1]));
+  assert.ok(gebruikt.size > 10, 'er werden nauwelijks knoppen gevonden — klopt de zoekopdracht nog?');
+  const mist = [...gebruikt].filter((n) => !gedefinieerd.has(n));
+  assert.deepEqual(mist, [], 'knop in de opmaak zonder functie op window:\n  ' + mist.join('\n  '));
+});

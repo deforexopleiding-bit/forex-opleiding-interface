@@ -124,6 +124,7 @@
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
     droogtest: { bezig: false, fout: null, data: null, opgehaald: false },
+    herkoppel: { bezig: false, fout: null, uitkomst: null },
     logboek: { bezig: false, fout: null, items: [], opgehaald: false, alleenFouten: false },
   };
 
@@ -677,6 +678,69 @@
     S.logboek.opgehaald = false;
     haalLogboek();
     hertekenen();
+  };
+
+  /**
+   * Een categorie op uit / concept / zelf zetten.
+   *
+   * Het hele autonomie-object gaat mee, niet alleen de gewijzigde categorie.
+   * De server slaat de waarde op zoals hij binnenkomt, dus alleen de ene
+   * categorie sturen zou de andere negen wissen — en dan staat er morgen iets
+   * aan waarvan niemand weet wie het aanzette.
+   */
+  window.__irisAutonomie = async (categorie, stand) => {
+    const st = S.instellingen;
+    const huidig = st.data?.instellingen?.autonomie;
+    if (!huidig) { toast('De instellingen zijn nog niet geladen.', 'warn'); return; }
+    if (huidig[categorie] === stand) return;
+
+    const nieuw = { ...huidig, [categorie]: stand };
+    try {
+      const j = await haalRuw('/api/iris-instellingen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sleutel: 'autonomie', waarde: nieuw }),
+      });
+      st.data = { ...st.data, instellingen: j.instellingen || st.data.instellingen };
+      toast(`${categorie} staat nu op ${stand}.`, 'success');
+    } catch (e) {
+      // De server weigert bijvoorbeeld 'zelf' voor opzeggingen en klachten.
+      // Die weigering hoort zichtbaar te zijn, niet stil weggeslikt.
+      toast(e?.message || 'Wijzigen mislukt', 'error');
+    }
+    hertekenen();
+  };
+
+  /* Koppeling opnieuw proberen.
+
+     Alleen voor contacten die nog géén klant hebben, en een geslaagde
+     koppeling wordt nooit teruggedraaid. Daarom mag deze knop zonder
+     waarschuwing: er valt niets mee kapot te maken, hij kan alleen iets
+     repareren. Twee keer drukken geeft hetzelfde resultaat als één keer. */
+  window.__irisHerkoppel = async () => {
+    const st = S.herkoppel;
+    if (st.bezig) return;
+    st.bezig = true; st.fout = null;
+    hertekenen();
+    try {
+      st.uitkomst = await haalRuw('/api/iris-herkoppel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const u = st.uitkomst;
+      toast(`${u.gewijzigd} van ${u.bekeken} gekoppeld. Nu ${u.na?.gekoppeld ?? '?'} gekoppeld, ${u.na?.te_bevestigen ?? '?'} te bevestigen, ${u.na?.onbekend ?? '?'} onbekend.`,
+        u.mislukt ? 'warn' : 'success');
+      // De Post toont de koppelstatus, dus die lijst klopt nu niet meer.
+      S.lijst.opgehaald = false;
+      haalLijst();
+    } catch (e) {
+      st.fout = e?.message || 'Herkoppelen mislukt';
+      toast(st.fout, 'error');
+    } finally {
+      st.bezig = false;
+      hertekenen();
+    }
   };
 
   window.__irisOpdrachtTyp = (v) => { S.opdrachten.nieuw = String(v || ''); };
@@ -1262,7 +1326,7 @@
 
     return `<div style="height:100%;overflow-y:auto;padding:0 0 20px">
       <div style="padding:14px;border-bottom:1px solid var(--border);background:var(--surface-2)">
-        <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(c.naam || d.klant?.name || 'Onbekend')}</div>
+        <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(c.naam || d.klant?.naam || 'Onbekend')}</div>
         ${(c.emails || []).map((e) => `<div style="font-size:11.5px;color:var(--text-2);word-break:break-all">✉ ${esc(e)}</div>`).join('')}
         ${(c.telefoons || []).map((p) => `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(p)}</div>`).join('')}
         ${c.koppelstatus !== 'gekoppeld'
@@ -1283,6 +1347,33 @@
   }
 
   /* ── De andere tabbladen ──────────────────────────────────────────────── */
+
+  /** Het knopje om de koppeling opnieuw te proberen, met de uitkomst eronder. */
+  function herkoppelBlok() {
+    const st = S.herkoppel;
+    const u = st.uitkomst;
+    const uitkomst = u
+      ? `<div style="font-size:11.5px;color:var(--text-2);margin-top:7px">
+          ${esc(String(u.gewijzigd))} van ${esc(String(u.bekeken))} bekeken contacten gekoppeld.
+          Nu: <b>${esc(String(u.na?.gekoppeld ?? '?'))}</b> gekoppeld ·
+          ${esc(String(u.na?.te_bevestigen ?? '?'))} te bevestigen ·
+          ${esc(String(u.na?.onbekend ?? '?'))} onbekend.
+          ${u.mislukt ? `<span style="color:var(--rose)"> ${esc(String(u.mislukt))} mislukt.</span>` : ''}
+          ${u.meer_te_doen ? '<span style="color:var(--amber)"> Er zijn er meer — druk nog eens.</span>' : ''}
+        </div>`
+      : '';
+    return `<div style="margin-top:18px;padding:11px 13px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)">
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px">Koppeling opnieuw proberen</div>
+      <div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px">
+        Zoekt opnieuw een klant bij contacten die er nog geen hebben. Een gevonden
+        koppeling wordt nooit teruggedraaid, dus nog eens drukken kan geen kwaad.
+      </div>
+      <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px"
+        onclick="__irisHerkoppel()" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig…' : 'Opnieuw proberen'}</button>
+      ${st.fout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:7px">⚠ ${esc(st.fout)}</div>` : ''}
+      ${uitkomst}
+    </div>`;
+  }
 
   function instellingenTab() {
     const st = S.instellingen;
@@ -1368,6 +1459,7 @@
       <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
         ${(d.categorieen || []).map(rij).join('')}
       </div>
+      ${herkoppelBlok()}
       <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
         <div><b>uit</b> — Iris doet niets in deze categorie.</div>
         <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
