@@ -697,9 +697,13 @@
           state.lastState = 'ringing';
           const hasEarlyMedia = _bindRemoteAudio(); // early media / ringback
           if (hasEarlyMedia) {
-            ringback.stop(); // safety — voor het geval 'ie ooit gestart is
+            // De provider stuurt zelf een belsignaal mee. Onze lokale toon
+            // eroverheen zou dubbele audio geven.
+            ringback.stop();
           } else {
-            ringback.start();
+            // Hij loopt al sinds het versturen van de INVITE; hier alleen nog
+            // blijven kijken of er alsnog early media komt.
+            ringback.start();     // no-op als hij al speelt
             _stopEarlyMediaPoll();
             _earlyMediaPollTimer = setInterval(() => {
               if (_bindRemoteAudio()) {
@@ -807,6 +811,12 @@
       // wordt aangemaakt mag geluid maken, eentje die later in een callback
       // ontstaat niet. Zie de kop van ringback.
       try { await ringback.primen(); } catch (_) { /* geluid is nooit blokkerend */ }
+      // DRIE FASEN, EN ZE STAAN ER ALLE DRIE: Verbinden… → Gaat over… → In
+      // gesprek. `dialing` werd nergens gezet, dus tijdens het verbinden toonde
+      // het venster nog de vórige toestand — 'Beëindigd' van het gesprek
+      // daarvoor, of 'Klaar'. Dan lijkt er niets te gebeuren precies op het
+      // moment dat er het meest gebeurt.
+      state.lastState = 'dialing';
       state.armeren = { bezig: true, afgebroken: false, sinds: Date.now() };
       updateCallbarStatus('Verbinden…', callbarOndertitel(displayName, effPhone, line));
       renderSheet();
@@ -825,7 +835,31 @@
 
       await ensureMicPermission();
       state.inviteVerstuurd = true;
-      await inviter.invite();
+
+      // ── DE BELTOON BEGINT BIJ HET VERSTUREN ──────────────────────────
+      //
+      // Hij startte pas bij Establishing, en daar zitten seconden tussen: de
+      // INVITE moet de deur uit, Voys moet hem doorzetten, en pas als er een
+      // 180 Ringing terugkomt wisselt SIP.js van staat. In die stilte denkt
+      // Dave dat er niets gebeurt, en dat was precies Maxims klacht — hij
+      // hoorde pas iets als er werd opgenomen of de voicemail begon.
+      //
+      // Nu klinkt hij zodra de INVITE weg is. Dat is geen gok: vanaf dat moment
+      // is er echt een oproep onderweg. De toon stopt zodra er early media
+      // binnenkomt (Establishing bindt die en zet 'm uit), zodra er wordt
+      // opgenomen, of zodra de call eindigt — in alle drie de gevallen staat
+      // ringback.stop() er al.
+      //
+      // De AudioContext is hierboven in de klik geprimed, dus deze start mág
+      // geluid maken. Zonder dat primen zou hij stil blijven en was dit een
+      // lege belofte.
+      ringback.start();
+      try {
+        await inviter.invite();
+      } catch (e) {
+        ringback.stop();   // nooit een oscillator achterlaten
+        throw e;
+      }
       return { ok: true, line };
     } catch (e) {
       ringback.stop(); // v=1dc: nooit een oscillator achterlaten bij invite-fout
@@ -939,10 +973,13 @@
     const connLabel = connLabelMap[connState] || connLabelMap.idle;
     const showConnRetry = (connState === 'failed' || connState === 'disabled');
     const st = state.lastState;
+    // Dezelfde drie woorden als in de callbar. Stonden ze uiteen, dan leest
+    // het venster 'Verbonden' terwijl de balk 'In gesprek' zegt, en dan gaat
+    // iemand zich afvragen of dat twee verschillende dingen zijn.
     const stateLabel =
-      st === 'dialing'   ? 'Bellen…' :
+      st === 'dialing'   ? 'Verbinden…' :
       st === 'ringing'   ? 'Gaat over…' :
-      st === 'connected' ? 'Verbonden' :
+      st === 'connected' ? 'In gesprek' :
       st === 'ended'     ? 'Beëindigd' :
       st === 'error'     ? 'Fout: ' + (state.lastError || 'onbekend') :
       'Klaar';
