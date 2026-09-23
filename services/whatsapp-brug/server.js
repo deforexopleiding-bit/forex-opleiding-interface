@@ -11,6 +11,7 @@
 // gezet is):
 //   GET  /status  — verbonden ja of nee, welk nummer, wanneer laatst iets gezien
 //   GET  /qr      — de actuele QR als dataURL, zolang er nog niet gekoppeld is
+//   POST /herkoppel — client afbreken en opnieuw starten; { wis_sessie } dwingt een nieuwe QR af
 //   POST /send    — { nummer, tekst }
 //
 // En de brug duwt zelf gebeurtenissen naar het CRM: verzonden, afgeleverd,
@@ -80,6 +81,14 @@ app.get('/status', auth, (_req, res) => {
     laatste_actie  : wa.staat.laatsteActie,
     wacht_op_qr    : !wa.staat.verbonden && !!wa.staat.qrDataUrl,
     laatste_fout   : wa.staat.laatsteFout,
+    // ── WAAROM DE CLIENT ERUIT LIGT, EN WAT ERAAN GEDAAN WORDT ────────────
+    // Dit stond alleen in de hartslag en was dus nergens op te vragen. Op
+    // 23 september lag de client eruit zonder fout en zonder QR, en er was
+    // geen enkele manier om te zien of de herverbinder nog iets deed.
+    // Aantallen, tijdstempels en een foutregel van de bibliotheek — nooit een
+    // nummer en nooit berichttekst.
+    herverbinden   : wa.herverbindStand ? wa.herverbindStand() : null,
+    wachthond      : wa.wachthondStand ? wa.wachthondStand() : null,
     leadlijst      : leadlijst.status(),
     webhook        : webhook.status(),
     // Meten zonder te kijken: aantallen per gebeurtenis en per reden waarom er
@@ -102,6 +111,34 @@ app.get('/qr', auth, (_req, res) => {
     return res.status(503).json({ gekoppeld: false, qr: null, melding: 'Nog geen QR — de client start op. Probeer het over enkele seconden opnieuw.' });
   }
   res.json({ gekoppeld: false, qr: wa.staat.qrDataUrl, sinds: wa.staat.qrSindsIso });
+});
+
+/**
+ * Opnieuw koppelen — de uitgang achter de koppelknop in het CRM.
+ *
+ * Maxim klikte op koppelen en kreeg een leeg venster: er was geen QR, en er
+ * was ook niets dat er een maakte. Deze route breekt de client af en begint
+ * opnieuw, zodat er gegarandeerd óf een verbinding óf een QR komt.
+ *
+ * `wis_sessie: true` gooit de bewaarde sessie weg. Dan is een nieuwe QR
+ * onvermijdelijk — dat is de knop voor 'geef me gewoon een code'. Zonder
+ * wissen wordt eerst geprobeerd de bestaande sessie te hervatten, wat sneller
+ * is en geen telefoon vraagt.
+ *
+ * Antwoordt zodra het starten IN GANG is gezet, niet als het klaar is:
+ * initialize() loopt door tot de QR of de verbinding er is en dat kan
+ * tientallen seconden duren. De aanroeper kijkt daarna op /status.
+ */
+app.post('/herkoppel', auth, async (req, res) => {
+  const wisSessie = req.body?.wis_sessie === true;
+  try {
+    const uit = await wa.herkoppel({ wisSessie });
+    if (!uit.gestart) return res.status(500).json({ error: uit.fout || 'Herkoppelen mislukt' });
+    return res.json({ ok: true, ...uit });
+  } catch (e) {
+    console.error('[brug] herkoppelen:', e?.message || e);
+    return res.status(500).json({ error: 'Herkoppelen mislukt' });
+  }
 });
 
 app.post('/send', auth, async (req, res) => {
