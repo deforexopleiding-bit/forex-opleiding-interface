@@ -357,7 +357,11 @@ test('twee keer drukken is één opdracht', async () => {
   v.zetAntwoord(() => new Promise((r) => { losmaken = () => r({ ok: true, gestart: true }); }));
   const a = v.herkoppel(true);
   await new Promise((r) => setImmediate(r));
-  await v.herkoppel(true);                       // tweede klik tijdens de eerste
+  // NIET awaiten op de tweede klik. Haal je het slot weg, dan blijft die tweede
+  // aanroep hangen op hetzelfde onafgemaakte antwoord, en dan laat de testloper
+  // deze test wég in plaats van hem af te keuren — groen naast kapot.
+  v.herkoppel(true);                             // tweede klik tijdens de eerste
+  for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
   assert.equal(v.gevraagd.filter((g) => g.url === '/api/opvolging-whatsapp-herkoppel').length, 1);
   losmaken();
   await a;
