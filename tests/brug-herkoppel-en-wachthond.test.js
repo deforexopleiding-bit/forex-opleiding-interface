@@ -427,7 +427,9 @@ test('bij een mislukt wissen wordt de teller NIET teruggezet', async () => {
 function binnenTijd(belofte, ms = 250) {
   return Promise.race([
     belofte,
-    new Promise((r) => setTimeout(() => r('VASTGELOPEN'), ms).unref?.()),
+    // GEEN .unref() hier: een timer die de lus niet wakker houdt kan het
+    // proces laten afsluiten vóór hij afgaat, en dan verdwijnt de test alsnog.
+    new Promise((r) => { setTimeout(() => r('VASTGELOPEN'), ms); }),
   ]);
 }
 
