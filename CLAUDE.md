@@ -263,7 +263,28 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   bundelt 'ie antwoorden die binnen drie minuten op elkaar volgen tot één mail
   via `meta->mail_status` (niet_nodig / direct / wacht / versturen / gemaild /
   geen_adres / mislukt); de cron claimt met een voorwaardelijke update.
-  Zie docs/support-module-plan.md §7c.
+  WEG TERUG: `support-hervat-start` / `-check` (publiek, geen sessietoken)
+  openen een gesprek op een ander apparaat. In de link uit onze mails staat
+  ALLEEN het kenmerk (`?dfo-support=SUP-XXXXXX`) — nooit een token, want dat
+  lekt via Referer, logs en geschiedenis. De sleutel is de mailcode. `-start`
+  geeft ALTIJD hetzelfde antwoord (orakel-probleem op het kenmerk), `-check`
+  zegt bij onbekend kenmerk hetzelfde als bij foute code. Bij succes ROTEERT
+  `sessie_token_hash`: één sleutel per gesprek, dus de oude browser krijgt 401
+  op de poll en ruimt zichzelf op. Hier gaat `geverifieerd` WEL omhoog (code
+  uit de mailbox = bewijs), anders dan bij een binnenkomende mail.
+  GEEN LOCKOUT in `-check`: nooit `verificatie_geblokkeerd`, nooit 423; elke
+  poging verbruikt de code (eerst claimen, dan vergelijken). De blokkade in
+  `support-verificatie-check` blijft WEL, want daar is het sessietoken nodig;
+  hier alleen het kenmerk, dat geen geheim is. Niet gelijktrekken.
+  `gesprekUitToken` geeft `{ gesprek, leesfout }`; `weigerSessie()` maakt van
+  een leesfout een 503 en van een onbekend token een 401 met
+  `code: 'SESSIE_ONGELDIG'`. De widget ruimt ALLEEN op bij 401 + die code
+  (`tokenOngeldig()`), nooit bij 503/netwerkfout/kale 401.
+  De codelimiet in `support-verificatie-start` is nu 3 per UUR (was levenslang
+  3 per gesprek — dat zette terugkerende studenten permanent op slot).
+  Widget bewaart een sessie 30 dagen (was 1). Env: `SUPPORT_SITE_URL`
+  (optioneel, default https://www.deforexopleiding.nl).
+  Zie docs/support-module-plan.md §7c en §7d.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

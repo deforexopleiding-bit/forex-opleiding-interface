@@ -39,29 +39,62 @@ export function maakKenmerk() {
 }
 
 /**
+ * De code die de widget in een 401 herkent als "dit token geldt niet meer".
+ * Alleen bij DIT signaal ruimt de widget zijn sessie op. Een kale 401 (van
+ * een proxy, een verkeerd geconfigureerde deploy) of een 503 laat de sessie
+ * staan — zie widget/support.js, tokenOngeldig().
+ */
+export const SESSIE_ONGELDIG = 'SESSIE_ONGELDIG';
+
+/**
  * Haal het gesprek op dat bij dit token hoort.
  *
- * Fail-closed: geen token, onbekend token of een DB-fout geeft null. De
- * aanroeper maakt daar een 401 van zonder te vertellen wélke van de drie het
- * was — dat verschil is voor een aanvaller gratis informatie.
+ * Fail-closed: zonder gesprek gaat er niets door. Maar er zijn twee soorten
+ * "geen gesprek", en die moeten verschillend terug naar de widget:
+ *
+ *   * `{ gesprek: null, leesfout: false }` — de database antwoordde, en er is
+ *     geen gesprek met dit token (nooit geweest, of vervangen doordat het
+ *     gesprek elders is heropend). Dat is een 401 met SESSIE_ONGELDIG, en de
+ *     widget mag dan opruimen.
+ *   * `{ gesprek: null, leesfout: true }` — we konden het niet nagaan. Dat is
+ *     een 503. Eerder werd dit óók een 401, en dan gooide elke widget die op
+ *     dat moment pollde zijn sessie weg bij één hikje van Supabase.
+ *
+ * Een onbekend en een leeg token worden niet uit elkaar gehouden: dat
+ * verschil is voor een aanvaller gratis informatie.
  *
  * @param {string} token — rauw token uit de X-Support-Token header
- * @returns {Promise<object|null>}
+ * @returns {Promise<{gesprek: object|null, leesfout: boolean}>}
  */
 export async function gesprekUitToken(token) {
   const hash = hashToken(token);
-  if (!hash) return null;
+  if (!hash) return { gesprek: null, leesfout: false };
   try {
     const { data, error } = await supabaseAdmin
       .from('support_gesprekken')
       .select('*')
       .eq('sessie_token_hash', hash)
       .maybeSingle();
-    if (error || !data) return null;
-    return data;
-  } catch (_) {
-    return null;
+    if (error) {
+      console.error('[support-sessie] token opzoeken mislukt:', error.message);
+      return { gesprek: null, leesfout: true };
+    }
+    return { gesprek: data || null, leesfout: false };
+  } catch (e) {
+    console.error('[support-sessie] token opzoeken mislukt:', e?.message || e);
+    return { gesprek: null, leesfout: true };
   }
+}
+
+/**
+ * Het antwoord als gesprekUitToken geen gesprek gaf. Eén plek, zodat geen
+ * endpoint van een storing alsnog een 401 maakt.
+ */
+export function weigerSessie(res, { leesfout }) {
+  if (leesfout) {
+    return res.status(503).json({ error: 'Even niet bereikbaar. Probeer het zo nog eens.' });
+  }
+  return res.status(401).json({ error: 'Onbekende sessie', code: SESSIE_ONGELDIG });
 }
 
 /** Het token uit de request halen. Alleen de header; bewust geen query-param. */

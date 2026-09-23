@@ -18,7 +18,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
-import { tokenUitRequest, gesprekUitToken, schrijfBericht, publiekBericht } from './_lib/support-sessie.js';
+import { tokenUitRequest, gesprekUitToken, weigerSessie, schrijfBericht, publiekBericht } from './_lib/support-sessie.js';
 import { haalBeschikbaarheid, beschikbaarheidsTekst } from './_lib/support-beschikbaarheid.js';
 import { botAntwoord } from './_lib/support-bot-core.js';
 import { escaleerGesprek } from './_lib/support-escalatie.js';
@@ -30,8 +30,8 @@ export default async function handler(req, res) {
   applySupportCors(req, res, 'POST, OPTIONS');
   if (handledPreflight(req, res, 'POST')) return;
 
-  const gesprek = await gesprekUitToken(tokenUitRequest(req));
-  if (!gesprek) return res.status(401).json({ error: 'Onbekende sessie' });
+  const { gesprek, leesfout } = await gesprekUitToken(tokenUitRequest(req));
+  if (!gesprek) return weigerSessie(res, { leesfout });
 
   if (gesprek.status === 'afgehandeld') {
     return res.status(409).json({ error: 'Dit gesprek is afgerond. Start een nieuw gesprek.' });

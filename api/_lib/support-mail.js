@@ -11,11 +11,33 @@
 
 import { sendEmailViaSmtp } from './send-email-core.js';
 import { renderMailShell, platteTekstMail } from './mail-shell.js';
+import { hervatLink } from './support-hervat.js';
 
 const STANDAARD_MAILBOX = 'info@deforexopleiding.nl';
 
 function mailbox(voorkeur) {
   return typeof voorkeur === 'string' && voorkeur.includes('@') ? voorkeur : STANDAARD_MAILBOX;
+}
+
+/**
+ * De weg terug naar het gesprek zelf, onderaan elke mail.
+ *
+ * Twee wegen naast elkaar, met opzet. Antwoorden op de mail is de makkelijkste
+ * en werkt overal; de link is er voor wie de chat wil met alles wat er al
+ * gezegd is erboven. In de link staat alleen het kenmerk — geen token, geen
+ * mailadres. Zie _lib/support-hervat.js voor waarom.
+ */
+function wegTerug(kenmerk) {
+  const link = hervatLink(kenmerk);
+  if (!link) return '';
+  return `<p style="margin:10px 0 0;color:#586374;font-size:12px">Liever de chat? `
+       + `<a href="${link}" style="color:#10284A;font-weight:600">Open je gesprek</a>`
+       + ` — we sturen je dan een code ter bevestiging.</p>`;
+}
+
+function wegTerugTekst(kenmerk) {
+  const link = hervatLink(kenmerk);
+  return link ? `\n\nLiever de chat? Open je gesprek via ${link} — we sturen je dan een code ter bevestiging.` : '';
 }
 
 /**
@@ -56,8 +78,9 @@ export async function stuurWachtrijBevestiging({ naar, naam, kenmerk, vraag, van
     <p style="margin:0 0 14px">Je vraag staat bij ons in de wachtrij. Je krijgt antwoord op dit mailadres.</p>
     <p style="margin:0 0 6px;color:#586374;font-size:13px">Je vraag:</p>
     <p style="margin:0 0 14px;padding:12px 14px;background:#F2F4F7;border-radius:8px">${String(vraag || '').slice(0, 800).replace(/[<>]/g, '')}</p>
-    <p style="margin:0">Kenmerk: <b>${kenmerk}</b> — handig om erbij te houden als je ons belt.</p>`;
-  const tekst = `Hoi${naam ? ' ' + naam : ''},\n\nJe vraag staat bij ons in de wachtrij. Je krijgt antwoord op dit mailadres.\n\nJe vraag:\n${String(vraag || '').slice(0, 800)}\n\nKenmerk: ${kenmerk}`;
+    <p style="margin:0">Kenmerk: <b>${kenmerk}</b> — handig om erbij te houden als je ons belt.</p>
+    ${wegTerug(kenmerk)}`;
+  const tekst = `Hoi${naam ? ' ' + naam : ''},\n\nJe vraag staat bij ons in de wachtrij. Je krijgt antwoord op dit mailadres.\n\nJe vraag:\n${String(vraag || '').slice(0, 800)}\n\nKenmerk: ${kenmerk}${wegTerugTekst(kenmerk)}`;
 
   return sendEmailViaSmtp({
     fromMailbox: mailbox(vanMailbox),
@@ -80,8 +103,9 @@ export async function stuurAntwoordMail({ naar, naam, kenmerk, antwoord, medewer
     <p style="margin:0 0 14px">Hoi${naam ? ' ' + naam : ''},</p>
     <p style="margin:0 0 14px;white-space:pre-wrap">${String(antwoord || '').replace(/[<>]/g, '')}</p>
     <p style="margin:0 0 4px">Groet,<br>${medewerker || 'De Forex Opleiding'}</p>
-    <p style="margin:18px 0 0;color:#586374;font-size:12px">Je kunt op deze mail antwoorden. Kenmerk ${kenmerk}.</p>`;
-  const tekst = `Hoi${naam ? ' ' + naam : ''},\n\n${antwoord}\n\nGroet,\n${medewerker || 'De Forex Opleiding'}\n\nJe kunt op deze mail antwoorden. Kenmerk ${kenmerk}.`;
+    <p style="margin:18px 0 0;color:#586374;font-size:12px">Je kunt gewoon op deze mail antwoorden — je reactie komt bij ons in hetzelfde gesprek terecht. Kenmerk ${kenmerk}.</p>
+    ${wegTerug(kenmerk)}`;
+  const tekst = `Hoi${naam ? ' ' + naam : ''},\n\n${antwoord}\n\nGroet,\n${medewerker || 'De Forex Opleiding'}\n\nJe kunt gewoon op deze mail antwoorden — je reactie komt bij ons in hetzelfde gesprek terecht. Kenmerk ${kenmerk}.${wegTerugTekst(kenmerk)}`;
 
   return sendEmailViaSmtp({
     fromMailbox: mailbox(vanMailbox),

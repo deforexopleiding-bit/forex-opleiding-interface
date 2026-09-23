@@ -15,15 +15,15 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
-import { tokenUitRequest, gesprekUitToken, publiekBericht, publiekGesprek } from './_lib/support-sessie.js';
+import { tokenUitRequest, gesprekUitToken, weigerSessie, publiekBericht, publiekGesprek } from './_lib/support-sessie.js';
 import { haalBeschikbaarheid } from './_lib/support-beschikbaarheid.js';
 
 export default async function handler(req, res) {
   applySupportCors(req, res, 'GET, OPTIONS');
   if (handledPreflight(req, res, 'GET')) return;
 
-  const gesprek = await gesprekUitToken(tokenUitRequest(req));
-  if (!gesprek) return res.status(401).json({ error: 'Onbekende sessie' });
+  const { gesprek, leesfout } = await gesprekUitToken(tokenUitRequest(req));
+  if (!gesprek) return weigerSessie(res, { leesfout });
 
   // volledig=1 haalt de hele thread op inclusief de eigen berichten. Dat is
   // wat de widget na een refresh nodig heeft om het gesprek terug te zetten;
@@ -50,8 +50,11 @@ export default async function handler(req, res) {
       .filter((b) => volledig || b.afzender !== 'klant')
       .map(publiekBericht);
   } catch (e) {
-    console.warn('[support-poll] lezen mislukt:', e?.message || e);
-    return res.status(200).json({ berichten: [], status: gesprek.status });
+    // Een 503 en geen lege 200: de widget las een antwoord zonder `gesprek`
+    // als "sessie weg" en gooide 'm dan weg. Een storing is geen oordeel over
+    // het token.
+    console.error('[support-poll] lezen mislukt:', e?.message || e);
+    return res.status(503).json({ error: 'Even niet bereikbaar. Probeer het zo nog eens.' });
   }
 
   const beschikbaarheid = await haalBeschikbaarheid();

@@ -328,6 +328,128 @@ klikbare bevestigingslink in een mail is precies de vorm die phishing nadoet.
 Zolang antwoorden per mail gewoon werkt, is dat de eenvoudigste weg terug —
 en die werkt nu.
 
+## 7d. De weg terug — een gesprek heropenen op een ander apparaat
+
+§7c sloot de mailkant: antwoorden op onze mail komt terug in het gesprek. Wat
+daarna nog ontbrak was de andere richting — de chat zélf terugvinden. De widget
+onthoudt een lopend gesprek in `localStorage`, dus alleen in dezelfde browser.
+Wie op de trein op zijn telefoon onze mail leest, kon het gesprek daar niet
+openen, en dat is nu juist het moment waarop iemand wil reageren.
+
+### Waarom geen magic link
+
+De voor de hand liggende oplossing is een link met een token erin. Dat doen we
+niet, om twee redenen die allebei op zichzelf al genoeg zijn:
+
+- **Een token in een URL lekt.** Naar serverlogs, naar de `Referer` van elke
+  externe afbeelding op de pagina, en naar de browsergeschiedenis van een
+  gedeelde computer. Dezelfde afweging staat in de kop van `support-sessie.js`
+  en die geldt hier onverkort.
+- **Het is de vorm van phishing.** Een klikbare link in een mail die toegang
+  geeft tot een gesprek leert precies het gedrag aan dat we onze studenten
+  liever afleren.
+
+### Wat er wel gebeurt
+
+In de link staat het **kenmerk**, `SUP-7K2M9Q`. Dat is geen sleutel maar een
+dossiernummer: het staat ook in de onderwerpregel van elke mail en wordt aan de
+telefoon hardop doorgegeven. De widget pikt `?dfo-support=SUP-…` op, haalt de
+parameter meteen uit de adresbalk met `history.replaceState`, en vraagt een code
+van zes cijfers aan. Die gaat naar hetzelfde adres als waar de mail heen ging.
+Wie 'm uit de mailbox haalt, is de eigenaar van die mailbox — precies wat we
+willen vaststellen.
+
+Twee endpoints, allebei zonder sessietoken:
+
+| | |
+|---|---|
+| `support-hervat-start` | Body `{ kenmerk }`. Verstuurt de code. Geeft **altijd** hetzelfde antwoord. |
+| `support-hervat-check` | Body `{ kenmerk, code }`. Geeft bij succes een vers sessietoken. |
+
+### Het orakel-probleem, nu op het kenmerk
+
+Een kenmerk is zes tekens uit een alfabet van 31: ruim 880 miljoen
+mogelijkheden. Toch mag `start` geen verschil laten zien tussen een bestaand en
+een verzonnen kenmerk — anders is het een vinkenlijst waarmee je geldige
+dossiernummers kunt aflopen. Daarom is het antwoord één vaste zin, zonder
+mailadres erin, of het kenmerk nu bestaat, geen mailadres heeft, geblokkeerd is,
+de codelimiet heeft bereikt of de mail niet verstuurd kon worden. `check` zegt
+bij een onbekend kenmerk letterlijk wat 'ie bij een foute code zegt.
+
+Dat de bezoeker niet te zien krijgt naar welk adres de code ging, is geen gemis:
+hij leest op dat moment de mail waarin de link stond.
+
+### Eén sleutel per gesprek
+
+`check` zet een **nieuw** sessietoken op het gesprek in plaats van er een tweede
+naast. Eén sleutel per gesprek is een regel die je kunt uitleggen en
+controleren; een groeiend lijstje sleutels waarvan niemand meer weet welke waar
+ligt, is dat niet.
+
+Praktisch gevolg: wie het gesprek op zijn telefoon heropent, ziet op de laptop
+het beginscherm terug met "Je hebt dit gesprek ergens anders geopend." De widget
+herkent dat aan een 401 met `SESSIE_ONGELDIG` op de poll en ruimt zichzelf op. Dat is de juiste kant
+om op te falen — op een gedeelde laptop blijft zo geen gesprek openstaan.
+
+### Geen lockout op de weg terug
+
+`support-verificatie-check` zet na vijf foute codes `verificatie_geblokkeerd`
+op het gesprek. `support-hervat-check` doet dat bewust niet, en geeft ook nooit
+een 423. Voor het eerste heb je het sessietoken nodig, dus wie daar mis tikt is
+de bezoeker zelf. Voor het tweede heb je alleen het kenmerk nodig, en een
+teller daar zou iedereen die het kenmerk kent een knop geven om de eigenaar
+buiten te sluiten. De 423 zou bovendien verklappen dat het kenmerk bestaat. Wat
+hier tegen raden beschermt: elke poging verbruikt de code. Het endpoint claimt
+de code eerst en vergelijkt pas daarna, dus één gok per code, ook bij
+gelijktijdige verzoeken.
+
+### Een storing is geen ongeldig token
+
+`gesprekUitToken` geeft `{ gesprek, leesfout }` terug. Een leesfout wordt een
+503, een onbekend token een 401 met `code: 'SESSIE_ONGELDIG'`. De widget gooit
+een sessie alleen weg bij die 401 mét code. Een 503, een netwerkfout of een
+kale 401 laat de sessie staan, zowel bij het laden als tijdens het pollen, en de
+eerstvolgende geslaagde poll haalt de thread op. Wijst de link uit een mail naar
+het gesprek dat al in deze browser staat, dan opent de widget het zonder code en
+zonder rotatie. De uitweg uit het codescherm brengt een bewaard gesprek terug in
+plaats van het te wissen.
+
+### Bekende beperkingen
+
+- De codelimiet (drie per uur) is gedeeld tussen de gewone verificatie en de weg
+  terug. Wie het kenmerk kent, kan de bezoeker daardoor een uur lang geen nieuwe
+  code laten aanvragen, en met één foute gok diens openstaande code verbruiken.
+  Dat is tijdelijk, en het verandert niets aan de geldigheid van zijn sessie.
+- De pogingenteller in `support-verificatie-check` wordt gelezen en daarna
+  opgehoogd; gelijktijdige pogingen tellen daar als één. Daar is wel het
+  sessietoken voor nodig.
+- `support-hervat-start` antwoordt bij een bestaand kenmerk trager dan bij een
+  verzonnen kenmerk (er gaat een mail uit). Bewust niet opgevuld met een
+  kunstmatige vertraging: dat maakt het endpoint voor iedereen traag, tegen een
+  aanval die met vijf pogingen per kwartier op 880 miljoen kenmerken nergens komt.
+
+### Dit telt als verificatie, een mailantwoord niet
+
+`geverifieerd` gaat hier omhoog. De code ging naar het adres dat al bij het
+gesprek stond, dus wie 'm intikt bewijst hetzelfde als in de gewone flow: toegang
+tot die mailbox. Zonder dat zou iemand die terugkomt zijn facturen alsnog niet
+kunnen navragen en is de weg terug halve winst.
+
+Let op het verschil met de mailbrug uit §7c: een **binnenkomende mail** verhoogt
+`geverifieerd` juist nooit. Een afzenderadres is te vervalsen, een code uit die
+mailbox halen niet.
+
+### Twee dingen die hier zijdelings uit voortkwamen
+
+- **De codelimiet telde levenslang.** `support-verificatie-start` stond op
+  maximaal drie codes per gesprek, ooit. Dat is een sluipende val: een student
+  die na drie verificaties over een half jaar terugkomt zat permanent op slot,
+  zonder dat iemand dat kon zien. Het is nu drie per uur. Dat begrenst een
+  mailbombardement net zo goed en loopt vanzelf weer leeg.
+- **De widget onthield een gesprek maar één dag.** Een vraag die 's ochtends
+  gesteld wordt en 's middags beantwoord, hoort de dag erna nog gewoon open te
+  staan. Dertig dagen nu.
+
 ## 8. Benodigde omgevingsvariabelen
 
 | Variabele | Waarvoor | Zonder |

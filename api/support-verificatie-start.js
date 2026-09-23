@@ -15,24 +15,25 @@
 // De IP-rate-limiter is fail-open (bewuste keuze in api/_lib/rate-limit.js:
 // een storing mag geen klanten buitensluiten). Voor een endpoint dat mail
 // verstuurt is dat te ruim, dus er zit een tweede teller op: maximaal 3
-// codes per gesprek. Die telt in de database en is fail-closed.
+// codes per gesprek per UUR. Die telt in de database en is fail-closed.
 
 import crypto from 'node:crypto';
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
-import { tokenUitRequest, gesprekUitToken, hashToken, schrijfBericht } from './_lib/support-sessie.js';
+import { tokenUitRequest, gesprekUitToken, weigerSessie, hashToken, schrijfBericht } from './_lib/support-sessie.js';
 import { stuurVerificatieCode } from './_lib/support-mail.js';
+import { magCodeVersturen } from './_lib/support-hervat.js';
 
 const GELDIG_MS = 10 * 60 * 1000;
-const MAX_CODES_PER_GESPREK = 3;
+const MAX_CODES_PER_UUR = 3;
 
 export default async function handler(req, res) {
   applySupportCors(req, res, 'POST, OPTIONS');
   if (handledPreflight(req, res, 'POST')) return;
 
-  const gesprek = await gesprekUitToken(tokenUitRequest(req));
-  if (!gesprek) return res.status(401).json({ error: 'Onbekende sessie' });
+  const { gesprek, leesfout } = await gesprekUitToken(tokenUitRequest(req));
+  if (!gesprek) return weigerSessie(res, { leesfout });
 
   if (gesprek.geverifieerd) {
     return res.status(200).json({ ok: true, al_geverifieerd: true });
@@ -47,18 +48,10 @@ export default async function handler(req, res) {
   if (limited) return res.status(429).json({ error: 'Te veel codes aangevraagd. Wacht even.' });
 
   // Tweede slot, fail-CLOSED: bij een leesfout geen code versturen.
-  try {
-    const { count, error } = await supabaseAdmin
-      .from('support_verificaties')
-      .select('id', { count: 'exact', head: true })
-      .eq('gesprek_id', gesprek.id);
-    if (error) throw new Error(error.message);
-    if ((count || 0) >= MAX_CODES_PER_GESPREK) {
-      return res.status(429).json({ error: 'Er zijn al meerdere codes verstuurd. Kijk ook in je spam.' });
-    }
-  } catch (e) {
-    console.error('[support-verificatie-start] tellen mislukt (fail-closed):', e?.message || e);
-    return res.status(503).json({ error: 'Verificatie is even niet beschikbaar.' });
+  // Telt binnen een uur en niet over de hele levensduur — zie magCodeVersturen
+  // in _lib/support-hervat.js voor waarom dat verschil ertoe doet.
+  if (!(await magCodeVersturen(gesprek.id, { max: MAX_CODES_PER_UUR }))) {
+    return res.status(429).json({ error: 'Er zijn net al codes verstuurd. Kijk ook in je spam.' });
   }
 
   // crypto.randomInt, niet Math.random: dit is een toegangscode.
