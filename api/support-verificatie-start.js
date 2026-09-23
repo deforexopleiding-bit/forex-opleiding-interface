@@ -21,7 +21,7 @@ import crypto from 'node:crypto';
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
-import { tokenUitRequest, gesprekUitToken, hashToken, schrijfBericht } from './_lib/support-sessie.js';
+import { tokenUitRequest, gesprekUitToken, weigerSessie, hashToken, schrijfBericht } from './_lib/support-sessie.js';
 import { stuurVerificatieCode } from './_lib/support-mail.js';
 import { magCodeVersturen } from './_lib/support-hervat.js';
 
@@ -32,8 +32,8 @@ export default async function handler(req, res) {
   applySupportCors(req, res, 'POST, OPTIONS');
   if (handledPreflight(req, res, 'POST')) return;
 
-  const gesprek = await gesprekUitToken(tokenUitRequest(req));
-  if (!gesprek) return res.status(401).json({ error: 'Onbekende sessie' });
+  const { gesprek, leesfout } = await gesprekUitToken(tokenUitRequest(req));
+  if (!gesprek) return weigerSessie(res, { leesfout });
 
   if (gesprek.geverifieerd) {
     return res.status(200).json({ ok: true, al_geverifieerd: true });

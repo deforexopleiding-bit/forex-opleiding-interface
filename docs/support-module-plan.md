@@ -388,8 +388,45 @@ ligt, is dat niet.
 
 Praktisch gevolg: wie het gesprek op zijn telefoon heropent, ziet op de laptop
 het beginscherm terug met "Je hebt dit gesprek ergens anders geopend." De widget
-herkent dat aan een 401 op de poll en ruimt zichzelf op. Dat is de juiste kant
+herkent dat aan een 401 met `SESSIE_ONGELDIG` op de poll en ruimt zichzelf op. Dat is de juiste kant
 om op te falen — op een gedeelde laptop blijft zo geen gesprek openstaan.
+
+### Geen lockout op de weg terug
+
+`support-verificatie-check` zet na vijf foute codes `verificatie_geblokkeerd`
+op het gesprek. `support-hervat-check` doet dat bewust niet, en geeft ook nooit
+een 423. Voor het eerste heb je het sessietoken nodig, dus wie daar mis tikt is
+de bezoeker zelf. Voor het tweede heb je alleen het kenmerk nodig, en een
+teller daar zou iedereen die het kenmerk kent een knop geven om de eigenaar
+buiten te sluiten. De 423 zou bovendien verklappen dat het kenmerk bestaat. Wat
+hier tegen raden beschermt: elke poging verbruikt de code. Het endpoint claimt
+de code eerst en vergelijkt pas daarna, dus één gok per code, ook bij
+gelijktijdige verzoeken.
+
+### Een storing is geen ongeldig token
+
+`gesprekUitToken` geeft `{ gesprek, leesfout }` terug. Een leesfout wordt een
+503, een onbekend token een 401 met `code: 'SESSIE_ONGELDIG'`. De widget gooit
+een sessie alleen weg bij die 401 mét code. Een 503, een netwerkfout of een
+kale 401 laat de sessie staan, zowel bij het laden als tijdens het pollen, en de
+eerstvolgende geslaagde poll haalt de thread op. Wijst de link uit een mail naar
+het gesprek dat al in deze browser staat, dan opent de widget het zonder code en
+zonder rotatie. De uitweg uit het codescherm brengt een bewaard gesprek terug in
+plaats van het te wissen.
+
+### Bekende beperkingen
+
+- De codelimiet (drie per uur) is gedeeld tussen de gewone verificatie en de weg
+  terug. Wie het kenmerk kent, kan de bezoeker daardoor een uur lang geen nieuwe
+  code laten aanvragen, en met één foute gok diens openstaande code verbruiken.
+  Dat is tijdelijk, en het verandert niets aan de geldigheid van zijn sessie.
+- De pogingenteller in `support-verificatie-check` wordt gelezen en daarna
+  opgehoogd; gelijktijdige pogingen tellen daar als één. Daar is wel het
+  sessietoken voor nodig.
+- `support-hervat-start` antwoordt bij een bestaand kenmerk trager dan bij een
+  verzonnen kenmerk (er gaat een mail uit). Bewust niet opgevuld met een
+  kunstmatige vertraging: dat maakt het endpoint voor iedereen traag, tegen een
+  aanval die met vijf pogingen per kwartier op 880 miljoen kenmerken nergens komt.
 
 ### Dit telt als verificatie, een mailantwoord niet
 

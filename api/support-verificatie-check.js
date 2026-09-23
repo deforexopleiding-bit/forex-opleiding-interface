@@ -8,6 +8,16 @@
 // nieuwe code aan te vragen is geen teller, dus de pogingen tellen per
 // gesprek en niet per code.
 //
+// Die blokkade hoort HIER, en alleen hier. Om dit endpoint te bereiken heb je
+// het sessietoken nodig, dus wie hier vijf keer mis tikt is de bezoeker zelf
+// (of iemand die zijn sessie al heeft), en een slot op zijn eigen gesprek
+// betekent iets. support-hervat-check doet hetzelfde werk met alleen het
+// kenmerk, en dat is geen geheim. Daar zou dezelfde teller iedereen die het
+// kenmerk kent een knop geven om de eigenaar buiten te sluiten. Daarom
+// verbruikt daar elke poging de code en wordt er niets geblokkeerd. Neem de
+// blokkade niet "voor de consistentie" mee naar hervat-check, en haal hem hier
+// ook niet weg omdat hij daar ontbreekt.
+//
 // Timing: de vergelijking gaat over SHA-256-hashes met
 // crypto.timingSafeEqual. Bij zes cijfers is een timing-aanval theoretisch,
 // maar het kost hier één regel om 'm uit te sluiten.
@@ -16,7 +26,7 @@ import crypto from 'node:crypto';
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
-import { tokenUitRequest, gesprekUitToken, hashToken, schrijfBericht, publiekGesprek } from './_lib/support-sessie.js';
+import { tokenUitRequest, gesprekUitToken, weigerSessie, hashToken, schrijfBericht, publiekGesprek } from './_lib/support-sessie.js';
 import { zoekKlant, haalOnboarding } from './_lib/support-lookups.js';
 
 const MAX_POGINGEN = 5;
@@ -34,8 +44,8 @@ export default async function handler(req, res) {
   applySupportCors(req, res, 'POST, OPTIONS');
   if (handledPreflight(req, res, 'POST')) return;
 
-  const gesprek = await gesprekUitToken(tokenUitRequest(req));
-  if (!gesprek) return res.status(401).json({ error: 'Onbekende sessie' });
+  const { gesprek, leesfout } = await gesprekUitToken(tokenUitRequest(req));
+  if (!gesprek) return weigerSessie(res, { leesfout });
   if (gesprek.geverifieerd) return res.status(200).json({ ok: true, gesprek: publiekGesprek(gesprek) });
   if (gesprek.verificatie_geblokkeerd) {
     return res.status(423).json({ error: 'Te vaak geprobeerd. Een collega pakt je vraag op.' });

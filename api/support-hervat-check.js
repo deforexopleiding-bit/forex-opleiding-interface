@@ -21,6 +21,28 @@
 // Let op het verschil met de mailbrug (cron-support-mail.js): een binnenkomende
 // mail verhoogt `geverifieerd` juist NOOIT, want een afzenderadres is te
 // vervalsen en een code uit die mailbox halen niet.
+//
+// ── GEEN LOCKOUT HIER, EN DAT IS MET OPZET ──────────────────────────────────
+// support-verificatie-check zet na vijf foute codes `verificatie_geblokkeerd`
+// op het gesprek. Hier NIET, en er komt ook nooit een 423 uit dit endpoint.
+// Het verschil zit in wie er aan de deur staat:
+//
+//   * Voor verificatie-check heb je het sessietoken nodig. Wie daar vijf keer
+//     mis tikt, is de bezoeker zelf, en een slot op zijn eigen gesprek
+//     betekent iets.
+//   * Hier heb je alleen het kenmerk nodig, en dat is geen geheim: het staat
+//     in elke onderwerpregel en wordt aan de telefoon voorgelezen. Een teller
+//     die hier het gesprek op slot zet, geeft iedereen die het kenmerk kent
+//     een knop om de eigenaar buiten te sluiten, zowel bij de verificatie als
+//     bij deze weg terug. De 423 zou bovendien verklappen dat het kenmerk
+//     bestaat.
+//
+// Wat hier wél tegen raden beschermt: elke poging verbruikt de code. We
+// claimen de code eerst (voorwaardelijke update op verbruikt_op IS NULL) en
+// vergelijken pas daarna. Eén gok per code dus, ook bij gelijktijdige
+// verzoeken, met maximaal drie codes per uur (magCodeVersturen) en een
+// IP-limiet erbovenop. Zet hier dus GEEN pogingenteller met blokkade terug
+// "voor de zekerheid"; daarmee bouw je de lockout opnieuw.
 
 import { supabaseAdmin } from './supabase.js';
 import { applySupportCors, handledPreflight } from './_lib/support-cors.js';
@@ -30,8 +52,6 @@ import {
 } from './_lib/support-sessie.js';
 import { zoekKlant, haalOnboarding } from './_lib/support-lookups.js';
 import { kenmerkUitBody, gesprekUitKenmerk, gelijkeHash } from './_lib/support-hervat.js';
-
-const MAX_POGINGEN = 5;
 
 // Onbekend kenmerk en foute code geven exact dezelfde tekst: anders is dit
 // endpoint alsnog de vinkenlijst die support-hervat-start niet mocht zijn.
@@ -71,31 +91,24 @@ export default async function handler(req, res) {
 
   if (!rij || Date.parse(rij.vervalt_op) < Date.now()) return res.status(400).json({ error: FOUT });
 
-  if (!gelijkeHash(hashToken(code), rij.code_hash)) {
-    const pogingen = (rij.pogingen || 0) + 1;
-    await supabaseAdmin.from('support_verificaties').update({ pogingen }).eq('id', rij.id);
-    if (pogingen >= MAX_POGINGEN) {
-      await supabaseAdmin.from('support_gesprekken')
-        .update({ verificatie_geblokkeerd: true })
-        .eq('id', gesprek.id);
-      return res.status(423).json({ error: 'Te vaak fout geprobeerd. Mail ons, dan pakt een collega het op.' });
-    }
-    return res.status(400).json({ error: FOUT });
-  }
-
-  // Goed. Code verbruiken vóór we een token uitgeven, zodat dezelfde code
-  // nooit twee sessies kan openen.
-  const { data: verbruikt, error: verbruikFout } = await supabaseAdmin
+  // Eerst claimen, dán vergelijken. Wie de claim wint, mag één keer
+  // vergelijken; goed of fout, de code is daarna op. Zo kan dezelfde code
+  // nooit twee sessies openen, en levert een stapel gelijktijdige gokken er
+  // maar één op.
+  const { data: geclaimd, error: claimFout } = await supabaseAdmin
     .from('support_verificaties')
     .update({ verbruikt_op: new Date().toISOString() })
     .eq('id', rij.id)
     .is('verbruikt_op', null)
     .select('id');
-  if (verbruikFout || !(verbruikt || []).length) {
-    // Iemand anders was net iets eerder met precies deze code. Geen tweede
-    // sessie erbij.
+  if (claimFout || !(geclaimd || []).length) {
+    if (claimFout) console.error('[support-hervat-check] code claimen mislukt:', claimFout.message);
     return res.status(400).json({ error: FOUT });
   }
+
+  // Fout: de code is al verbruikt, verder niets. Geen teller, geen blokkade,
+  // geen ander antwoord. Zie de kop van dit bestand.
+  if (!gelijkeHash(hashToken(code), rij.code_hash)) return res.status(400).json({ error: FOUT });
 
   const token = maakSessieToken();
   const patch = { sessie_token_hash: hashToken(token) };

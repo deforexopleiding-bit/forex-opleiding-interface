@@ -56,7 +56,7 @@
 
   var st = {
     open: false,
-    stap: 'start',       // start | onderwerp | formulier | chat
+    stap: 'start',       // start | onderwerp | formulier | chat | hervat
     soort: null,
     onderwerp: null,
     config: null,
@@ -70,6 +70,7 @@
     codeBezig: false,
     hervatKenmerk: null,
     hervatGestuurd: false,
+    volledigNodig: false,
     laatsteTijd: null,
     pollTimer: null,
     ongelezen: 0,
@@ -79,6 +80,30 @@
   function bewaar(v) { try { localStorage.setItem(OPSLAG, JSON.stringify(v)); } catch (_) {} }
   function lees() { try { return JSON.parse(localStorage.getItem(OPSLAG) || 'null'); } catch (_) { return null; } }
   function wis() { try { localStorage.removeItem(OPSLAG); } catch (_) {} }
+
+  // Is dit token echt niet meer geldig? Alleen dán ruimen we de sessie op.
+  // Twee sloten, want opruimen gooit een lopend gesprek weg: de status moet
+  // 401 zijn ÉN de server moet er zelf SESSIE_ONGELDIG bij zetten. Een 503
+  // (storing), een netwerkfout of een kale 401 van iets anders dan onze API
+  // (proxy, deploy-beveiliging) laat de sessie staan. Zie gesprekUitToken in
+  // api/_lib/support-sessie.js.
+  function tokenOngeldig(e) {
+    return !!(e && e.status === 401 && e.code === 'SESSIE_ONGELDIG');
+  }
+
+  // Naar de chat met het token dat we hebben, en de thread laten ophalen door
+  // de poll. Niet wachten op een eerste geslaagde call: lukt die niet, dan
+  // staat de bezoeker tenminste in zijn gesprek en vult de volgende ronde het
+  // aan, in plaats van dat hij op een scherm blijft hangen dat nergens heen
+  // gaat.
+  function naarChat() {
+    st.stap = 'chat';
+    st.berichten = [];
+    st.laatsteTijd = null;
+    st.volledigNodig = true;
+    st.ongelezen = 0;
+    startPoll();
+  }
 
   /* ── netwerk ──────────────────────────────────────────────────────────── */
   function api(pad, opties) {
@@ -97,6 +122,7 @@
         if (!r.ok) {
           var f = new Error((j && j.error) || 'Er ging iets mis (' + r.status + ')');
           f.status = r.status;
+          f.code = (j && j.code) || null;
           throw f;
         }
         return j;
@@ -299,7 +325,9 @@
           '<button class="btn" data-a="hervat-open"' + (st.bezig ? ' disabled' : '') + '>' +
           (st.bezig ? 'Bezig…' : 'Open mijn gesprek') + '</button>';
       }
-      h += '<button class="terug" data-a="nieuw" style="margin-top:14px">Liever een nieuwe vraag stellen</button>';
+      // De uitweg gooit niets weg: stond er in deze browser al een gesprek,
+      // dan komt dat gewoon terug. Een nieuwe vraag kan daarna nog steeds.
+      h += '<button class="terug" data-a="hervat-terug" style="margin-top:14px">Terug</button>';
       return h + '</div>';
     }
 
@@ -444,6 +472,12 @@
     if (actie === 'code') { checkCode(); return; }
     if (actie === 'hervat-code') { vraagHervatCode(); return; }
     if (actie === 'hervat-open') { openHervat(); return; }
+    if (actie === 'hervat-terug') {
+      st.hervatKenmerk = null; st.hervatGestuurd = false; st.stap = 'start';
+      teken();
+      herstel().then(function () { teken(); });
+      return;
+    }
     if (actie === 'nieuw') {
       wis();
       st.token = null; st.gesprek = null; st.berichten = []; st.stap = 'start';
@@ -618,9 +652,22 @@
     // hoeft ons geen verzoek per vijf seconden te sturen.
     if (document.hidden) return;
 
-    var q = st.laatsteTijd ? '?sinds=' + encodeURIComponent(st.laatsteTijd) : '';
+    // Na een herstel of heropening die de thread nog niet binnen heeft, halen
+    // we 'm in zijn geheel op; daarna weer alleen wat er bij kwam.
+    var volledig = st.volledigNodig;
+    var q = volledig ? '?volledig=1'
+      : (st.laatsteTijd ? '?sinds=' + encodeURIComponent(st.laatsteTijd) : '');
     api('support-poll' + q).then(function (r) {
       if (!r) return;
+      if (volledig) {
+        st.volledigNodig = false;
+        st.berichten = r.berichten || [];
+        if (st.berichten.length) st.laatsteTijd = st.berichten[st.berichten.length - 1].created_at;
+        if (r.gesprek) st.gesprek = r.gesprek;
+        if (st.config) st.config.live = r.live;
+        teken();
+        return;
+      }
       var nieuw = 0;
       (r.berichten || []).forEach(function (b) {
         if (st.berichten.some(function (x) { return x.id && x.id === b.id; })) return;
@@ -640,7 +687,7 @@
       // wanneer hetzelfde gesprek elders is heropend — support-hervat-check
       // geeft één sleutel per gesprek uit. Blijven pollen levert dan alleen
       // een bevroren venster op, dus we zeggen wat er aan de hand is.
-      if (e && e.status === 401) {
+      if (tokenOngeldig(e)) {
         stopPoll();
         wis();
         st.token = null;
@@ -695,16 +742,11 @@
         st.gesprek = r.gesprek;
         st.hervatKenmerk = null;
         st.hervatGestuurd = false;
-        // De hele thread ophalen, niet alleen wat er na nu bij komt: de
-        // bezoeker komt juist terug om te lezen wat er gezegd is.
-        return api('support-poll?volledig=1').then(function (p) {
-          st.berichten = (p && p.berichten) || [];
-          if (p && p.gesprek) st.gesprek = p.gesprek;
-          if (st.berichten.length) st.laatsteTijd = st.berichten[st.berichten.length - 1].created_at;
-          st.stap = 'chat';
-          st.ongelezen = 0;
-          startPoll();
-        });
+        // Het token is op dit moment al geroteerd; het oude geldt niet meer.
+        // Dus nu meteen de chat in. De bezoeker komt terug om te lezen wat er
+        // gezegd is, dus de poll haalt de hele thread erbij.
+        naarChat();
+        poll();
       })
       .catch(function (e) { st.fout = e.message; })
       .then(function () { st.bezig = false; teken(); });
@@ -723,15 +765,21 @@
     st.token = bewaard.token;
     return api('support-poll?volledig=1')
       .then(function (r) {
-        if (!r || !r.gesprek) { wis(); st.token = null; return; }
-        st.gesprek = r.gesprek;
+        st.gesprek = (r && r.gesprek) || null;
         st.stap = 'chat';
-        st.berichten = r.berichten || [];
+        st.berichten = (r && r.berichten) || [];
         if (st.berichten.length) st.laatsteTijd = st.berichten[st.berichten.length - 1].created_at;
         st.ongelezen = 0;
         startPoll();
       })
-      .catch(function () { wis(); st.token = null; });
+      .catch(function (e) {
+        // Alleen een token dat de server zelf ongeldig noemt, gaat weg. Bij
+        // een storing of netwerkfout houden we het: een sessie leeft dertig
+        // dagen, en die gooien we niet weg om een hikje bij het laden. De
+        // poll haalt de thread op zodra de server weer antwoordt.
+        if (tokenOngeldig(e)) { wis(); st.token = null; return; }
+        naarChat();
+      });
   }
 
   function startWidget() {
@@ -749,14 +797,25 @@
       // Komt de bezoeker via de link in onze mail, dan gaat dat vóór wat er
       // toevallig in deze browser bewaard staat — de link wijst naar een
       // specifiek gesprek, en dat is wat 'ie wil zien.
-      if (uitMail) {
+      //
+      // Eerst wel kijken wat er bewaard staat. Wijst de link naar precies dat
+      // gesprek, dan openen we het gewoon: geen code, en dus ook geen rotatie
+      // die het token vervangt dat hier al klopte.
+      if (!uitMail) return herstel();
+      return herstel().then(function () {
+        st.open = true;
+        if (st.gesprek && st.gesprek.kenmerk === uitMail) return;
+        // Een ander gesprek (of niets): naar het codescherm. Het bewaarde
+        // gesprek blijft in localStorage staan; de uitweg haalt het terug.
+        stopPoll();
+        st.token = null;
+        st.gesprek = null;
+        st.berichten = [];
+        st.volledigNodig = false;
         st.hervatKenmerk = uitMail;
         st.hervatGestuurd = false;
         st.stap = 'hervat';
-        st.open = true;
-        return;
-      }
-      return herstel();
+      });
     }).then(function () { teken(); }).catch(function () {
       // Geen config betekent: we weten niet welke onderwerpen er zijn, of we
       // bereikbaar zijn, of wat er al loopt. Een knop die dan tóch opent,
