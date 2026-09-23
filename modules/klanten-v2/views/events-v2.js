@@ -110,6 +110,11 @@
     attDetail: null,        // { attId, eventId } → open modal
     noteDraft: {},          // [attId] = string (bewerkbare notitie-tekst)
     noteBusy:  {},          // [attId] = true tijdens save
+    // De broodjesnotitie in de kolom NOTITIE van de aanwezigenlijst. Losse
+    // staat van noteDraft hierboven: dat is `notes` in het detailpaneel, dit
+    // is `notitie` in de tabel. Twee kolommen, twee bewerkingen.
+    notitieEdit: null,      // { attId, waarde } → deze rij staat in bewerkmodus
+    notitieBusy: {},        // [attId] = true tijdens opslaan
     // Punt 4 — In-shell inbox conversation viewer (split-pane)
     inboxConvId: null,      // actieve conversation in split-pane
     inboxScrollTop: 0,      // laatst-bekende scroll van linkerlijst; restore na re-render
@@ -242,6 +247,11 @@
     const j = await tryFetch('att:' + id, '/api/events-attendees-list?event_id=' + encodeURIComponent(id));
     st.loading[id] = false;
     if (j && j.__error) st.error[id] = j.__error; else st.data[id] = asArr(j?.attendees || j?.items);
+    // Welke optionele kolommen de databank nog niet had. De kolom NOTITIE
+    // toont dat liever dan een rij lege streepjes, want dat leest als
+    // 'niemand heeft iets opgegeven'.
+    st.ontbreekt = st.ontbreekt || {};
+    st.ontbreekt[id] = Array.isArray(j?.ontbrekende_kolommen) ? j.ontbrekende_kolommen : [];
     if (window.DFO?.render) window.DFO.render();
     // Fix ronde-13: als de deelnemer-modal open is (open vanuit
     // Inschrijvingen wacht op deze fetch), re-portal na render.
@@ -1563,7 +1573,7 @@
     ${rows.length === 0
       ? emptyBlk('Geen deelnemers', 'Er zijn geen deelnemers in deze categorie.')
       : `<div style="padding:0 20px 20px">${H.table(
-          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Belstatus'},{l:'',cls:'r'}],
+          [{l:'Naam'},{l:'E-mail',cls:'optional'},{l:'Telefoon',cls:'optional'},{l:'Status'},{l:'Aanmelddatum',cls:'optional'},{l:'Vragenlijst',cls:'optional'},{l:'Belstatus'},{l:'Notitie'},{l:'',cls:'r'}],
           rows.map((a) => {
             const naam = [a.first_name || a.voornaam, a.last_name || a.achternaam].filter(Boolean).join(' ') || a.name || a.email || '—';
             const [sc, sl] = ATT_STATUS_META[a.status] || ['neutral', a.status || '—'];
@@ -1596,10 +1606,50 @@
                     ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
                     : `<span title="${plekViaBel ? 'Vragenlijst nog niet ingevuld — telt wel mee via belstatus Bevestigd' : 'Vragenlijst nog niet ingevuld'}" style="color:var(--rose);font-size:14px">✗</span>`)),
               _belStatusDropdown(a, id),
+              _notitieCel(a, id),
               `<div style="position:relative;display:inline-block"><button class="icon-btn" title="Meer" onclick="event.stopPropagation();window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>${_ui.attKebabOpen === a.id ? _evAttKebabHtml(a.id, id) : ''}</div>`,
             ];
           })
         )}</div>`}`;
+  }
+
+  // ── DE KOLOM NOTITIE — de broodjes ──────────────────────────────────────
+  //
+  // Wat iemand eet, ingevuld bij "Bevestigd" in de opvolgmodule. Deze lijst is
+  // waarmee besteld wordt, dus hij moet hier staan én hier te corrigeren zijn:
+  // een typefout mag niet vastzitten tot het event voorbij is.
+  //
+  // NIET HETZELFDE ALS `notes`. Die staat in het detailpaneel en is de vrije
+  // aantekening over de deelnemer ("Opgebeld door Chesney om 13u41"). Door
+  // elkaar halen betekent dat een bestelling iemands aantekening overschrijft.
+  //
+  // Klikken opent een invoerveld op zijn plek. Enter of wegklikken slaat op,
+  // Escape laat het zoals het was, en leegmaken wist de notitie — dat is
+  // hetzelfde gebaar en hoeft dus geen aparte knop.
+  function _notitieCel(a, eventId) {
+    const mist = ((_live.attendees.ontbreekt || {})[eventId] || []).includes('notitie');
+    if (mist) {
+      // Geen lege streep: die leest als 'niemand heeft iets opgegeven'.
+      return `<span title="De kolom notitie bestaat nog niet in de databank. Draai docs/sql-migrations/2026-09-23-event-attendees-notitie.sql." style="font-size:11.5px;color:var(--amber)">nog niet ingericht</span>`;
+    }
+    const bezig = !!_ui.notitieBusy[a.id];
+    if (bezig) return `<span style="font-size:12px;color:var(--text-3)">opslaan…</span>`;
+
+    const bewerkt = _ui.notitieEdit && _ui.notitieEdit.attId === a.id;
+    if (bewerkt) {
+      return `<input type="text" maxlength="500" value="${esc(_ui.notitieEdit.waarde)}"
+        placeholder="bv. 2x kaas — leeg laten wist de notitie"
+        oninput="window.__evNotitieTyp(this.value)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();window.__evNotitieBewaar('${esc(a.id)}','${esc(eventId)}')}else if(event.key==='Escape'){window.__evNotitieStop()}"
+        onblur="window.__evNotitieBewaar('${esc(a.id)}','${esc(eventId)}')"
+        autofocus
+        style="width:150px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;background:var(--surface);color:var(--text)" />`;
+    }
+    const tekst = String(a.notitie || '').trim();
+    return `<span onclick="window.__evNotitieBewerk('${esc(a.id)}')"
+      title="${tekst ? esc(tekst) + ' — klik om aan te passen' : 'Klik om een notitie toe te voegen'}"
+      style="cursor:text;font-size:12px;${tekst ? 'color:var(--text)' : 'color:var(--text-3)'};display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${
+        tekst ? esc(tekst) : '+ notitie'}</span>`;
   }
 
   // BUG 6 + 7 — Belstatus als inline-dropdown die schrijft naar
@@ -2256,6 +2306,58 @@
     } catch (e) { alert('Notitie opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _ui.noteBusy[attId] = false; if (window.DFO?.render) window.DFO.render(); }
   };
+  // ── DE KOLOM NOTITIE: bewerken, opslaan, afbreken ──────────────────────
+  window.__evNotitieBewerk = (attId) => {
+    if (_ui.notitieBusy[attId]) return;
+    const lijst = Object.values(_live.attendees.data || {}).find((l) => Array.isArray(l) && l.some((x) => x.id === attId));
+    const rij = (lijst || []).find((x) => x.id === attId);
+    _ui.notitieEdit = { attId, waarde: String((rij && rij.notitie) || '') };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evNotitieTyp = (val) => {
+    // Alleen de waarde bijhouden, GEEN render: opnieuw tekenen tijdens typen
+    // haalt de focus uit het veld en dan typ je de helft naast het vak.
+    if (_ui.notitieEdit) _ui.notitieEdit.waarde = String(val || '');
+  };
+  window.__evNotitieStop = () => {
+    _ui.notitieEdit = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evNotitieBewaar = async (attId, eventId) => {
+    const st = _ui.notitieEdit;
+    if (!st || st.attId !== attId || _ui.notitieBusy[attId]) return;
+    const nieuw = String(st.waarde || '').trim();
+    const lijst = _live.attendees.data[eventId];
+    const idx = Array.isArray(lijst) ? lijst.findIndex((x) => x.id === attId) : -1;
+    const oud = idx >= 0 ? String(lijst[idx].notitie || '').trim() : '';
+    _ui.notitieEdit = null;
+    // Niets veranderd: geen aanroep. Wegklikken zonder iets te typen hoort
+    // geen schrijfactie te zijn.
+    if (nieuw === oud) { if (window.DFO?.render) window.DFO.render(); return; }
+
+    _ui.notitieBusy[attId] = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/events-attendee-update?id=' + encodeURIComponent(attId), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        // Leeg = wissen. NULL en niet een lege string, anders staat er een rij
+        // die 'iets ingevuld' lijkt terwijl er niets staat.
+        body: JSON.stringify({ notitie: nieuw || null }),
+      });
+      if (j?.error) throw new Error(j.error);
+      // De server zegt het als de kolom er nog niet is. Stil doorgaan zou
+      // betekenen dat de lijst een bestelling toont die nergens staat.
+      if (j && j.notitie_opgeslagen === false) throw new Error(j.notitie_reden || 'de kolom bestaat nog niet');
+      if (idx >= 0) lijst[idx] = { ...lijst[idx], notitie: nieuw || null };
+      _showToast(nieuw ? 'Notitie opgeslagen' : 'Notitie gewist');
+    } catch (e) {
+      alert('Notitie opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+    } finally {
+      _ui.notitieBusy[attId] = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+
   window.__evAttOpenConv = (convId) => {
     // In-shell viewer via Inbox-tab-mode
     _ui.attDetail = null;
