@@ -383,6 +383,10 @@
     laden: false, data: null, error: null,
     paneelOpen: false,
     qr: null, qrError: null, qrLaden: false,
+    // Een herkoppeling loopt: de client wordt afgebroken en start opnieuw. Dat
+    // duurt tientallen seconden, en zolang moet het venster zeggen dat er iets
+    // gebeurt in plaats van een lege doos te tonen.
+    herkoppelBezig: false, herkoppelFout: null, herkoppelSinds: null,
   };
   // Handles apart van de staat: een timer is geen gegeven maar een ding dat
   // opgeruimd moet worden. Zie stopWaTimers().
@@ -589,6 +593,90 @@
         ? 'Niet gekoppeld. Er staat een QR klaar om te scannen.'
         : 'Niet gekoppeld. De brug draait wel; open dit paneel om te koppelen.',
     };
+  }
+
+  /**
+   * WAT IS ER AAN DE HAND MET DE BRUG? Eén antwoord, altijd ingevuld.
+   *
+   * ── DE FOUT DIE WE HIERMEE WEGHALEN ────────────────────────────────────
+   * Op 23 september klikte Maxim op koppelen en kreeg hij een leeg wit venster.
+   * De brug leefde, maar de client lag eruit zonder fout en zonder QR. Het
+   * paneel had daar geen woord voor: geen QR betekende 'QR wordt opgehaald…',
+   * en dat bleef staan terwijl er nooit een kwam.
+   *
+   * Een lege doos is geen toestand. Elke uitkomst hieronder zegt wat er is, wat
+   * er gebeurt, en of er iets van jou verwacht wordt.
+   *
+   * @returns {{staat:string, kop:string, uitleg:string, knop:?string, ernst:string}}
+   */
+  function brugToestand({ data, error, qr, herkoppelBezig, herkoppelFout, nuMs = Date.now() } = {}) {
+    // Een lopende herkoppeling gaat vóór alles: dat is wat er NU gebeurt, en
+    // de status die we ernaast ophalen loopt er per definitie achteraan.
+    if (herkoppelBezig) {
+      return { staat: 'herkoppelen', ernst: 'bezig',
+        kop: 'Bezig met verbinden…',
+        uitleg: 'De brug start de WhatsApp-client opnieuw op. Dat duurt meestal tien tot dertig '
+              + 'seconden; zodra er een code is verschijnt die hier vanzelf.',
+        knop: null };
+    }
+    if (herkoppelFout) {
+      return { staat: 'herkoppel_mislukt', ernst: 'fout',
+        kop: 'Opnieuw verbinden is niet gelukt',
+        uitleg: String(herkoppelFout),
+        knop: 'opnieuw' };
+    }
+    if (error) {
+      // De brug zelf niet te bereiken. Dan is een scherm vol scan-instructies
+      // misleidend: er valt niets te scannen.
+      return { staat: 'onbereikbaar', ernst: 'fout',
+        kop: 'De brug is niet bereikbaar',
+        uitleg: String(error) + ' Staat de service op de VPS aan?',
+        knop: null };
+    }
+    if (!data) {
+      return { staat: 'laden', ernst: 'bezig', kop: 'Status wordt opgehaald…', uitleg: '', knop: null };
+    }
+    if (data.verbonden === true) {
+      const nummer = toonNummer(data.nummer);
+      return { staat: 'verbonden', ernst: 'goed',
+        kop: 'Gekoppeld' + (nummer ? ' met ' + nummer : ''),
+        uitleg: 'Je kunt dit venster sluiten.',
+        knop: null };
+    }
+    if (qr) {
+      return { staat: 'qr', ernst: 'actie',
+        kop: 'Klaar om te scannen',
+        uitleg: 'Scan de code met de telefoon van Dave.',
+        knop: 'nieuwe' };
+    }
+
+    // ── GEEN VERBINDING EN GEEN QR ─────────────────────────────────────────
+    // Dit is precies de gemeten toestand, en hier stond niets. Wat er nu staat
+    // hangt af van wat de brug over zichzelf zegt.
+    const h = data.herverbinden || null;
+    const sinds = data.laatste_actie ? geledenTekst(data.laatste_actie) : null;
+    const fout = data.laatste_fout || (h && h.laatste_fout) || null;
+
+    if (h && h.opgegeven) {
+      return { staat: 'opgegeven', ernst: 'fout',
+        kop: 'De brug heeft het opgegeven',
+        uitleg: 'Na ' + (h.poging || '?') + ' mislukte pogingen wordt er niet meer geprobeerd'
+              + (fout ? ' (' + fout + ')' : '') + '. Klik hieronder om het opnieuw te starten.',
+        knop: 'opnieuw' };
+    }
+    if (h && h.bezig) {
+      return { staat: 'herverbindt', ernst: 'bezig',
+        kop: 'De brug probeert zelf opnieuw te verbinden',
+        uitleg: 'Poging ' + (h.poging || 1) + (h.laatste_poging ? ', laatste om ' + geledenTekst(h.laatste_poging) : '')
+              + (fout ? '. Vorige fout: ' + fout : '') + '.',
+        knop: 'nu' };
+    }
+    return { staat: 'client_weg', ernst: 'fout',
+      kop: 'De client ligt eruit' + (sinds ? ' — laatste teken van leven ' + sinds : ''),
+      uitleg: 'De brug draait wel, maar er is geen WhatsApp-verbinding en geen code om te scannen'
+            + (fout ? '. Laatste fout: ' + fout : '')
+            + '. Klik hieronder om opnieuw te koppelen.',
+      knop: 'opnieuw' };
   }
 
   /**
@@ -1532,6 +1620,11 @@
 .opv .waqr{display:block;width:320px;max-width:100%;height:auto;margin:14px auto 0;border:1px solid var(--o-line);border-radius:14px;background:#fff}
 .opv .wastap{margin:12px 0 0;padding-left:20px;font-size:13px;color:#414954;line-height:1.7}
 .opv .waklaar{background:var(--o-grns);border:1px solid #bfe9d6;color:#08794a;border-radius:12px;padding:14px 16px;text-align:center;font-size:14px;font-weight:650}
+/* Het toestandsvak in het koppelpaneel: altijd gevuld, ook zonder QR. Links
+   uitgelijnd omdat er een hele zin in kan staan (laatste fout, aantal pogingen),
+   en dat leest niet gecentreerd. */
+.opv .wastand{text-align:left;line-height:1.45;font-weight:500;margin-bottom:0}
+.opv .wastand b{font-weight:700}
 /* De twee vensters van de dag: spraakbericht voor 09:00 en nabellen 12–13u. */
 .opv .vst{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 9px;font-size:11.5px;font-weight:650;border:1px solid transparent}
 .opv .vst.ok{background:var(--o-grns);border-color:#bfe9d6;color:#08794a}
@@ -2199,13 +2292,20 @@
   }
 
   /**
-   * Het koppelpaneel. Toont de status in gewone taal, en als er niet gekoppeld
-   * is de QR met de vier stappen eronder. Zodra de brug verbonden meldt komt
-   * daar een groene bevestiging voor in de plaats en stopt het pollen.
+   * Het koppelpaneel. Zegt in gewone taal wat er aan de hand is — altijd, ook
+   * als er geen QR is — en geeft de knop die bij die toestand hoort.
+   *
+   * De vier scan-stappen horen alleen bij een code die er echt staat. Ze stonden
+   * hier eerder ook onder 'QR wordt opgehaald…', en dat was de lege doos:
+   * instructies om iets te scannen dat er nooit kwam.
    */
   function waPaneelHtml() {
     if (!_wa.paneelOpen) return '';
     const s = beschrijfWaStatus(_wa);
+    const t = brugToestand({
+      data: _wa.data, error: _wa.error, qr: _wa.qr,
+      herkoppelBezig: _wa.herkoppelBezig, herkoppelFout: _wa.herkoppelFout,
+    });
     const d = _wa.data || {};
 
     let body = '<div class="waregel"><span>Status</span><span>' +
@@ -2215,26 +2315,33 @@
 
     body += brugTellersBlok(d);
 
-    if (s.verbonden) {
-      body += '<div class="waklaar" style="margin-top:14px">&#10003; Gekoppeld' +
-        (s.nummer ? ' met ' + esc(s.nummer) : '') + '.<br>' +
-        '<span style="font-weight:600;font-size:12.5px">Je kunt dit venster sluiten.</span></div>';
-    } else if (_wa.error) {
-      // Geen QR tonen als we de brug niet eens kunnen bereiken: dan is een
-      // scherm vol instructies misleidend, want er valt niets te scannen.
-      body += '<div class="warn2" style="margin-top:14px"><b>De brug is nu niet bereikbaar.</b> ' +
-        esc(_wa.error) + '<br>Staat de service op de VPS aan?</div>';
-    } else {
-      body += _wa.qr
-        ? '<img class="waqr" width="320" height="320" alt="QR-code om WhatsApp te koppelen" src="' + esc(_wa.qr) + '">'
-        : '<div class="empty" style="margin-top:14px">' +
-            (_wa.qrError ? esc(_wa.qrError) : 'QR wordt opgehaald&hellip;') + '</div>';
-      body += '<ol class="wastap">' +
+    // De toestand in één blok, in de kleur die erbij hoort. Ook 'verbonden' en
+    // 'onbereikbaar' lopen hierlangs, zodat er maar één plek is die bepaalt wat
+    // er staat.
+    const vak = t.ernst === 'goed' ? 'waklaar' : (t.ernst === 'fout' ? 'warn2' : 'ronde');
+    body += '<div class="' + vak + ' wastand" style="margin-top:14px">' +
+      '<b>' + esc(t.kop) + '</b>' + (t.uitleg ? '<br>' + esc(t.uitleg) : '') + '</div>';
+
+    if (t.staat === 'qr') {
+      body += '<img class="waqr" width="320" height="320" alt="QR-code om WhatsApp te koppelen" src="' + esc(_wa.qr) + '">' +
+        '<ol class="wastap">' +
         '<li>Open <b>WhatsApp</b> op de telefoon</li>' +
         '<li>Ga naar <b>Instellingen</b></li>' +
         '<li>Kies <b>Gekoppelde apparaten</b></li>' +
         '<li>Tik op <b>Apparaat koppelen</b> en scan deze code</li></ol>' +
         '<div class="ronde" style="margin-top:10px">De code ververst zichzelf; laat dit venster open tot het lampje groen wordt.</div>';
+    }
+
+    // De knop. 'opnieuw' wist de sessie zodat er gegarandeerd een nieuwe code
+    // komt; 'nu' laat de bestaande sessie staan en probeert alleen eerder dan
+    // de brug zelf van plan was.
+    if (t.knop === 'opnieuw' || t.knop === 'nieuwe') {
+      body += '<button class="obtn p" id="opv-wa-koppel" style="width:100%;margin-top:14px"' +
+        ' onclick="window.__opvWaHerkoppel(true)">' +
+        (t.knop === 'nieuwe' ? 'Nieuwe code ophalen' : 'Opnieuw koppelen') + '</button>';
+    } else if (t.knop === 'nu') {
+      body += '<button class="obtn" id="opv-wa-koppel" style="width:100%;margin-top:14px"' +
+        ' onclick="window.__opvWaHerkoppel(false)">Nu opnieuw proberen</button>';
     }
 
     body += '<button class="obtn" style="width:100%;margin-top:16px" onclick="window.__opvWaSluit()">Sluiten</button>';
@@ -5061,9 +5168,52 @@
     herstelWaTimers();
   };
 
+  /**
+   * OPNIEUW KOPPELEN — de knop die altijd tot een QR moet leiden.
+   *
+   * Hij breekt de client op de VPS af en start hem opnieuw. Met wisSessie=true
+   * gaat ook de opgeslagen sessie weg, en dan is een nieuwe code gegarandeerd:
+   * zonder sessie kán WhatsApp niet anders dan opnieuw om een koppeling vragen.
+   * Met wisSessie=false blijft de sessie staan en proberen we alleen eerder dan
+   * de brug zelf van plan was — dat is de 'nu opnieuw proberen' onder een
+   * lopende herverbinding.
+   *
+   * Tijdens het starten staat er 'Bezig met verbinden…' en blijven we pollen;
+   * de brug meldt pas een QR als puppeteer op gang is, en dat duurt tientallen
+   * seconden. Een leeg venster in die tijd is precies de fout die we weghalen.
+   */
+  window.__opvWaHerkoppel = async (wisSessie) => {
+    if (_wa.herkoppelBezig) return;      // dubbelklik is geen tweede opdracht
+    _wa.herkoppelBezig = true;
+    _wa.herkoppelFout  = null;
+    _wa.herkoppelSinds = Date.now();
+    _wa.qr = null; _wa.qrError = null;
+    render();
+    // De timers meteen op de snelle cadans: de QR kan elk moment verschijnen.
+    herstelWaTimers();
+    try {
+      const j = await post('/api/opvolging-whatsapp-herkoppel', { wis_sessie: wisSessie === true });
+      // De brug kan 200 geven en tóch niet gestart zijn (sessie wissen mislukt,
+      // initialize gooit meteen). Dan is het geen succes, wat de status ook zegt.
+      if (j && j.gestart === false) _wa.herkoppelFout = j.fout || 'De brug kon de client niet opnieuw starten.';
+    } catch (e) {
+      _wa.herkoppelFout = (e && e.message) || 'Onbekende fout';
+    }
+    _wa.herkoppelBezig = false;
+    // Niet vertrouwen op de volgende tik: direct kijken wat eruit kwam.
+    fetchWaStatus();
+    if (!_wa.herkoppelFout) fetchWaQr();
+    herstelWaTimers();
+    render();
+  };
+
   window.__opvWaSluit = () => {
     _wa.paneelOpen = false;
     _wa.qr = null; _wa.qrError = null;
+    // Een mislukte poging is geen blijvende toestand: bij het volgende openen
+    // begin je schoon. De lopende herkoppeling zelf laten we staan — die draait
+    // op de VPS door, ook als dit venster dicht is.
+    _wa.herkoppelFout = null;
     // Eerst de timers terug naar de rustige cadans, dan pas tekenen — anders
     // blijft de snelle poll van vijf seconden nog een ronde doorlopen.
     herstelWaTimers();
@@ -5100,7 +5250,16 @@
 
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
-  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst, brugTellersBlok };
+  window.__opvWaHelpers = {
+    beschrijfWaStatus, brugToestand, bepaalWaTimers, bepaalTimerActie,
+    toonNummer, geledenTekst, brugTellersBlok,
+    // Voor tests/opvolging-koppelknop-altijd-qr.test.js: het paneel echt laten
+    // tekenen en de knop indrukken, zonder browser. De lege doos was een
+    // HTML-fout, dus die moet in de HTML zelf te betrappen zijn.
+    waPaneelHtml,
+    zetWa: (v) => Object.assign(_wa, v),
+    leesWa: () => ({ ..._wa }),
+  };
 
   // De weekbalk los na te slaan, en getest in tests/opvolging-weekbalk.test.js
   // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.
