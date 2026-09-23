@@ -404,3 +404,74 @@ test('bij een mislukt wissen wordt de teller NIET teruggezet', async () => {
   await c.roep(true);
   assert.equal(c.herverbinder.gelukt_aangeroepen, 0);
 });
+
+// ── 4b · AFBREKEN DAT BLIJFT HANGEN ───────────────────────────────────────
+// De stap die het meest kán vastlopen is juist de eerste: client.destroy()
+// praat met puppeteer, en een vastzittende puppeteer is precies de reden dat
+// er geknikkerd wordt. Zonder tijdslimiet blijft het verzoek open staan, loopt
+// het CRM in zijn eigen time-out van twintig seconden, en leest Maxim 'de brug
+// is niet bereikbaar' terwijl de brug leeft. Dat is hetzelfde lege venster,
+// één laag dieper.
+
+/** Een client waarvan afbreken of wissen NOOIT antwoordt, met een handmatige klok. */
+function hangendeClient({ afbrekenHangt = false, wisHangt = false } = {}) {
+  const gedaan = { afgebroken: 0, gewist: 0, gestart: 0 };
+  const staat = { verbonden: true, qrDataUrl: 'oude-qr', qrSindsIso: 'toen', laatsteFout: null };
+  const rij = [];
+  const nooit = () => new Promise(() => {});   // lost nooit op — dat is de storing
+  return {
+    staat, gedaan, rij,
+    // Alle wachtende tijdslimieten laten afgaan. Niet awaiten op de callback
+    // zelf: de belofte eronder blijft immers hangen, dat is het hele punt.
+    tik: async () => {
+      const nu = rij.splice(0, rij.length);
+      for (const t of nu) { try { t.fn(); } catch (_) {} }
+      for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+    },
+    roep: (wisSessie = false) => herkoppel({
+      staat,
+      afbreken: async () => { gedaan.afgebroken += 1; if (afbrekenHangt) return nooit(); },
+      wis     : async () => { gedaan.gewist += 1;     if (wisHangt) return nooit(); },
+      start   : async () => { gedaan.gestart += 1; },
+      herverbinder: { gelukt() {} },
+      wisSessie, log: () => {},
+      plan    : (ms, fn) => { const h = { ms, fn }; rij.push(h); return h; },
+      annuleer: (h) => { const i = rij.indexOf(h); if (i >= 0) rij.splice(i, 1); },
+    }),
+  };
+}
+
+test('een afbreken dat blijft hangen houdt de knop niet gegijzeld', async () => {
+  const c = hangendeClient({ afbrekenHangt: true });
+  const belofte = c.roep(true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(c.gedaan.gestart, 0, 'zolang de tijdslimiet loopt is er nog niets gestart');
+  await c.tik();                       // de tijdslimiet gaat af
+  const uit = await belofte;
+  assert.equal(uit.gestart, true, 'na de limiet gaat hij gewoon door met opnieuw starten');
+  assert.equal(c.gedaan.gestart, 1);
+  assert.equal(c.gedaan.gewist, 1, 'en de sessie is alsnog gewist, dus er komt een QR');
+});
+
+test('een wissen dat blijft hangen eindigt in een nette uitleg, niet in stilte', async () => {
+  // Hier gaan we NIET door: zonder gewiste sessiemap kan de oude, kapotte
+  // sessie terugkomen en blijft de QR alsnog uit.
+  const c = hangendeClient({ wisHangt: true });
+  const belofte = c.roep(true);
+  await new Promise((r) => setImmediate(r));
+  await c.tik();
+  const uit = await belofte;
+  assert.equal(uit.gestart, false);
+  assert.match(uit.fout, /sessie wissen faalde/);
+  assert.match(uit.fout, /geen antwoord binnen/);
+  assert.equal(c.gedaan.gestart, 0);
+});
+
+test('een tijdslimiet die niet afgaat wordt opgeruimd', async () => {
+  // Een achtergebleven timer houdt het proces wakker en laat later alsnog een
+  // afwijzing los op een belofte die al klaar is.
+  const c = hangendeClient();
+  const uit = await c.roep(true);
+  assert.equal(uit.gestart, true);
+  assert.equal(c.rij.length, 0, 'geen enkele tijdslimiet blijft staan');
+});
