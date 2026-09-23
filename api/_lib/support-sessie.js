@@ -88,7 +88,22 @@ export function tokenUitRequest(req) {
  * @param {object} [opts.meta]
  * @returns {Promise<object|null>} het geschreven bericht, of null bij fout
  */
-export async function schrijfBericht({ gesprekId, afzender, tekst, afzenderUserId = null, meta = {} }) {
+export async function schrijfBericht(opts) {
+  const { bericht, error } = await schrijfBerichtOfFout(opts);
+  if (error) {
+    console.error('[support-sessie] bericht schrijven mislukt:', error.message);
+    return null;
+  }
+  return bericht;
+}
+
+/**
+ * Als schrijfBericht, maar geeft de databasefout terug in plaats van 'm weg te
+ * loggen: `{ bericht, error }`. Voor callers die een fout moeten kunnen
+ * duiden — de mailcron herkent een unieke-sleutelfout als "al verwerkt".
+ * Bij een fout worden de tellers op het gesprek niet aangeraakt.
+ */
+export async function schrijfBerichtOfFout({ gesprekId, afzender, tekst, afzenderUserId = null, meta = {} }) {
   const nu = new Date().toISOString();
 
   const { data: bericht, error } = await supabaseAdmin
@@ -103,10 +118,7 @@ export async function schrijfBericht({ gesprekId, afzender, tekst, afzenderUserI
     .select()
     .maybeSingle();
 
-  if (error) {
-    console.error('[support-sessie] bericht schrijven mislukt:', error.message);
-    return null;
-  }
+  if (error) return { bericht: null, error };
 
   // Tellers. Een bericht van de klant verhoogt de ongelezen-teller; een
   // bericht van ons zet 'm terug en legt de eerste-reactietijd vast.
@@ -141,7 +153,7 @@ export async function schrijfBericht({ gesprekId, afzender, tekst, afzenderUserI
     console.warn('[support-sessie] tellers bijwerken mislukt:', e?.message || e);
   }
 
-  return bericht;
+  return { bericht, error: null };
 }
 
 /**

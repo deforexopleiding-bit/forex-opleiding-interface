@@ -105,3 +105,82 @@ export function afzenderHoortBij(afzender, gesprekEmail) {
   if (!a || !b || !a.includes('@') || !b.includes('@')) return false;
   return a === b;
 }
+
+// Namen van de unieke indexen uit
+// docs/sql-migrations/2026-09-23-support-mail-ontdubbelen.sql. Een schending
+// daarvan betekent: een andere run (of een andere kopie van dezelfde mail) was
+// ons voor. Dat is geen storing.
+export const UNIEKE_BRON_INDEXEN = [
+  'uniq_support_bericht_bron_email',
+  'uniq_support_bericht_bron_message',
+];
+
+/**
+ * Een Message-ID normaliseren tot iets waarop we kunnen ontdubbelen.
+ *
+ * Dezelfde mail die naar info@ én events@ gaat, landt als twee rijen in
+ * email_messages (één per mailbox), met twee verschillende id's maar
+ * dezelfde Message-ID. Die header is dus de sleutel voor "dezelfde mail".
+ *
+ * We halen de punthaken en witruimte eraf en laten de rest ongemoeid —
+ * Message-ID's zijn hoofdlettergevoelig. Wat geen bruikbare ID is (leeg,
+ * spaties erin, te lang, of met " of \ die in een PostgREST-filter niet
+ * veilig te citeren zijn) wordt null: dan ontdubbelen we alleen op
+ * bron_email_id, zoals voorheen.
+ *
+ * @param {*} raw
+ * @returns {string|null}
+ */
+export function normaliseerMessageId(raw) {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim().replace(/^<+/, '').replace(/>+$/, '').trim();
+  if (!id || id.length > 500) return null;
+  if (/[\s"\\]/.test(id)) return null;
+  return id;
+}
+
+/**
+ * Is deze databasefout een botsing op een van onze bron-indexen?
+ *
+ * Postgres meldt een unieke-sleutelschending als SQLSTATE 23505; PostgREST
+ * geeft die door als `error.code` met de indexnaam in `message`. We kijken
+ * naar allebei: een 23505 op een andere index (die er nu niet is, maar
+ * later kan komen) moet gewoon als fout blijven tellen.
+ *
+ * @param {*} error — het error-object uit supabase-js
+ * @returns {boolean}
+ */
+export function isAlVerwerktFout(error) {
+  if (!error || String(error.code || '') !== '23505') return false;
+  const tekst = `${error.message || ''} ${error.details || ''}`;
+  return UNIEKE_BRON_INDEXEN.some((naam) => tekst.includes(naam));
+}
+
+/**
+ * Uit een batch mails kiezen wat nog verwerkt moet worden.
+ *
+ * Valt af: een mail waarvan het id al als bron_email_id in een bericht staat,
+ * een mail waarvan de Message-ID al bekend is, en een tweede kopie van
+ * dezelfde Message-ID binnen deze batch (info@ en events@ in één run). De
+ * eerste kopie in de aangeleverde volgorde wint.
+ *
+ * @param {Array<{id:string, message_id?:string}>} mails
+ * @param {{ bekendeEmailIds?: Iterable<string>, bekendeMessageIds?: Iterable<string> }} bekend
+ * @returns {Array<{ mail: object, messageId: string|null }>}
+ */
+export function kiesNieuweMails(mails, { bekendeEmailIds = [], bekendeMessageIds = [] } = {}) {
+  const emailIds = new Set(bekendeEmailIds);
+  const messageIds = new Set(bekendeMessageIds);
+  const uit = [];
+  for (const mail of mails || []) {
+    if (!mail?.id || emailIds.has(mail.id)) continue;
+    const messageId = normaliseerMessageId(mail.message_id);
+    if (messageId) {
+      if (messageIds.has(messageId)) continue;
+      messageIds.add(messageId);
+    }
+    emailIds.add(mail.id);
+    uit.push({ mail, messageId });
+  }
+  return uit;
+}

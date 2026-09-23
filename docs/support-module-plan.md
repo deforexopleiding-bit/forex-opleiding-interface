@@ -296,11 +296,27 @@ opgepakt: liever één mail te veel dan een antwoord dat nooit aankomt.
 Een gesprek gaat pas de deur uit als het oudste wachtende bericht drie
 minuten oud is, en dan gaan de jongere mee.
 
-De idempotentie aan de IN-kant is een check-dan-insert zonder unieke index.
-Dat is waterdicht tegen herhaalde runs (een fout in de check betekent
-overslaan, niet invoegen), maar niet tegen twee runs die exact dezelfde mail
-gelijktijdig verwerken. Een unieke index op `(meta->>'bron_email_id')` maakt
-dat hard, maar vraagt een migratie en staat nog open.
+De idempotentie aan de IN-kant heeft drie lagen:
+
+1. **Rij-id.** `meta->bron_email_id` — dezelfde mail in een volgende run.
+2. **Message-ID.** `meta->bron_message_id` (genormaliseerd door
+   `normaliseerMessageId()`: punthaken eraf, verder ongemoeid) — dezelfde
+   mail in een andere mailbox. Een klant die info@ en events@ allebei
+   aanschrijft is het gewone geval, niet het zeldzame. Binnen één run wint de
+   kopie waarvan de body al binnen is.
+3. **Unieke index.** Migratie `2026-09-23-support-mail-ontdubbelen.sql` zet een
+   partiële unieke index op beide sleutels. Twee runs die tegelijk langs de
+   check komen: de database weigert de tweede insert met 23505, en
+   `isAlVerwerktFout()` leest dat als "al verwerkt" — geen statuswissel, geen
+   tweede melding, geen fout in het rapport. Zonder de migratie werken 1 en 2
+   gewoon; alleen deze laatste grendel ontbreekt dan.
+
+Een fout in de check zelf betekent: deze run niets schrijven.
+
+In de CRM-thread staat bij een klantbericht dat per mail binnenkwam "per
+mail" (het afzenderadres klopt, maar is niet geverifieerd), en bij een
+antwoord met `mail_status` `mislukt` of `geen_adres` een rode waarschuwing —
+anders ziet niemand dat de klant het antwoord nooit kreeg.
 
 ### Wat hier nog niet zit
 

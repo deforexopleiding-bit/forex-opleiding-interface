@@ -8,10 +8,16 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { readFileSync } from 'node:fs';
+
 import {
   kenmerkUitOnderwerp,
   strookCitaat,
   afzenderHoortBij,
+  normaliseerMessageId,
+  isAlVerwerktFout,
+  kiesNieuweMails,
+  UNIEKE_BRON_INDEXEN,
 } from '../api/_lib/support-mailbrug.js';
 
 describe('kenmerkUitOnderwerp', () => {
@@ -115,5 +121,105 @@ describe('afzenderHoortBij', () => {
     assert.equal(afzenderHoortBij('paulien@hotmail.com', null), false);
     assert.equal(afzenderHoortBij('', ''), false);
     assert.equal(afzenderHoortBij('geen-adres', 'geen-adres'), false);
+  });
+});
+
+describe('normaliseerMessageId', () => {
+  test('haalt punthaken en witruimte eraf', () => {
+    assert.equal(normaliseerMessageId(' <CAF3x.Y@mail.gmail.com> '), 'CAF3x.Y@mail.gmail.com');
+    assert.equal(normaliseerMessageId('abc@x.nl'), 'abc@x.nl');
+  });
+
+  test('laat hoofdletters staan — Message-ID\'s zijn hoofdlettergevoelig', () => {
+    assert.notEqual(normaliseerMessageId('<AbC@x.nl>'), normaliseerMessageId('<abc@x.nl>'));
+  });
+
+  test('wat geen bruikbare ID is wordt null', () => {
+    for (const raw of [null, undefined, 42, '', '   ', '<>', '<a b@x.nl>', '<a"b@x.nl>', '<a\\b@x.nl>', 'x'.repeat(501)]) {
+      assert.equal(normaliseerMessageId(raw), null, 'faalt op ' + JSON.stringify(raw));
+    }
+  });
+
+  test('komma en haakjes mogen blijven; die citeert postgrest-js zelf', () => {
+    assert.equal(normaliseerMessageId('<a,b(c)@x.nl>'), 'a,b(c)@x.nl');
+  });
+});
+
+describe('isAlVerwerktFout', () => {
+  const botsing = (index) => ({
+    code: '23505',
+    message: `duplicate key value violates unique constraint "${index}"`,
+    details: 'Key ((meta ->> \'bron_email_id\'::text))=(x) already exists.',
+  });
+
+  test('een botsing op een van onze bron-indexen is "al verwerkt"', () => {
+    assert.equal(isAlVerwerktFout(botsing('uniq_support_bericht_bron_email')), true);
+    assert.equal(isAlVerwerktFout(botsing('uniq_support_bericht_bron_message')), true);
+  });
+
+  test('een botsing op een andere index blijft een fout', () => {
+    assert.equal(isAlVerwerktFout(botsing('support_berichten_pkey')), false);
+  });
+
+  test('andere fouten en geen fout zijn niet "al verwerkt"', () => {
+    assert.equal(isAlVerwerktFout(null), false);
+    assert.equal(isAlVerwerktFout(undefined), false);
+    assert.equal(isAlVerwerktFout({ code: '23503', message: 'uniq_support_bericht_bron_email' }), false);
+    assert.equal(isAlVerwerktFout({ code: 'PGRST301', message: 'JWT expired' }), false);
+  });
+
+  test('de indexnamen komen overeen met de migratie', () => {
+    // Hernoemt iemand een index in de SQL maar niet in de code, dan telt een
+    // botsing weer als storing. Deze test vangt dat af.
+    const sql = readFileSync(
+      new URL('../docs/sql-migrations/2026-09-23-support-mail-ontdubbelen.sql', import.meta.url), 'utf8',
+    );
+    for (const naam of UNIEKE_BRON_INDEXEN) {
+      assert.match(sql, new RegExp(`CREATE UNIQUE INDEX IF NOT EXISTS ${naam}\\b`), naam);
+    }
+  });
+});
+
+describe('kiesNieuweMails', () => {
+  const mail = (id, message_id) => ({ id, message_id });
+
+  test('dezelfde mail in info@ en events@ komt er één keer door', () => {
+    const uit = kiesNieuweMails([
+      mail('rij-info', '<abc@gmail.com>'),
+      mail('rij-events', 'abc@gmail.com'),
+    ]);
+    assert.deepEqual(uit.map((x) => x.mail.id), ['rij-info']);
+    assert.equal(uit[0].messageId, 'abc@gmail.com');
+  });
+
+  test('een al bekende Message-ID valt af, ook met een nieuw rij-id', () => {
+    const uit = kiesNieuweMails(
+      [mail('rij-events', '<abc@gmail.com>'), mail('rij-nieuw', '<def@gmail.com>')],
+      { bekendeMessageIds: ['abc@gmail.com'] },
+    );
+    assert.deepEqual(uit.map((x) => x.mail.id), ['rij-nieuw']);
+  });
+
+  test('een al bekend rij-id valt af, ook zonder Message-ID', () => {
+    const uit = kiesNieuweMails(
+      [mail('rij-1', null), mail('rij-2', null)],
+      { bekendeEmailIds: ['rij-1'] },
+    );
+    assert.deepEqual(uit.map((x) => x.mail.id), ['rij-2']);
+  });
+
+  test('zonder bruikbare Message-ID wordt alleen op rij-id ontdubbeld', () => {
+    const uit = kiesNieuweMails([mail('rij-1', null), mail('rij-2', '<a b>'), mail('rij-1', null)]);
+    assert.deepEqual(uit.map((x) => [x.mail.id, x.messageId]), [['rij-1', null], ['rij-2', null]]);
+  });
+
+  test('verschillende mails blijven allebei staan', () => {
+    const uit = kiesNieuweMails([mail('a', '<1@x>'), mail('b', '<2@x>')]);
+    assert.equal(uit.length, 2);
+  });
+
+  test('lege of rare invoer geeft een lege lijst', () => {
+    assert.deepEqual(kiesNieuweMails(null), []);
+    assert.deepEqual(kiesNieuweMails([null, {}, { id: '' }]), []);
   });
 });

@@ -13,15 +13,19 @@
 //         mail mee.
 //
 // Idempotent. De IN-kant herkent een al verwerkte mail aan
-// meta->bron_email_id op het bericht; de UIT-kant claimt per bericht met een
+// meta->bron_email_id en meta->bron_message_id op het bericht, en een unieke
+// index op allebei (migratie 2026-09-23) vangt gelijktijdige runs af; de UIT-kant claimt per bericht met een
 // voorwaardelijke update (alleen als meta nog precies zo staat als gelezen) en
 // zet meta->mail_status om. Twee keer draaien binnen vijf minuten doet niets
 // dubbel.
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
-import { schrijfBericht } from './_lib/support-sessie.js';
+import { schrijfBerichtOfFout } from './_lib/support-sessie.js';
 import { stuurAntwoordMail } from './_lib/support-mail.js';
-import { kenmerkUitOnderwerp, strookCitaat, afzenderHoortBij } from './_lib/support-mailbrug.js';
+import {
+  kenmerkUitOnderwerp, strookCitaat, afzenderHoortBij,
+  kiesNieuweMails, isAlVerwerktFout, normaliseerMessageId,
+} from './_lib/support-mailbrug.js';
 import { createNotification, resolveOntvangersVoorRecht } from './_lib/notify.js';
 
 // Hoe ver terug we kijken in de mailbox. Ruim genoeg om een sync-hapering te
@@ -44,7 +48,7 @@ export default async function handler(req, res) {
   const auth = checkCronAuth(req);
   if (!auth.ok) return res.status(auth.status).json(auth.body);
 
-  const uit = { binnengekomen: 0, genegeerd: 0, gebundeld: 0, gemaild: 0, fouten: [] };
+  const uit = { binnengekomen: 0, genegeerd: 0, al_verwerkt: 0, gebundeld: 0, gemaild: 0, fouten: [] };
 
   await verwerkInkomendeMail(uit);
   await verstuurWachtendeAntwoorden(uit);
@@ -64,7 +68,7 @@ async function verwerkInkomendeMail(uit) {
     const grens = new Date(Date.now() - TERUGBLIK_MS).toISOString();
     const { data, error } = await supabaseAdmin
       .from('email_messages')
-      .select('id, subject, from_address, body_text, snippet, date_received')
+      .select('id, message_id, subject, from_address, body_text, snippet, date_received')
       .gte('date_received', grens)
       .ilike('subject', '%SUP-%')
       .order('date_received', { ascending: false })
@@ -76,27 +80,34 @@ async function verwerkInkomendeMail(uit) {
     return;
   }
 
-  for (const mail of mails) {
+  // Al verwerkt? Dit is de idempotentie-grendel: de cron draait vaker dan de
+  // terugblik lang is, dus elke mail komt gegarandeerd meerdere keren langs.
+  // We kijken op twee sleutels: het id van de rij (dezelfde mail in een
+  // volgende run) en de Message-ID (dezelfde mail in een andere mailbox —
+  // info@ en events@ tegelijk is het gewone geval, niet het zeldzame).
+  //
+  // Een fout hier is géén "nog niet verwerkt": dan slaan we de hele run over
+  // en proberen het over vijf minuten opnieuw. Anders zou een haperende query
+  // elke keer een dubbel bericht in de thread zetten.
+  mails = mails.filter((m) => kenmerkUitOnderwerp(m.subject));
+  if (!mails.length) return;
+
+  let bekend;
+  try {
+    bekend = await haalBekendeBronnen(mails);
+  } catch (e) {
+    uit.fouten.push('idempotentie-check: ' + (e?.message || e));
+    return;
+  }
+
+  // Kopieën met een body eerst, zodat bij info@ + events@ de kopie wint
+  // waarvan de body al binnen is. De sortering is stabiel: verder blijft
+  // nieuwste-eerst staan.
+  mails.sort((a, b) => (b.body_text ? 1 : 0) - (a.body_text ? 1 : 0));
+
+  for (const { mail, messageId } of kiesNieuweMails(mails, bekend)) {
     try {
       const kenmerk = kenmerkUitOnderwerp(mail.subject);
-      if (!kenmerk) continue;
-
-      // Al verwerkt? Dan is er niets te doen. Dit is de idempotentie-grendel:
-      // de cron draait vaker dan de terugblik lang is, dus elke mail komt
-      // gegarandeerd meerdere keren langs.
-      // Een fout hier is géén "nog niet verwerkt": dan slaan we de mail over
-      // en proberen het de volgende run opnieuw. Anders zou een haperende
-      // query elke keer een dubbel bericht in de thread zetten.
-      const { data: bestaand, error: bestaandErr } = await supabaseAdmin
-        .from('support_berichten')
-        .select('id')
-        .contains('meta', { bron_email_id: mail.id })
-        .limit(1);
-      if (bestaandErr) {
-        uit.fouten.push(`idempotentie-check ${mail.id}: ${bestaandErr.message}`);
-        continue;
-      }
-      if ((bestaand || []).length) continue;
 
       const { data: gesprek } = await supabaseAdmin
         .from('support_gesprekken')
@@ -117,13 +128,23 @@ async function verwerkInkomendeMail(uit) {
       const tekst = strookCitaat(mail.body_text || mail.snippet || '');
       if (!tekst) { uit.genegeerd++; continue; }
 
-      const bericht = await schrijfBericht({
+      const meta = { via: 'mail', bron_email_id: mail.id };
+      if (messageId) meta.bron_message_id = messageId;
+      const { bericht, error } = await schrijfBerichtOfFout({
         gesprekId: gesprek.id,
         afzender: 'klant',
         tekst,
-        meta: { via: 'mail', bron_email_id: mail.id },
+        meta,
       });
-      if (!bericht) { uit.fouten.push(`${kenmerk}: bericht schrijven mislukt`); continue; }
+      // Een botsing op de unieke bron-index betekent dat een gelijktijdige
+      // run (of een andere kopie van deze mail) ons net voor was. Die heeft
+      // de status en de melding al gedaan; wij doen niets.
+      if (isAlVerwerktFout(error)) { uit.al_verwerkt++; continue; }
+      if (error || !bericht) {
+        console.error(`[cron-support-mail] ${kenmerk}: bericht schrijven mislukt:`, error?.message || 'geen rij');
+        uit.fouten.push(`${kenmerk}: bericht schrijven mislukt`);
+        continue;
+      }
 
       // De bal ligt weer bij ons. Ook als het gesprek al afgehandeld was: een
       // klant die terugschrijft heeft een vervolgvraag, en die hoort in de
@@ -139,6 +160,36 @@ async function verwerkInkomendeMail(uit) {
       uit.fouten.push('mail verwerken: ' + (e?.message || e));
     }
   }
+}
+
+/**
+ * Welke bron-id's en Message-ID's uit deze batch staan al in een bericht?
+ * Twee queries voor de hele batch in plaats van één per mail; met de unieke
+ * indexen uit de migratie zijn het index-lookups. Gooit bij een fout.
+ */
+async function haalBekendeBronnen(mails) {
+  const emailIds = mails.map((m) => m.id).filter(Boolean);
+  const messageIds = [...new Set(mails.map((m) => normaliseerMessageId(m.message_id)).filter(Boolean))];
+
+  const [perId, perMessage] = await Promise.all([
+    supabaseAdmin
+      .from('support_berichten')
+      .select('meta')
+      .in('meta->>bron_email_id', emailIds),
+    messageIds.length
+      ? supabaseAdmin
+        .from('support_berichten')
+        .select('meta')
+        .in('meta->>bron_message_id', messageIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (perId.error) throw new Error(perId.error.message);
+  if (perMessage.error) throw new Error(perMessage.error.message);
+
+  return {
+    bekendeEmailIds: (perId.data || []).map((r) => r.meta?.bron_email_id).filter(Boolean),
+    bekendeMessageIds: (perMessage.data || []).map((r) => r.meta?.bron_message_id).filter(Boolean),
+  };
 }
 
 async function meldWachtrij(gesprek, uit) {

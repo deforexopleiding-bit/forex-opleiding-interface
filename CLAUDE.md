@@ -255,7 +255,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   eraf en zet de tekst als klantbericht terug in het gesprek — maar ALLEEN als
   het afzenderadres exact `support_gesprekken.email` is; dat is de enige
   toegangscontrole op die route en `geverifieerd` gaat er nooit van omhoog
-  (een From is te vervalsen). Idempotent via `meta->bron_email_id`. Uitgaand
+  (een From is te vervalsen). Idempotent via `meta->bron_email_id` én
+  `meta->bron_message_id` (zelfde mail in info@ + events@), met een partiële
+  unieke index op allebei (migratie 2026-09-23-support-mail-ontdubbelen.sql,
+  handmatig); een 23505 daarop = "al verwerkt", geen fout. Uitgaand
   bundelt 'ie antwoorden die binnen drie minuten op elkaar volgen tot één mail
   via `meta->mail_status` (niet_nodig / direct / wacht / versturen / gemaild /
   geen_adres / mislukt); de cron claimt met een voorwaardelijke update.

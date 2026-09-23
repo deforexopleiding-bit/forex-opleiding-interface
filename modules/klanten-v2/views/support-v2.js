@@ -417,9 +417,24 @@
           ${vanKlant
             ? 'background:var(--surface-2);color:var(--text);border-bottom-left-radius:4px'
             : 'border-bottom-right-radius:4px'}">${esc(b.tekst)}</div>
-        <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;text-align:${vanKlant ? 'left' : 'right'}">${dtijd(b.created_at)}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;text-align:${vanKlant ? 'left' : 'right'}">${dtijd(b.created_at)}${mailLabel(b)}</div>
       </div>`;
     }).join('');
+  }
+
+  // Per mail binnengekomen: het afzenderadres klopte, maar een From is te
+  // vervalsen — dit bericht staat niet op één lijn met een geverifieerde
+  // chat. En een antwoord dat per mail niet aankwam, moet de collega zien;
+  // anders denkt iedereen dat de klant het heeft.
+  function mailLabel(b) {
+    if (b.afzender === 'klant' && b.meta?.via === 'mail') {
+      return ` · <span title="Via een mailantwoord binnengekomen. Het afzenderadres klopt met dit gesprek, maar is niet geverifieerd.">per mail</span>`;
+    }
+    if (b.afzender === 'medewerker' && (b.meta?.mail_status === 'mislukt' || b.meta?.mail_status === 'geen_adres')) {
+      const uitleg = b.meta.mail_status === 'mislukt' ? 'mail niet aangekomen' : 'geen mailadres';
+      return ` · <span style="color:var(--red,#c1272d);font-weight:650">⚠ ${uitleg}</span>`;
+    }
+    return '';
   }
 
   function contextPaneel(g, ctx, acties) {
