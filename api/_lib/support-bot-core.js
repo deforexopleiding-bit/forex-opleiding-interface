@@ -376,7 +376,13 @@ export async function botAntwoord({ gesprek, berichten, beschikbaarheid }) {
   const uit = blok.input;
   const besluit = beslisAntwoord({ model: uit, config, gesprek, beschikbaarheid });
 
-  if (!besluit.versturen || besluit.reden === 'laag_vertrouwen' || besluit.reden === 'intent_uit') {
+  // Wat de bot niet zelf afhandelt, is kennis die ontbreekt — ook als hij een
+  // antwoord produceerde. Juist 'model_escaleert' is het zuiverste signaal:
+  // het model zegt dan met zoveel woorden dat het het niet weet. Dat ging
+  // eerder verloren, waardoor de kennisbank niet groeide op precies de vragen
+  // waar hij voor bedoeld is.
+  const KENNISGAT = ['geen_antwoord', 'laag_vertrouwen', 'intent_uit', 'model_escaleert'];
+  if (!besluit.versturen || KENNISGAT.includes(besluit.reden)) {
     await noteerOnbeantwoord(laatsteVraag);
   }
 

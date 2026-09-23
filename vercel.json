@@ -215,6 +215,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron-support-mail",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/snapshot-cleanup",
       "schedule": "30 3 * * *"
     },

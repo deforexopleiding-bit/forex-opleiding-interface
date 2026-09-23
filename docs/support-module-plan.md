@@ -229,6 +229,89 @@ De klant krijgt op dat moment **geen** bericht. De actie staat nog op
 `goedgekeurd`, dus zodra de collega 'm op gedaan zet gaat het bericht alsnog
 uit. Zouden we nu al sturen, dan kreeg de klant er twee.
 
+## 7c. De mailkant — hoe een gesprek doorloopt buiten de chat
+
+Een bezoeker die de tab sluit is niet weg; hij wacht gewoon in zijn mailbox.
+De supportmodule moet daar dus net zo goed werken als in de widget, en dat
+bleek na S1 nog niet zo te zijn.
+
+### Wat er misging
+
+In de antwoordmail stond "Je kunt op deze mail antwoorden." Dat was waar in
+de letterlijke zin — het antwoord kwam binnen op `info@` — maar niet in de
+zin die ertoe doet. De mail belandde in de e-mailmodule als een losse mail.
+Het gesprek bleef op `wacht_op_klant` staan, de wachtrij toonde niets, en de
+klant wachtte op een reactie die niemand aan het schrijven was. De belofte in
+de mail was daarmee erger dan geen belofte.
+
+Daarnaast werd elk antwoord meteen een eigen mail. Twee zinnen die een
+collega kort na elkaar typt ("Hallo Paulien" — "Kan je me je nummer
+doorgeven?") kwamen aan als twee mails, veertig seconden na elkaar.
+
+### Hoe het nu loopt
+
+`api/cron-support-mail.js` draait elke vijf minuten en doet twee dingen.
+
+**Binnenkomend.** Elke mail van de laatste zes uur met `SUP-` in het
+onderwerp wordt bekeken. Het kenmerk komt uit `kenmerkUitOnderwerp()`, dat
+door de `Re:`/`Antw:`/`Fwd:`-laag heen kijkt. De citaatstaart gaat eraf met
+`strookCitaat()` — anders staat onze eigen vorige mail integraal in de thread
+en leest het CRM als een echoput. Wat overblijft komt als `klant`-bericht in
+het gesprek, de status gaat naar `wacht_op_ons`, en de wachtrij krijgt een
+melding.
+
+Drie dingen zijn hier bewust zo:
+
+- **Het afzenderadres moet exact het adres van het gesprek zijn.** Dat is de
+  enige toegangscontrole op deze route. Een kenmerk is zes tekens en dus te
+  raden; zonder deze check zou iemand met een gegokt kenmerk in andermans
+  gesprek kunnen schrijven en daar het antwoord van een collega op krijgen.
+- **`geverifieerd` blijft staan zoals het stond.** Een `From` is te
+  vervalsen. Een mailantwoord is genoeg om een vraag te stellen, niet om
+  persoonlijke gegevens los te krijgen.
+- **Een afgehandeld gesprek gaat weer open.** Wie terugschrijft heeft een
+  vervolgvraag, en die hoort in de wachtrij en niet in het archief.
+
+Idempotent via `meta->bron_email_id` op het bericht: de cron draait vaker dan
+de terugblik lang is, dus elke mail komt gegarandeerd meerdere keren langs.
+
+**Uitgaand.** Het eerste antwoord gaat direct de deur uit vanuit
+`support-antwoord.js`. Ging er voor dat gesprek in de afgelopen drie minuten
+al een mail uit, dan krijgt het bericht `meta->mail_status = 'wacht'` en
+stuurt de cron het even later gebundeld mee. Mislukt de directe mail, dan
+belandt het bericht in dezelfde wachtrij — een SMTP-storing kost dan vijf
+minuten, geen bericht.
+
+`mail_status` kent deze waarden: `niet_nodig` (geen adres, of de bezoeker
+kijkt nog mee), `direct` (support-antwoord.js is aan het versturen),
+`wacht` (ligt klaar voor de cron), `versturen` (door een cron-run geclaimd)
+en `gemaild`. Afvoer: `geen_adres` als het mailadres tussendoor verdween,
+`mislukt` na twaalf vergeefse pogingen (`meta->mail_pogingen`).
+
+De cron claimt met een voorwaardelijke update — alleen als `mail_status` en
+`mail_op` nog staan zoals gelezen — zodat twee overlappende runs niet allebei
+versturen. Een bericht dat langer dan een kwartier op `direct` of
+`versturen` staat hoort bij een run die niet meer bestaat en wordt opnieuw
+opgepakt: liever één mail te veel dan een antwoord dat nooit aankomt.
+Een gesprek gaat pas de deur uit als het oudste wachtende bericht drie
+minuten oud is, en dan gaan de jongere mee.
+
+De idempotentie aan de IN-kant is een check-dan-insert zonder unieke index.
+Dat is waterdicht tegen herhaalde runs (een fout in de check betekent
+overslaan, niet invoegen), maar niet tegen twee runs die exact dezelfde mail
+gelijktijdig verwerken. Een unieke index op `(meta->>'bron_email_id')` maakt
+dat hard, maar vraagt een migratie en staat nog open.
+
+### Wat hier nog niet zit
+
+Er is geen weg terug naar het gesprek vanuit de mail. De widget herkent een
+terugkerende bezoeker via `localStorage`, dus alleen in dezelfde browser en
+zolang dat daar staat. Een link met een token erin zou dat oplossen, maar
+tokens horen niet in een URL (zie de kop van `support-sessie.js`), en een
+klikbare bevestigingslink in een mail is precies de vorm die phishing nadoet.
+Zolang antwoorden per mail gewoon werkt, is dat de eenvoudigste weg terug —
+en die werkt nu.
+
 ## 8. Benodigde omgevingsvariabelen
 
 | Variabele | Waarvoor | Zonder |
