@@ -226,8 +226,14 @@ test('het lampje is het levensteken waar de timers op afgaan', () => {
 
 test('elke timer wordt opgeruimd bij sluiten, wisselen en unload', () => {
   const src = readFileSync(VIEW, 'utf8');
-  assert.match(src, /window\.__opvWaSluit[\s\S]{0,400}herstelWaTimers\(\)/,
-    'sluiten hoort de timers bij te stellen');
+  // Begrensd op de FUNCTIE, niet op een aantal tekens. Een venster van 400
+  // tekens lekt bij de eerste de beste toegevoegde uitleg de volgende functie
+  // in — of, erger, houdt op net vóór de regel waar het om gaat en meldt rood
+  // terwijl er niets stuk is. Dat laatste gebeurde toen deze sluitfunctie er
+  // een alinea commentaar bij kreeg.
+  const sluit = src.match(/window\.__opvWaSluit = \(\) => \{[\s\S]*?\n  \};/);
+  assert.ok(sluit, '__opvWaSluit niet gevonden');
+  assert.match(sluit[0], /herstelWaTimers\(\)/, 'sluiten hoort de timers bij te stellen');
   assert.match(src, /beforeunload['"], stopWaTimers/,
     'bij het sluiten van het tabblad hoort alles uit');
   // De shell kent geen afscheidshaak, dus wegnavigeren bereikt de intervallen
