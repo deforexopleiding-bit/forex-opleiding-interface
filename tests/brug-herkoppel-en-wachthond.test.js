@@ -413,6 +413,24 @@ test('bij een mislukt wissen wordt de teller NIET teruggezet', async () => {
 // is niet bereikbaar' terwijl de brug leeft. Dat is hetzelfde lege venster,
 // één laag dieper.
 
+/**
+ * Een eigen deadline om de test heen.
+ *
+ * ZONDER DIT IS DE TEST GEEN TEST. Haal je de tijdslimiet uit herkoppelen.js
+ * weg, dan lost de belofte nooit op en blijft `await` hangen — en dan meldt de
+ * testloper niet 'fail' maar laat hij de test gewoon weg. Bij de sabotageronde
+ * stond er 30 geslaagd en 0 gefaald terwijl er drie waren verdwenen: precies
+ * het groene scherm naast kapotte code waar we op zitten te letten.
+ *
+ * Nu wint de deadline en komt er een waarde terug die de assertie afkeurt.
+ */
+function binnenTijd(belofte, ms = 250) {
+  return Promise.race([
+    belofte,
+    new Promise((r) => setTimeout(() => r('VASTGELOPEN'), ms).unref?.()),
+  ]);
+}
+
 /** Een client waarvan afbreken of wissen NOOIT antwoordt, met een handmatige klok. */
 function hangendeClient({ afbrekenHangt = false, wisHangt = false } = {}) {
   const gedaan = { afgebroken: 0, gewist: 0, gestart: 0 };
@@ -447,7 +465,8 @@ test('een afbreken dat blijft hangen houdt de knop niet gegijzeld', async () => 
   await new Promise((r) => setImmediate(r));
   assert.equal(c.gedaan.gestart, 0, 'zolang de tijdslimiet loopt is er nog niets gestart');
   await c.tik();                       // de tijdslimiet gaat af
-  const uit = await belofte;
+  const uit = await binnenTijd(belofte);
+  assert.notEqual(uit, 'VASTGELOPEN', 'zonder tijdslimiet blijft het verzoek hangen en ziet het CRM een onbereikbare brug');
   assert.equal(uit.gestart, true, 'na de limiet gaat hij gewoon door met opnieuw starten');
   assert.equal(c.gedaan.gestart, 1);
   assert.equal(c.gedaan.gewist, 1, 'en de sessie is alsnog gewist, dus er komt een QR');
@@ -460,7 +479,8 @@ test('een wissen dat blijft hangen eindigt in een nette uitleg, niet in stilte',
   const belofte = c.roep(true);
   await new Promise((r) => setImmediate(r));
   await c.tik();
-  const uit = await belofte;
+  const uit = await binnenTijd(belofte);
+  assert.notEqual(uit, 'VASTGELOPEN', 'zonder tijdslimiet op het wissen blijft het verzoek hangen');
   assert.equal(uit.gestart, false);
   assert.match(uit.fout, /sessie wissen faalde/);
   assert.match(uit.fout, /geen antwoord binnen/);
@@ -471,7 +491,8 @@ test('een tijdslimiet die niet afgaat wordt opgeruimd', async () => {
   // Een achtergebleven timer houdt het proces wakker en laat later alsnog een
   // afwijzing los op een belofte die al klaar is.
   const c = hangendeClient();
-  const uit = await c.roep(true);
+  const uit = await binnenTijd(c.roep(true));
+  assert.notEqual(uit, 'VASTGELOPEN');
   assert.equal(uit.gestart, true);
   assert.equal(c.rij.length, 0, 'geen enkele tijdslimiet blijft staan');
 });
