@@ -90,6 +90,9 @@ export default async function handler(req, res) {
 
 /**
  * Ging er voor dit gesprek in de afgelopen minuten al een antwoordmail uit?
+ * Ook een mail die nog onderweg is ('direct', 'versturen') telt: anders ziet
+ * een tweede antwoord dat binnenkomt terwijl de eerste SMTP-call nog loopt
+ * niets, en gaan er alsnog twee mails vlak na elkaar de deur uit.
  *
  * Fail-open: bij twijfel mailen we gewoon. Een mail te veel is vervelend, een
  * antwoord dat nooit aankomt is erger.
@@ -102,7 +105,7 @@ async function ergensRecentGemaild(gesprekId) {
       .select('id')
       .eq('gesprek_id', gesprekId)
       .eq('afzender', 'medewerker')
-      .contains('meta', { mail_status: 'gemaild' })
+      .in('meta->>mail_status', ['gemaild', 'direct', 'versturen'])
       .gte('created_at', grens)
       .limit(1);
     return (data || []).length > 0;

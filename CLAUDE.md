@@ -257,7 +257,8 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   toegangscontrole op die route en `geverifieerd` gaat er nooit van omhoog
   (een From is te vervalsen). Idempotent via `meta->bron_email_id`. Uitgaand
   bundelt 'ie antwoorden die binnen drie minuten op elkaar volgen tot één mail
-  via `meta->mail_status` (niet_nodig / direct / wacht / gemaild / geen_adres).
+  via `meta->mail_status` (niet_nodig / direct / wacht / versturen / gemaild /
+  geen_adres / mislukt); de cron claimt met een voorwaardelijke update.
   Zie docs/support-module-plan.md §7c.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,

@@ -13,8 +13,9 @@
 //         mail mee.
 //
 // Idempotent. De IN-kant herkent een al verwerkte mail aan
-// meta->bron_email_id op het bericht; de UIT-kant claimt per bericht en zet
-// meta->mail_status om. Twee keer draaien binnen vijf minuten doet niets
+// meta->bron_email_id op het bericht; de UIT-kant claimt per bericht met een
+// voorwaardelijke update (alleen als meta nog precies zo staat als gelezen) en
+// zet meta->mail_status om. Twee keer draaien binnen vijf minuten doet niets
 // dubbel.
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
@@ -29,6 +30,15 @@ const TERUGBLIK_MS = 6 * 60 * 60 * 1000;
 
 // Hoe lang een antwoord mag wachten op een mogelijk vervolgbericht.
 const BUNDEL_WACHT_MS = 3 * 60 * 1000;
+
+// Een bericht dat al zo lang op 'direct' of 'versturen' staat, hoort bij een
+// run die niet meer bestaat (Vercel kapt na 60s af). Dan pakken we het opnieuw
+// op: liever één mail te veel dan een antwoord dat nooit aankomt.
+const HANGT_MS = 15 * 60 * 1000;
+
+// Na zoveel mislukte pogingen (één per run, dus ruim een uur) stoppen we. Een
+// adres dat blijvend weigert mag de wachtrij niet eeuwig bezet houden.
+const MAX_POGINGEN = 12;
 
 export default async function handler(req, res) {
   const auth = checkCronAuth(req);
@@ -45,6 +55,10 @@ export default async function handler(req, res) {
 /* ── IN: mailantwoorden terug in het gesprek ──────────────────────────────── */
 
 async function verwerkInkomendeMail(uit) {
+  // Nieuwste eerst: verwerkte mails blijven zes uur in het venster staan. Met
+  // de oudste eerst zou een drukke middag de limiet vullen met mails die al
+  // binnen zijn, en kwam de nieuwe mail pas aan de beurt als de oude uit het
+  // venster vielen.
   let mails = [];
   try {
     const grens = new Date(Date.now() - TERUGBLIK_MS).toISOString();
@@ -53,7 +67,7 @@ async function verwerkInkomendeMail(uit) {
       .select('id, subject, from_address, body_text, snippet, date_received')
       .gte('date_received', grens)
       .ilike('subject', '%SUP-%')
-      .order('date_received', { ascending: true })
+      .order('date_received', { ascending: false })
       .limit(100);
     if (error) throw new Error(error.message);
     mails = data || [];
@@ -70,11 +84,18 @@ async function verwerkInkomendeMail(uit) {
       // Al verwerkt? Dan is er niets te doen. Dit is de idempotentie-grendel:
       // de cron draait vaker dan de terugblik lang is, dus elke mail komt
       // gegarandeerd meerdere keren langs.
-      const { data: bestaand } = await supabaseAdmin
+      // Een fout hier is géén "nog niet verwerkt": dan slaan we de mail over
+      // en proberen het de volgende run opnieuw. Anders zou een haperende
+      // query elke keer een dubbel bericht in de thread zetten.
+      const { data: bestaand, error: bestaandErr } = await supabaseAdmin
         .from('support_berichten')
         .select('id')
         .contains('meta', { bron_email_id: mail.id })
         .limit(1);
+      if (bestaandErr) {
+        uit.fouten.push(`idempotentie-check ${mail.id}: ${bestaandErr.message}`);
+        continue;
+      }
       if ((bestaand || []).length) continue;
 
       const { data: gesprek } = await supabaseAdmin
@@ -143,35 +164,53 @@ async function meldWachtrij(gesprek, uit) {
 /* ── UIT: wachtende antwoorden gebundeld versturen ────────────────────────── */
 
 async function verstuurWachtendeAntwoorden(uit) {
-  let wachtend = [];
+  let kandidaten = [];
   try {
-    const grens = new Date(Date.now() - BUNDEL_WACHT_MS).toISOString();
     const { data, error } = await supabaseAdmin
       .from('support_berichten')
       .select('id, gesprek_id, tekst, meta, created_at')
       .eq('afzender', 'medewerker')
-      .contains('meta', { mail_status: 'wacht' })
-      .lt('created_at', grens)
+      .in('meta->>mail_status', ['wacht', 'direct', 'versturen'])
       .order('created_at', { ascending: true })
-      .limit(100);
+      .limit(200);
     if (error) throw new Error(error.message);
-    wachtend = data || [];
+    kandidaten = data || [];
   } catch (e) {
     uit.fouten.push('wachtende antwoorden lezen: ' + (e?.message || e));
     return;
   }
-  if (!wachtend.length) return;
+  if (!kandidaten.length) return;
+
+  const nu = Date.now();
+  const hangt = (b) => nu - (Date.parse(b.meta?.mail_op || b.created_at) || 0) > HANGT_MS;
+  const klaar = (b) => b.meta?.mail_status === 'wacht' || hangt(b);
 
   // Per gesprek bundelen: één mail met alles wat er sinds de vorige mail bij
-  // gekomen is, in de volgorde waarin de collega het typte.
+  // gekomen is, in de volgorde waarin de collega het typte. Het gesprek gaat
+  // pas de deur uit als het oudste wachtende bericht zijn drie minuten gehad
+  // heeft; dan gaan ook de jongere mee, anders knipt de cron een reeks van
+  // drie zinnen alsnog in twee mails.
   const perGesprek = new Map();
-  for (const b of wachtend) {
+  for (const b of kandidaten) {
+    if (!klaar(b)) continue;
     if (!perGesprek.has(b.gesprek_id)) perGesprek.set(b.gesprek_id, []);
     perGesprek.get(b.gesprek_id).push(b);
   }
 
-  for (const [gesprekId, berichten] of perGesprek) {
+  for (const [gesprekId, alle] of perGesprek) {
     try {
+      const oudste = Date.parse(alle[0].created_at) || 0;
+      if (nu - oudste < BUNDEL_WACHT_MS && !alle.some(hangt)) continue;
+
+      // Claimen. Alleen wat wij daadwerkelijk omzetten gaat mee; een parallelle
+      // run die hetzelfde las krijgt niets terug en stuurt dus niets.
+      const berichten = [];
+      for (const b of alle) {
+        const geclaimd = await zetStatus(b, 'versturen', { vereist: true });
+        if (geclaimd) berichten.push(geclaimd);
+      }
+      if (!berichten.length) continue;
+
       const { data: gesprek } = await supabaseAdmin
         .from('support_gesprekken')
         .select('kenmerk, naam, email')
@@ -181,7 +220,7 @@ async function verstuurWachtendeAntwoorden(uit) {
       // Geen mailadres (meer)? Dan is er niets te versturen, maar de berichten
       // moeten wel uit de wachtrij — anders blijven ze elke run terugkomen.
       if (!gesprek?.email) {
-        await markeer(berichten, 'geen_adres');
+        for (const b of berichten) await zetStatus(b, 'geen_adres');
         continue;
       }
 
@@ -200,12 +239,22 @@ async function verstuurWachtendeAntwoorden(uit) {
       });
 
       if (verstuurd?.ok) {
-        await markeer(berichten, 'gemaild');
+        for (const b of berichten) await zetStatus(b, 'gemaild');
         uit.gebundeld += berichten.length;
         uit.gemaild++;
       } else {
-        // Blijft op 'wacht' staan; de volgende run probeert het opnieuw. Een
-        // tijdelijke SMTP-storing kost dan vijf minuten, geen bericht.
+        // Terug op 'wacht'; de volgende run probeert het opnieuw. Een
+        // tijdelijke SMTP-storing kost dan vijf minuten, geen bericht. Na
+        // MAX_POGINGEN geven we het op, zodat een blijvend weigerend adres de
+        // wachtrij niet eeuwig bezet houdt.
+        for (const b of berichten) {
+          const pogingen = (Number(b.meta?.mail_pogingen) || 0) + 1;
+          const opgeven = pogingen >= MAX_POGINGEN;
+          if (opgeven) {
+            console.error(`[cron-support-mail] ${gesprek.kenmerk}: bericht ${b.id} na ${pogingen} pogingen niet gemaild — opgegeven`);
+          }
+          await zetStatus(b, opgeven ? 'mislukt' : 'wacht', { extra: { mail_pogingen: pogingen } });
+        }
         uit.fouten.push(`${gesprek.kenmerk}: bundelmail niet verstuurd`);
       }
     } catch (e) {
@@ -214,16 +263,27 @@ async function verstuurWachtendeAntwoorden(uit) {
   }
 }
 
-/** meta->mail_status omzetten, met behoud van de rest van meta. */
-async function markeer(berichten, status) {
-  for (const b of berichten) {
-    try {
-      await supabaseAdmin
-        .from('support_berichten')
-        .update({ meta: { ...(b.meta || {}), mail_status: status, mail_op: new Date().toISOString() } })
-        .eq('id', b.id);
-    } catch (e) {
-      console.warn('[cron-support-mail] markeren mislukt:', e?.message || e);
+/**
+ * meta->mail_status omzetten, met behoud van de rest van meta.
+ *
+ * Met `vereist` is het een claim: de update slaagt alleen als mail_status en
+ * mail_op nog precies zo staan als wij ze lazen. Geeft de bijgewerkte rij
+ * terug, of null als een ander ons voor was (of de update faalde).
+ */
+async function zetStatus(b, status, { vereist = false, extra = {} } = {}) {
+  const meta = { ...(b.meta || {}), ...extra, mail_status: status, mail_op: new Date().toISOString() };
+  try {
+    let q = supabaseAdmin.from('support_berichten').update({ meta }).eq('id', b.id);
+    if (vereist) {
+      const zoalsGelezen = { mail_status: b.meta?.mail_status };
+      if (b.meta?.mail_op) zoalsGelezen.mail_op = b.meta.mail_op;
+      q = q.contains('meta', zoalsGelezen);
     }
+    const { data, error } = await q.select('id, gesprek_id, tekst, meta, created_at');
+    if (error) throw new Error(error.message);
+    return (data || [])[0] || null;
+  } catch (e) {
+    console.warn('[cron-support-mail] mail_status bijwerken mislukt:', e?.message || e);
+    return null;
   }
 }
