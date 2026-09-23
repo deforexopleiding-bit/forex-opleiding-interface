@@ -40,6 +40,7 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   logt warning + skipt auto-trigger (geen runtime-crash). Setup: random
   32+ byte hex/base64 in alle Vercel-environments. Backup in 1Password.
 - Strato IMAP credentials per mailbox in env vars
+- DFO_LMS_AGENDA_SECRET in env vars (sensitive — server-side only): gedeeld geheim (header `x-dfo-secret`) voor de agendabrug `/api/lms-agenda-events` met het LMS; ontbreekt → route dicht (503). Zie docs/lms-agenda-brug.md.
 
 ## Productie-users
 - Jeffrey Biemold — biemoldjeffrey@gmail.com — rol: manager
