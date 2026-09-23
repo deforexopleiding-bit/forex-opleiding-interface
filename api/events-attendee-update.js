@@ -24,7 +24,10 @@ import { normaliseerStrict } from './_lib/phone-e164.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called', 'call_status', 'notes'];
+// 'notitie' is de BROODJESNOTITIE uit de aanwezigenlijst en is iets anders dan
+// 'notes' — die laatste is de vrije aantekening in het deelnemer-detailpaneel.
+// Zie docs/sql-migrations/2026-09-23-event-attendees-notitie.sql.
+const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called', 'call_status', 'notes', 'notitie'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -102,6 +105,16 @@ export default async function handler(req, res) {
         // gewiste notitie ook echt weg is (in plaats van een lege string).
         patch.notes = v === null ? null : (String(v).trim() || null);
         break;
+      case 'notitie':
+        // De broodjesnotitie. Zelfde regel: wissen betekent NULL, niet een
+        // lege string — anders staat er in de lijst een rij die 'iets
+        // ingevuld' lijkt terwijl er niets staat.
+        //
+        // Begrensd op 500 tekens. Ruim genoeg voor '2x kaas, 1x hesp, geen
+        // tomaat' en te krap om er een dagboek in te zetten dat de kolom in
+        // de tabel onleesbaar maakt.
+        patch.notitie = v === null ? null : (String(v).trim().slice(0, 500) || null);
+        break;
       default:
         // shouldn't reach
         break;
@@ -137,20 +150,47 @@ export default async function handler(req, res) {
     if (beforeErr) throw new Error('before-fetch: ' + beforeErr.message);
     if (!before)   return res.status(404).json({ error: 'Deelnemer niet gevonden' });
 
-    const { data: row, error } = await supabaseAdmin
+    // ── WERKT MET ÉN ZONDER DE KOLOM `notitie` ─────────────────────────
+    // Draait de migratie nog niet, dan faalt de HELE update met 42703 zodra
+    // `notitie` in de patch staat — en dan landt ook een naamswijziging of
+    // een belstatus in dezelfde aanroep niet. Dus: bij precies die fout één
+    // keer opnieuw zónder dat veld, en eerlijk terugmelden dat de notitie
+    // niet is opgeslagen. Stil 200 teruggeven zou erger zijn: dan denkt
+    // iemand dat de broodjesbestelling vaststaat terwijl er niets staat.
+    const VELDEN_TERUG = `
+      id, event_id, first_name, last_name, email, phone, status,
+      customer_id, deal_id, subscription_id,
+      ghl_contact_id, ghl_form_submission_id, assessment_response_id,
+      switched_from_event_id, switched_at,
+      registered_at, attended_at, no_show_marked_at, sale_at,
+      follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at,
+      created_at, updated_at`;
+    const schrijf = (p, metNotitie) => supabaseAdmin
       .from('event_attendees')
-      .update(patch)
+      .update(p)
       .eq('id', id)
-      .select(`
-        id, event_id, first_name, last_name, email, phone, status,
-        customer_id, deal_id, subscription_id,
-        ghl_contact_id, ghl_form_submission_id, assessment_response_id,
-        switched_from_event_id, switched_at,
-        registered_at, attended_at, no_show_marked_at, sale_at,
-        follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at,
-        created_at, updated_at
-      `)
+      .select(VELDEN_TERUG + (metNotitie ? ', notitie' : ''))
       .maybeSingle();
+
+    const wilNotitie = Object.prototype.hasOwnProperty.call(patch, 'notitie');
+    let notitieKolomOntbreekt = false;
+    let { data: row, error } = await schrijf(patch, wilNotitie);
+    if (error && error.code === '42703' && /\bnotitie\b/.test(error.message || '')) {
+      notitieKolomOntbreekt = true;
+      console.warn('[events-attendee-update] kolom notitie bestaat nog niet — '
+        + 'draai docs/sql-migrations/2026-09-23-event-attendees-notitie.sql. '
+        + 'De rest van deze wijziging is wel opgeslagen.');
+      const { notitie: _weg, ...zonder } = patch;
+      if (Object.keys(zonder).length === 0) {
+        // Er viel verder niets te schrijven. Geen 200 met een lege belofte.
+        return res.status(422).json({
+          code : 'NOTITIE_KOLOM_ONTBREEKT',
+          error: 'De notitie kon niet opgeslagen worden: de kolom bestaat nog niet in de databank. '
+               + 'Draai docs/sql-migrations/2026-09-23-event-attendees-notitie.sql.',
+        });
+      }
+      ({ data: row, error } = await schrijf(zonder, false));
+    }
     if (error) {
       if (error.code === '23505') {
         return res.status(409).json({
@@ -197,7 +237,16 @@ export default async function handler(req, res) {
       console.error('[events-attendee-update audit]', e.message);
     }
 
-    return res.status(200).json({ attendee: row });
+    return res.status(200).json({
+      attendee: row,
+      // Alleen erbij als er om een notitie gevraagd is. De UI meldt het dan;
+      // een stille 200 zou de indruk wekken dat de bestelling vaststaat.
+      ...(notitieKolomOntbreekt ? {
+        notitie_opgeslagen: false,
+        notitie_reden: 'De kolom notitie bestaat nog niet in de databank. '
+          + 'Draai docs/sql-migrations/2026-09-23-event-attendees-notitie.sql.',
+      } : {}),
+    });
   } catch (e) {
     console.error('[events-attendee-update]', e.message);
     return res.status(500).json({ error: e.message });

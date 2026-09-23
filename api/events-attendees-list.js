@@ -80,25 +80,22 @@ export default async function handler(req, res) {
   const offset = Math.max(0, clampInt(q.offset, 0, 0, 1_000_000));
 
   try {
-    // switched_to_event_id is nieuw sinds migratie 026. Fail-soft: bij
-    // 42703/PGRST204 (kolom ontbreekt) retry zonder — dan blijft
-    // 'switched_to_event_title' NULL en toont de UI enkel 'Verplaatst'.
-    const RICH_SELECT = `
-      id, event_id, first_name, last_name, email, phone, status,
-      attendance_status, outcome,
-      customer_id, deal_id, subscription_id, bonus_excluded,
-      ghl_contact_id, ghl_form_submission_id, assessment_response_id, assessment_linked_at,
-      switched_from_event_id, switched_to_event_id, switched_at,
-      registered_at, attended_at, no_show_marked_at, sale_at,
-      follow_up_flagged, follow_up_reason, called_at, call_status, call_status_at, notes,
-      source, created_via, automation_enabled,
-      created_at, updated_at
-    `;
-    // CORE_SELECT is de fallback zonder switched_to_event_id (én zonder
-    // bonus_excluded — laatste is toegevoegd in migratie 049; frontend
-    // behandelt undefined als false). Dit maakt de list-endpoint robuust
-    // op omgevingen waar 049 nog niet gedraaid is.
-    const CORE_SELECT = `
+    // ── KOLOMMEN DIE ER NIET HOEVEN TE ZIJN ────────────────────────────
+    // Drie stuks, elk uit een eigen migratie, elk in een eigen tempo gedraaid:
+    //   bonus_excluded        (049)
+    //   switched_to_event_id  (026)
+    //   notitie               (2026-09-23, de broodjesnotitie)
+    //
+    // Een select die een ontbrekende kolom noemt faalt met 42703 en neemt de
+    // HELE query mee — dus niet één kolom weg, maar de complete
+    // aanwezigenlijst.
+    //
+    // OP DE KOLOMNAAM, NIET OP DE FOUTCODE ALLEEN. 42703 zegt WEL dat er een
+    // kolom ontbreekt en NIET welke. De vorige versie viel bij elke 42703 terug
+    // op één vaste kortere lijst, en dan verdween `switched_to_event_id` ook
+    // als er iets heel anders aan de hand was. Nu valt precies de genoemde
+    // kolom af en blijft de rest staan.
+    const VASTE_KOLOMMEN = `
       id, event_id, first_name, last_name, email, phone, status,
       attendance_status, outcome,
       customer_id, deal_id, subscription_id,
@@ -109,6 +106,8 @@ export default async function handler(req, res) {
       source, created_via, automation_enabled,
       created_at, updated_at
     `;
+    const OPTIONELE_KOLOMMEN = ['bonus_excluded', 'switched_to_event_id', 'notitie'];
+
     const buildQuery = (selectCols) => {
       let q = supabaseAdmin
         .from('event_attendees')
@@ -132,21 +131,27 @@ export default async function handler(req, res) {
 
     let rows;
     let count;
+    let beschikbaar = [...OPTIONELE_KOLOMMEN];
     {
-      const r1 = await buildQuery(RICH_SELECT);
-      if (r1.error && (r1.error.code === '42703' || r1.error.code === 'PGRST204')) {
-        console.warn('[attendees-list] switched_to_event_id kolom ontbreekt — draai migratie 026 voor bestemmings-titel');
-        const r2 = await buildQuery(CORE_SELECT);
-        if (r2.error) throw new Error('attendees-list: ' + r2.error.message);
-        rows = r2.data;
-        count = r2.count;
-      } else if (r1.error) {
-        throw new Error('attendees-list: ' + r1.error.message);
-      } else {
-        rows = r1.data;
-        count = r1.count;
+      let r = null;
+      // Hooguit zo vaak als er optionele kolommen zijn: elke ronde valt er
+      // minstens één af, anders stoppen we.
+      for (let poging = 0; poging <= OPTIONELE_KOLOMMEN.length; poging += 1) {
+        r = await buildQuery([VASTE_KOLOMMEN, ...beschikbaar].join(', '));
+        if (!r.error) break;
+        if (r.error.code !== '42703' && r.error.code !== 'PGRST204') break;
+        const weg = beschikbaar.filter((k) => new RegExp('\\b' + k + '\\b').test(r.error.message || ''));
+        if (weg.length === 0) break;   // een andere kolom: niet blijven proberen
+        console.warn('[attendees-list] kolom ontbreekt: ' + weg.join(', '));
+        beschikbaar = beschikbaar.filter((k) => !weg.includes(k));
       }
+      if (r.error) throw new Error('attendees-list: ' + r.error.message);
+      rows = r.data;
+      count = r.count;
     }
+    // Wat er ontbrak, zodat de UI het kan MELDEN in plaats van een lege kolom
+    // te tonen die eruitziet alsof niemand iets heeft opgegeven.
+    const ontbrekendeKolommen = OPTIONELE_KOLOMMEN.filter((k) => !beschikbaar.includes(k));
 
     // Batch-lookup: titels van doel-events voor de rijen die verplaatst
     // zijn. Één query per unieke switched_to_event_id (max 1 round-trip).
@@ -549,6 +554,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       items, total, limit, offset,
       counts: { byStatus },
+      // Welke optionele kolommen ontbraken. De UI meldt dat liever dan een
+      // lege kolom te tonen die eruitziet alsof niemand iets heeft opgegeven.
+      ontbrekende_kolommen: ontbrekendeKolommen,
     });
   } catch (e) {
     console.error('[events-attendees-list]', e.message);
