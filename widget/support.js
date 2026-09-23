@@ -47,6 +47,12 @@
 
   var OPSLAG = 'dfo-support-sessie';
   var POLL_MS = 5000;
+  var BEWAAR_MS = 30 * 24 * 3600 * 1000;
+
+  // De parameter waarmee onze mails naar een lopend gesprek wijzen. Er staat
+  // alleen een kenmerk in, nooit een token — zie api/_lib/support-hervat.js.
+  var HERVAT_PARAM = 'dfo-support';
+  var KENMERK_RE = /^SUP-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 
   var st = {
     open: false,
@@ -62,6 +68,8 @@
     onbereikbaar: false,
     codeVeld: false,
     codeBezig: false,
+    hervatKenmerk: null,
+    hervatGestuurd: false,
     laatsteTijd: null,
     pollTimer: null,
     ongelezen: 0,
@@ -86,7 +94,11 @@
       return r.text().then(function (t) {
         var j = null;
         try { j = t ? JSON.parse(t) : null; } catch (_) {}
-        if (!r.ok) throw new Error((j && j.error) || 'Er ging iets mis (' + r.status + ')');
+        if (!r.ok) {
+          var f = new Error((j && j.error) || 'Er ging iets mis (' + r.status + ')');
+          f.status = r.status;
+          throw f;
+        }
         return j;
       });
     });
@@ -271,6 +283,26 @@
 
     if (st.fout) h += '<div class="fout">' + esc(st.fout) + '</div>';
 
+    if (st.stap === 'hervat') {
+      h += '<p class="vraag">Je gesprek ' + esc(st.hervatKenmerk) + '</p>';
+      if (!st.hervatGestuurd) {
+        h += '<p style="margin:0 0 14px;font-size:13.5px;line-height:1.6;color:#586374">' +
+          'We sturen een code van zes cijfers naar het mailadres waarop je onze mail kreeg. ' +
+          'Zo weten we zeker dat jij het bent voordat we het gesprek openen.</p>' +
+          '<button class="btn" data-a="hervat-code"' + (st.bezig ? ' disabled' : '') + '>' +
+          (st.bezig ? 'Bezig…' : 'Stuur me de code') + '</button>';
+      } else {
+        h += '<p style="margin:0 0 14px;font-size:13.5px;line-height:1.6;color:#586374">' +
+          'Kijk in je mailbox — ook even in de spam. De code is tien minuten geldig.</p>' +
+          '<div class="veld"><label for="f-hervat">Code</label>' +
+          '<input id="f-hervat" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></div>' +
+          '<button class="btn" data-a="hervat-open"' + (st.bezig ? ' disabled' : '') + '>' +
+          (st.bezig ? 'Bezig…' : 'Open mijn gesprek') + '</button>';
+      }
+      h += '<button class="terug" data-a="nieuw" style="margin-top:14px">Liever een nieuwe vraag stellen</button>';
+      return h + '</div>';
+    }
+
     if (st.stap === 'start') {
       h += '<p class="vraag">Volg je al een traject bij ons?</p><div class="keuzes">' +
         '<button class="keuze" data-a="soort" data-v="klant"><div><b>Ja, ik ben student</b>' +
@@ -410,10 +442,13 @@
     if (actie === 'stuur') { stuur(false); return; }
     if (actie === 'mens') { stuur(true); return; }
     if (actie === 'code') { checkCode(); return; }
+    if (actie === 'hervat-code') { vraagHervatCode(); return; }
+    if (actie === 'hervat-open') { openHervat(); return; }
     if (actie === 'nieuw') {
       wis();
       st.token = null; st.gesprek = null; st.berichten = []; st.stap = 'start';
       st.soort = null; st.onderwerp = null; st.codeVeld = false;
+      st.hervatKenmerk = null; st.hervatGestuurd = false;
       teken(); return;
     }
   }
@@ -600,17 +635,88 @@
         if (!st.open) st.ongelezen += nieuw;
         teken();
       }
-    }).catch(function () {
-      // Netwerkhikje. Volgende ronde weer; geen melding, dat is alleen maar
+    }).catch(function (e) {
+      // Een 401 is geen netwerkhikje: dit token geldt niet meer. Dat gebeurt
+      // wanneer hetzelfde gesprek elders is heropend — support-hervat-check
+      // geeft één sleutel per gesprek uit. Blijven pollen levert dan alleen
+      // een bevroren venster op, dus we zeggen wat er aan de hand is.
+      if (e && e.status === 401) {
+        stopPoll();
+        wis();
+        st.token = null;
+        st.berichten = [];
+        st.gesprek = null;
+        st.stap = 'start';
+        st.fout = 'Je hebt dit gesprek ergens anders geopend. Daar staat alles.';
+        teken();
+        return;
+      }
+      // Verder: volgende ronde weer; geen melding, dat is alleen maar
       // verwarrend voor een bezoeker die niets fout deed.
     });
+  }
+
+  /* ── terugkomen via de link in onze mail ──────────────────────────────── */
+
+  // Het kenmerk uit de URL, en meteen weg uit de adresbalk. Er staat geen
+  // geheim in, maar een URL die blijft staan wordt gedeeld en gebookmarkt, en
+  // dan opent er straks een leeg codescherm bij iemand anders.
+  function kenmerkUitUrl() {
+    var k = null;
+    try {
+      var p = new URLSearchParams(location.search);
+      var ruw = (p.get(HERVAT_PARAM) || '').trim().toUpperCase();
+      if (!KENMERK_RE.test(ruw)) return null;
+      k = ruw;
+      p.delete(HERVAT_PARAM);
+      var rest = p.toString();
+      history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+    } catch (_) { return null; }
+    return k;
+  }
+
+  function vraagHervatCode() {
+    st.bezig = true; st.fout = null; teken();
+    api('support-hervat-start', { method: 'POST', body: { kenmerk: st.hervatKenmerk } })
+      .then(function () { st.hervatGestuurd = true; })
+      .catch(function (e) { st.fout = e.message; })
+      .then(function () { st.bezig = false; teken(); });
+  }
+
+  function openHervat() {
+    var code = veld('f-hervat');
+    if (code.length !== 6) { st.fout = 'Vul de zes cijfers in.'; teken(); return; }
+
+    st.bezig = true; st.fout = null; teken();
+    api('support-hervat-check', { method: 'POST', body: { kenmerk: st.hervatKenmerk, code: code } })
+      .then(function (r) {
+        st.token = r.token;
+        bewaar({ token: r.token, tijd: Date.now() });
+        st.gesprek = r.gesprek;
+        st.hervatKenmerk = null;
+        st.hervatGestuurd = false;
+        // De hele thread ophalen, niet alleen wat er na nu bij komt: de
+        // bezoeker komt juist terug om te lezen wat er gezegd is.
+        return api('support-poll?volledig=1').then(function (p) {
+          st.berichten = (p && p.berichten) || [];
+          if (p && p.gesprek) st.gesprek = p.gesprek;
+          if (st.berichten.length) st.laatsteTijd = st.berichten[st.berichten.length - 1].created_at;
+          st.stap = 'chat';
+          st.ongelezen = 0;
+          startPoll();
+        });
+      })
+      .catch(function (e) { st.fout = e.message; })
+      .then(function () { st.bezig = false; teken(); });
   }
 
   /* ── herstel na refresh ───────────────────────────────────────────────── */
   function herstel() {
     var bewaard = lees();
-    // Een sessie van langer dan een dag geleden is geen lopend gesprek meer.
-    if (!bewaard || !bewaard.token || (Date.now() - (bewaard.tijd || 0)) > 24 * 3600 * 1000) {
+    // Dertig dagen. Eerder stond hier een dag, en dat was te kort: een vraag
+    // die 's ochtends gesteld wordt en 's middags beantwoord, hoort de dag
+    // erna nog gewoon open te staan als de bezoeker terugkomt kijken.
+    if (!bewaard || !bewaard.token || (Date.now() - (bewaard.tijd || 0)) > BEWAAR_MS) {
       if (bewaard) wis();
       return Promise.resolve();
     }
@@ -634,9 +740,22 @@
     // Config alvast ophalen zodat de knop de juiste titel toont, maar pas
     // ná de eerste render: de bezoeker ziet de widget meteen, ook als de
     // server traag is.
+    var uitMail = kenmerkUitUrl();
+
     api('support-widget-config').then(function (c) {
       if (!c || c.aan === false) { host.remove(); return; }
       st.config = c;
+
+      // Komt de bezoeker via de link in onze mail, dan gaat dat vóór wat er
+      // toevallig in deze browser bewaard staat — de link wijst naar een
+      // specifiek gesprek, en dat is wat 'ie wil zien.
+      if (uitMail) {
+        st.hervatKenmerk = uitMail;
+        st.hervatGestuurd = false;
+        st.stap = 'hervat';
+        st.open = true;
+        return;
+      }
       return herstel();
     }).then(function () { teken(); }).catch(function () {
       // Geen config betekent: we weten niet welke onderwerpen er zijn, of we
