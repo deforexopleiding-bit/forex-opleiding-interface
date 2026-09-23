@@ -249,7 +249,16 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   met uitleg. LET OP de grendel in `stuurLmsUitnodiging()`: die slaat stap 2
   over zodra `uitnodiging_verstuurd_op` gevuld is, dus juist het geval
   UITNODIGING_WACHTWOORD_NIET_GEZET kan het CRM NIET zelf herstellen; dat
-  vraagt een force-optie aan LMS-kant. Zie docs/support-module-plan.md.
+  vraagt een force-optie aan LMS-kant.
+  MAILKANT: `api/cron-support-mail.js` (*/5) koppelt de mailbox aan de module.
+  Binnenkomend herkent 'ie `SUP-XXXXXX` in het onderwerp, knipt de citaatstaart
+  eraf en zet de tekst als klantbericht terug in het gesprek — maar ALLEEN als
+  het afzenderadres exact `support_gesprekken.email` is; dat is de enige
+  toegangscontrole op die route en `geverifieerd` gaat er nooit van omhoog
+  (een From is te vervalsen). Idempotent via `meta->bron_email_id`. Uitgaand
+  bundelt 'ie antwoorden die binnen drie minuten op elkaar volgen tot één mail
+  via `meta->mail_status` (niet_nodig / direct / wacht / gemaild / geen_adres).
+  Zie docs/support-module-plan.md §7c.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
@@ -559,6 +568,11 @@ Lopend op Vercel:
   try/catch zodat één fout de rest van de batch niet blokkeert. Sinds #672
   logt elke succesvolle send ook naar `dunning_engine` zodat de cooldown-teller
   klopt en de pipeline-triggers vuren.
+- /api/cron-support-mail (*/5 * * * *) — mailkant van de supportmodule:
+  mailantwoorden terug in het gesprek + gebundelde antwoordmails. Zie de
+  Support-sectie hierboven.
+- /api/cron-support-opvolging (*/15 * * * *) — wachtrij-herinneringen, stille
+  gesprekken afhandelen, dode aanwezigheid opruimen.
 - /api/cron-dunning-engine (0 9 * * *) — automatische aanmaan-engine.
   Selecteert wanbetalers per workflow-stap, respecteert
   `app_settings.dunning_cooldown_days` (default 7), skipt klanten met een

@@ -94,7 +94,7 @@ export default async function handler(req, res) {
   // ── 2. De bezoeker wil een mens ─────────────────────────────────────────
   if (vraagtMens) {
     const { melding } = await escaleerGesprek({ gesprek, reden: 'klant_vraagt_mens', beschikbaarheid });
-    if (!beschikbaarheid.live) {
+    if (!beschikbaarheid.live && gesprek.email) {
       await stuurWachtrijBevestiging({ naar: gesprek.email, naam: gesprek.naam, kenmerk: gesprek.kenmerk, vraag: tekst })
         .catch((e) => console.warn('[support-bericht] wachtrijmail mislukt:', e?.message || e));
     }
@@ -126,7 +126,7 @@ export default async function handler(req, res) {
     // gaat gewoon naar een mens, precies zoals wanneer de bot het niet wist.
     console.warn('[support-bericht] bot niet beschikbaar:', resultaat.code);
     const { melding } = await escaleerGesprek({ gesprek, reden: `bot_${resultaat.code}`, beschikbaarheid });
-    if (!beschikbaarheid.live) {
+    if (!beschikbaarheid.live && gesprek.email) {
       await stuurWachtrijBevestiging({ naar: gesprek.email, naam: gesprek.naam, kenmerk: gesprek.kenmerk, vraag: tekst })
         .catch(() => {});
     }
@@ -170,7 +170,7 @@ export default async function handler(req, res) {
       gesprek, reden: resultaat.besluit_reden, beschikbaarheid,
     });
     if (melding) antwoorden.push({ afzender: 'systeem', tekst: melding, created_at: new Date().toISOString() });
-    if (!beschikbaarheid.live) {
+    if (!beschikbaarheid.live && gesprek.email) {
       await stuurWachtrijBevestiging({ naar: gesprek.email, naam: gesprek.naam, kenmerk: gesprek.kenmerk, vraag: tekst })
         .catch(() => {});
     }
