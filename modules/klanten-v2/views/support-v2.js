@@ -85,6 +85,32 @@
     return Math.floor(u / 24) + ' dg';
   };
 
+  // Zit de bezoeker nu met de chat open? De widget stuurt met het venster
+  // open elke paar seconden een hartslag (klant_gezien_op, zie
+  // api/support-poll.js); 40 seconden is dezelfde grens die
+  // api/support-antwoord.js gebruikt om te beslissen of er ook gemaild wordt.
+  // `null` = onbekend (migratie nog niet gedraaid) — dan tonen we niets.
+  const IN_CHAT_MS = 40 * 1000;
+  function inChat(g) {
+    if (!g || !('klant_gezien_op' in g)) return null;
+    const t = Date.parse(g.klant_gezien_op || '');
+    return Number.isFinite(t) && Date.now() - t <= IN_CHAT_MS;
+  }
+  function aanwezigPil(g, klein) {
+    const nu = inChat(g);
+    if (nu === null || g.status === 'afgehandeld') return '';
+    if (nu) {
+      return `<span title="De chat staat nu open bij de bezoeker — je antwoord verschijnt direct." style="display:inline-flex;align-items:center;gap:5px;
+        padding:${klein ? '1px 7px' : '3px 9px'};border-radius:20px;background:var(--emerald-soft,#e3f7ec);color:var(--emerald,#07835A);
+        font-size:${klein ? '11px' : '11.5px'};font-weight:650;white-space:nowrap">
+        <span style="width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px rgba(7,131,90,.18)"></span>In de chat</span>`;
+    }
+    if (klein) return '';
+    return `<span title="De bezoeker heeft de chat niet open. Je antwoord gaat ook per mail." style="display:inline-flex;align-items:center;gap:5px;
+      padding:3px 9px;border-radius:20px;background:var(--surface-2);color:var(--text-2);font-size:11.5px;font-weight:600;white-space:nowrap">
+      <span style="width:7px;height:7px;border-radius:50%;background:#A9B4C2"></span>Niet in de chat${g.klant_gezien_op ? ' · ' + geleden(g.klant_gezien_op) + ' geleden' : ''}</span>`;
+  }
+
   function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
   function setUrlParam(k, v) {
     try {
@@ -293,7 +319,7 @@
       const ongelezen = r.ongelezen_voor_ons > 0;
       return [
         ongelezen ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber)"></span>` : '',
-        `<div class="cell-main" style="${ongelezen ? 'font-weight:650' : ''}">${esc(r.naam || 'Onbekend')}</div>
+        `<div class="cell-main" style="display:flex;align-items:center;gap:7px;${ongelezen ? 'font-weight:650' : ''}">${esc(r.naam || 'Onbekend')}${aanwezigPil(r, true)}</div>
          <div class="cell-sub">${esc(r.email || '')} · ${esc(r.kenmerk)}${r.geverifieerd ? ' · geverifieerd' : ''}</div>`,
         `${esc(ONDERWERP_LABEL[r.onderwerp] || r.onderwerp)}
          <div class="cell-sub">${r.soort === 'klant' ? 'student' : 'bezoeker'}</div>`,
@@ -322,10 +348,18 @@
       const oudAantal = _det.data?.berichten?.length || 0;
       const nieuwAantal = r.berichten?.length || 0;
       const zelfdeStatus = _det.data?.gesprek?.status === r.gesprek?.status;
+      const zelfdeAanwezig = inChat(_det.data?.gesprek) === inChat(r.gesprek);
+      const zelfdeMail = mailSig(_det.data?.berichten) === mailSig(r.berichten);
       _det.data = r;
-      if (stil && oudAantal === nieuwAantal && zelfdeStatus) return;
+      if (stil && oudAantal === nieuwAantal && zelfdeStatus && zelfdeAanwezig && zelfdeMail) return;
     }
     if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Verandert de mailstatus van een antwoord (wacht → gemaild), dan moet
+  // het label mee. Een korte vingerafdruk is genoeg.
+  function mailSig(berichten) {
+    return (berichten || []).filter((b) => b.afzender === 'medewerker').map((b) => b.meta?.mail_status || '').join(',');
   }
 
   function startDetailPoll(id) {
@@ -349,7 +383,15 @@
     try {
       const r = await stuur('antwoord', '/api/support-antwoord', { gesprek_id: _det.id, tekst });
       _det.concept = '';
-      if (window.KV?.toast) window.KV.toast(r?.gemaild ? 'Verstuurd — ook per mail' : 'Verstuurd');
+      if (window.KV?.toast) {
+        const m = r?.mail_status;
+        window.KV.toast(
+          m === 'niet_nodig' ? 'Verstuurd — de bezoeker zit in de chat en ziet het direct'
+          : r?.gemaild ? 'Verstuurd in de chat én per mail'
+          : m === 'wacht' ? 'Verstuurd — gaat over een paar minuten gebundeld per mail'
+          : m === 'geen_adres' ? 'Verstuurd in de chat — er is geen mailadres, dus geen mail'
+          : 'Verstuurd — de mail wordt nog verstuurd');
+      }
       await laadDetail(_det.id);
     } catch (e) {
       if (window.KV?.toast) window.KV.toast(e.message, 'err');
@@ -426,6 +468,16 @@
   // vervalsen — dit bericht staat niet op één lijn met een geverifieerde
   // chat. En een antwoord dat per mail niet aankwam, moet de collega zien;
   // anders denkt iedereen dat de klant het heeft.
+  //
+  // Bij elk antwoord van ons staat hoe het bij de klant terechtkwam: in de
+  // chat (hij zat er), per mail, of nog onderweg.
+  const MAIL_LABEL = {
+    niet_nodig: ['in de chat getoond', 'var(--emerald,#07835A)', 'De bezoeker had de chat open; er ging geen mail.'],
+    direct:     ['mail wordt verstuurd', 'var(--text-3)', 'De bezoeker zat niet in de chat; de mail gaat nu de deur uit.'],
+    versturen:  ['mail wordt verstuurd', 'var(--text-3)', 'De bezoeker zat niet in de chat; de mail gaat nu de deur uit.'],
+    wacht:      ['mail volgt', 'var(--text-3)', 'Wordt binnen een paar minuten gebundeld met je andere antwoorden per mail verstuurd.'],
+    gemaild:    ['✓ gemaild', 'var(--blue,#1f5fbf)', 'Ook per mail naar de bezoeker verstuurd.'],
+  };
   function mailLabel(b) {
     if (b.afzender === 'klant' && b.meta?.via === 'mail') {
       return ` · <span title="Via een mailantwoord binnengekomen. Het afzenderadres klopt met dit gesprek, maar is niet geverifieerd.">per mail</span>`;
@@ -434,6 +486,8 @@
       const uitleg = b.meta.mail_status === 'mislukt' ? 'mail niet aangekomen' : 'geen mailadres';
       return ` · <span style="color:var(--red,#c1272d);font-weight:650">⚠ ${uitleg}</span>`;
     }
+    const l = b.afzender === 'medewerker' ? MAIL_LABEL[b.meta?.mail_status] : null;
+    if (l) return ` · <span title="${esc(l[2])}" style="color:${l[1]};font-weight:600">${l[0]}</span>`;
     return '';
   }
 
@@ -548,6 +602,17 @@
     return h;
   }
 
+  function antwoordHint(g) {
+    const nu = inChat(g);
+    if (nu === true) return '<b style="color:var(--emerald,#07835A)">De bezoeker zit nu in de chat</b> — je antwoord verschijnt daar direct.';
+    if (nu === false) {
+      return g.email
+        ? `De bezoeker heeft de chat niet open — je antwoord gaat ook per mail naar <b>${esc(g.email)}</b>.`
+        : 'De bezoeker heeft de chat niet open en er is geen mailadres — je antwoord staat alleen in de chat.';
+    }
+    return 'Kijkt de bezoeker niet meer mee, dan gaat je antwoord ook per mail.';
+  }
+
   function detailView() {
     const id = urlParam('gesprek');
     if (!id) return '';
@@ -587,6 +652,7 @@
             <div style="font-size:14.5px;font-weight:650;color:var(--text)">${esc(g.naam || 'Onbekend')}</div>
             <div style="font-size:12px;color:var(--text-2)">${esc(ONDERWERP_LABEL[g.onderwerp] || g.onderwerp)} · ${esc(g.kenmerk)}</div>
           </div>
+          ${aanwezigPil(g, false)}
           ${H.pill(pc, pl)}
           ${!g.toegewezen_aan && !klaar ? `<button class="btn btn-sm btn-primary" onclick="window.__supPak()">Oppakken</button>` : ''}
           ${!klaar ? `<button class="btn btn-ghost btn-sm" onclick="window.__supStatus('afgehandeld')">Afronden</button>`
@@ -610,8 +676,7 @@
                  <button class="btn btn-primary" onclick="window.__supAntwoord()" ${_det.bezig ? 'disabled' : ''}
                    style="height:44px;padding:0 18px">${_det.bezig ? '…' : 'Stuur'}</button>
                </div>
-               <div style="font-size:11.2px;color:var(--text-3);margin-top:6px">
-                 Kijkt de bezoeker niet meer mee, dan gaat je antwoord ook per mail.</div>`}
+               <div style="font-size:11.4px;color:var(--text-3);margin-top:6px">${antwoordHint(g)}</div>`}
         </div>
       </div>
 

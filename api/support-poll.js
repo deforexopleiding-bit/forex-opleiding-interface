@@ -57,6 +57,12 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: 'Even niet bereikbaar. Probeer het zo nog eens.' });
   }
 
+  // "Zit de bezoeker nu in de chat?" — de widget pollt alleen met het
+  // venster open en de tab zichtbaar; met het venster dicht stuurt 'ie
+  // `dicht=1` (dan telt het niet). Zo weet het CRM wie er écht meekijkt, en
+  // weet support-antwoord of een antwoord ook per mail moet.
+  await markeerGezien(gesprek, req.query?.dicht === '1');
+
   const beschikbaarheid = await haalBeschikbaarheid();
 
   return res.status(200).json({
@@ -64,5 +70,26 @@ export default async function handler(req, res) {
     status: gesprek.status,
     gesprek: publiekGesprek(gesprek),
     live: !!beschikbaarheid.live,
+    reden: beschikbaarheid.reden || null,
   });
+}
+
+// Eén schrijfactie per GEZIEN_THROTTLE_MS per gesprek, niet elke vijf
+// seconden. Fail-soft: zonder de kolom (migratie nog niet gedraaid) of bij een
+// storing pollt de widget gewoon door.
+export const GEZIEN_THROTTLE_MS = 15 * 1000;
+
+async function markeerGezien(gesprek, dicht) {
+  if (dicht || !gesprek?.id) return;
+  if (!('klant_gezien_op' in gesprek)) return;          // kolom bestaat nog niet
+  const vorig = Date.parse(gesprek.klant_gezien_op || '') || 0;
+  if (Date.now() - vorig < GEZIEN_THROTTLE_MS) return;
+  try {
+    await supabaseAdmin
+      .from('support_gesprekken')
+      .update({ klant_gezien_op: new Date().toISOString() })
+      .eq('id', gesprek.id);
+  } catch (e) {
+    console.warn('[support-poll] gezien bijwerken mislukt:', e?.message || e);
+  }
 }

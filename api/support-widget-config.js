@@ -62,7 +62,13 @@ export default async function handler(req, res) {
     welkom: widget.welkom || 'Stel je vraag — vaak heb je binnen een minuut antwoord.',
     onderwerpen: ONDERWERPEN,
     live: !!beschikbaarheid.live,
+    // Waarom niet live: 'niemand_online' binnen kantooruren of
+    // 'buiten_kantooruren'. De widget zegt dan net iets anders — "er is nu
+    // niemand" is iets anders dan "we zijn morgen om 9 uur weer terug".
+    reden: beschikbaarheid.reden || null,
     bereikbaarheid: beschikbaarheid.label || null,
+    antwoord_mailbox: widget.antwoord_mailbox || 'info@deforexopleiding.nl',
+    bot_naam: 'Sam',
     wachtrij_tekst: beschikbaarheidsTekst(beschikbaarheid, widget.antwoord_mailbox),
     links: {
       agenda: widget.agenda_url || null,

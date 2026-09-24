@@ -7,10 +7,9 @@
 // bezoeker die de tab gesloten heeft ziet anders nooit dat er geantwoord is,
 // en belt de volgende dag alsnog.
 //
-// "Kijkt niet meer mee" leiden we af uit de tijd sinds het laatste bericht
-// van de klant. Binnen twee minuten gaan we ervan uit dat de chat openstaat;
-// daarna sturen we de mail. Liever één mail te veel dan een antwoord dat
-// niemand leest.
+// "Kijkt niet meer mee" leiden we af uit de hartslag van de widget — zie
+// bezoekerKijktMee(). Liever één mail te veel dan een antwoord dat niemand
+// leest.
 //
 // Eén uitzondering: ging er voor dit gesprek net al een antwoordmail uit, dan
 // versturen we niet meteen opnieuw. Twee berichten die een collega kort na
@@ -26,6 +25,29 @@ import { stuurAntwoordMail } from './_lib/support-mail.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LIVE_VENSTER_MS = 2 * 60 * 1000;
+export const IN_CHAT_VENSTER_MS = 40 * 1000;
+
+/**
+ * Kijkt de bezoeker nu mee?
+ *
+ * Sinds de widget met het venster open een hartslag stuurt
+ * (`klant_gezien_op`, zie support-poll.js) weten we dat zeker: binnen 40
+ * seconden gezien = de chat staat open, en dan verschijnt het antwoord daar.
+ * Wie de chat dichtdeed of wegging, krijgt het óók per mail — ook als 'ie
+ * een minuut geleden nog iets typte. Dat was precies het gat van de oude
+ * regel ("laatste bericht < 2 min") waardoor een antwoord zoek kon raken.
+ *
+ * Zonder de kolom (migratie nog niet gedraaid) valt het terug op die oude
+ * regel.
+ */
+export function bezoekerKijktMee(gesprek, nu = Date.now()) {
+  if (gesprek && 'klant_gezien_op' in gesprek) {
+    const gezien = Date.parse(gesprek.klant_gezien_op || '') || 0;
+    return nu - gezien <= IN_CHAT_VENSTER_MS;
+  }
+  const laatsteKlant = Date.parse(gesprek?.laatste_klant_bericht_op || '') || 0;
+  return nu - laatsteKlant <= LIVE_VENSTER_MS;
+}
 const BUNDEL_VENSTER_MS = 3 * 60 * 1000;
 
 export default async function handler(req, res) {
@@ -46,8 +68,7 @@ export default async function handler(req, res) {
 
   // Wel of niet mailen bepalen we vóór het schrijven: zodra het bericht
   // bestaat, moet meta al kloppen, anders pakt de cron 'm niet op.
-  const laatsteKlant = Date.parse(gesprek.laatste_klant_bericht_op || '') || 0;
-  const kijktMee = Date.now() - laatsteKlant <= LIVE_VENSTER_MS;
+  const kijktMee = bezoekerKijktMee(gesprek);
   const mailNodig = !!gesprek.email && !kijktMee;
   const recentGemaild = mailNodig ? await ergensRecentGemaild(id) : false;
   const mailStatus = !mailNodig ? 'niet_nodig' : (recentGemaild ? 'wacht' : 'direct');
@@ -85,7 +106,7 @@ export default async function handler(req, res) {
     await zetMailStatus(bericht.id, bericht.meta, gemaild ? 'gemaild' : 'wacht');
   }
 
-  return res.status(200).json({ bericht, gemaild, mail_status: mailStatus });
+  return res.status(200).json({ bericht, gemaild, mail_status: mailStatus, in_chat: kijktMee });
 }
 
 /**
