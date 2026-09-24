@@ -599,6 +599,15 @@ Lopend op Vercel:
   Support-sectie hierboven.
 - /api/cron-support-opvolging (*/15 * * * *) — wachtrij-herinneringen, stille
   gesprekken afhandelen, dode aanwezigheid opruimen.
+- /api/cron-afspraak-reminders (*/3) + /api/cron-reminder-alarm (*/15, watchdog)
+  + /api/cron-reminder-alarm-digest (0 6 * * * UTC ≈ 08:00 NL) — afspraak-
+  bevestiging/reminders. Sinds 2026-09-24: bevestiging per kanaal max 7
+  pogingen met backoff → `bevestiging_gaveup_at`; permanente bounce of
+  domein-typefout → `lead_email_undeliverable_at` (géén mail meer voor die
+  afspraak, adres wordt NOOIT automatisch aangepast). Mislukte sends komen
+  alleen nog in de dagelijkse digest; het real-time alarm meldt alleen
+  stilgevallen cron / onverklaard niet-verstuurde reminders (max 1×/uur).
+  NIET terugzetten naar een alarm per mislukte poging (gaf 95 mails/dag).
 - /api/cron-dunning-engine (0 9 * * *) — automatische aanmaan-engine.
   Selecteert wanbetalers per workflow-stap, respecteert
   `app_settings.dunning_cooldown_days` (default 7), skipt klanten met een

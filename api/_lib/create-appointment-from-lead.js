@@ -19,6 +19,7 @@
 import fetch from 'node-fetch';
 import { supabaseAdmin } from '../supabase.js';
 import { createGhlAppointment } from './ghl-appointment.js';
+import { detectEmailTypo } from './send-error-classify.js';
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 // GHL contacts-API gebruikt een andere Version dan de calendars-API.
@@ -306,11 +307,19 @@ export async function createAppointmentForLead({
     ghl_calendar_id     : process.env.GHL_CALENDAR_ID || null, // afspraak-reminders: agenda-herkomst
   };
 
+  // Domein-typefout (bv. gmail.col) → onbezorgbaar-marker; het adres zelf
+  // blijft ongewijzigd. De reminder-cron slaat mail dan over.
+  const typo = detectEmailTypo(insertRow.lead_email);
+  if (typo) {
+    insertRow.lead_email_undeliverable_at = new Date().toISOString();
+    insertRow.lead_email_undeliverable_reason = typo.reden;
+  }
+
   // 42703 fail-soft: strip optionele kolommen die in oudere schema's
   // kunnen ontbreken. booking_source is toegevoegd in migratie 046,
   // setter_user_id in de BP2-migratie — als die nog niet gedraaid is,
   // stript de fail-soft-lus 'em uit de insert.
-  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source', 'setter_user_id', 'ghl_calendar_id'];
+  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source', 'setter_user_id', 'ghl_calendar_id', 'lead_email_undeliverable_at', 'lead_email_undeliverable_reason'];
   let attempt = { ...insertRow };
   let inserted = null;
   for (let i = 0; i < 3; i++) {
@@ -320,11 +329,16 @@ export async function createAppointmentForLead({
       .select('id, scheduled_at, status, zoom_join_url, ghl_appointment_id')
       .maybeSingle();
     if (!error) { inserted = data; break; }
-    if (error.code === '42703') {
+    if (error.code === '42703' || error.code === 'PGRST204') {
       const msg = String(error.message || '').toLowerCase();
       let stripped = false;
       for (const k of OPTIONAL_KEYS) {
         if (msg.includes(k) && k in attempt) { delete attempt[k]; stripped = true; }
+      }
+      // Marker-kolommen horen bij elkaar: ontbreekt er één, strip beide.
+      if (!('lead_email_undeliverable_at' in attempt) || !('lead_email_undeliverable_reason' in attempt)) {
+        delete attempt.lead_email_undeliverable_at;
+        delete attempt.lead_email_undeliverable_reason;
       }
       if (!stripped) {
         const err = new Error('DB insert follow_up_appointments: ' + error.message);

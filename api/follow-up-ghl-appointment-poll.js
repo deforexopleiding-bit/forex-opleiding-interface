@@ -12,6 +12,24 @@ import { fetchGhlContact } from './_lib/ghl-contact.js';
 import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 import { listActiveCalendarIds } from './_lib/ghl-calendars.js';
+import { detectEmailTypo } from './_lib/send-error-classify.js';
+
+const normEmail = (s) => String(s || '').trim().toLowerCase();
+
+// Vorig adres + onbezorgbaar-marker van een bestaande afspraak. Bewust een
+// losse, fail-soft query (niet in de hoofd-select): mislukt die (bv. migratie
+// nog niet gedraaid), dan blijft de marker gewoon onaangeroerd.
+async function leesVorigAdres(id) {
+  try {
+    const { data, error } = await supabaseAdmin.from('follow_up_appointments')
+      .select('lead_email, lead_email_undeliverable_at')
+      .eq('id', id)
+      .maybeSingle();
+    return error ? null : data;
+  } catch {
+    return null;
+  }
+}
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const ABORT_MS = 55_000;
@@ -291,6 +309,28 @@ export default async function handler(req, res) {
         ghl_calendar_id:     event.calendarId   || existing?.ghl_calendar_id || null,
       };
 
+      // Domein-typefout (bv. gmail.col) → onbezorgbaar-marker zodat de
+      // reminder-cron geen mail naar een niet-bestaand domein probeert. Het
+      // adres zelf wordt NOOIT aangepast. Is het adres sinds de vorige poll
+      // veranderd (gecorrigeerd in GHL), dan wordt de marker opnieuw bepaald —
+      // en dus gewist als het nieuwe adres in orde is.
+      const typo = detectEmailTypo(leadEmail);
+      const markeer = () => {
+        row.lead_email_undeliverable_at = new Date().toISOString();
+        row.lead_email_undeliverable_reason = typo.reden;
+      };
+      if (!existing?.id) {
+        if (typo) markeer();
+      } else {
+        const vorig = await leesVorigAdres(existing.id);
+        if (vorig && normEmail(vorig.lead_email) !== normEmail(leadEmail)) {
+          if (typo) markeer();
+          else { row.lead_email_undeliverable_at = null; row.lead_email_undeliverable_reason = null; }
+        } else if (vorig && typo && !vorig.lead_email_undeliverable_at) {
+          markeer();
+        }
+      }
+
       // 2-step pattern: SELECT existing → UPDATE of INSERT
       // Reden: partial-unique constraints zijn geen geldige ON CONFLICT-arbiter
       // in PostgREST. existing.id is al beschikbaar van de select boven.
@@ -300,10 +340,21 @@ export default async function handler(req, res) {
         if (existing?.id) return (await supabaseAdmin.from('follow_up_appointments').update(r).eq('id', existing.id)).error;
         return (await supabaseAdmin.from('follow_up_appointments').insert(r)).error;
       }
-      let error = await schrijf(row);
-      if (error && (error.code === '42703' || /ghl_calendar_id/.test(error.message || '')) && 'ghl_calendar_id' in row) {
-        const { ghl_calendar_id: _weg, ...zonder } = row;
-        error = await schrijf(zonder);
+      // Fail-soft voor optionele kolommen die in een ouder schema kunnen
+      // ontbreken: strip precies de kolom die de foutmelding noemt en probeer
+      // opnieuw (dekt Postgres 42703 én PostgREST PGRST204).
+      const OPTIONELE_KOLOMMEN = ['lead_email_undeliverable_at', 'lead_email_undeliverable_reason', 'ghl_calendar_id'];
+      let payload = row;
+      let error = await schrijf(payload);
+      for (let i = 0; i < 2 && error; i++) {
+        const msg = String(error.message || '');
+        let weg = OPTIONELE_KOLOMMEN.filter((k) => k in payload && msg.includes(k));
+        if (!weg.length) break;
+        if (weg.some((k) => k.startsWith('lead_email_undeliverable'))) {
+          weg = [...new Set([...weg, 'lead_email_undeliverable_at', 'lead_email_undeliverable_reason'])];
+        }
+        payload = Object.fromEntries(Object.entries(payload).filter(([k]) => !weg.includes(k)));
+        error = await schrijf(payload);
       }
 
       if (error) {
