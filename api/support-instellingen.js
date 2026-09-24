@@ -18,8 +18,8 @@
 import { supabaseAdmin } from './supabase.js';
 import { staffUit, verkeerdeMethode, basisHeaders } from './_lib/support-staff.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { naarOfficeHoursConfig } from './_lib/support-beschikbaarheid.js';
-import { parseOfficeHoursConfig, officeHoursLabel, parseHHMM } from './_lib/dunning-office-hours.js';
+import { naarOfficeHoursConfig, leesbareUren } from './_lib/support-beschikbaarheid.js';
+import { parseOfficeHoursConfig, parseHHMM } from './_lib/dunning-office-hours.js';
 
 const WIDGET_VELDEN = ['aan', 'titel', 'welkom', 'agenda_url', 'events_url', 'antwoord_mailbox'];
 
@@ -148,7 +148,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       kantooruren: uren?.value || null,
-      kantooruren_label: officeHoursLabel(cfg),
+      kantooruren_label: leesbareUren(cfg),
       widget: widget?.value || null,
       bot: bot || null,
       // Echt nagevraagd, niet aangenomen: een lezer zonder support.config

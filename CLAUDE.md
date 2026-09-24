@@ -284,7 +284,18 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   3 per gesprek — dat zette terugkerende studenten permanent op slot).
   Widget bewaart een sessie 30 dagen (was 1). Env: `SUPPORT_SITE_URL`
   (optioneel, default https://www.deforexopleiding.nl).
-  Zie docs/support-module-plan.md §7c en §7d.
+  WIDGET V2 (2026-09-24): het skelet staat er één keer; renders werken
+  alleen bij wat veranderde (NOOIT meer het hele venster via innerHTML —
+  dat vervangt het tekstveld tijdens typen en speelt animaties opnieuw af).
+  Invoervelden ≥16px (iOS-zoom). Publieke hooks: `window.DFOSupport.open()`,
+  `<a href="#support">`, `[data-dfo-support-open]`, `[data-dfo-support-kaart]`.
+  Aanwezigheid: `support_gesprekken.klant_gezien_op` (migratie
+  2026-09-24-support-klant-gezien.sql, niet blokkerend) — gezet door
+  `support-poll` zolang het venster open is (`dicht=1` telt niet);
+  `bezoekerKijktMee()` in support-antwoord.js (40 s) bepaalt of er ook
+  gemaild wordt. Widgettests draaien in jsdom (devDependency) via
+  tests/support-widget-harness.js.
+  Zie docs/support-module-plan.md §7c, §7d en §7e.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

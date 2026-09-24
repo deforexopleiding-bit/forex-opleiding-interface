@@ -450,6 +450,49 @@ mailbox halen niet.
   gesteld wordt en 's middags beantwoord, hoort de dag erna nog gewoon open te
   staan. Dertig dagen nu.
 
+## 7e. De widget, versie 2 — zichtbaar, rustig, en eerlijk over wie er is
+
+> 24 september 2026. Aanleiding: de knop verdween in het blauw rechtsonder op
+> de (donkere) site, en typen in de chat "sprong en flikkerde".
+
+**Waarom het flikkerde.** Elke render — ook elke poll van 5 s — zette het hele
+venster opnieuw via `innerHTML`. Het tekstveld werd vervangen terwijl je typte,
+de openingsanimatie van het paneel en van élke bubbel speelde opnieuw, en de
+thread sprong naar beneden. Op iPhone kwam daar de zoom bij: Safari zoomt in op
+elk veld onder 16px. Nu staat het skelet er één keer; nieuwe berichten worden
+aangehangen, keuzestappen alleen vervangen als hun inhoud verandert (met behoud
+van ingevulde velden en focus), en alle velden zijn 16px. Vastgelegd in
+`tests/support-widget-weergave.test.js`.
+
+**Uiterlijk.** Goud (`--gold #c98b2e`) op de donkere site, met "Hulp nodig? /
+Chat met ons supportteam", een groene stip als er een collega online is, een
+pulsring en eens per drie dagen een teaser-ballon. Paneel 410 × max 690px; op
+mobiel schermvullend met `visualViewport`, zodat de invoer boven het
+toetsenbord blijft. Kleuren komen uit de `:root` van de website zelf.
+
+**Wie is er?** Kop en statusbalk zeggen altijd in één zin met wie je praat en
+wat er met je vraag gebeurt: Sam (digitale assistent) · een collega is online ·
+niemand online → antwoord per mail op *jouw adres* · Jeffrey helpt je verder.
+Kantooruren staan er leesbaar (`leesbareUren()`: "ma–vr 09:00–17:30").
+
+**Vanaf de pagina.** `window.DFOSupport.open()`, elke `<a href="#support">`,
+elk element met `data-dfo-support-open`, en `<div data-dfo-support-kaart>` voor
+een supportkaart. Staat die nergens, dan zet de widget op `/contact` zelf een
+kaart bovenaan het blok "Direct contact" (`.cinfo`). Die automatische plaatsing
+hangt aan de markup van de site — netter is een `data-dfo-support-kaart` in de
+code van de website zelf.
+
+**In de chat of niet (CRM).** Nieuwe kolom `support_gesprekken.klant_gezien_op`
+(migratie `2026-09-24-support-klant-gezien.sql`, niet blokkerend). De widget
+pollt met het venster open; met het venster dicht pollt 'ie ± elke 20 s met
+`dicht=1` (voor de badge op de knop) en telt dan níet als aanwezig.
+`support-poll` schrijft hooguit één keer per 15 s. Het CRM toont "In de chat" /
+"Niet in de chat · x geleden" in lijst en detail, en per antwoord hoe het
+aankwam: *in de chat getoond* · *mail volgt* · *✓ gemaild* · *⚠ mail niet
+aangekomen*. `support-antwoord` beslist mail-of-niet nu op die hartslag
+(`bezoekerKijktMee()`, 40 s) in plaats van "laatste klantbericht < 2 min" —
+wie de chat dichtdeed krijgt dus altijd mail. Zonder de kolom: oude regel.
+
 ## 8. Benodigde omgevingsvariabelen
 
 | Variabele | Waarvoor | Zonder |

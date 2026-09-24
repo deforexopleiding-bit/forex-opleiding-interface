@@ -21,7 +21,7 @@
 // die is TZ-aware via Intl.DateTimeFormat en overleeft dus de zomertijd.
 
 import { supabaseAdmin } from '../supabase.js';
-import { parseOfficeHoursConfig, isWithinOfficeHours, officeHoursLabel } from './dunning-office-hours.js';
+import { parseOfficeHoursConfig, isWithinOfficeHours } from './dunning-office-hours.js';
 
 export const HARTSLAG_VENSTER_MS = 5 * 60 * 1000;
 
@@ -66,7 +66,7 @@ export function naarOfficeHoursConfig(raw) {
  */
 export function bepaalBeschikbaarheid({ urenConfig, aanwezigen, nu = new Date() }) {
   const cfg = parseOfficeHoursConfig(naarOfficeHoursConfig(urenConfig));
-  const label = officeHoursLabel(cfg);
+  const label = leesbareUren(cfg);
 
   let binnen = false;
   try {
@@ -90,6 +90,32 @@ export function bepaalBeschikbaarheid({ urenConfig, aanwezigen, nu = new Date() 
     return { live: false, binnen_kantooruren: true, aantal_online: 0, reden: 'niemand_online', label };
   }
   return { live: true, binnen_kantooruren: true, aantal_online: online.length, reden: 'live', label };
+}
+
+/**
+ * De kantooruren zoals een bezoeker ze leest: "ma–vr 09:00–17:30".
+ *
+ * officeHoursLabel() geeft "09:00-17:30 Europe/Amsterdam (ma,di,wo,do,vr)" —
+ * prima voor een collega in het CRM, maar dat stond letterlijk in de widget
+ * en in de wachtrijzin. Een aaneengesloten reeks dagen wordt een bereik,
+ * losse dagen een opsomming, zeven dagen "elke dag".
+ */
+export function leesbareUren(cfg) {
+  const namen = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
+  const c = cfg || {};
+  // Maandag eerst, zondag achteraan — zo leest een Nederlandse week.
+  const dagen = [...new Set((Array.isArray(c.days) ? c.days : []).map(Number))]
+    .filter((d) => d >= 0 && d <= 6)
+    .sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+  const tijd = `${c.start || '09:00'}–${c.end || '17:30'}`;
+  if (!dagen.length) return tijd;
+  if (dagen.length === 7) return `elke dag ${tijd}`;
+  const volg = dagen.map((d) => (d + 6) % 7);
+  const aaneen = volg.every((v, i) => i === 0 || v === volg[i - 1] + 1);
+  const deel = aaneen && dagen.length > 2
+    ? `${namen[dagen[0]]}–${namen[dagen[dagen.length - 1]]}`
+    : dagen.map((d) => namen[d]).join(', ');
+  return `${deel} ${tijd}`;
 }
 
 /**
@@ -124,7 +150,7 @@ export async function haalBeschikbaarheid(nu = new Date()) {
     return {
       live: false, binnen_kantooruren: false, aantal_online: 0,
       reden: 'aanwezigheid_onleesbaar',
-      label: officeHoursLabel(parseOfficeHoursConfig(naarOfficeHoursConfig(urenConfig))),
+      label: leesbareUren(parseOfficeHoursConfig(naarOfficeHoursConfig(urenConfig))),
     };
   }
 
@@ -137,8 +163,9 @@ export async function haalBeschikbaarheid(nu = new Date()) {
  */
 export function beschikbaarheidsTekst(b, antwoordMailbox = 'info@deforexopleiding.nl') {
   if (b?.live) return 'Er is nu iemand beschikbaar — je vraag komt direct bij ons binnen.';
+  const mailbox = antwoordMailbox || 'info@deforexopleiding.nl';
   if (b?.reden === 'niemand_online') {
-    return `Op dit moment zit er niemand aan de chat. Je vraag staat in de wachtrij; je krijgt antwoord per mail vanaf ${antwoordMailbox}.`;
+    return `Er is op dit moment geen collega online. Je vraag staat bij ons team en je krijgt antwoord per mail (van ${mailbox}) zodra iemand hem heeft opgepakt.`;
   }
-  return `We zijn bereikbaar ${b?.label || 'op werkdagen'}. Je vraag staat in de wachtrij; je krijgt antwoord per mail vanaf ${antwoordMailbox}.`;
+  return `Ons team is bereikbaar ${b?.label || 'op werkdagen'}. Je vraag staat voor ons klaar en je krijgt antwoord per mail (van ${mailbox}) zodra iemand hem heeft opgepakt.`;
 }

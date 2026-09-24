@@ -64,7 +64,10 @@ export default async function handler(req, res) {
   try {
     let q = supabaseAdmin
       .from('support_gesprekken')
-      .select('id, kenmerk, soort, onderwerp, status, prioriteit, naam, email, telefoon, customer_id, geverifieerd, toegewezen_aan, ongelezen_voor_ons, laatste_bericht_op, laatste_klant_bericht_op, escalatie_reden, created_at')
+      // '*' en niet een vaste kolomlijst: klant_gezien_op komt uit een
+      // latere migratie, en een expliciete kolom die nog niet bestaat laat
+      // de hele werklijst falen. De hashes gaan er hieronder weer af.
+      .select('*')
       .order('laatste_bericht_op', { ascending: false, nullsFirst: false })
       .limit(limiet);
 
@@ -100,7 +103,7 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      gesprekken: rijen.map((r) => ({
+      gesprekken: rijen.map(({ sessie_token_hash: _t, ip_hash: _i, ...r }) => ({
         ...r,
         toegewezen_naam: r.toegewezen_aan ? (namen.get(r.toegewezen_aan) || null) : null,
         open_acties: acties.get(r.id) || 0,
