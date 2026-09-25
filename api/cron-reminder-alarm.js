@@ -5,9 +5,7 @@
 // een eigen state-log; muteert NOOIT guard-/claim-kolommen op afspraken en kan
 // de reminder-flow dus niet breken (aparte functie, eigen try/catch).
 //
-// Detecteert drie dingen:
-//   (a) MISLUKTE SENDS      — nieuwe rijen in afspraak_bericht_faillog sinds de
-//                             vorige alarmcheck (watermark op created_at).
+// Watchdog — detecteert twee dingen (real-time, hoogstens 1×/uur):
 //   (b) DUE-MAAR-ONVERSTUURD— afspraken (scheduled + ghl_calendar_id NOT NULL)
 //                             waarvan een moment al > 6 min in zijn venster staat
 //                             maar de guard nog NULL is. Oorzaak-onafhankelijk
@@ -15,9 +13,12 @@
 //   (c) CRON STAAT STIL     — laatste 'reminder-cron-heartbeat' in
 //                             follow_up_events_log ouder dan 10 min.
 //
+// Tak (a) — mislukte sends per poging — is verhuisd naar de dagelijkse
+// samenvatting (api/cron-reminder-alarm-digest.js). Per-poging-alarmen
+// veroorzaakten 95 mails/dag bij één onbezorgbaar adres (2026-09-24).
+//
 // Anti-spam: state in follow_up_events_log (event_type='reminder-alarm', payload
-// { last_faillog_at, last_alert_at }). Nieuwe faillog-rijen alarmeren direct;
-// doorlopende toestanden (b/c) hoogstens eens per uur. GEEN nieuwe tabellen.
+// { last_alert_at }). Doorlopende toestanden hoogstens eens per uur.
 //
 // Mail via sendEmailViaSmtp (welkom@, werkende creds) naar
 // process.env.ALARM_EMAIL || 'jeffreybiemold@gmail.com'.
@@ -56,9 +57,6 @@ async function dueQuery(build) {
   }
 }
 
-function fmtFail(f) {
-  return `• ${f.moment || '?'}/${f.kanaal || '?'} — ${(f.reason || 'onbekend')}${f.http_status ? ` (http ${f.http_status})` : ''} — appt ${f.appointment_id || '?'} — ${f.created_at || ''}`;
-}
 function fmtDue(label, d) {
   if (!d || (!d.count && !d.error)) return null;
   if (d.error) return `${label}: query-fout — ${d.error}`;
@@ -79,9 +77,7 @@ export default async function handler(req, res) {
 
   try {
     // ── State laden (anti-spam) ──────────────────────────────────────────
-    let lastFaillogAt = null;   // watermark op afspraak_bericht_faillog.created_at
-    let lastAlertAt   = null;   // laatste keer dat we ECHT mailden
-    let firstRun      = false;
+    let lastAlertAt = null;   // laatste keer dat we ECHT mailden
     try {
       const { data: st } = await supabaseAdmin
         .from('follow_up_events_log')
@@ -90,36 +86,10 @@ export default async function handler(req, res) {
         .order('received_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (st?.payload) {
-        lastFaillogAt = st.payload.last_faillog_at || null;
-        lastAlertAt   = st.payload.last_alert_at   || null;
-      } else {
-        firstRun = true;
-      }
+      lastAlertAt = st?.payload?.last_alert_at || null;
     } catch (e) {
       out.issues.state_read_error = e?.message || String(e);
     }
-    // Eerste run: baseline op NU, zodat historische faillog niet in één keer
-    // wordt gedumpt. (b)/(c) worden wél gewoon geëvalueerd.
-    if (firstRun || !lastFaillogAt) lastFaillogAt = nowIso;
-
-    // ── (a) MISLUKTE SENDS: nieuwe faillog-rijen sinds de watermark ──────
-    let newFails = [];
-    try {
-      const { data, error } = await supabaseAdmin
-        .from('afspraak_bericht_faillog')
-        .select('id, appointment_id, moment, kanaal, reason, http_status, created_at')
-        .gt('created_at', lastFaillogAt)
-        .order('created_at', { ascending: true })
-        .limit(100);
-      if (error) out.issues.faillog_error = error.message;
-      else newFails = data || [];
-    } catch (e) {
-      out.issues.faillog_error = e?.message || String(e);
-    }
-    // Nieuwe watermark = jongste geziene faillog (of ongewijzigd als er niets is).
-    const maxFaillogAt = newFails.length ? newFails[newFails.length - 1].created_at : lastFaillogAt;
-    out.issues.nieuwe_fails = newFails.length;
 
     // ── (c) CRON STAAT STIL: laatste heartbeat-leeftijd ──────────────────
     let cronStale = false;
@@ -163,8 +133,11 @@ export default async function handler(req, res) {
       // flaggen als de call net is begonnen (≤ nu, binnen 15 min) en 'm nooit ging.
       zoom5: await dueQuery((q) => q.is('zoom_5min_at', null)
         .gt('scheduled_at', iso(nowMs - 15 * M)).lte('scheduled_at', iso(nowMs))),
-      // bevestiging: zoom-link binnen maar > 10 min niet bevestigd (call in de toekomst)
+      // bevestiging: zoom-link binnen maar > 10 min niet bevestigd (call in de toekomst).
+      // Afspraken met al gelogde pogingen of een give-up-marker zijn geen STILLE
+      // drop meer — die staan in de faillog en komen in de dagelijkse digest.
       bevestiging: await dueQuery((q) => q.is('bevestiging_sent_at', null).not('zoom_join_url', 'is', null)
+        .is('bevestiging_gaveup_at', null).eq('bevestiging_mail_attempts', 0).eq('bevestiging_wa_attempts', 0)
         .gt('scheduled_at', iso(nowMs)).lte('created_at', iso(nowMs - 10 * M))),
     };
     const dueTotal = Object.values(due).reduce((s, d) => s + (d.count || 0), 0);
@@ -172,22 +145,17 @@ export default async function handler(req, res) {
     out.issues.due_total = dueTotal;
 
     // ── Beslissen of we mailen ───────────────────────────────────────────
-    // Nieuwe fails → direct. Doorlopende toestanden (b/c) → hoogstens 1×/uur.
+    // Alleen doorlopende toestanden (b/c), hoogstens 1×/uur. Mislukte sends
+    // per poging gaan naar de dagelijkse digest, niet hierheen.
     const ongoing = dueTotal > 0 || cronStale;
     const cooldownOk = !lastAlertAt || (nowMs - Date.parse(lastAlertAt)) >= COOLDOWN_MS;
-    const shouldMail = newFails.length > 0 || (ongoing && cooldownOk);
+    const shouldMail = ongoing && cooldownOk;
     out.shouldMail = shouldMail;
 
     if (shouldMail) {
       const regels = [];
       regels.push(`Reminder-alarm — ${nowIso}`);
       regels.push('');
-      if (newFails.length > 0) {
-        regels.push(`(a) Mislukte sends: ${newFails.length} nieuwe faillog-rij(en)`);
-        newFails.slice(0, 25).forEach((f) => regels.push('  ' + fmtFail(f)));
-        if (newFails.length > 25) regels.push(`  … en ${newFails.length - 25} meer`);
-        regels.push('');
-      }
       if (dueTotal > 0) {
         regels.push(`(b) Due-maar-onverstuurd: ${dueTotal} afspraak(en) waarvan een reminder al had moeten vuren`);
         [['Bevestiging', due.bevestiging], ['24u-reminder', due.r24], ['2u-reminder', due.r2], ['30m-reminder', due.r30], ['Zoom-5min', due.zoom5]]
@@ -198,9 +166,9 @@ export default async function handler(req, res) {
         regels.push(`(c) Reminder-cron staat mogelijk stil: laatste heartbeat ${heartbeatAgeMin} min geleden (drempel 10 min).`);
         regels.push('');
       }
-      regels.push('— Automatisch alarm van cron-reminder-alarm. Dit is Fase 1 (alleen melden); er is niets automatisch hersteld.');
+      regels.push('— Automatisch alarm van cron-reminder-alarm (watchdog). Mislukte sends per afspraak staan in de dagelijkse samenvatting van 08:00.');
       const text = regels.join('\n');
-      const n = newFails.length + dueTotal + (cronStale ? 1 : 0);
+      const n = dueTotal + (cronStale ? 1 : 0);
       const subject = `⚠️ Reminder-alarm: ${n} probleem${n === 1 ? '' : 'en'} in de afspraak-reminders`;
 
       let mailRes = { ok: false, reason: 'niet verstuurd' };
@@ -212,27 +180,18 @@ export default async function handler(req, res) {
       out.mailed = !!mailRes.ok;
       out.mail_error = mailRes.ok ? null : (mailRes.reason || 'onbekend');
 
-      // State alleen bijwerken als de mail ECHT de deur uit ging: dan schuift de
-      // watermark op (fails niet nog eens melden) en start de cooldown. Faalt de
-      // mail, dan laten we de state staan → volgende run probeert opnieuw.
+      // State alleen bijwerken als de mail ECHT de deur uit ging: dan start de
+      // cooldown. Faalt de mail, dan laten we de state staan → volgende run
+      // probeert opnieuw.
       if (mailRes.ok) {
         try {
           await supabaseAdmin.from('follow_up_events_log').insert({
             source: 'cron', event_type: 'reminder-alarm', processed: true,
-            payload: { at: nowIso, last_faillog_at: maxFaillogAt, last_alert_at: nowIso,
-              gemeld: { nieuwe_fails: newFails.length, due_total: dueTotal, cron_stale: cronStale } },
+            payload: { at: nowIso, last_alert_at: nowIso,
+              gemeld: { due_total: dueTotal, cron_stale: cronStale } },
           });
         } catch (e) { out.issues.state_write_error = e?.message || String(e); }
       }
-    } else if (firstRun) {
-      // Geen probleem op de eerste run: leg de baseline vast zodat historische
-      // faillog later niet alsnog wordt gedumpt.
-      try {
-        await supabaseAdmin.from('follow_up_events_log').insert({
-          source: 'cron', event_type: 'reminder-alarm', processed: true,
-          payload: { at: nowIso, last_faillog_at: maxFaillogAt, last_alert_at: null, baseline: true },
-        });
-      } catch (e) { out.issues.state_write_error = e?.message || String(e); }
     }
   } catch (e) {
     // Alarm mag NOOIT de boel breken — vang alles af en rapporteer 200.

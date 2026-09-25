@@ -23,6 +23,13 @@
 // kregen daardoor pas de ochtend erna hun WA + mail. De vereistZoom-guard op
 // de bevestiging blijft: geen Zoom-link → geen bevestiging, ongeacht tijd.
 //
+// 2026-09-24: retry-storm-fix. Bevestiging per kanaal max 7 pogingen met
+// backoff (3→6→12→24→48→96 min), daarna bevestiging_gaveup_at. Permanente
+// mailfout (5.1.x, domain does not exist, user unknown…) → direct
+// lead_email_undeliverable_at; dan geen mail meer voor ÉLK moment van die
+// afspraak. Reminders geven op na 7 faillog-rijen per kanaal of bij alleen
+// permanente fouten. Zie api/_lib/send-error-classify.js.
+//
 // SCOPE: alle afspraken uit een GHL-agenda-import (ghl_calendar_id NOT NULL).
 // De toegang_aanvragen-flow (cron-toegang-aanvragen) blijft ongemoeid.
 // 0 incasso-writes.
@@ -34,6 +41,7 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR } from './_lib/afspraak-berichten.js';
 import { logAfspraakFail } from './_lib/afspraak-faillog.js';
+import { classifySendError, MAX_ATTEMPTS, backoffMinNaPoging } from './_lib/send-error-classify.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 import { bouwInternMail, waVars, bronVan } from './_lib/afspraak-intern-notify.js';
 
@@ -51,7 +59,7 @@ function isoMinuut(d) {
   return new Date(d).toISOString().slice(0, 16);
 }
 
-const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, bevestiging_wa_sent_at, bevestiging_mail_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token';
+const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, bevestiging_wa_sent_at, bevestiging_mail_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token, lead_email_undeliverable_at, lead_email_undeliverable_reason, bevestiging_mail_attempts, bevestiging_mail_next_at, bevestiging_wa_attempts, bevestiging_wa_next_at, bevestiging_gaveup_at';
 
 // Near-term geplande afspraken uit een GHL-agenda-import (ghl_calendar_id NOT
 // NULL). Verbreed van alleen-opstartsessie naar ALLE afspraak-agenda's; rijen
@@ -89,6 +97,7 @@ async function haalBevestigingKandidaten(nowMs) {
     .not('ghl_calendar_id', 'is', null)
     .not('zoom_join_url', 'is', null)
     .is('bevestiging_sent_at', null)
+    .is('bevestiging_gaveup_at', null)
     .gt('scheduled_at', nowIso)
     .order('scheduled_at', { ascending: true })
     .limit(500);
@@ -153,60 +162,154 @@ async function stuurMailBevestiging(appt, moment, ctx) {
   }
 }
 
+// Zet de onbezorgbaar-marker (1× per afspraak). Het adres zelf blijft staan.
+async function markeerOnbezorgbaar(appt, reden) {
+  if (appt.lead_email_undeliverable_at) return;
+  const at = new Date().toISOString();
+  const txt = String(reden || 'onbekend').slice(0, 500);
+  const { error } = await supabaseAdmin.from('follow_up_appointments')
+    .update({ lead_email_undeliverable_at: at, lead_email_undeliverable_reason: txt })
+    .eq('id', appt.id)
+    .is('lead_email_undeliverable_at', null);
+  if (error) { console.error('[cron-afspraak-reminders] onbezorgbaar-marker:', appt.id, error.message); return; }
+  appt.lead_email_undeliverable_at = at;
+  appt.lead_email_undeliverable_reason = txt;
+}
+
+// Boekt een mislukte bevestigings-poging voor één kanaal ('mail' | 'wa'):
+// geeft de kanaal-claim vrij en zet teller + volgende-poging-tijd in ÉÉN update.
+// Returnt het nieuwe aantal pogingen.
+async function boekMislukking(appt, kanaal, nowMs) {
+  const sentCol = `bevestiging_${kanaal}_sent_at`;
+  const attCol  = `bevestiging_${kanaal}_attempts`;
+  const nextCol = `bevestiging_${kanaal}_next_at`;
+  const n = (appt[attCol] || 0) + 1;
+  const nextAt = n >= MAX_ATTEMPTS ? null : new Date(nowMs + backoffMinNaPoging(n) * MIN).toISOString();
+  const { error } = await supabaseAdmin.from('follow_up_appointments')
+    .update({ [sentCol]: null, [attCol]: n, [nextCol]: nextAt })
+    .eq('id', appt.id);
+  if (error) {
+    console.error('[cron-afspraak-reminders] boekMislukking:', appt.id, kanaal, error.message);
+    await unclaimRow(appt.id, sentCol); // claim mag nooit blijven staan na een mislukte send
+  }
+  appt[attCol] = n;
+  appt[nextCol] = nextAt;
+  return n;
+}
+
+async function markeerBevestigingOpgegeven(appt, reden) {
+  const at = new Date().toISOString();
+  const { error } = await supabaseAdmin.from('follow_up_appointments')
+    .update({ bevestiging_gaveup_at: at, bevestiging_gaveup_reason: String(reden).slice(0, 500) })
+    .eq('id', appt.id)
+    .is('bevestiging_gaveup_at', null);
+  if (error) console.error('[cron-afspraak-reminders] gaveup-marker:', appt.id, error.message);
+}
+
 // Verwerk het bevestiging-moment met PER-KANAAL-markers: WhatsApp en mail
 // worden los geclaimd/gemarkeerd, zodat een mislukte WhatsApp in een volgende
-// run opnieuw wordt geprobeerd ZONDER de mail nog een keer te sturen. Zodra
-// beide toepasselijke kanalen klaar zijn, wordt bevestiging_sent_at gezet
-// (de "volledig-klaar"-guard + kandidaatfilter).
-async function verwerkBevestiging({ rows, moment, welkomPhoneId, live }) {
-  const vak = { kandidaten: rows.length, onderdrukt: null, verstuurd: 0, resultaten: [] };
+// run opnieuw wordt geprobeerd ZONDER de mail nog een keer te sturen.
+//
+// Per kanaal één van vier toestanden: 'nvt' (niet van toepassing), 'klaar'
+// (verstuurd), 'wacht' (volgende poging later) of 'opgegeven' (cap van
+// MAX_ATTEMPTS bereikt, of mail permanent onbezorgbaar). Zodra geen enkel
+// kanaal nog 'wacht':
+//   - minstens één kanaal klaar (of niets toepasselijk) → bevestiging_sent_at
+//   - minstens één kanaal opgegeven                      → bevestiging_gaveup_at
+// Beide kunnen tegelijk (bv. WhatsApp verstuurd, mail onbezorgbaar).
+async function verwerkBevestiging({ rows, moment, welkomPhoneId, live, nowMs }) {
+  const vak = { kandidaten: rows.length, onderdrukt: null, verstuurd: 0, opgegeven: 0, resultaten: [] };
   if (!live) { vak.resultaten = rows.map((a) => ({ id: a.id, naam: a.lead_name, dry: true })); return vak; }
+
+  const inBackoff = (iso) => !!iso && Date.parse(iso) > nowMs;
 
   for (const appt of rows) {
     const ctx = bouwContext(appt);
     const res = { id: appt.id, wa: null, mail: null };
     const waApplicable = !!welkomPhoneId && !!appt.lead_phone;
     const mailApplicable = !!appt.lead_email;
+    let waState = 'nvt';
+    let mailState = 'nvt';
 
-    // ── WhatsApp (per-kanaal claim + retry) ──
+    // ── WhatsApp (per-kanaal claim + cap + backoff) ──
     if (!waApplicable) {
       res.wa = { ok: false, skipped: !welkomPhoneId ? 'welkom-phone-ontbreekt' : 'geen-telefoon' };
     } else if (appt.bevestiging_wa_sent_at) {
-      res.wa = { ok: true, alreadySent: true };
+      res.wa = { ok: true, alreadySent: true }; waState = 'klaar';
+    } else if ((appt.bevestiging_wa_attempts || 0) >= MAX_ATTEMPTS) {
+      res.wa = { ok: false, skipped: 'cap-bereikt' }; waState = 'opgegeven';
+    } else if (inBackoff(appt.bevestiging_wa_next_at)) {
+      res.wa = { ok: false, skipped: 'backoff', next_at: appt.bevestiging_wa_next_at }; waState = 'wacht';
     } else if (await claimRow(appt.id, 'bevestiging_wa_sent_at')) {
       const r = await stuurWaBevestiging(appt, moment, ctx, welkomPhoneId);
       res.wa = r;
-      if (!r.ok) {
-        await unclaimRow(appt.id, 'bevestiging_wa_sent_at'); // vrijgeven → volgende run retryt WA (mail blijft ongemoeid)
-        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'whatsapp', templateName: moment.waTemplate, reason: r.error || r.skipped || 'onbekend', httpStatus: r.http_status ?? null, toPhone: appt.lead_phone });
+      if (r.ok) {
+        waState = 'klaar';
+      } else {
+        const reden = r.error || r.skipped || 'onbekend';
+        const n = await boekMislukking(appt, 'wa', nowMs);
+        waState = n >= MAX_ATTEMPTS ? 'opgegeven' : 'wacht';
+        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'whatsapp', templateName: moment.waTemplate, reason: `${reden} (poging ${n}/${MAX_ATTEMPTS})`, httpStatus: r.http_status ?? null, toPhone: appt.lead_phone });
       }
     } else {
-      res.wa = { ok: false, skipped: 'claim-race' };
+      res.wa = { ok: false, skipped: 'claim-race' }; waState = 'wacht';
     }
 
-    // ── Mail (per-kanaal claim + retry, NOOIT dubbel) ──
+    // ── Mail (per-kanaal claim + cap + backoff, permanent = direct stoppen) ──
     if (!mailApplicable) {
       res.mail = { ok: false, skipped: 'geen-email' };
     } else if (appt.bevestiging_mail_sent_at) {
-      res.mail = { ok: true, alreadySent: true };
+      res.mail = { ok: true, alreadySent: true }; mailState = 'klaar';
+    } else if (appt.lead_email_undeliverable_at) {
+      res.mail = { ok: false, skipped: 'email-onbezorgbaar' }; mailState = 'opgegeven';
+    } else if ((appt.bevestiging_mail_attempts || 0) >= MAX_ATTEMPTS) {
+      res.mail = { ok: false, skipped: 'cap-bereikt' }; mailState = 'opgegeven';
+    } else if (inBackoff(appt.bevestiging_mail_next_at)) {
+      res.mail = { ok: false, skipped: 'backoff', next_at: appt.bevestiging_mail_next_at }; mailState = 'wacht';
     } else if (await claimRow(appt.id, 'bevestiging_mail_sent_at')) {
       const r = await stuurMailBevestiging(appt, moment, ctx);
       res.mail = r;
-      if (!r.ok) {
-        await unclaimRow(appt.id, 'bevestiging_mail_sent_at');
-        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'email', reason: r.error || 'onbekend' });
+      if (r.ok) {
+        mailState = 'klaar';
+      } else {
+        const cls = classifySendError({ kanaal: 'mail', reason: r.error, code: r.code });
+        const n = await boekMislukking(appt, 'mail', nowMs);
+        if (cls.soort === 'permanent') {
+          await markeerOnbezorgbaar(appt, cls.reden);
+          mailState = 'opgegeven';
+        } else {
+          mailState = n >= MAX_ATTEMPTS ? 'opgegeven' : 'wacht';
+        }
+        res.mail.soort = cls.soort;
+        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'email', reason: `${cls.soort === 'permanent' ? '[permanent] ' : ''}${cls.reden} (poging ${n}/${MAX_ATTEMPTS})` });
       }
     } else {
-      res.mail = { ok: false, skipped: 'claim-race' };
+      res.mail = { ok: false, skipped: 'claim-race' }; mailState = 'wacht';
     }
 
-    // ── Volledig klaar? Alle TOEPASSELIJKE kanalen gemarkeerd → zet de guard. ──
-    const waKlaar = !waApplicable || res.wa?.ok || res.wa?.alreadySent;
-    const mailKlaar = !mailApplicable || res.mail?.ok || res.mail?.alreadySent;
-    if (waKlaar && mailKlaar) {
-      await claimRow(appt.id, 'bevestiging_sent_at'); // idempotent (WHERE … IS NULL)
-      if (res.wa?.ok || res.mail?.ok) vak.verstuurd += 1;
-      res.klaar = true;
+    // ── Afronden zodra geen enkel kanaal nog wacht ──
+    const states = [waState, mailState].filter((s) => s !== 'nvt');
+    const nogBezig = states.includes('wacht');
+    res.wa_state = waState;
+    res.mail_state = mailState;
+    if (!nogBezig) {
+      if (states.length === 0 || states.includes('klaar')) {
+        await claimRow(appt.id, 'bevestiging_sent_at'); // idempotent (WHERE … IS NULL)
+        if (res.wa?.ok || res.mail?.ok) vak.verstuurd += 1;
+        res.klaar = true;
+      }
+      if (states.includes('opgegeven')) {
+        const redenen = [];
+        if (waState === 'opgegeven') redenen.push(`whatsapp: ${MAX_ATTEMPTS} pogingen mislukt`);
+        if (mailState === 'opgegeven') {
+          redenen.push(appt.lead_email_undeliverable_at
+            ? `mail onbezorgbaar: ${appt.lead_email_undeliverable_reason || 'onbekend'}`
+            : `mail: ${MAX_ATTEMPTS} pogingen mislukt`);
+        }
+        await markeerBevestigingOpgegeven(appt, redenen.join(' · '));
+        vak.opgegeven += 1;
+        res.opgegeven = true;
+      }
     } else {
       res.klaar = false;
     }
@@ -322,6 +425,9 @@ async function verstuur(appt, moment, welkomPhoneId) {
   // ── E-mail (onboarding@) ──
   if (!appt.lead_email) {
     uitkomst.mail = { ok: false, skipped: 'geen-email' };
+  } else if (appt.lead_email_undeliverable_at) {
+    // Eerder permanent gebounced of typefout bij import → niet meer proberen.
+    uitkomst.mail = { ok: false, skipped: 'email-onbezorgbaar' };
   } else {
     try {
       const { subject, text, html } = moment.mail(appt, ctx);
@@ -331,14 +437,39 @@ async function verstuur(appt, moment, welkomPhoneId) {
     } catch (e) {
       uitkomst.mail = { ok: false, error: e?.message || String(e) };
     }
-    // Faillog voor mislukte reminder-mail (spiegel van de WhatsApp-tak). Puur
-    // zichtbaarheid — verandert de guard-/claim-logica NIET. Zonder dit waren
-    // reminder-mailfouten nergens persistent zichtbaar (alleen WA werd gelogd).
     if (uitkomst.mail && !uitkomst.mail.ok && !uitkomst.mail.skipped) {
-      await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'mail', reason: uitkomst.mail.error || uitkomst.mail.code || 'onbekend' });
+      const cls = classifySendError({ kanaal: 'mail', reason: uitkomst.mail.error, code: uitkomst.mail.code });
+      uitkomst.mail.soort = cls.soort;
+      if (cls.soort === 'permanent') await markeerOnbezorgbaar(appt, cls.reden);
+      await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'mail', reason: `${cls.soort === 'permanent' ? '[permanent] ' : ''}${cls.reden}` });
     }
   }
   return uitkomst;
+}
+
+// Reminder-moment mislukt (geen enkel kanaal gelukt): opnieuw proberen of
+// opgeven? Opgeven (claim blijft staan) als er niets zinnigs meer te proberen
+// valt: alle fouten permanent / geen contactgegevens, óf de cap van
+// MAX_ATTEMPTS mislukte pogingen per kanaal (geteld in de faillog) is bereikt.
+// Config-problemen aan onze kant (welkom-lijn/Meta ontbreekt) blijven retryen
+// zoals voorheen — die lossen we op, niet de lead.
+async function reminderRetrybaar(appt, moment, r) {
+  const configSkip = ['welkom-phone-ontbreekt', 'meta-niet-geconfigureerd'];
+  if (configSkip.includes(r.wa?.skipped)) return true;
+  const kanalen = [];
+  if (r.wa && !r.wa.ok && r.wa.error) kanalen.push('whatsapp');
+  if (r.mail && !r.mail.ok && r.mail.error && r.mail.soort !== 'permanent') kanalen.push('mail');
+  if (kanalen.length === 0) return false;
+  for (const kanaal of kanalen) {
+    const { count, error } = await supabaseAdmin.from('afspraak_bericht_faillog')
+      .select('id', { count: 'exact', head: true })
+      .eq('appointment_id', appt.id)
+      .eq('moment', moment.key)
+      .eq('kanaal', kanaal);
+    if (error) return true; // bij twijfel: gedrag van vóór deze wijziging
+    if ((count || 0) < MAX_ATTEMPTS) return true;
+  }
+  return false;
 }
 
 // ── INTERNE MELDING: kandidaten = ECHTE nieuwe boekingen die nog niet gemeld
@@ -445,7 +576,7 @@ export default async function handler(req, res) {
     try {
       const bevMoment = MOMENTEN.find((m) => m.key === 'bevestiging');
       const bevRows = await haalBevestigingKandidaten(nowMs);
-      summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, live });
+      summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, live, nowMs });
     } catch (e) {
       summary.errors.push({ step: 'bevestiging', error: e?.message || String(e) });
     }
@@ -468,14 +599,19 @@ export default async function handler(req, res) {
         if (!gotClaim) continue;
         const r = await verstuur(appt, moment, welkomPhoneId);
         const ietsGelukt = r.wa?.ok || r.mail?.ok;
+        let teruggedraaid = false;
         if (!ietsGelukt) {
-          // Beide kanalen faalden → guard terugdraaien zodat een volgende run
-          // 'em opnieuw probeert (transiente fout mag geen bericht kosten).
-          await unclaimRow(appt.id, moment.kolom);
+          // Niets gelukt → alleen vrijgeven als opnieuw proberen zin heeft
+          // (tijdelijke fout, onder de cap). Anders blijft de claim staan en
+          // is dit moment afgehandeld.
+          if (await reminderRetrybaar(appt, moment, r)) {
+            await unclaimRow(appt.id, moment.kolom);
+            teruggedraaid = true;
+          }
         } else {
           vak.verstuurd += 1;
         }
-        vak.resultaten.push({ id: appt.id, wa: r.wa, mail: r.mail, teruggedraaid: !ietsGelukt });
+        vak.resultaten.push({ id: appt.id, wa: r.wa, mail: r.mail, teruggedraaid, opgegeven: !ietsGelukt && !teruggedraaid });
       }
       summary.momenten[moment.key] = vak;
     }
