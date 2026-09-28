@@ -196,6 +196,10 @@
       recorder: null,
       stukken: [],
       herkenner: null,
+      // Wat Iris kan, van de server. Geen eigen kopie in het scherm: die zou
+      // uit de pas lopen met wat er ook echt uitgevoerd kan worden.
+      snelknoppen: [],
+      nietHier: null,
     },
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
@@ -761,6 +765,8 @@
     try {
       const j = await haal('/api/iris-opdracht?actie=lijst');
       st.items = Array.isArray(j.items) ? j.items : [];
+      st.snelknoppen = Array.isArray(j.snelknoppen) ? j.snelknoppen : [];
+      st.nietHier = j.niet_hier || null;
       st.fout = null;
     } catch (e) {
       st.fout = e?.message || 'Opdrachten niet opgehaald';
@@ -990,6 +996,39 @@
       }
     };
     recorder.start();
+  };
+
+  /**
+   * Een snelknop vult het veld en zet de cursor achteraan.
+   *
+   * Een INDEX in het onclick, geen tekst. Een string in een HTML-attribuut
+   * betekent aanhalingstekens ontsnappen in een taal die dat zelf ook doet, en
+   * dat gaat mis zodra er een apostrof in een zin staat -- zie de les over
+   * JSON.stringify in attributen in CLAUDE.md.
+   *
+   * Overschrijft nooit wat er al staat: wie halverwege een zin op een knop
+   * drukt, is die zin anders kwijt.
+   */
+  window.__irisOpdrachtVoorbeeld = (i) => {
+    const st = S.opdrachten;
+    const k = (st.snelknoppen || [])[Number(i)];
+    if (!k) return;
+    const staat = String(st.nieuw || '');
+    if (staat.trim()) {
+      toast('Er staat al iets in het veld. Maak dat eerst leeg.', 'warn');
+      return;
+    }
+    st.nieuw = String(k.tekst || '');
+    hertekenen();
+    // Na het hertekenen bestaat het veld opnieuw, dus de cursor moet er daarna
+    // heen. Zonder dit staat de tekst er wel, maar typt de volgende toetsaanslag
+    // ergens anders.
+    queueMicrotask(() => {
+      const veld = document.getElementById('irisOpdrachtVeld');
+      if (!veld) return;
+      veld.focus();
+      veld.selectionStart = veld.selectionEnd = veld.value.length;
+    });
   };
 
   window.__irisOpdrachtMaak = async () => {
@@ -1744,6 +1783,7 @@
           onclick="__irisOpdrachtMaak()" ${st.maakt || !(st.nieuw || '').trim() ? 'disabled' : ''}>${st.maakt ? 'Bezig…' : 'Uitzoeken'}</button>
       </div>
       ${neemtOp ? `<div style="font-size:11px;color:var(--rose);margin-top:6px">● Aan het opnemen — klik nog eens om te stoppen.</div>` : ''}
+      ${snelknoppen()}
     </div>`;
 
     let lijst;
@@ -1756,6 +1796,36 @@
       ${lijst}
     </div>
     <style>@keyframes irisPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
+  }
+
+  /**
+   * Wat je Iris kunt vragen, als knoppen onder het veld.
+   *
+   * ── WAAROM DIT ER NIET STOND ────────────────────────────────────────────
+   * Het veld had één voorbeeld in de placeholder. Wat Iris kan stond wél
+   * uitgeschreven -- in de systeemtekst die naar het taalmodel gaat. Het model
+   * wéét dus wat het kan; jij moest het raden.
+   *
+   * Klikken vult het veld met een HALVE zin. Een hele zin nodigt uit om te
+   * versturen wat er staat; een halve dwingt je de naam en de reden zelf in te
+   * vullen -- en die mag Iris nooit verzinnen.
+   *
+   * De lijst komt van de server, zodat er geen tweede lijst is die uit de pas
+   * kan lopen met wat er ook echt uitgevoerd kan worden.
+   */
+  function snelknoppen() {
+    const st = S.opdrachten;
+    const knoppen = Array.isArray(st.snelknoppen) ? st.snelknoppen : [];
+    if (!knoppen.length) return '';
+    return `<div style="margin-top:10px">
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:5px">Of begin hiermee:</div>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        ${knoppen.map((k, i) => `<button class="chip" style="font-size:11.5px;padding:4px 11px"
+          onclick="__irisOpdrachtVoorbeeld(${i})"
+          title="${esc(k.staptype || '')}">${esc(k.label || k.staptype || '')}</button>`).join('')}
+      </div>
+      ${st.nietHier ? `<div style="font-size:11px;color:var(--text-3);margin-top:6px">${esc(st.nietHier)}</div>` : ''}
+    </div>`;
   }
 
   function opdrachtRij(o) {
