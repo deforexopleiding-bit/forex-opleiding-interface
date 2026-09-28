@@ -35,8 +35,9 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen, GEEN_WERK, werkbakCategorieFilter } from './_lib/iris/instellingen.js';
-import { vensterStand, magVersturen } from './_lib/iris/venster.js';
+import { vensterStand, magVersturen, BIJNA_DICHT_MINUTEN } from './_lib/iris/venster.js';
 import { contactZoekFilter } from './_lib/iris/zoekfilter.js';
+import { aandachtsregel } from './_lib/iris/aandacht.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STANDAARD_LIMIET = 50;
@@ -130,12 +131,62 @@ export default async function handler(req, res) {
 
   try {
     if (actie === 'gesprek') return await geefGesprek(q, res);
+    if (actie === 'aandacht') return await geefAandacht(res);
     if (actie === 'lijst') return await geefLijst(q, res);
     return res.status(400).json({ error: `onbekende actie: ${actie}` });
   } catch (e) {
     console.error('[iris-post]', actie, e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
+}
+
+// ── Wat er nú moet gebeuren ──────────────────────────────────────────────────
+//
+// Drie tellingen, drie head-queries. Geen rij wordt opgehaald: `head: true`
+// met `count: 'exact'` vraagt de databank alleen om het getal. Voor een balk
+// die op élke tab staat en bij elke poll ververst, is dat het verschil tussen
+// een regel tekst en een halve megabyte.
+
+async function geefAandacht(res) {
+  const nu = new Date();
+  const tellingen = { venster_bijna_dicht: 0, melding_hangt: 0, wacht_op_ons: 0 };
+
+  // 1. Vensters die bijna dichtgaan. Alleen WhatsApp -- voor mail bestaat het
+  //    venster niet (P-1). De ondergrens is nu minus 24 uur plus de marge:
+  //    daarbinnen staat het venster nog open maar niet lang meer.
+  const dicht = new Date(nu.getTime() - 24 * 3600 * 1000);
+  const bijna = new Date(dicht.getTime() + BIJNA_DICHT_MINUTEN * 60 * 1000);
+  const { count: cVenster, error: eVenster } = await supabaseAdmin
+    .from('iris_gesprekken')
+    .select('id', { count: 'exact', head: true })
+    .eq('kanaal', 'whatsapp')
+    .gt('laatste_inbound', dicht.toISOString())
+    .lte('laatste_inbound', bijna.toISOString());
+  if (eVenster) throw new Error('vensters tellen: ' + eVenster.message);
+  tellingen.venster_bijna_dicht = Number(cVenster || 0);
+
+  // 2. Meldingen die hangen. De tabel bestaat pas na de migratie van 28
+  //    september; ontbreekt hij, dan is het getal nul en niet een storing.
+  const { count: cHangt, error: eHangt } = await supabaseAdmin
+    .from('iris_opvolgingen')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'verlopen');
+  if (eHangt && !/does not exist/i.test(String(eHangt.message)) && eHangt.code !== '42P01') {
+    throw new Error('opvolgingen tellen: ' + eHangt.message);
+  }
+  tellingen.melding_hangt = Number(cHangt || 0);
+
+  // 3. Werk dat wacht. Dezelfde twee sloten als het lijstfilter: spam telt niet
+  //    mee, want spam is geen werk (P-2).
+  const { count: cWacht, error: eWacht } = await supabaseAdmin
+    .from('iris_gesprekken')
+    .select('id', { count: 'exact', head: true })
+    .in('status', ['nieuw', 'wacht_op_ons'])
+    .or(werkbakCategorieFilter());
+  if (eWacht) throw new Error('werk tellen: ' + eWacht.message);
+  tellingen.wacht_op_ons = Number(cWacht || 0);
+
+  return res.status(200).json({ tellingen, regel: aandachtsregel(tellingen) });
 }
 
 // ── De lijst ─────────────────────────────────────────────────────────────────

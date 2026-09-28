@@ -86,6 +86,8 @@ function ongedefinieerdeAanroepen(pad) {
     'yield', 'void', 'delete', 'instanceof',
   ]);
 
+  const CSS_PSEUDO = new Set(['not', 'is', 'where', 'has', 'nth-child', 'nth-of-type', 'lang', 'dir']);
+
   const mist = new Set();
   for (const m of code.matchAll(/([A-Za-z_$][\w$]*)\s*\(([^)]{0,3})\)?/g)) {
     const naam = m[1];
@@ -97,6 +99,11 @@ function ongedefinieerdeAanroepen(pad) {
     const ervoor = code.slice(0, m.index);
     if (/[.\w$]$/.test(ervoor)) continue;        // eigenschap (x.foo) of deel van een naam
     if (/@$/.test(ervoor)) continue;             // CSS-at-regel: @media (…), @supports (…)
+    // CSS-pseudoklasse: .iris-post:not(.heeft-keuze). Die staat in de
+    // stijlregels die deze module zelf meebrengt, en `not` is geen functie.
+    // Alleen bij een DIRECT voorafgaande dubbele punt — een ternary schrijft
+    // `? a() : b()` met een spatie, dus die raken we hier niet.
+    if (/:$/.test(ervoor) && CSS_PSEUDO.has(naam)) continue;
     const laatsteWoord = ervoor.match(/([A-Za-z_$][\w$]*)\s*$/);
     if (laatsteWoord && !WOORD_ERVOOR.has(laatsteWoord[1])) continue;
     mist.add(naam);
