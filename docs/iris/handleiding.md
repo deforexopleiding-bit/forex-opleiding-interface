@@ -66,6 +66,16 @@ Na Verstuur telt er dertig seconden af, met een knop **Toch niet**. Binnen die
 dertig seconden kun je het nog tegenhouden. Daarna is het weg, en dan is het
 ook echt weg — er is geen terughalen.
 
+**Je mag het scherm intussen sluiten.** Het bericht staat op de server klaar,
+niet in je browser. Klap je je laptop dicht of valt je verbinding weg, dan
+vertrekt het gewoon op tijd. Dat stond er vroeger anders: toen betekende het
+tabblad sluiten dat het bericht nooit wegging, en niets zei dat. De balk zegt
+nu zelf welke van de twee situaties geldt.
+
+Eén gevolg daarvan: druk je op **Toch niet** op het moment dat hij net vertrekt,
+dan krijg je te horen dat het te laat is. Dat is met opzet — een melding
+"teruggehaald" terwijl de klant het bericht al heeft, is erger dan geen knop.
+
 Klopt het antwoord niet? Spreek gewoon in wat er anders moet en druk op
 **Opnieuw**. Iris overschrijft het concept; er komt geen tweede versie naast.
 
