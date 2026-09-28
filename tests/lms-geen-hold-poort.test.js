@@ -210,14 +210,12 @@ test('CONTRACT: geen enkel bestand onder api/ roept de hold-poort nog aan', () =
     'de hold-poort is teruggekomen in: ' + schuldig.join(', '));
 });
 
-test('CONTRACT: de automatische verzendpaden vragen de STILTE-poort, alle drie', () => {
-  // Alle paden waarlangs een klant automatisch een bericht kan krijgen. De
-  // bulk-flow hoort hier sinds 21 september bij: daar stond de hold-poort en
-  // die is VERVANGEN, niet weggehaald — een bulk-ronde van gisteren is geen
-  // vrijbrief om vandaag tegen een afspraak in te manen.
+test('CONTRACT: de automatische verzendpaden vragen de STILTE-poort', () => {
+  // De motor en de gesprek-reminders. De bulk-flow hoorde hier van 21 tot
+  // 28 september bij; sindsdien draait bulk bewust zonder LMS-poort (zie
+  // tests/bulk-send-zonder-lms-poort.test.js).
   for (const kort of ['api/_lib/dunning-engine.js',
-                      'api/cron-dunning-conversation-reminders.js',
-                      'api/cron-dunning-bulk-send.js']) {
+                      'api/cron-dunning-conversation-reminders.js']) {
     const bron = lees(kort);
     assert.match(bron, /haalStilteStand\(/, kort + ' haalt de stilte-stand niet op');
     assert.match(bron, /stilteBlokkade\(/,  kort + ' toetst de stilte-poort niet');

@@ -158,6 +158,12 @@ gisteren, en gaat niet meer uit op een pauze die een script heeft gezet. Wil
 Maxim bulk tóch helemaal zonder LMS-poort, dan is dat één import en één
 `if`-blok minder in dat bestand.
 
+**Update 28 september 2026:** op verzoek van Maxim is de LMS-poort uit
+`cron-dunning-bulk-send.js` gehaald. Een goedgekeurde bulk-ronde gaat nu ook
+uit naar een klant met een lopende stilte; de teller `lms_stilte` staat niet
+meer in het bulk-rapport. De motor en de gesprek-reminders houden de poort.
+Gedrag vastgelegd in `tests/bulk-send-zonder-lms-poort.test.js`.
+
 Eén ding is bij die verhuizing meteen rechtgezet: de stand werd opgehaald
 vóór de check "zijn er wel wachtende ontvangers?". Deze cron draait elke 3
 minuten, dus dat waren 480 bevragingen per dag voor niets. De bevraging
