@@ -1008,6 +1008,37 @@
     }
   }
 
+  /**
+   * Bellen vanuit de belrij.
+   *
+   * Opent het belvenster met het nummer al ingevuld -- dat scheelt per
+   * telefoontje een handeling en een kans op een typefout, en dat was het hele
+   * punt van B-2.
+   *
+   * Is de softphone er niet (niet geladen, geen SIP-account), dan zeggen we dat
+   * en vallen we terug op `tel:`. Stil niets doen zou betekenen dat je twee
+   * keer drukt en dan zelf gaat zoeken waar het nummer stond.
+   */
+  window.__irisBel = (i) => {
+    const r = (S.belrij.items || [])[Number(i)];
+    if (!r || !r.telefoon) { toast('Geen telefoonnummer bij dit contact.', 'warn'); return; }
+
+    const sp = window.KlxSoftphone;
+    if (sp && typeof sp.open === 'function') {
+      sp.open({
+        phone: r.telefoon,
+        name: r.naam || null,
+        customerId: r.customer_id || null,
+        source: 'iris-belrij',
+      });
+      return;
+    }
+
+    toast('De softphone is hier niet beschikbaar; we openen je telefoon-app.', 'warn');
+    try { window.location.href = 'tel:' + String(r.telefoon).replace(/[^\d+]/g, ''); }
+    catch (_) { toast('Bellen lukt hier niet.', 'error'); }
+  };
+
   window.__irisBelrijEigenaar = (v) => {
     S.belrij.eigenaar = String(v || 'alle');
     S.belrij.opgehaald = false;
@@ -2310,6 +2341,30 @@
      Wie moet er gebeld worden, en hoe vaak is dat al geprobeerd. Bellen zelf
      blijft de softphone; dit is de lijst ernaast. */
 
+  /**
+   * De belknop.
+   *
+   * ── HERGEBRUIK, GEEN TWEEDE SOFTPHONE ───────────────────────────────────
+   * `window.KlxSoftphone` staat al in deze schil (klanten-v2/index.html laadt
+   * hem) en wordt door Leads, Events en Mentoren gebruikt. Er een tweede naast
+   * zetten zou betekenen dat een wijziging aan de SIP-kant op twee plekken
+   * door moet -- dezelfde afweging als bij de microfoon.
+   *
+   * Een INDEX in het onclick, geen nummer. Twee redenen: een string in een
+   * HTML-attribuut is de bekende val (CLAUDE.md), en een telefoonnummer hoort
+   * niet in de opmaak te staan waar een schermafdruk hem meeneemt.
+   */
+  function belKnop(r, i) {
+    if (!r || !r.telefoon) {
+      return `<span title="Geen telefoonnummer bij dit contact" style="font-size:10.5px;color:var(--text-3);white-space:nowrap">geen nummer</span>`;
+    }
+    const titel = r.mag_vandaag_nog === false
+      ? 'Deze persoon is vandaag al gebeld. Nog eens bellen kan, maar weet dat het de tweede is.'
+      : `Bellen via de softphone${r.telefoon_kort ? ' (' + r.telefoon_kort + ')' : ''}`;
+    return `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px;white-space:nowrap"
+      onclick="__irisBel(${i})" title="${esc(titel)}">Bellen</button>`;
+  }
+
   function belrijTab() {
     const st = S.belrij;
     if (!st.opgehaald && !st.bezig) queueMicrotask(haalBelrij);
@@ -2322,30 +2377,41 @@
     const kop = `<div style="display:flex;gap:6px;align-items:center;padding:14px 0 12px;flex-wrap:wrap">
       ${knop('alle', 'Iedereen')}${knop('mij', 'Van mij')}
       ${st.drempel ? `<span style="font-size:11px;color:var(--text-3);margin-left:6px">
-        Escaleren na ${esc(String(st.drempel.pogingen))} pogingen in ${esc(String(st.drempel.dagen))} dagen.</span>` : ''}
+        Escaleren na ${esc(String(st.drempel.pogingen))} pogingen in ${esc(String(st.drempel.dagen))} dagen — de stand staat per rij.</span>` : ''}
+      <div style="flex:1"></div>
+      <span style="font-size:11px;color:var(--text-3)">${esc(String(st.items.length))} te bellen</span>
     </div>`;
 
     if (!st.items.length) return `<div style="max-width:720px;margin:0 auto;padding:0 20px">${kop}${NIETS('Niemand te bellen. Dat is goed nieuws.')}</div>`;
 
-    const rijen = st.items.map((r) => {
+    const rijen = st.items.map((r, i) => {
       const t = r.telling || {};
       // Een lijst die niet zegt dat iemand vandaag al aan de beurt is geweest,
       // levert precies het telefoontje op dat de klant twee keer krijgt.
       const opTijd = r.mag_vandaag_nog === false
         ? `<span style="font-size:10.5px;color:var(--text-3)">vandaag geweest</span>`
         : '';
-      const esc8 = r.escalatie && r.escalatie.moet
+      // `escaleren`, niet `moet`. Het endpoint geeft { escaleren, reden } terug
+      // -- dit stond op `r.escalatie.moet` en dat bestaat niet, dus deze badge
+      // is nooit één keer op het scherm verschenen.
+      const esc8 = r.escalatie && r.escalatie.escaleren
         ? `<span title="${esc(r.escalatie.reden || '')}" style="font-size:10.5px;padding:2px 7px;border-radius:9px;background:var(--amber-soft,var(--surface-2));color:var(--amber);font-weight:600">escaleren</span>`
+        : '';
+      // B-1: de STAND per rij, niet de regel in de kop. "2 van 3 pogingen"
+      // zegt in vier woorden wat die kopregel je zelf liet uitrekenen.
+      const stand = r.voortgang
+        ? `<div style="font-size:11px;color:${r.voortgang.klaar ? 'var(--amber)' : 'var(--text-3)'};margin-top:3px">
+             ${esc(r.voortgang.tekst)}${t.laatste_contact ? ' · gesproken ' + esc(tijdKort(t.laatste_contact)) : ''}
+           </div>`
         : '';
       return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:7px;padding:10px 12px;background:var(--surface);display:flex;gap:10px;align-items:baseline">
         <div style="min-width:0;flex:1">
           <div style="font-size:12.5px;font-weight:600">${esc(r.naam || 'Onbekend')}</div>
           <div style="font-size:11.5px;color:var(--text-2);margin-top:2px">${esc(r.reden || '')}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:3px">
-            ${esc(String(t.totaal ?? 0))} poging(en)${t.laatste ? ' · laatst ' + esc(tijdKort(t.laatste)) : ''}
-          </div>
+          ${stand}
         </div>
         ${esc8}${opTijd}
+        ${belKnop(r, i)}
         <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(r.eigenaar || '')}</span>
       </div>`;
     }).join('');
