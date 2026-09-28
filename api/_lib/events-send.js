@@ -205,7 +205,15 @@ export async function sendEventWhatsAppTemplate({
   // markeert de deelnemer daarom niet als WHATSAPP_ONBEREIKBAAR. Vijftig
   // mensen onbereikbaar noemen omdat een template stuk is, maakt die
   // markering waardeloos.
-  const bodyVarsN = (String(templateRow.body_text || '').match(/\{\{\d+\}\}/g) || []).length;
+  // TWEE VORMEN TELLEN. Sinds C4 staat een body in de DB soms in de
+  // named-vorm ({{klant.voornaam}}) en soms positioneel ({{1}}) — van de drie
+  // vragenlijst-templates is er één positioneel en zijn er twee named. Alleen
+  // op {{N}} tellen zou die named-templates missen, en juist daar zit de
+  // mapping die kan ontbreken. Meta kent alleen de positionele vorm, dus in
+  // beide gevallen moet er een mapping zijn.
+  const bodyTekst  = String(templateRow.body_text || '');
+  const bodyVarsN  = (bodyTekst.match(/\{\{\s*\d+\s*\}\}/g) || []).length
+                   + (bodyTekst.match(/\{\{\s*[a-z_]+\.[a-z_]+\s*\}\}/gi) || []).length;
   const heeftMapping = !!(bodyMapping && typeof bodyMapping === 'object'
                           && Object.keys(bodyMapping).length > 0);
   if (bodyVarsN > 0 && !heeftMapping) {

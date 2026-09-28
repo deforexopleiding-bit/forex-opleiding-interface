@@ -10,7 +10,8 @@
 //                 (dezelfde URL die ook gebruikt wordt door
 //                 attendee.vragenlijst_link in template-variables.js)
 //   - Template  : EVENTS_QUESTIONNAIRE_TEMPLATE_NAME, default
-//                 'vragenlijst_herinnering'
+//                 'vragenlijst_herinnering_correct' (zie het blok bij
+//                 TEMPLATE_NAME — de oude default bestond niet)
 //   - Subject   : "Vul je vragenlijst in voor <event.title>"
 //   - Body      : korte uitnodiging om de vragenlijst af te ronden
 //
@@ -20,7 +21,8 @@
 //
 // CONFIGURATIE:
 //   PUBLIC_BASE_URL                          (env, fallback vercel.app)
-//   EVENTS_QUESTIONNAIRE_TEMPLATE_NAME       (env, fallback 'vragenlijst_herinnering')
+//   EVENTS_QUESTIONNAIRE_TEMPLATE_NAME       (env, fallback
+//                                            'vragenlijst_herinnering_correct')
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventMail, wrapEmailHtml } from '../mailer.js';
@@ -28,7 +30,32 @@ import { sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl';
-const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering_v3';
+// ── DE TEMPLATE, EN WAAROM DEZE ──────────────────────────────────────────
+// GEMETEN 28 september: 'vragenlijst_herinnering_v3' BESTAAT NIET in
+// whatsapp_meta_templates. Elke WhatsApp uit dit bestand faalde dus met
+// "template niet gevonden" — dat is een deel van de 54 stappen in die bucket.
+// De naam stond alleen hier; geen seed, geen SQL, geen andere code.
+//
+// Maxim kiest 'vragenlijst_herinnering_correct': het APPROVED nl-template dat
+// de automatisatie 'Vragenlijst-herinnering' sinds 17/09 gebruikt. De andere
+// twee kandidaten ('vragenlijst_herinnering' en '_v2') bestaan ook en zijn
+// APPROVED, maar die zijn niet in gebruik.
+const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering_correct';
+
+// ── DE MAPPING, ZOALS DE ANDERE VIER VERZENDPADEN ───────────────────────
+// Body van dat template: 'Hoi {{1}}, je plek voor de {{2}} staat...'
+// (in de DB staat de named-vorm {{klant.voornaam}} / {{event.titel}}; de
+// positionele vorm is wat Meta kent).
+//
+// FALLBACK, geen overrule: staat er een meta_param_mapping op de templaterij,
+// dan wint die. Deze regel zorgt dat de send niet van dat jsonb-veld afhangt.
+//
+// LET OP DE EERSTE KEY. Het template noemt 'klant.voornaam', maar dat leest
+// uit de CUSTOMER-context en die geeft dit pad niet mee — alleen event,
+// attendee en moduleContext. getCustomerValue returnt dan stil een lege
+// string, dus 'Hoi , je plek...'. Vandaar 'attendee.voornaam', dat uit
+// attendee.first_name leest en hier dus wél resolvet.
+const PARAM_MAPPING   = { body: { 1: 'attendee.voornaam', 2: 'event.titel' } };
 const TEMPLATE_LANG   = 'nl';
 
 function escHtml(s) {
@@ -137,6 +164,7 @@ export async function sendEventAttendeeQuestionnaire({ attendeeId, sentByUserId 
         templateName : TEMPLATE_NAME,
         languageCode : TEMPLATE_LANG,
         sentByUserId : sentByUserId || null,
+        paramMappingOverride : PARAM_MAPPING,
       }),
       sendQuestionnaireMail({
         firstName       : attendee.first_name,

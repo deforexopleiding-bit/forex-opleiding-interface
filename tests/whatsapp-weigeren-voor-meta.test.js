@@ -214,8 +214,11 @@ test('(c) de mapping-guard staat VOOR de resolve en de Meta-call', () => {
 });
 
 test('(c) hij kijkt naar de body EN naar beide mapping-bronnen', () => {
-  assert.match(SEND, /body_text \|\| ''\)\.match\(\/\\\{\\\{\\d\+\\\}\\\}\/g\)/,
-    'het aantal {{N}} uit de body van de template');
+  // De telling komt uit body_text van de templaterij. De twee vormen die
+  // geteld worden staan in hun eigen test hieronder.
+  assert.match(SEND, /const bodyTekst\s+= String\(templateRow\.body_text \|\| ''\)/,
+    'de body van de template is de bron van de telling');
+  assert.match(SEND, /const bodyVarsN\s+= \(bodyTekst\.match/);
   assert.match(SEND, /const heeftMapping = !!\(bodyMapping/);
   // bodyMapping is DB-eerst met de stap-mapping als fallback.
   assert.match(SEND, /const bodyMapping = dbMapping \|\| overrideMapping/);
@@ -298,4 +301,79 @@ test('de guards zitten in events-send, dus alle vijf de paden erven ze', () => {
     assert.doesNotMatch(zonderUitleg(bron), /isE164\(/,
       f + ' hoort de nummer-check NIET zelf te doen - die staat in events-send');
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HET QUESTIONNAIRE-PAD — TEMPLATE DIE NIET BESTOND + ONTBREKENDE MAPPING
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// GEMETEN 28 september: 'vragenlijst_herinnering_v3' bestaat NIET in
+// whatsapp_meta_templates, dus elke WhatsApp uit dit pad faalde met "template
+// niet gevonden". Er staan drie APPROVED nl-templates, alle met een mapping:
+// 'vragenlijst_herinnering' (positioneel), '_correct' en '_v2' (named).
+// Maxim kiest '_correct' — dat gebruikt de automatisatie sinds 17/09.
+
+const QI = zonderUitleg(
+  readFileSync(join(ROOT, 'api/_lib/events-questionnaire-invite.js'), 'utf8'));
+
+test('het questionnaire-pad gebruikt een template die BESTAAT', () => {
+  assert.match(QI, /'vragenlijst_herinnering_correct'/,
+    'de gekozen template hoort in de code te staan');
+  assert.doesNotMatch(QI, /vragenlijst_herinnering_v3/,
+    'de niet-bestaande naam hoort weg te zijn');
+});
+
+test('de v3-naam staat NERGENS meer in code of seeds', () => {
+  // Hij stond op precies een plek: de fallback in dit bestand. Deze test
+  // bewaakt dat hij niet via een seed of een ander bestand terugkomt.
+  const bestanden = [
+    'api/_lib/events-questionnaire-invite.js',
+    'api/events-attendee-send-questionnaire.js',
+    'api/_lib/events-send.js',
+    'api/_lib/events-automation-engine.js',
+  ];
+  for (const f of bestanden) {
+    let bron;
+    try { bron = readFileSync(join(ROOT, f), 'utf8'); } catch { continue; }
+    // In events-send mag de naam in een TOELICHTING staan (de meting), maar
+    // niet in code.
+    assert.doesNotMatch(zonderUitleg(bron), /vragenlijst_herinnering_v3/,
+      f + ' noemt de niet-bestaande template nog in code');
+  }
+});
+
+test('het questionnaire-pad geeft nu een mapping mee, zoals de andere vier', () => {
+  assert.match(QI, /const PARAM_MAPPING\s+= \{ body: \{ 1: 'attendee\.voornaam', 2: 'event\.titel' \} \}/);
+  assert.match(QI, /paramMappingOverride : PARAM_MAPPING/);
+  // Precies een verzendaanroep in dit bestand, en die heeft de mapping.
+  const sends = (QI.match(/sendEventWhatsAppTemplate\(\{/g) || []).length;
+  assert.equal(sends, 1, 'een verzendaanroep - de twee andere plekken zijn logComms');
+});
+
+test("de mapping gebruikt attendee.voornaam en NIET klant.voornaam", () => {
+  // Het template noemt {{klant.voornaam}}, maar dat leest uit de CUSTOMER-
+  // context en die geeft dit pad niet mee (alleen event, attendee,
+  // moduleContext). getCustomerValue returnt dan stil '' en de klant krijgt
+  // 'Hoi , je plek voor...'. Vandaar attendee.voornaam.
+  assert.match(QI, /1: 'attendee\.voornaam'/);
+  assert.doesNotMatch(QI, /1: 'klant\.voornaam'/);
+  // En het bewijs dat de customer-resolver stil leeg teruggeeft.
+  const tv = readFileSync(join(ROOT, 'api/_lib/template-variables.js'), 'utf8');
+  assert.match(tv, /function getCustomerValue\(customer, key\) \{\s*\n\s*if \(!customer\) return '';/,
+    'als dit ooit gaat gooien in plaats van leeg teruggeven, verandert het risico');
+});
+
+test('(c) de mapping-guard telt OOK named placeholders', () => {
+  // Sinds C4 staat een body soms named in de DB. Van de drie
+  // vragenlijst-templates is er een positioneel en zijn er twee named. Alleen
+  // op {{N}} tellen zou juist die twee missen.
+  const tel = (t) => (t.match(/\{\{\s*\d+\s*\}\}/g) || []).length
+                   + (t.match(/\{\{\s*[a-z_]+\.[a-z_]+\s*\}\}/gi) || []).length;
+  assert.equal(tel('Hoi {{1}}, je plek voor {{2}} staat klaar!'), 2, 'positioneel');
+  assert.equal(tel('Hoi {{klant.voornaam}}, je plek voor de {{event.titel}} staat...'), 2, 'named');
+  assert.equal(tel('Hoi {{attendee.voornaam}}, je plek voor {{event.titel}}...'), 2, 'named v2');
+  assert.equal(tel('Geen variabelen hier.'), 0, 'zonder variabelen geen guard');
+  // En de bron telt beide vormen.
+  assert.match(SEND, /bodyTekst\.match\(\/\\\{\\\{\\s\*\\d\+/, 'positionele telling');
+  assert.match(SEND, /\[a-z_\]\+\\\.\[a-z_\]\+/, 'named telling');
 });
