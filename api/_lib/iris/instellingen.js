@@ -49,6 +49,58 @@ export const CATEGORIEEN = Object.freeze([
   'spam',
 ]);
 
+/**
+ * Categorieën waar geen mens iets mee hoeft te doen.
+ *
+ * ── WAAROM DIT EEN APARTE LIJST IS EN GEEN STATUS ───────────────────────────
+ * `spam` is een echte categorie — reclame, phishing, onzin — en templates.js
+ * geeft er terecht geen enkele antwoordsjabloon voor. Iris ziet dus prima dat
+ * "Meta for Business" geen klant is. En dan zette cron-iris-werk de status
+ * alsnog op `wacht_op_ons`, want dat deed hij voor élk ingedeeld bericht.
+ * Daarmee was het verschil tussen een triage-hulp en gewoon een tweede inbox
+ * precies één regel code.
+ *
+ * De stand staat NIET in `iris_gesprekken.status`. Die kolom heeft een CHECK
+ * met vijf waarden; er een zesde bij zetten is een migratie, en een migratie
+ * die nog niet gedraaid is, is een kapotte schrijfactie. Bovendien zou het
+ * dezelfde wetenschap op twee plekken zetten: de categorie zegt het al.
+ *
+ * `bounce_systeem` staat hier met opzet NIET bij. Een onbestelbare mail ziet
+ * eruit als ruis, maar betekent vaak dat een adres dood is — en dat is werk.
+ *
+ * Is een gesprek verkeerd ingedeeld, dan zet één klik het terug (iris-indeling).
+ * Dat is meteen de plek waar zichtbaar wordt dat Iris het mis had.
+ */
+export const GEEN_WERK = Object.freeze(['spam']);
+
+/**
+ * Hoort een gesprek met deze categorie in de werkbak?
+ *
+ * Een lege of onbekende categorie hoort er WÉL in: nog-niet-ingedeeld is geen
+ * reden om iets te verbergen. Dat is de veilige kant — te veel tonen kost
+ * aandacht, te weinig tonen kost een klant.
+ */
+export function hoortInWerkbak(categorie) {
+  const c = String(categorie || '').trim();
+  if (!c) return true;
+  return !GEEN_WERK.includes(c);
+}
+
+/**
+ * Het PostgREST-filter dat de werkbak nodig heeft, als or-tekenreeks.
+ *
+ * ── DE VAL DIE HIER IN ZIT ──────────────────────────────────────────────────
+ * Het voor de hand liggende `.not('categorie','in','(spam)')` wordt in SQL
+ * `NOT (categorie IN ('spam'))`, en dat is NULL voor een rij zonder categorie
+ * — dus die rij valt weg. Precies de nog-niet-ingedeelde gesprekken, die het
+ * hardst op iemand wachten, zouden dan uit de werkbak verdwijnen.
+ *
+ * Vandaar de expliciete `categorie.is.null` ernaast.
+ */
+export function werkbakCategorieFilter(geenWerk = GEEN_WERK) {
+  return `categorie.is.null,categorie.not.in.(${geenWerk.join(',')})`;
+}
+
 /** De drie standen. 'uit' = niets. 'concept' = schrijven, niet sturen. 'zelf' = sturen. */
 export const STANDEN = Object.freeze(['uit', 'concept', 'zelf']);
 
