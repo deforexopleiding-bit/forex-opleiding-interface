@@ -35,6 +35,7 @@ export const STAP_LABELS = Object.freeze({
   taak_aanmaken: 'Een taak aanmaken voor een mens',
   belrij_toevoegen: 'Op de belrij zetten',
   factuur_nakijken: 'Laten nakijken of een factuur betaald is',
+  opvolging_instellen: 'Bijhouden of er gereageerd wordt',
 });
 
 /** Waar een aangemaakte taak te vinden is. Er is (nog) geen link per taak. */
@@ -76,6 +77,16 @@ export function resultaatRegels(type, resultaat) {
   }
   if (resultaat.belrij_id) {
     r.push({ tekst: 'Op de belrij gezet' });
+  }
+  if (resultaat.opvolging_id) {
+    // De datum is het hele punt: "opvolging ingesteld" zonder tot wanneer is
+    // net zo weinig waard als de taakregel die O-2 verving.
+    const tot = resultaat.tot ? String(resultaat.tot).slice(0, 10) : null;
+    r.push({
+      tekst: tot
+        ? `Opvolging loopt tot ${tot} — komt er niets, dan krijg je bericht`
+        : 'Opvolging ingesteld',
+    });
   }
   if (resultaat.wordt) {
     // Verlengen: was → wordt is het enige dat iemand hier wil weten.
@@ -187,6 +198,7 @@ export const SNELKNOPPEN = Object.freeze([
   { staptype: 'factuur_nakijken', label: 'Factuur nakijken', tekst: 'Kijk na of al betaald is: ' },
   { staptype: 'taak_aanmaken', label: 'Taak aanmaken', tekst: 'Maak een taak aan: ' },
   { staptype: 'belrij_toevoegen', label: 'Op de belrij zetten', tekst: 'Zet op de belrij: ' },
+  { staptype: 'opvolging_instellen', label: 'Verwittig me als er niets komt', tekst: 'Verwittig me als er geen reactie komt op ' },
 ]);
 
 /**

@@ -283,6 +283,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron-iris-opvolging",
+      "schedule": "15 7 * * *"
+    },
+    {
       "path": "/api/cron-iris-gezondheid",
       "schedule": "0 5 * * *"
     }

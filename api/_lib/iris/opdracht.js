@@ -49,6 +49,7 @@ export const STAPTYPES = Object.freeze([
   'lms_toegang_verlengen', 'lms_uitnodiging', 'lms_on_hold',
   'belofte_vastleggen', 'afbetalingsplan',
   'taak_aanmaken', 'belrij_toevoegen', 'factuur_nakijken',
+  'opvolging_instellen',
 ]);
 
 /**
@@ -156,6 +157,13 @@ export const SYSTEEM_TEKST = [
   '  taak_aanmaken          een taak voor een mens',
   '  belrij_toevoegen       iemand op de belrij zetten',
   '  factuur_nakijken       laten nakijken of een factuur al betaald is',
+  '  opvolging_instellen    bijhouden of er gereageerd wordt, en bericht geven',
+  '                         als dat binnen X dagen uitblijft',
+  '',
+  'Vraagt iemand om verwittigd te worden als een reactie uitblijft, gebruik dan',
+  'opvolging_instellen en NIET taak_aanmaken. Een taak is een regel in een',
+  'lijstje; een opvolging kijkt zelf en geeft bericht. Zet in parameters een',
+  '"dagen" (een geheel getal) en een "omschrijving" in gewone taal.',
   '',
   'Wat je NIET kunt, en ook niet moet voorstellen: iemand blokkeren, iemands',
   'toegang intrekken, een factuur op betaald zetten. Dat doet een mens.',
