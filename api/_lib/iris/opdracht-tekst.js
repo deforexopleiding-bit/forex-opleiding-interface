@@ -162,3 +162,38 @@ export function bouwVerloop(verloop) {
       details: r.details && typeof r.details === 'object' ? r.details : null,
     }));
 }
+
+/**
+ * Wat je Iris kunt vragen, als knoppen.
+ *
+ * ── WAAROM DIT BESTOND EN NIET ZICHTBAAR WAS (O-3) ──────────────────────────
+ * Het invoerveld had één voorbeeld in de placeholder en verder niets. Wat Iris
+ * kan stond wél ergens uitgeschreven -- in de systeemtekst van opdracht.js --
+ * maar die lijst gaat naar het taalmodel en niet naar de mens die ervoor zit.
+ * Het model wéét wat het kan; jij moest het raden. Dat is de verkeerde kant op.
+ *
+ * Elke knop noemt het staptype waar hij op leunt. Daar staat een test op: een
+ * knop mag alleen verwijzen naar iets dat ook echt uitgevoerd kan worden, en
+ * elk uitvoerbaar staptype hoort een knop te hebben. Wordt er iets ingebouwd,
+ * dan faalt die test tot er een knop bij staat.
+ *
+ * De teksten zijn HALVE zinnen. Een hele zin nodigt uit om te versturen wat er
+ * staat; een halve dwingt je de naam en de reden zelf in te vullen -- en die
+ * mag Iris nooit verzinnen.
+ */
+export const SNELKNOPPEN = Object.freeze([
+  { staptype: 'lms_toegang_verlengen', label: 'Toegang verlengen', tekst: 'Verleng de toegang van ' },
+  { staptype: 'belofte_vastleggen', label: 'Betaalafspraak vastleggen', tekst: 'Leg een betaalafspraak vast voor ' },
+  { staptype: 'factuur_nakijken', label: 'Factuur nakijken', tekst: 'Kijk na of al betaald is: ' },
+  { staptype: 'taak_aanmaken', label: 'Taak aanmaken', tekst: 'Maak een taak aan: ' },
+  { staptype: 'belrij_toevoegen', label: 'Op de belrij zetten', tekst: 'Zet op de belrij: ' },
+]);
+
+/**
+ * Wat hier NIET kan, in één regel onder de knoppen.
+ *
+ * Zonder deze regel is de enige manier om erachter te komen: het vragen, een
+ * plan krijgen, en bij Uitvoeren stuklopen.
+ */
+export const NIET_HIER_TEKST =
+  'Een bericht sturen gaat via de Post, niet via een opdracht.';
