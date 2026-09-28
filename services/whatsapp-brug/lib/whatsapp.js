@@ -11,6 +11,9 @@
 // een tekst langskomt vóór die controle.
 
 import { maakHerverbinder } from './herverbinden.js';
+import { maakWachthond } from './wachthond.js';
+import { herkoppel as herkoppelKern } from './herkoppelen.js';
+import { rm } from 'node:fs/promises';
 import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
@@ -810,6 +813,28 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     log     : (...a) => console.warn(...a),
   });
 
+  // ── DE WACHTHOND ────────────────────────────────────────────────────────
+  // De herverbinder hangt aan `disconnected` en `auth_failure`. Komt er geen
+  // van beide — de pagina crasht stil, Chromium valt om — dan roept niemand
+  // 'verbroken' en gebeurt er niets. Dat is de toestand van 23 september:
+  // server leeft, client ligt eruit, geen QR, geen fout, twaalf uur stil.
+  //
+  // Deze kijkt naar de wérkelijke toestand in plaats van op een gebeurtenis te
+  // wachten. Zie lib/wachthond.js voor wanneer hij wel en niet aan de bel trekt.
+  const wachthond = maakWachthond({
+    stand: () => ({
+      verbonden   : staat.verbonden,
+      heeftQr     : !!staat.qrDataUrl,
+      herverbinden: herverbinder.stand(),
+      laatsteActie: staat.laatsteActie,
+    }),
+    porren  : (reden) => herverbinder.verbroken('wachthond: ' + reden),
+    plan    : (ms, fn) => setTimeout(fn, ms),
+    annuleer: (h) => clearTimeout(h),
+    log     : (...a) => console.warn(...a),
+  });
+  wachthond.start();
+
   client.on('ready', () => {
     staat.verbonden = true;
     staat.qrDataUrl = null;      // gekoppeld; de QR is nergens meer goed voor
@@ -1028,6 +1053,47 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     zetMelder(fn) { melder = typeof fn === 'function' ? fn : null; },
     /** Stand voor de hartslag: alleen tellers, geen persoonsdata. */
     herverbindStand: () => herverbinder.stand(),
+    /** Wat de wachthond gedaan heeft. Alleen tellingen en tijdstempels. */
+    wachthondStand : () => wachthond.stand(),
+
+    /**
+     * HANDMATIG OPNIEUW KOPPELEN — de uitgang achter de koppelknop.
+     *
+     * Maxim klikte op koppelen en kreeg een leeg venster: er was geen QR, en
+     * er was ook niets dat er een maakte. Deze route breekt de client af en
+     * begint opnieuw, zodat er gegarandeerd óf een verbinding óf een QR komt.
+     *
+     * ── WISSEN IS EEN APARTE KEUZE ─────────────────────────────────────
+     * Zonder wissen probeert whatsapp-web.js de bewaarde sessie te hervatten;
+     * dat is het snelst en vraagt geen telefoon. Maar juist als díe sessie
+     * stuk is blijft hij dan hangen. Met `wisSessie` gaat de sessiemap weg en
+     * is een nieuwe QR onvermijdelijk — dat is de knop voor 'geef me gewoon
+     * een code'.
+     *
+     * De herverbinder wordt eerst teruggezet: anders telt deze handmatige
+     * poging door op een teller die misschien al bijna aan de afsluitgrens
+     * zat, en sluit het proces af terwijl iemand staat te kijken.
+     */
+    async herkoppel({ wisSessie = false } = {}) {
+      return herkoppelKern({
+        staat,
+        afbreken: () => client.destroy(),
+        wis     : () => rm(cfg.sessiePad, { recursive: true, force: true }),
+        // NIET awaiten tot het klaar is: initialize() loopt door tot de QR of
+        // de verbinding er is, en dat kan tientallen seconden duren. De
+        // aanroeper krijgt meteen antwoord en kijkt daarna op /status.
+        start   : async () => {
+          client.initialize().catch((e) => {
+            staat.laatsteFout = 'herkoppelen faalde: ' + (e?.message || e);
+            console.error('[brug]', staat.laatsteFout);
+            herverbinder.verbroken('herkoppelen faalde');
+          });
+        },
+        herverbinder,
+        wisSessie,
+        log: (...a) => console.log(...a),
+      });
+    },
     start() {
       console.log('[brug] WhatsApp-client starten…');
       client.initialize().catch((e) => {
@@ -1037,6 +1103,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     },
     async stop() {
       if (lidTimer) { clearInterval(lidTimer); lidTimer = null; }
+      // Ook de wachthond: anders trekt hij tijdens het afsluiten nog aan de bel
+      // en start hij een client die net netjes wordt neergelegd.
+      wachthond.stop();
       try { await client.destroy(); } catch (_) {}
     },
 
