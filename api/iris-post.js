@@ -22,8 +22,11 @@
 //
 // ── DE FILTERS ───────────────────────────────────────────────────────────────
 // wacht_op_ons · wacht_op_klant · venster_bijna_dicht · niet_gekoppeld ·
-// belofte_vandaag · alles. Dat zijn de vragen die iemand 's ochtends stelt.
-// "Alle open gesprekken" is er geen van.
+// belofte_vandaag · spam · alles. Dat zijn de vragen die iemand 's ochtends
+// stelt. "Alle open gesprekken" is er geen van.
+//
+// 'spam' is de tegenhanger van wat er uit wacht_op_ons weggehaald is: die
+// gesprekken verdwijnen niet, ze staan alleen niet meer tussen het werk.
 //
 // 'venster_bijna_dicht' wordt na het ophalen berekend en niet in SQL. Reden:
 // de grens verschuift elke minuut, dus een WHERE erop zou een index opleveren
@@ -31,7 +34,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { haalInstellingen } from './_lib/iris/instellingen.js';
+import { haalInstellingen, GEEN_WERK, werkbakCategorieFilter } from './_lib/iris/instellingen.js';
 import { vensterStand, magVersturen } from './_lib/iris/venster.js';
 import { contactZoekFilter } from './_lib/iris/zoekfilter.js';
 
@@ -46,6 +49,7 @@ export const FILTERS = Object.freeze([
   'venster_bijna_dicht',
   'niet_gekoppeld',
   'belofte_vandaag',
+  'spam',
   'alles',
 ]);
 
@@ -149,8 +153,22 @@ async function geefLijst(q, res) {
     .select('id, contact_id, kanaal, categorie, status, toegewezen_aan, laatste_inbound, laatste_outbound, ongelezen', { count: 'exact' })
     .order('laatste_inbound', { ascending: false, nullsFirst: false });
 
-  if (filter === 'wacht_op_ons') vraag = vraag.in('status', ['nieuw', 'wacht_op_ons']);
-  else if (filter === 'wacht_op_klant') vraag = vraag.eq('status', 'wacht_op_klant');
+  if (filter === 'wacht_op_ons') {
+    // Twee sloten op hetzelfde. cron-iris-werk zet spam sinds P-2 niet meer op
+    // wacht_op_ons, maar de gesprekken die er VÓÓR die wijziging in zijn
+    // beland staan er nog. Dit filter haalt ze er alsnog uit, zonder dat er
+    // één rij in de databank aangeraakt hoeft te worden.
+    //
+    // Let op de or: zie werkbakCategorieFilter() voor waarom een kale
+    // .not('categorie','in',...) de nog-niet-ingedeelde gesprekken zou wissen.
+    vraag = vraag
+      .in('status', ['nieuw', 'wacht_op_ons'])
+      .or(werkbakCategorieFilter());
+  } else if (filter === 'spam') {
+    // Niet weg, wel weg uit het werk. Hier kijk je na of Iris het goed zag, en
+    // één klik zet een vergissing terug (iris-indeling).
+    vraag = vraag.in('categorie', [...GEEN_WERK]);
+  } else if (filter === 'wacht_op_klant') vraag = vraag.eq('status', 'wacht_op_klant');
   else if (filter === 'niet_gekoppeld') vraag = vraag.is('contact_id', null);
   else if (filter === 'venster_bijna_dicht') {
     // Voorselectie in SQL op "inbound binnen de laatste 24 uur"; de precieze
