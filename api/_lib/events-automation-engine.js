@@ -552,14 +552,28 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
       //      probleem. Doorgaan, maar luid registreren.
       if (result && result.permanent) {
         await deps.recordLog(idx, type, result);
-        const reden = (result && result.error) || 'definitief geweigerd zonder reden';
+        // `error` OF `reason`. De Meta-weigeringen zetten `error`, maar de
+        // guards in events-send (nummer niet E.164, body zonder mapping)
+        // zetten `reason` — net als elke andere skip daar. Zonder dat tweede
+        // veld las last_error 'definitief geweigerd zonder reden' en was de
+        // hele reden weg, precies wat #1625 wilde voorkomen.
+        const reden = (result && (result.error || result.reason))
+                   || 'definitief geweigerd zonder reden';
         permanenteWeigering = 'stap ' + idx + ' ' + type + ': ' + reden;
         // Alleen WhatsApp markeert de deelnemer als onbereikbaar: een
         // geweigerd e-mailadres is een ander probleem met een andere
         // oplossing, en die samen in één markering gooien maakt de melding
         // onbruikbaar. Fail-soft — een mislukte markering mag de flow niet
         // stoppen, dat zou punt 3 hierboven ongedaan maken.
-        if (type === 'send_whatsapp' && typeof deps.markeerWhatsappOnbereikbaar === 'function') {
+        // config_fout = de template of de mapping is stuk, niet de ontvanger.
+        // Die deelnemer als WHATSAPP_ONBEREIKBAAR markeren zou 50 mensen
+        // onbereikbaar noemen omdat een jsonb-veld leeg staat, en dan zegt de
+        // markering niets meer. De reden komt wel op de run, dus zichtbaar
+        // blijft het.
+        const isConfigFout = !!(result && result.config_fout);
+        if (!isConfigFout
+            && type === 'send_whatsapp'
+            && typeof deps.markeerWhatsappOnbereikbaar === 'function') {
           try {
             await deps.markeerWhatsappOnbereikbaar({ attendee, reden, stepIndex: idx });
           } catch (e) {

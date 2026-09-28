@@ -20,6 +20,9 @@
 // generieke verzend-acties die de automation-engine kan combineren.
 
 import { supabaseAdmin } from '../supabase.js';
+// isE164: DE ENE definitie van de vorm die Meta accepteert (zie #1624).
+// Hier gebruikt om een onbruikbaar nummer te weigeren VOOR de Meta-call.
+import { isE164 } from './phone-e164.js';
 import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { buildMetaVariablesFromMapping, resolveVariables } from './template-variables.js';
@@ -80,6 +83,34 @@ export async function sendEventWhatsAppTemplate({
   }
   const phone = toE164Plus(attendee?.phone);
   if (!phone) return { ok: false, skipped: true, reason: 'no-phone' };
+
+  // ── GEEN META-CALL OP EEN NUMMER DAT NOOIT KAN WERKEN ─────────────────
+  //
+  // GEMETEN 28 september over event_automation_run_log: 53 mislukte
+  // send_whatsapp-stappen met Meta 131009 ("Het telefoonnummer is onjuist
+  // ingedeeld"), verdeeld over 8 deelnemers. Dus 6 a 7 verworpen berichten
+  // per persoon, en de laatste was 26/09 — dit liep nog.
+  //
+  // toE164Plus hierboven plakt alleen een '+' voor wat er staat. Een lokaal
+  // nummer als '0472223752' wordt daarmee '+0472223752' en een mailadres in
+  // het telefoonveld wordt '+nonclevalerie@gmailcom'. Beide overleven de
+  // no-phone-check en gaan naar Meta, die ze terecht weigert.
+  //
+  // Nu weigeren we zelf, en wel PERMANENT: dezelfde payload zou dezelfde
+  // fout geven, dus retryen is zinloos. `permanent` zorgt ook dat de engine
+  // de reden op de run zet en de deelnemer markeert als
+  // WHATSAPP_ONBEREIKBAAR (zie #1625), zodat die 8 mensen in de opvolglijst
+  // staan in plaats van alleen diep in een staplogboek.
+  //
+  // De reden noemt de RAUWE waarde uit het telefoonveld, niet de
+  // '+'-variant die toE164Plus ervan maakte: wie het gaat rechtzetten moet
+  // zien wat er werkelijk in de kolom staat.
+  if (!isE164(phone)) {
+    return {
+      ok: false, skipped: true, permanent: true,
+      reason: 'nummer niet E.164: ' + String(attendee?.phone ?? '').trim(),
+    };
+  }
 
   // 1) Events phone_number_id ophalen.
   const { data: modCfg, error: modErr } = await supabaseAdmin
@@ -155,6 +186,38 @@ export async function sendEventWhatsAppTemplate({
     ? (paramMappingOverride.body || paramMappingOverride)
     : null;
   const bodyMapping = dbMapping || overrideMapping;
+
+  // ── EEN {{N}}-BODY ZONDER MAPPING IS EEN CONFIGFOUT, GEEN VERZENDPOGING ─
+  //
+  // GEMETEN 28 september: 50 mislukte stappen met Meta 131008 ("Required
+  // parameter is missing"), alle op 'vragenlijst_herinnering_correct' bij
+  // 'Vragenlijst-herinnering'. Die template had toen geen
+  // meta_param_mapping en de stap gaf er geen mee, dus ging het bericht als
+  // 0 parameters de deur uit bij een body met {{1}}.
+  //
+  // Dat is inmiddels in de DATA opgelost (de template heeft nu een mapping),
+  // en precies daarom staat deze guard er: zonder net hangt het aan een
+  // jsonb-veld dat iemand kan leegmaken, en dan begint hetzelfde stil
+  // opnieuw.
+  //
+  // `permanent` omdat dezelfde payload dezelfde fout geeft. MAAR ook
+  // `config_fout`, want dit is GEEN probleem van de ontvanger: de engine
+  // markeert de deelnemer daarom niet als WHATSAPP_ONBEREIKBAAR. Vijftig
+  // mensen onbereikbaar noemen omdat een template stuk is, maakt die
+  // markering waardeloos.
+  const bodyVarsN = (String(templateRow.body_text || '').match(/\{\{\d+\}\}/g) || []).length;
+  const heeftMapping = !!(bodyMapping && typeof bodyMapping === 'object'
+                          && Object.keys(bodyMapping).length > 0);
+  if (bodyVarsN > 0 && !heeftMapping) {
+    return {
+      ok: false, skipped: true, permanent: true, config_fout: true,
+      reason: 'template \'' + templateName + '\' heeft ' + bodyVarsN
+            + ' variabele(n) in de body maar geen mapping: niet in '
+            + 'whatsapp_meta_templates.meta_param_mapping en niet op de stap '
+            + '(config.param_mapping). Zonder mapping gaat het bericht met 0 '
+            + 'parameters weg en weigert Meta het met 131008 of 132000.',
+    };
+  }
 
   const ctx = { event, attendee, moduleContext };
 
