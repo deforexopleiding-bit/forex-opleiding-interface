@@ -23,6 +23,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
 import {
   uitCallLog, telPogingen, moetEscaleren, sorteerBelrij, redenTekst, MAX_PER_DAG,
+  voortgang, nummerAfgeschermd,
 } from './_lib/iris/belrij.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -98,9 +99,14 @@ async function geefLijst(req, res, user) {
       eigenaar: r.eigenaar,
       prioriteit: r.prioriteit,
       status: r.status,
+      telefoon_kort: nummerAfgeschermd(c?.telefoons?.[0]),
       telling,
       mag_vandaag_nog: telling.mag_vandaag_nog,
       escalatie,
+      // Hoe ver deze persoon is, per rij. In de kop stond alleen de REGEL
+      // ("escaleren na 3 pogingen in 3 dagen"); wie wilde weten waar een rij
+      // stond, moest zelf tellen -- en dat doet niemand.
+      voortgang: voortgang(telling, instellingen.escalatie),
       aangemaakt_op: r.aangemaakt_op,
     };
   });

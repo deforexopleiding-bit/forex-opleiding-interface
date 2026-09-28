@@ -166,6 +166,54 @@ export function moetEscaleren(telling, drempel = {}, { laatsteInbound = null, nu
 }
 
 /**
+ * Hoe ver is deze persoon op weg naar een escalatie?
+ *
+ * ── WAAROM DIT EEN EIGEN REGEL PER RIJ IS (B-1) ─────────────────────────────
+ * In de kop stond "Escaleren na 3 pogingen in 3 dagen". Dat is de regel, niet
+ * de stand. Bij een rij die daar nog niet is, moest je zelf de pogingen tellen
+ * en de regel erop toepassen -- en dat doet niemand, dus deed niemand het.
+ *
+ * "2 van 3 pogingen" zegt in vier woorden wat die kopregel je zelf liet
+ * uitrekenen.
+ *
+ * De DAGEN staan er apart bij, want die zijn het halve punt: drie keer bellen
+ * op een ochtend is geen drie dagen proberen, en zonder dat getal ziet iemand
+ * die vanochtend drie keer probeerde eruit alsof hij klaar is om te escaleren.
+ *
+ * @returns {{tekst: string, pogingen: number, nodig_pogingen: number,
+ *            dagen: number, nodig_dagen: number, klaar: boolean}}
+ */
+export function voortgang(telling, drempel = {}) {
+  const nodigPogingen = Number.isInteger(drempel?.pogingen) ? drempel.pogingen : 3;
+  const nodigDagen = Number.isInteger(drempel?.dagen) ? drempel.dagen : 3;
+  const pogingen = Math.max(0, Number(telling?.niet_opgenomen) || 0);
+  const dagen = Math.max(0, Number(telling?.dagen_niet_opgenomen) || 0);
+
+  return {
+    pogingen,
+    nodig_pogingen: nodigPogingen,
+    dagen,
+    nodig_dagen: nodigDagen,
+    klaar: pogingen >= nodigPogingen && dagen >= nodigDagen,
+    tekst: `${pogingen} van ${nodigPogingen} pogingen · ${dagen} van ${nodigDagen} dagen`,
+  };
+}
+
+/**
+ * Het nummer, afgeschermd voor op het scherm.
+ *
+ * Alleen de laatste vier cijfers. Genoeg om te zien dat je de juiste rij te
+ * pakken hebt, te weinig om iets mee te doen -- en het staat dus ook niet in
+ * een schermafdruk die iemand doorstuurt. Bellen gaat via de softphone, die
+ * het volledige nummer uit de gegevens haalt; niemand hoeft het te lezen.
+ */
+export function nummerAfgeschermd(telefoon) {
+  const cijfers = String(telefoon || '').replace(/\D/g, '');
+  if (cijfers.length < 4) return null;
+  return '•••• ' + cijfers.slice(-4);
+}
+
+/**
  * De volgorde van de belrij.
  *
  * Prioriteit eerst, dan wie het langst wacht. Niet op "meeste pogingen": dan
