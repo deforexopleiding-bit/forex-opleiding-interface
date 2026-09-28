@@ -27,6 +27,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
 import { maakPlan, volgendeToestand, magDirectUitvoeren, verloopRegel, TOESTANDEN } from './_lib/iris/opdracht.js';
+import { bouwPlanRegels, bouwVerloop, naUitvoerenZin } from './_lib/iris/opdracht-tekst.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_VRAAG = 2000;
@@ -97,7 +98,20 @@ async function geefEen(req, res) {
     .eq('opdracht_id', id)
     .order('aangemaakt_op', { ascending: true });
 
-  return res.status(200).json({ opdracht, acties: acties || [] });
+  // De drie dingen die allemaal "wat is er gebeurd" zeggen, in één leesbare
+  // vorm erbij. `opdracht` en `acties` blijven ongemoeid: wie de ruwe vorm wil,
+  // heeft hem nog.
+  //
+  // Waarom hier en niet in het scherm: dit is logica, geen opmaak, en logica
+  // die niemand kan narekenen zegt na een half jaar iets anders dan je denkt.
+  const lijst = acties || [];
+  return res.status(200).json({
+    opdracht,
+    acties: lijst,
+    plan_regels: bouwPlanRegels(opdracht.plan, lijst),
+    verloop_regels: bouwVerloop(opdracht.verloop),
+    na_uitvoeren_zin: naUitvoerenZin(opdracht.na_uitvoeren),
+  });
 }
 
 // ── Maken ────────────────────────────────────────────────────────────────────
