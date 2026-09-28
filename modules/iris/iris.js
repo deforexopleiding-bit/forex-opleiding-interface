@@ -200,6 +200,11 @@
       // uit de pas lopen met wat er ook echt uitgevoerd kan worden.
       snelknoppen: [],
       nietHier: null,
+      // Wat er loopt te wachten. Een opvolging die je niet kunt zien, is niet
+      // te onderscheiden van een opvolging die niet bestaat.
+      opvolgingen: [],
+      opvolgingenBezig: false,
+      nogNietGemigreerd: false,
     },
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
@@ -768,6 +773,7 @@
       st.snelknoppen = Array.isArray(j.snelknoppen) ? j.snelknoppen : [];
       st.nietHier = j.niet_hier || null;
       st.fout = null;
+      haalOpvolgingen();
     } catch (e) {
       st.fout = e?.message || 'Opdrachten niet opgehaald';
     } finally {
@@ -776,6 +782,52 @@
       hertekenen();
     }
   }
+
+  /**
+   * De lopende opvolgingen.
+   *
+   * Apart van de opdrachtenlijst omdat een opvolging ook zonder opdracht kan
+   * bestaan, en omdat hij zijn eigen levensduur heeft: de opdracht is al
+   * "geregeld" terwijl de opvolging nog kijkt. Dat is geen tegenstrijdigheid
+   * maar precies wat er gevraagd werd.
+   */
+  async function haalOpvolgingen() {
+    const st = S.opdrachten;
+    if (st.opvolgingenBezig) return;
+    st.opvolgingenBezig = true;
+    try {
+      const j = await haal('/api/iris-opvolging');
+      st.opvolgingen = Array.isArray(j.items) ? j.items : [];
+      st.nogNietGemigreerd = j.nog_niet_gemigreerd === true;
+    } catch (e) {
+      // Niet fataal: de opdrachten zelf werken. Stil in de console, want een
+      // rode balk voor een blok dat er misschien niet eens hoeft te staan,
+      // leidt af van wat er wel is.
+      console.warn('[iris] opvolgingen niet opgehaald:', e?.message || e);
+    } finally {
+      st.opvolgingenBezig = false;
+      hertekenen();
+    }
+  }
+
+  /* Een opvolging stoppen.
+
+     Mag altijd, zonder waarschuwing: een wacht die niet meer nodig is en toch
+     afgaat, leert je de volgende melding te negeren. Er gaat niets verloren --
+     de rij blijft staan met status 'afgebroken'. */
+  window.__irisOpvolgingAfbreken = async (id) => {
+    try {
+      await haalRuw('/api/iris-opvolging', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'afbreken', id }),
+      });
+      toast('Opvolging gestopt.', 'success');
+      haalOpvolgingen();
+    } catch (e) {
+      toast(e?.message || 'Stoppen mislukt', 'error');
+    }
+  };
 
   /* ── Belrij en logboek: ophalen ───────────────────────────────────────
      Twee lijsten die alleen gelezen worden. Zelfde vorm als haalOpdrachten:
@@ -1793,6 +1845,7 @@
 
     return `<div style="max-width:720px;margin:0 auto;padding:0 20px 24px">
       ${invoer}
+      ${opvolgingenBlok()}
       ${lijst}
     </div>
     <style>@keyframes irisPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
@@ -1825,6 +1878,53 @@
           title="${esc(k.staptype || '')}">${esc(k.label || k.staptype || '')}</button>`).join('')}
       </div>
       ${st.nietHier ? `<div style="font-size:11px;color:var(--text-3);margin-top:6px">${esc(st.nietHier)}</div>` : ''}
+    </div>`;
+  }
+
+  /**
+   * Wat er staat te wachten.
+   *
+   * ── WAAROM DIT EEN EIGEN BLOK IS ────────────────────────────────────────
+   * Een opvolging leeft langer dan de opdracht die hem maakte: de opdracht is
+   * al "geregeld" terwijl de opvolging nog kijkt. Als hij alleen onder die
+   * opdracht stond, zou je hem moeten zoeken in iets wat er afgerond uitziet.
+   *
+   * En het belangrijkste: een opvolging die je niet kunt zien, is niet te
+   * onderscheiden van een opvolging die niet bestaat -- precies het probleem
+   * waar O-2 over ging. "Iris houdt het in de gaten" is alleen geloofwaardig
+   * als je kunt nakijken wat, en tot wanneer.
+   */
+  function opvolgingenBlok() {
+    const st = S.opdrachten;
+    if (st.nogNietGemigreerd) {
+      return `<div style="border:1px solid var(--amber-line,var(--border));background:var(--amber-soft,var(--surface-2));border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:11.5px;color:var(--text-2)">
+        Opvolgingen zijn nog niet ingeschakeld: de databankwijziging van 28 september moet nog draaien.
+      </div>`;
+    }
+    const rijen = Array.isArray(st.opvolgingen) ? st.opvolgingen : [];
+    if (!rijen.length) return '';
+
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--surface-2)">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:7px">
+        Iris houdt in de gaten</div>
+      ${rijen.map(opvolgingRij).join('')}
+    </div>`;
+  }
+
+  function opvolgingRij(o) {
+    const verlopen = o.status === 'verlopen';
+    // 'verlopen' betekent: de termijn is om en de melding is (nog) niet
+    // aangekomen. Die stand moet opvallen -- anders ziet een mislukte melding
+    // er hetzelfde uit als een melding die gewoon nog moet komen.
+    const stand = verlopen
+      ? `<span title="${esc(o.meld_fout || 'De melding is nog niet verstuurd.')}" style="color:var(--rose);font-size:10.5px;font-weight:600">melding hangt</span>`
+      : `<span style="color:var(--text-3);font-size:10.5px">tot ${esc(tijdKort(o.tot))}</span>`;
+
+    return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:12px">
+      <span style="flex:1;min-width:0">${esc(o.omschrijving || '—')}</span>
+      ${stand}
+      <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px"
+        onclick="__irisOpvolgingAfbreken('${esc(o.id)}')" title="Stop met wachten. De opvolging blijft in de geschiedenis staan.">Stop</button>
     </div>`;
   }
 

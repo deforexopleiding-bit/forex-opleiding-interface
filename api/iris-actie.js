@@ -30,6 +30,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { STAPTYPES } from './_lib/iris/opdracht.js';
+import { bouwOpvolging } from './_lib/iris/opvolging.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -51,6 +52,7 @@ export const RECHT_PER_TYPE = Object.freeze({
   taak_aanmaken: 'iris.post.beantwoorden',
   belrij_toevoegen: 'iris.belrij',
   factuur_nakijken: 'iris.post.beantwoorden',
+  opvolging_instellen: 'iris.post.beantwoorden',
 });
 
 /**
@@ -342,6 +344,56 @@ async function voerUit(actie, user) {
         .single();
       if (error) throw new Error('taak aanmaken: ' + error.message);
       return { taak_id: data.id };
+    }
+
+    case 'opvolging_instellen': {
+      // ── WAAROM DIT GEEN taak_aanmaken IS ──────────────────────────────
+      // taak_aanmaken zette één regel in pending_actions: een omschrijving,
+      // en verder niets. Geen datum, geen bewaking, geen bericht. Er werd om
+      // drie dingen gevraagd en er gebeurde er nul van.
+      //
+      // Een opvolging legt alle drie vast, en cron-iris-opvolging kijkt
+      // dagelijks of er iets binnenkwam.
+
+      // Het adres wordt HIER vastgelegd, niet bij het melden opgezocht. Wie de
+      // opvolging vroeg, krijgt het bericht -- ook als zijn rol of zijn plek
+      // in de organisatie intussen veranderd is.
+      const { data: profiel } = await supabaseAdmin
+        .from('profiles').select('email').eq('id', user.id).maybeSingle();
+
+      // Waarop gewacht wordt. Een gesprek is het scherpste spoor; staat dat er
+      // niet bij, dan het contact, want daar hangen alle gesprekken onder.
+      let gesprekId = p.gesprek_id || null;
+      if (!gesprekId && actie.contact_id) {
+        const { data: laatste } = await supabaseAdmin
+          .from('iris_gesprekken')
+          .select('id')
+          .eq('contact_id', actie.contact_id)
+          .order('laatste_inbound', { ascending: false, nullsFirst: false })
+          .limit(1);
+        gesprekId = laatste?.[0]?.id || null;
+      }
+
+      const gebouwd = bouwOpvolging({
+        opdrachtId: actie.opdracht_id || null,
+        actieId: actie.id,
+        gesprekId,
+        contactId: actie.contact_id || null,
+        omschrijving: p.omschrijving || 'Opvolging vanuit Iris',
+        dagen: p.dagen,
+        verwittigEmail: profiel?.email || null,
+        verwittigWie: user.id,
+        aangemaaktDoor: user.id,
+      });
+      if (!gebouwd.ok) throw new Error(gebouwd.fout);
+
+      const { data, error } = await supabaseAdmin
+        .from('iris_opvolgingen')
+        .insert(gebouwd.rij)
+        .select('id, tot, waarop')
+        .single();
+      if (error) throw new Error('opvolging opslaan: ' + error.message);
+      return { opvolging_id: data.id, tot: data.tot, waarop: data.waarop };
     }
 
     // Verzenden en de overige LMS-stappen komen in een volgende stap. Ze
