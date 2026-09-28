@@ -308,29 +308,15 @@ test('CONTRACT: de automatische verzendpaden vragen de stilte-poort', () => {
   }
 });
 
-test('CONTRACT: in de bulk-flow is de poort VERVANGEN, niet weggehaald', () => {
-  // Bij #1641 gold nog "de bulk-flow blijft zoals hij is" en stond daar de
-  // hold-poort. Die moest op 21 september weg (een automatische
-  // betalingspauze mag geen aanmaning tegenhouden), en dan is er maar één
-  // eerlijke uitkomst: vervangen door de stilte-poort. Hem alleen weghalen
-  // zou bulk juist ONbeschermd achterlaten tegen een echte afspraak, en dat
-  // is de dure kant van de fout.
+test('CONTRACT: de bulk-flow heeft GEEN LMS-poort (sinds 28 september 2026)', () => {
+  // Op verzoek van Maxim uit cron-dunning-bulk-send.js gehaald: een
+  // goedgekeurde bulk-ronde gaat ook uit bij een lopende LMS-stilte. De motor
+  // en de gesprek-reminders houden de poort wel (toets hierboven). Gedrag:
+  // tests/bulk-send-zonder-lms-poort.test.js.
   const bulk = lees('api/cron-dunning-bulk-send.js');
-  assert.match(bulk, /haalStilteStand\(/, 'de bulk-flow haalt de stilte-stand niet op');
-  assert.match(bulk, /stilteBlokkade\(/,  'de bulk-flow toetst de stilte-poort niet');
+  assert.doesNotMatch(bulk, /lms-stilte\.js/, 'de bulk-flow importeert de stilte-lib weer');
+  assert.doesNotMatch(bulk, /stilteBlokkade\(|haalStilteStand\(/, 'de stilte-poort staat weer in de bulk-flow');
   assert.doesNotMatch(bulk, /holdBlokkade\(/, 'de hold-poort staat nog in de bulk-flow');
-});
-
-test('CONTRACT: de bulk-poort staat VÓÓR de atomische claim', () => {
-  // Erna zou de ontvanger van 'pending' naar 'sending' en weer terug moeten,
-  // elke ronde opnieuw, zolang de afspraak loopt. Vóór de claim blijft hij
-  // gewoon staan en gaat hij mee zodra de afspraak af is.
-  const bulk  = lees('api/cron-dunning-bulk-send.js');
-  const poort = bulk.indexOf('const stilteBlok = stilteBlokkade(stilteStand, rec.customer_id)');
-  const claim = bulk.indexOf("3a) ATOMISCHE CLAIM");
-  assert.ok(poort > 0 && claim > 0, 'een van de twee is niet te vinden');
-  assert.ok(poort < claim, 'de stilte-poort staat na de claim — dat geeft een '
-    + 'statuswissel heen en weer bij elke ronde');
 });
 
 test('CONTRACT: de motor haalt de stand ÉÉN keer op, niet per klant', () => {
