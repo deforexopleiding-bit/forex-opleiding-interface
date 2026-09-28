@@ -69,6 +69,19 @@ ook echt weg — er is geen terughalen.
 Klopt het antwoord niet? Spreek gewoon in wat er anders moet en druk op
 **Opnieuw**. Iris overschrijft het concept; er komt geen tweede versie naast.
 
+### Inspreken in de gesprekken-module
+
+De microfoon die je bij Iris kent, staat nu ook in de Wanbetalers-module, naast
+het tekstvak. Dezelfde microfoon — niet een tweede die net iets anders doet.
+
+Klik, praat, en je ziet je woorden meelopen in het veld. Klik nog eens om te
+stoppen. Wat er al stond blijft staan: je spreekt iets bíj, je gooit niets weg.
+
+**Er wordt nooit vanzelf verstuurd.** De tekst blijft in het veld tot jij op
+Verstuur drukt. Inspreken is een manier van typen, geen manier van versturen.
+
+Zie je geen microfoon staan, dan kan je browser het niet. In Chrome werkt het.
+
 ### Wat er rood kan worden
 
 Soms staat er **⛔** bij het concept. Dan gaat het bericht niet weg, en staat
