@@ -78,6 +78,14 @@ export default async function handler(req, res) {
   if (!ACTIES.has(actie)) return res.status(400).json({ error: 'onbekende actie' });
 
   const notitie = b.notitie != null ? String(b.notitie).trim().slice(0, 2000) : '';
+  // DE BROODJESNOTITIE — hoort bij de DEELNEMER, niet bij deze kaart.
+  //
+  // `notitie` hierboven gaat naar de opvolgtaak: dat is de aantekening van
+  // Dave over het gesprek. Wat iemand eet hoort in de eventmodule, want daar
+  // wordt de bestelling mee gedaan. Twee verschillende dingen, twee velden.
+  // Zie docs/sql-migrations/2026-09-23-event-attendees-notitie.sql.
+  const deelnemerNotitie = b.deelnemer_notitie != null
+    ? String(b.deelnemer_notitie).trim().slice(0, 500) : null;
   // Zonder die zin is 'gesprek gehad' een vinkje zonder inhoud, en dan weet de
   // volgende die deze lead oppakt nog steeds niets.
   if (actie === 'gesprek_gehad' && !notitie) {
@@ -193,11 +201,27 @@ export default async function handler(req, res) {
       // te overzien — de view vertelt het dan aan Dave.
       const belstatus = await zetBelstatusBevestigd(attendeeId, nu);
 
+      // DE BROODJESNOTITIE, NA DE BEVESTIGING EN LOSGEKOPPELD DAARVAN.
+      //
+      // Bevestigen doet precies wat het altijd deed: belstatus, plek,
+      // bevestigingsmail. Deze schrijfactie is een TOEVOEGING en mag daar
+      // nooit op ingrijpen — vandaar erna, en fail-soft. Lukt hij niet, dan
+      // is de bevestiging nog steeds gebeurd en zegt het scherm dat de
+      // notitie niet is opgeslagen.
+      //
+      // Alleen schrijven als er iets getypt is. Een leeg veld hoort een
+      // bestaande notitie niet te wissen: wie opnieuw bevestigt zonder het
+      // vakje in te vullen, bedoelt niet 'gooi zijn broodje weg'.
+      const deelnemerNotitieStand = deelnemerNotitie
+        ? await zetDeelnemerNotitie(attendeeId, deelnemerNotitie)
+        : 'niet_gevraagd';
+
       return res.status(200).json({
         success: true,
         slaapt_tot: nogEenRonde ? wakker : null,
         gearchiveerd: !nogEenRonde,
         belstatus,
+        deelnemer_notitie: deelnemerNotitieStand,
       });
     }
 
@@ -612,6 +636,47 @@ async function leesPlekRij(attendeeId, db) {
  *
  * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
  */
+/**
+ * De broodjesnotitie op de deelnemer zetten.
+ *
+ * ── WAAROM DIT APART STAAT EN FAIL-SOFT IS ────────────────────────────────
+ * Bevestigen is de handeling; dit is een aantekening erbij. De belstatus, de
+ * plek en de bevestigingsmail zijn op dit punt al gebeurd, en een mislukte
+ * notitie mag daar niets aan veranderen — een uitzondering hier zou een
+ * bevestiging ongedaan laten lijken die gewoon geslaagd is.
+ *
+ * ── MAAR NOOIT STIL ───────────────────────────────────────────────────────
+ * Wat er misgaat komt terug in het antwoord, zodat het scherm het kan zeggen.
+ * Een stilzwijgend verlies betekent op de dag zelf een broodje te weinig, en
+ * dat merkt niemand tot het te laat is.
+ *
+ * Draait de migratie nog niet, dan faalt de update met 42703 op de kolomnaam.
+ * Dat is een eigen antwoord ('kolom_ontbreekt'), geen algemene fout: het
+ * verschil tussen 'het ging mis' en 'dit is nog niet ingericht' is precies wat
+ * iemand nodig heeft om te weten wat hij eraan moet doen.
+ */
+export async function zetDeelnemerNotitie(attendeeId, tekst, db = supabaseAdmin) {
+  if (!attendeeId) return 'geen_deelnemer';
+  try {
+    const { error } = await db
+      .from('event_attendees')
+      .update({ notitie: tekst })
+      .eq('id', attendeeId);
+    if (error) {
+      if (error.code === '42703' && /\bnotitie\b/.test(error.message || '')) {
+        console.warn('[opvolging-aanmelding-actie] kolom notitie bestaat nog niet — '
+          + 'draai docs/sql-migrations/2026-09-23-event-attendees-notitie.sql');
+        return 'kolom_ontbreekt';
+      }
+      throw new Error(error.message);
+    }
+  } catch (e) {
+    console.warn('[opvolging-aanmelding-actie] deelnemer-notitie (soft):', e?.message || e);
+    return 'mislukt';
+  }
+  return 'bijgewerkt';
+}
+
 export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmin, opties = {}) {
   if (!attendeeId) return 'geen_deelnemer';
   const voor = await leesPlekRij(attendeeId, db);

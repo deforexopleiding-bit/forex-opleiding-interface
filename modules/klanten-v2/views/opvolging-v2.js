@@ -1586,7 +1586,11 @@
 .opv .opt b{display:block;font-size:14.5px}.opv .opt span{font-size:12.5px;color:var(--o-muted)}
 .opv .warn{background:var(--o-ambs);border:1px solid #f3ddb4;border-radius:11px;padding:12px 14px;font-size:13px;color:#7a4d00;margin-bottom:12px}
 .opv .info{background:var(--o-accs);border:1px solid #cfdcff;border-radius:11px;padding:12px 14px;font-size:13px;color:#1a3d9e;margin-bottom:12px}
-.opv textarea,.opv input[type=date]{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit}
+.opv textarea,.opv input[type=date],.opv input[type=text]{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit;box-sizing:border-box}
+/* Kopje boven een veld. Twee velden onder elkaar zonder label is raden waar
+   wat hoort; hier gaat het ene naar de eventmodule en het andere niet. */
+.opv .veldkop{display:block;margin:12px 0 5px;font-size:12.5px;font-weight:650;color:var(--o-ink)}
+.opv .veldkop span{font-weight:400;color:var(--o-muted)}
 /* G2 · het formulier van '+ Lead toevoegen'. Zelfde vorm als de bestaande
    velden hierboven; text en select deden nog niet mee omdat ze nergens
    voorkwamen. */
@@ -3823,7 +3827,19 @@
               '<i>of</i> hij komt, maar of het nog klopt.'
             : 'Het event is binnen vier dagen, dus er komt geen ronde meer. De kaart gaat dicht.') +
           '</div>' +
-          '<textarea id="opv-an" rows="2" placeholder="Notitie (mag leeg) — bv. komt met zijn broer"></textarea>' +
+          // ── DE BROODJES ───────────────────────────────────────────────
+          // Twee velden, en ze gaan met opzet naar twee verschillende
+          // plekken. De notitie hieronder is Daves aantekening bij DEZE
+          // kaart; de broodjes horen bij de DEELNEMER en verschijnen in de
+          // eventmodule op de aanwezigenlijst — dat is de lijst waarmee
+          // besteld wordt. Eén veld voor allebei zou betekenen dat 'komt met
+          // zijn broer' tussen de bestellingen staat.
+          //
+          // Allebei optioneel. Leeg laten bevestigt precies zoals voorheen.
+          '<label class="veldkop" for="opv-brood">Broodjes <span>(optioneel — komt in de eventmodule)</span></label>' +
+          '<input id="opv-brood" type="text" maxlength="500" placeholder="bv. 2x kaas — of 1x hesp 1x kaas" />' +
+          '<label class="veldkop" for="opv-an">Notitie bij deze kaart <span>(mag leeg)</span></label>' +
+          '<textarea id="opv-an" rows="2" placeholder="bv. komt met zijn broer"></textarea>' +
           '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'bevestigd\')">' +
           'Bevestigd vastleggen</button>');
       }
@@ -4791,6 +4807,10 @@
     const m = _ui.modal; if (!m || _ui.bezig) return;
     const el = document.getElementById('opv-an');
     const notitie = (el && el.value || '').trim();
+    // Het broodjesveld staat alleen in het bevestigingsvenster; elders is dit
+    // element er niet en blijft de waarde leeg.
+    const brood = document.getElementById('opv-brood');
+    const deelnemerNotitie = (brood && brood.value || '').trim();
     if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
 
     // Op slot vóór de eerste await: post() doet dat ook, maar pas op het moment
@@ -4799,7 +4819,10 @@
     // de notitie op.
     _ui.bezig = true;
     try {
-      const antwoord = await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
+      const antwoord = await post('/api/opvolging-aanmelding-actie', {
+        taak_id: m.taakId, actie: uitkomst, notitie: notitie || null,
+        deelnemer_notitie: deelnemerNotitie || null,
+      });
 
       // ── DE EVENTMODULE GAAT MEE, EN FALEN MAG NOOIT STIL ───────────────
       // Allebei de schrijfacties hieronder zijn fail-soft op de server: de
@@ -4823,6 +4846,19 @@
       if (uitkomst === 'geen_gehoor' && antwoord && antwoord.belstatus === 'geen_deelnemer') {
         alert('Gearchiveerd in Opvolging. Let op: deze kaart hangt niet aan een deelnemer in de '
           + 'eventmodule, dus er gaat GEEN laatste-kans-mail uit en zijn plek vervalt niet automatisch.');
+      }
+      // DE BROODJES ZIJN NIET VRIJBLIJVEND. Bevestigd is bevestigd — dat is
+      // gelukt — maar als de bestelling niet is opgeslagen hoort Dave dat nú
+      // te weten, niet op de dag zelf als er een broodje te weinig is.
+      if (deelnemerNotitie && antwoord && antwoord.deelnemer_notitie
+          && antwoord.deelnemer_notitie !== 'bijgewerkt') {
+        const reden = {
+          kolom_ontbreekt: 'de kolom bestaat nog niet in de databank (de migratie moet nog draaien)',
+          geen_deelnemer : 'deze kaart hangt niet aan een deelnemer in de eventmodule',
+          mislukt        : 'het opslaan ging mis',
+        }[antwoord.deelnemer_notitie] || 'onbekende reden';
+        alert('Bevestigd — dat is gelukt. Maar de broodjes zijn NIET opgeslagen: '
+          + reden + '. Zet ze zo nodig met de hand in de aanwezigenlijst.');
       }
       if (antwoord && antwoord.eventmodule === 'mislukt') {
         alert('Afgemeld in Opvolging, maar in de eventmodule kon hij niet op "Komt niet" gezet worden. Zet hem daar even met de hand.');
