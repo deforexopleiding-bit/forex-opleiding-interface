@@ -64,7 +64,20 @@ function klem(v, standaard, min, max) {
  * scherm er komt (gat G3), en die wil je kunnen nakijken.
  */
 export function bouwLijstRij(gesprek, { contact, laatsteBericht, nu = new Date() } = {}) {
-  const venster = vensterStand(gesprek.laatste_inbound, nu);
+  // Het servicevenster van 24 uur is een regel van META over WHATSAPP. Voor
+  // mail bestaat het niet: je mag een klant antwoorden wanneer je wilt.
+  //
+  // Toch stond er op een mailrij "venster open nog 23u34". Dat is niet alleen
+  // onzin, het is schadelijke onzin: het suggereert een deadline die er niet is,
+  // en een deadline die er niet is, laat je haasten met iets waar je juist rustig
+  // over had moeten nadenken. Bij mail gaat het vaak over advocaten en
+  // betalingsregelingen — precies waar haast het duurst is.
+  //
+  // Dus: null voor mail. Uitdrukkelijk null en geen object met open:false, want
+  // "dicht" is ook een bewering over een venster dat niet bestaat.
+  const venster = gesprek.kanaal === 'whatsapp'
+    ? vensterStand(gesprek.laatste_inbound, nu)
+    : null;
   return {
     id: gesprek.id,
     kanaal: gesprek.kanaal,
@@ -82,12 +95,14 @@ export function bouwLijstRij(gesprek, { contact, laatsteBericht, nu = new Date()
     voorbeeld: laatsteBericht?.tekst_kort || null,
     samenvatting: laatsteBericht?.samenvatting || null,
     zekerheid: laatsteBericht?.zekerheid ?? null,
-    venster: {
-      open: venster.open,
-      bijna_dicht: venster.bijna_dicht,
-      tekst: venster.resterend_tekst,
-      resterend_ms: venster.resterend_ms,
-    },
+    venster: venster
+      ? {
+        open: venster.open,
+        bijna_dicht: venster.bijna_dicht,
+        tekst: venster.resterend_tekst,
+        resterend_ms: venster.resterend_ms,
+      }
+      : null,
   };
 }
 
@@ -141,7 +156,16 @@ async function geefLijst(q, res) {
     // Voorselectie in SQL op "inbound binnen de laatste 24 uur"; de precieze
     // grens van twee uur komt daarna. Zonder deze voorselectie zou de hele
     // tabel opgehaald moeten worden om er een handvol uit te vissen.
-    vraag = vraag.gte('laatste_inbound', new Date(nu.getTime() - 24 * 3600 * 1000).toISOString());
+    //
+    // En alleen WhatsApp. Dit filter bestond, maar gaf verkeerde uitkomsten:
+    // mailgesprekken kwamen er ook in, want die kregen ook een venster
+    // toegerekend. Een filter dat moet tonen waar de tijd dringt, duwde dan
+    // een WhatsApp-gesprek dat écht bijna dicht was uit beeld ten gunste van
+    // een mail waarvoor geen enkele klok loopt. Dat is erger dan een filter dat
+    // niet bestaat.
+    vraag = vraag
+      .eq('kanaal', 'whatsapp')
+      .gte('laatste_inbound', new Date(nu.getTime() - 24 * 3600 * 1000).toISOString());
   } else if (filter === 'belofte_vandaag') {
     const { data: beloftes } = await supabaseAdmin
       .from('iris_beloftes')
@@ -301,6 +325,10 @@ async function geefGesprek(q, res) {
     laatsteInbound: gesprek.laatste_inbound,
     stilleUrenInstelling: instellingen.stille_uren,
     automatisch: false,
+    // Zonder dit krijgt een mail de WhatsApp-regels opgelegd: buiten 24 uur
+    // "alleen een goedgekeurde template". Dat is geen scheve badge maar een
+    // blokkade op het antwoorden.
+    kanaal: gesprek.kanaal,
     nu,
   });
 
