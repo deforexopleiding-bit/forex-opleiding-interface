@@ -139,6 +139,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron-inbox-uitgesteld",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron-dunning-conversation-reminders",
       "schedule": "*/15 * * * *"
     },

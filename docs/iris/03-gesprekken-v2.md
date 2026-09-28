@@ -219,22 +219,71 @@ je 'm niet meer. Het ongedaan-venster grijpt in op het moment dat het inzicht
 kómt — één seconde later, als je je eigen zin ziet staan. Bijkomend: het scheelt
 een klik per antwoord, en de audit telde er vier.
 
-#### De beperking, en waarom hij de goede kant op valt
-
-Het wachten gebeurt **in het scherm**, niet op de server. Sluit je het tabblad
-binnen die dertig seconden, dan vertrekt het bericht niet. De balk zegt dat er
-zelf bij, en bij het wegklikken vraagt de browser om bevestiging.
-
-Dat is een echte beperking. Hij valt alleen de goede kant op: er gaat niets
-ongewild wég. Het alternatief — de verzending op de server parkeren — vraagt een
-tabel, een cron en een ingreep in de verzendweg die Joost deelt. Dat is een
-aparte beslissing en een aparte PR; deze versie lost het geval op waar de klacht
-over ging (je klikt, je ziet het, je haalt het terug) zonder één regel aan die
-verzendweg te veranderen.
-
 Eén bericht tegelijk: zolang er eentje aftelt, staat de schrijfbalk op de teller.
 Een tweede beginnen terwijl de eerste nog terug kan, maakt van "welke haal ik
 terug?" een raadsel.
+
+#### G2 op de server — de beperking is weg
+
+De eerste versie liet het venster **in het scherm** wachten. Sloot je het tabblad
+binnen die dertig seconden, dan vertrok het bericht nooit. De balk zei dat erbij
+en de browser vroeg om bevestiging, maar het bleef een gat: je dénkt dat je
+geantwoord hebt, en de klant wacht.
+
+**Nu parkeert de server het bericht meteen** in `inbox_uitgesteld`. Daarna zijn
+er twee wegen, en dat is met opzet:
+
+| Situatie | Wie geeft het startsein | Wanneer |
+|---|---|---|
+| tabblad blijft open | het scherm zelf | **exact** 30 s |
+| tabblad is dicht | een cron | binnen de minuut erna |
+
+**Waarom hybride en niet gewoon een cron.** Een Vercel-cron draait hooguit één
+keer per minuut. Alles aan de cron overlaten zou betekenen dat het venster in de
+praktijk tussen de 30 en 90 seconden ligt. Dat is niet "ongeveer dertig
+seconden" — dat is een venster waarvan je niet weet wanneer het dicht is, en dan
+blijf je ernaar kijken in plaats van door te werken.
+
+**Het ding dat nooit mag gebeuren.** Het scherm en de cron kunnen tegelijk
+besluiten dat dit bericht nú weg mag. Zonder bescherming vertrekt het dan twee
+keer, en bij een klant met een achterstand is dat geen dubbel berichtje maar een
+reden om te twijfelen aan alles wat je stuurt.
+
+De bescherming is één UPDATE die alleen slaagt als de rij nog op `gepland` staat
+én nog van niemand is. Twee die tegelijk komen: één krijgt een rij, de ander
+niets. Hetzelfde patroon als `cron-lisa-delayed`. Drie gevallen liggen vast in
+tests: scherm en cron tegelijk, twee cron-runs tegelijk, en annuleren ná de
+claim.
+
+**Annuleren ná de claim lukt niet, en dat is met opzet.** Op dat moment is het
+bericht onderweg. Een knop die zegt dat hij het tegenhield terwijl de klant het
+al heeft, is erger dan een knop die zegt dat het te laat is.
+
+**Het 24-uursvenster wordt bij het VERSTUREN gecontroleerd, niet bij het
+parkeren.** Een venster dat nu open is, kan over dertig seconden dicht zijn — en
+dán is het moment om dat te weten. Is het dicht, dan komt de rij op `mislukt`
+met een leesbare reden die in het gesprek te zien is. Nooit stil.
+
+**De waarschuwing bij het wegklikken is er nog, maar alleen als hij waar is.**
+Staat het bericht geparkeerd, dan mag je het scherm dicht doen en zegt de balk
+dat ook. Een browser die het altijd vraagt, leert je "ja hoor" te klikken zonder
+te lezen — en dan werkt hij ook niet meer op het moment dat het wél uitmaakt.
+
+**Hangende claims worden niet blind vrijgegeven.** Valt een proces om tussen de
+claim en het wegschrijven van de status, dan is de voor de hand liggende
+oplossing — claim wissen, iemand anders pakt 'm op — precies fout: Meta kan het
+bericht al geaccepteerd hebben. Er wordt daarom eerst gekeken of er ná het
+claim-moment een uitgaand bericht in dat gesprek staat. Zo ja, dan gaat de rij
+op `verstuurd` met een notitie om het na te kijken; zo nee, dan komt hij vrij.
+Van de twee manieren waarop dit mis kan gaan, is "niet verstuurd en luid gemeld"
+binnen een minuut recht te zetten, en "twee keer verstuurd" niet.
+
+> **Wat nog in het scherm wacht: templates.** Die lopen via een ánder endpoint
+> (`inbox-send-template`), dat zijn variabelen pas op het verzendmoment opzoekt.
+> Dat pad is niet mee verhuisd, dus voor een template geldt de oude beperking
+> nog: scherm dicht binnen dertig seconden betekent dat hij niet vertrekt. De
+> balk zegt per geval welke van de twee waar is. Dit is bewust een aparte stap —
+> het meeverhuizen van die resolutie is een tweede verbouwing.
 
 ### G6 — mail bij een gesprek dat nog geen klant heeft
 
