@@ -18,7 +18,7 @@ import { computeDealTotals } from './deal-total.js';
 import { createNotification } from './notify.js';
 import { BEZWAREN, isBezwaar } from './bezwaren.js';
 import { schrijfLeadNotitie } from './followup-notitie.js';
-import { telefoonVoorOpvolging } from './phone-e164.js';
+import { telefoonNlBe } from './phone-e164.js';
 
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET     = new Set(['aanwezig', 'no_show', 'afgemeld']);
@@ -1126,7 +1126,7 @@ function bouwOpvolgingTaak({
   const basis = {
     naam,
     email      : att?.email || null,
-    telefoon   : telefoonVoorOpvolging(att?.phone, { bron: 'events-complete' }),
+    telefoon   : telefoonNlBe(att?.phone, { bron: 'events-complete' }),
     bron       : 'event',
     bron_ref   : {
       event_id   : eventId,

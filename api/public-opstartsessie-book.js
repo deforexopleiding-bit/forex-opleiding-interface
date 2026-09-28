@@ -39,24 +39,17 @@
 // contacts. Geen dunning/arrangement/pending-action touches.
 
 import { supabaseAdmin } from './supabase.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE  = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Basale E.164-normalisatie voor NL/BE input (kopie van _lib/lms-provisioning.js
-// helper — hier standalone gehouden zodat dependency minimaal blijft).
-function telefoonE164(raw) {
-  if (!raw) return null;
-  const digits = String(raw).replace(/[^\d+]/g, '');
-  if (!digits) return null;
-  if (digits.startsWith('+')) return digits;
-  // NL/BE aannemen op basis van 0-prefix.
-  const rest = digits.replace(/^0+/, '');
-  if (rest.length >= 9 && rest.length <= 12) return '+31' + rest;
-  return digits;
-}
+// Telefoon naar E.164 via de gedeelde NL/BE-regel (api/_lib/phone-e164.js).
+// De eigen kopie hier plakte +31 voor alles zonder +: '0032471134787' werd
+// '+3132471134787' en '0475716706' '+31475716706'.
+const telefoonE164 = (raw) => telefoonNlBe(raw, { bron: 'public-opstartsessie-book' });
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

@@ -35,7 +35,7 @@
 // Schrijft uitsluitend in opvolging_taken.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { telefoonVoorOpvolging } from './_lib/phone-e164.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
 import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
@@ -335,7 +335,7 @@ async function maakKaart({ afspraak, vandaag, callTijd, reden_code, spraak_tijd 
   const { error } = await supabaseAdmin.from('opvolging_taken').insert({
     naam       : (afspraak.lead_name && String(afspraak.lead_name).trim()) || 'Naamloos',
     email      : afspraak.lead_email || null,
-    telefoon   : telefoonVoorOpvolging(afspraak.lead_phone, { bron: 'cron-opvolging-zoom-nabel' }),
+    telefoon   : telefoonNlBe(afspraak.lead_phone, { bron: 'cron-opvolging-zoom-nabel' }),
     reden      : 'zoom_nabellen',
     reden_code,
     bron       : 'call',

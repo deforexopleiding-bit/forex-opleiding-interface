@@ -31,7 +31,7 @@
 // Schrijft uitsluitend in opvolging_taken.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { telefoonVoorOpvolging } from './_lib/phone-e164.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import {
   ANNULERING_VANAF, HERBOEKT_STATUSSEN, REDEN_ZELF,
   annuleerBron, bouwNotitie, bouwBadge, bouwNotitieRegel,
@@ -232,7 +232,7 @@ async function maakKaart({ afspraak, vandaag }) {
   const rij = {
     naam       : (afspraak.lead_name && String(afspraak.lead_name).trim()) || 'Naamloos',
     email      : afspraak.lead_email || null,
-    telefoon   : telefoonVoorOpvolging(afspraak.lead_phone, { bron: 'cron-opvolging-annuleringen' }),
+    telefoon   : telefoonNlBe(afspraak.lead_phone, { bron: 'cron-opvolging-annuleringen' }),
     reden      : REDEN,
     reden_code : annuleerBron(afspraak),
     bron       : 'call',

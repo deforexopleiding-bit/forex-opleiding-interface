@@ -55,7 +55,7 @@ function kiesLijn(nummer) {
     }
   }
   if (genormaliseerd.startsWith('0')) {
-    // Zelfde regel als normaliseerOpvolging in api/_lib/phone-e164.js: een
+    // Zelfde regel als normaliseerNlBe in api/_lib/phone-e164.js: een
     // lokaal 045-049-nummer van 10 cijfers is een Belgisch gsm. Belde dat via
     // de NL-lijn, dan weigerde de operator na 1-2 seconden (28 september).
     // Nog steeds geen zekerheid, dus zeker:false — de uitleg zegt dat.
@@ -67,8 +67,8 @@ function kiesLijn(nummer) {
 
 /**
  * Welk land hoort bij een lokaal 0-nummer (alleen cijfers)? SPIEGEL van de
- * regel in normaliseerOpvolging (api/_lib/phone-e164.js) — dit bestand is een
- * klassiek script en kan die niet importeren. tests/telefoon-opvolging.test.js
+ * regel in normaliseerNlBe (api/_lib/phone-e164.js) — dit bestand is een
+ * klassiek script en kan die niet importeren. tests/telefoon-nl-be.test.js
  * houdt de twee gelijk. null = twijfel.
  */
 function lijnVoorLokaalNummer(cijfers) {

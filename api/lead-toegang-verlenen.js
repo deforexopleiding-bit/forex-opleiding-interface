@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       const wa = await stuurWelkom({
         email: lead.email,
         voornaam: lead.voornaam || null,
-        telefoon: telefoonE164(lead.telefoon || ''),
+        telefoon: telefoonE164(lead.telefoon || '', 'lead-toegang-verlenen'),
         kanalen: ['email'],
       });
       mailStatus = { ok: !!wa?.ok, detail: wa || null };

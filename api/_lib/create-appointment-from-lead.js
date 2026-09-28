@@ -20,7 +20,7 @@ import fetch from 'node-fetch';
 import { supabaseAdmin } from '../supabase.js';
 import { createGhlAppointment } from './ghl-appointment.js';
 import { detectEmailTypo } from './send-error-classify.js';
-import { telefoonVoorOpvolging } from './phone-e164.js';
+import { telefoonNlBe } from './phone-e164.js';
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 // GHL contacts-API gebruikt een andere Version dan de calendars-API.
@@ -222,8 +222,8 @@ export async function createAppointmentForLead({
   // Nummer normaliseren VÓÓR het naar GHL gaat. Een rauw '0475716706' vult
   // GHL aan met zijn standaardland NL, de appointment-poll leest dat als
   // '+31475716706' terug en de opwarm-cron maakt er een opvolgtaak met een
-  // onbestaand nummer van. Zie normaliseerOpvolging in _lib/phone-e164.js.
-  lead = { ...lead, lead_phone: telefoonVoorOpvolging(lead.lead_phone, { bron: 'create-appointment-from-lead' }) };
+  // onbestaand nummer van. Zie normaliseerNlBe in _lib/phone-e164.js.
+  lead = { ...lead, lead_phone: telefoonNlBe(lead.lead_phone, { bron: 'create-appointment-from-lead' }) };
 
   // 1) Contact-koppeling — hard 422 als er niks is.
   const ghlContactId = await resolveGhlContactId(lead);

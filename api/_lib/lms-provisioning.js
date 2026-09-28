@@ -4,16 +4,23 @@
 // de aanroepende endpoints doen zelf de requirePermission-check.
 
 import { supabaseAdmin } from '../supabase.js';
-import { normalizePhoneE164 } from './meta-capi.js';
+import { telefoonNlBe } from './phone-e164.js';
 
 // Datum 'YYYY-MM-DD' -> ISO-grenzen (begin/eind van de dag, UTC).
 export const vanIso = (d) => `${d}T00:00:00.000Z`;
 export const totIso = (d) => `${d}T23:59:59.999Z`;
 
-/** +E164 in hetzelfde formaat als leads.telefoon_e164 ('+31…'), of null. */
-export function telefoonE164(raw) {
-  const d = normalizePhoneE164(raw);
-  return d ? '+' + d : null;
+/**
+ * Wat er in leads.telefoon_e164 komt. Was normalizePhoneE164 uit meta-capi,
+ * die elke 0 als Nederlands las: '0475716706' werd '+31475716706' en
+ * '470497423' '+31470497423'. Nu de gedeelde NL/BE-regel uit phone-e164.js;
+ * bij twijfel het rauwe nummer + een log, nooit stil een verkeerd land.
+ *
+ * @param {*} raw
+ * @param {string} [bron]  voor het log
+ */
+export function telefoonE164(raw, bron = 'lms-provisioning') {
+  return telefoonNlBe(raw, { bron });
 }
 
 /**
