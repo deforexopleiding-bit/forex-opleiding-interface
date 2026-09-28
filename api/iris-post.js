@@ -38,6 +38,7 @@ import { haalInstellingen, GEEN_WERK, werkbakCategorieFilter } from './_lib/iris
 import { vensterStand, magVersturen, BIJNA_DICHT_MINUTEN } from './_lib/iris/venster.js';
 import { contactZoekFilter } from './_lib/iris/zoekfilter.js';
 import { aandachtsregel } from './_lib/iris/aandacht.js';
+import { leesOrdening, klokVenster, voegSamen, MAX_DRINGEND, ORDENINGEN } from './_lib/iris/ordening.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STANDAARD_LIMIET = 50;
@@ -198,6 +199,9 @@ async function geefLijst(q, res) {
   const limiet = klem(q.limiet, STANDAARD_LIMIET, 1, MAX_LIMIET);
   const vanaf = klem(q.vanaf, 0, 0, 100000);
   const nu = new Date();
+  // Zoeken heeft zijn eigen volgorde nodig -- wie zoekt, wil vinden, niet
+  // gesorteerd worden op iets anders. Vandaar: geen klok-groep bij een zoekterm.
+  const ordening = zoek ? 'nieuwste' : leesOrdening(q.ordening, filter);
 
   let vraag = supabaseAdmin
     .from('iris_gesprekken')
@@ -273,10 +277,42 @@ async function geefLijst(q, res) {
     vraag = vraag.in('contact_id', ids);
   }
 
+  // ── DE KLOK-GROEP ──────────────────────────────────────────────────────────
+  // WhatsApp-gesprekken waarvan het venster bijna dichtgaat, kortste tijd
+  // eerst. Alleen bovenaan de EERSTE pagina: hem bij elk doorladen herhalen zou
+  // betekenen dat je dezelfde gesprekken opnieuw ziet, en dan vertrouw je de
+  // lijst niet meer.
+  //
+  // Een aparte opvraging en geen slimme ORDER BY, omdat "hoe dringend is dit"
+  // een berekening is die elke minuut verschuift. PostgREST kan daar niet op
+  // sorteren, en een kolom die het antwoord bewaart zou elke minuut verouderen.
+  let dringendRijen = [];
+  if (ordening === 'dringend' && vanaf === 0) {
+    const klok = klokVenster(nu);
+    const { data, error: eKlok } = await supabaseAdmin
+      .from('iris_gesprekken')
+      .select('id, contact_id, kanaal, categorie, status, toegewezen_aan, laatste_inbound, laatste_outbound, ongelezen')
+      .eq('kanaal', 'whatsapp')
+      .gt('laatste_inbound', klok.van)
+      .lte('laatste_inbound', klok.tot)
+      .order('laatste_inbound', { ascending: true })
+      .limit(MAX_DRINGEND);
+    // Mislukt dit, dan is de lijst gewoon de gewone lijst. Een klok-groep die
+    // niet geladen kon worden is geen reden om de hele lijst te weigeren.
+    if (eKlok) console.warn('[iris-post] klok-groep niet geladen:', eKlok.message);
+    else dringendRijen = data || [];
+  }
+
   const { data: gesprekken, error, count } = await vraag.range(vanaf, vanaf + limiet - 1);
   if (error) throw new Error('gesprekken: ' + error.message);
 
-  const rijen = gesprekken || [];
+  // Het AANTAL UIT DE HOOFDOPVRAGING, niet uit de samengevoegde lijst. De
+  // cursor loopt over de hoofdopvraging; zou hij over `items` lopen, dan sloeg
+  // hij bij het doorladen net zoveel gesprekken over als er in de klok-groep
+  // stonden -- en die verdwijnen dan stil uit de lijst.
+  const hoofdAantal = (gesprekken || []).length;
+  const samen = voegSamen(dringendRijen, gesprekken || [], { eerstePagina: vanaf === 0 });
+  const rijen = samen.items;
   const contactIds = [...new Set(rijen.map((g) => g.contact_id).filter(Boolean))];
   const gesprekIds = rijen.map((g) => g.id);
 
@@ -298,12 +334,16 @@ async function geefLijst(q, res) {
 
   return res.status(200).json({
     items,
-    totaal: count ?? items.length,
+    totaal: count ?? hoofdAantal,
     filter,
     categorie,
+    ordening,
+    ordeningen: ORDENINGEN,
     vanaf,
     limiet,
-    meer: (count ?? 0) > vanaf + items.length,
+    dringend_aantal: samen.dringend_aantal,
+    meer: (count ?? 0) > vanaf + hoofdAantal,
+    volgende_vanaf: vanaf + hoofdAantal,
     filters: FILTERS,
   });
 }
