@@ -41,6 +41,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { telefoonVoorOpvolging } from './_lib/phone-e164.js';
 import { dagPlus, WAKKER_DAGEN_VOOR_EVENT, badgeVoorEvent } from './_lib/opvolging-aanmelding.js';
 import { onAttendeePlekChange, PLEK_SELECT } from './_lib/event-attendee-mutations.js';
 import { verplaatsDeelnemer } from './_lib/event-attendee-move-core.js';
@@ -419,7 +420,7 @@ async function maakBevestigdeKaart({ taak, nieuweAttendeeId, doelEvent, eventDag
     const velden = {
       naam       : taak.naam,
       email      : taak.email || null,
-      telefoon   : taak.telefoon || null,
+      telefoon   : telefoonVoorOpvolging(taak.telefoon, { bron: 'opvolging-aanmelding-actie' }),
       reden      : 'aanmelding',
       bron       : 'event',
       // ZELFDE VORM ALS cron-opvolging-aanmeldingen SCHRIJFT. De view leest

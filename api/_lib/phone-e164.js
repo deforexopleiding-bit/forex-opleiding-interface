@@ -151,3 +151,142 @@ export function normaliseerLenient(raw, line) {
   }
   return s;   // short-code / extension / onbekend → raw, geen 400
 }
+
+// ── DERDE BELEID: OPVOLGING (BELPAD) ─────────────────────────────────────
+//
+// GEMETEN op 28 september. Belgische gsm-nummers in lokaal formaat
+// ('0475716706') kwamen in opvolging_taken.telefoon terecht als
+// '+31475716706'. Dat nummer bestaat niet; de softphone kiest dan de NL-lijn
+// en de operator weigert na 1-2 seconden (call_log: duration_sec 1-2,
+// outcome_hint no_answer). René Frederix had één taak met '0475716706' en
+// een nieuwere met '+31475716706'; Rayan Kerkab stond op een event met
+// +32471644261 en als opvolgtaak met +31471644261.
+//
+// De lus: een taak met een lokaal nummer wordt ingepland → het RAUWE nummer
+// gaat naar GHL (contacts/upsert) → GHL vult zijn standaardland NL in → de
+// appointment-poll leest '+31…' terug in follow_up_appointments.lead_phone
+// → de opwarm-cron maakt daar een nieuwe taak van. Niemand in onze code
+// plakte +31 ervoor; we gaven het nummer alleen ongenormaliseerd door aan
+// iemand die het wél deed.
+//
+// WAAROM HIER WEL EEN AANNAME, EN BIJ normaliseerStrict NIET.
+// Strict hoort bij een SEND-pad: een WhatsApp met iemands gegevens. Een
+// verkeerde gok daar lekt informatie naar een vreemde. Dit is een BELPAD:
+// een mens kiest het nummer aan, ziet de lijnkeuze en hoort wie opneemt. En
+// het alternatief is niet 'niets doen' — dat is GHL laten gokken, altijd NL.
+//
+// DE AFWEGING BIJ 04 MET 10 CIJFERS. In NL beginnen ook vaste netnummers met
+// 04 (040 Eindhoven, 046, 047x, 049x), en die zijn óók 10 cijfers — precies
+// zo lang als een lokaal Belgisch gsm-nummer (045x-049x). Het nummer alleen
+// beslist dat niet. We kiezen +32: onze leads zijn overwegend Vlaams, en een
+// Nederlandse lead geeft vrijwel altijd een 06-nummer op. Een NL-vastnummer
+// in 04 wordt hierdoor verkeerd; dat is zichtbaar in de lijnkeuze en
+// overschrijfbaar, en zeldzamer dan het omgekeerde.
+//
+// Alleen 045-049 geldt als Belgisch gsm. 040-044 met 10 cijfers bestaat in
+// België niet (gsm = 045x-049x, vast = 9 cijfers), dus dat is zeker een
+// Nederlands vastnummer (040 Eindhoven, 043 Maastricht) en gaat naar +31.
+//
+// TWIJFEL = RAUW LATEN + LOGGEN. Fout aantal cijfers, geen 0/+/00-prefix, of
+// een +31/+32 met een onmogelijke lengte: dan blijft het nummer zoals het
+// binnenkwam. Zo valt het op in de lijst in plaats van stil een verkeerd
+// land te krijgen.
+
+// Lengte van het nationale deel (na de landcode) die we accepteren.
+const NATIONAAL_LENGTE = { '31': [9], '32': [8, 9] };
+
+// Een landveld van een formulier naar een landcode. Alleen NL en BE: voor
+// andere landen weten we de lokale nummering niet, dus dan val je terug op
+// de regel.
+function _landcode(land) {
+  if (land == null) return null;
+  const s = String(land).trim().toLowerCase().replace(/[^a-zë+0-9]/g, '');
+  if (['nl', 'nld', 'nederland', 'netherlands', 'thenetherlands', 'holland', '31', '+31'].includes(s)) return '31';
+  if (['be', 'bel', 'belgie', 'belgië', 'belgium', 'belgique', '32', '+32'].includes(s)) return '32';
+  return null;
+}
+
+function _geldigVoorLand(code, nationaal) {
+  const lengtes = NATIONAAL_LENGTE[code];
+  if (!lengtes) return true; // ander land: alleen de E.164-vorm telt
+  return lengtes.includes(nationaal.length);
+}
+
+/**
+ * OPVOLGING-PAD. Pure functie — logt niet zelf (zie telefoonVoorOpvolging).
+ *
+ * @param {*} raw
+ * @param {{ land?: string }} [opties]  landveld van de bron, als dat er is
+ * @returns {{ telefoon: ?string, e164: ?string, zeker: boolean, reden: string }}
+ *   telefoon  wat opgeslagen wordt: het E.164-nummer, of bij twijfel het
+ *             rauwe (getrimde) nummer
+ *   e164      gezet als omgezet, anders null
+ *   zeker     true = landcode stond erin of kwam uit het landveld
+ *   reden     korte uitleg, voor het log
+ */
+export function normaliseerOpvolging(raw, { land = null } = {}) {
+  if (raw == null) return { telefoon: null, e164: null, zeker: false, reden: 'geen nummer' };
+  const rauw = String(raw).trim();
+  const s = rauw.replace(/[\s\-().\/]/g, '');
+  if (!s) return { telefoon: null, e164: null, zeker: false, reden: 'geen nummer' };
+
+  const twijfel = (reden) => ({ telefoon: rauw, e164: null, zeker: false, reden });
+
+  // 1 · + of 00: de landcode staat er al. Overnemen, maar wel de lengte
+  //     controleren voor NL/BE — '+3147979884' is een cijfer te kort.
+  if (s.startsWith('+') || s.startsWith('00')) {
+    const kandidaat = s.startsWith('+') ? s : '+' + s.slice(2);
+    if (!isE164(kandidaat)) return twijfel('geen geldige E.164-vorm');
+    const d = kandidaat.slice(1);
+    for (const code of Object.keys(NATIONAAL_LENGTE)) {
+      if (d.startsWith(code) && !_geldigVoorLand(code, d.slice(code.length))) {
+        return twijfel('+' + code + ' met fout aantal cijfers');
+      }
+    }
+    return { telefoon: kandidaat, e164: kandidaat, zeker: true, reden: 'landcode aanwezig' };
+  }
+
+  if (!/^\d+$/.test(s)) return twijfel('onbekende tekens');
+  // Zonder 0 en zonder +: '3147979884' kan een vergeten + zijn, of een
+  // nummer zonder 0. Niet raden.
+  if (!s.startsWith('0')) return twijfel('geen 0, + of 00 ervoor');
+  const nationaal = s.slice(1);
+
+  // 2 · Landveld van de bron gaat voor.
+  const code = _landcode(land);
+  if (code) {
+    if (_geldigVoorLand(code, nationaal)) {
+      const e164 = '+' + code + nationaal;
+      return { telefoon: e164, e164, zeker: true, reden: 'landveld ' + code };
+    }
+    return twijfel('landveld +' + code + ' maar fout aantal cijfers');
+  }
+
+  // 3 · De regel.
+  let c = null;
+  let reden = '';
+  if (nationaal.length === 9 && /^4[5-9]/.test(nationaal)) { c = '32'; reden = '045-049 + 10 cijfers → Belgisch gsm'; }
+  else if (nationaal.length === 9 && nationaal.startsWith('6')) { c = '31'; reden = '06 → Nederlands gsm'; }
+  else if (nationaal.length === 9) { c = '31'; reden = '0 + 9 cijfers → Nederlands vast'; }
+  else if (nationaal.length === 8) { c = '32'; reden = '0 + 8 cijfers → Belgisch vast'; }
+  if (!c) return twijfel('fout aantal cijfers voor NL/BE');
+  const e164 = '+' + c + nationaal;
+  return { telefoon: e164, e164, zeker: false, reden };
+}
+
+/**
+ * Wat er in opvolging_taken.telefoon (of naar GHL) gaat. Logt bij twijfel,
+ * zodat een rauw gebleven nummer in de Vercel-logs terug te vinden is.
+ *
+ * @param {*} raw
+ * @param {{ land?: string, bron?: string }} [opties]
+ * @returns {?string}
+ */
+export function telefoonVoorOpvolging(raw, { land = null, bron = 'onbekend' } = {}) {
+  const r = normaliseerOpvolging(raw, { land });
+  if (r.telefoon && !r.e164) {
+    console.warn('[telefoon-opvolging] niet omgezet, rauw bewaard:',
+      { bron, telefoon: r.telefoon, reden: r.reden });
+  }
+  return r.telefoon;
+}
