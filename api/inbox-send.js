@@ -1,47 +1,46 @@
 // api/inbox-send.js
 // POST → verzend een outbound WhatsApp-bericht via Meta Cloud API.
-// Permission: finance.inbox.send
+// Permission: finance.inbox.send (of events.simone.use / onboarding.inbox.send,
+// afhankelijk van de module waar het gesprek bij hoort)
 //
 // Body:
 //   conversation_id     uuid  required
-//   mode                'text' | 'template'  required
+//   mode                'text' | 'template' | 'image' | 'document' | 'video'
 //   body                text  required bij mode='text' (free-form)
 //   template_name       text  required bij mode='template'
 //   template_language   text  optional (default 'nl')
-//   template_variables  object optional — wordt 1-op-1 in audit/DB bewaard;
-//                                          voor PR A2 geen automatic component-build
-//   template_components array optional — Meta's components-payload (header/body/buttons)
+//   template_variables  object optional — wordt 1-op-1 in audit/DB bewaard
+//   template_components array optional — Meta's components-payload
+//   media_link/caption/filename bij de media-modes
 //
 // 24h customer-service window:
-//   mode='text' vereist een inbound msg binnen 24h. Buiten 24h → 422 met
-//   message dat een approved template gebruikt moet worden.
+//   mode='text' en de media-modes vereisen een inbound msg binnen 24h. Buiten
+//   24h → 422 met de melding dat er een approved template nodig is.
 //
 // Response: 200 { success: true, message_id, meta_wamid }
-//           422 { error: '24h_window_expired'|'validation', ... }
+//           422 { error: '24h_window_expired', ... }
 //           502 { error, meta_error } bij Meta-API fout
 //           503 { error, missing: [] } bij niet-geconfigureerde Meta
+//
+// ── WAT HIER SINDS G2-SERVER STAAT, EN WAT NIET MEER ─────────────────────────
+// Het lezen van het verzoek, de rechten en het antwoord staan hier. Het
+// verzenden zelf staat in _lib/inbox-verzenden.js, omdat er sinds het
+// uitgestelde versturen drie aanroepers zijn (dit endpoint, het scherm dat na
+// dertig seconden alsnog verstuurt, en de cron voor als dat scherm dicht is).
+// Drie kopieën van die logica is precies hoe je krijgt dat een bericht via de
+// ene weg wél in de audit-log belandt en via de andere niet.
+//
+// De vormen van het antwoord zijn letterlijk hetzelfde gebleven: vijf schermen
+// hangen aan dit endpoint en kennen die uit hun hoofd.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 // NOTE: Fase 2b per-mentor-ACL (checkOnboardingConvAccess) op de
 // onboarding-tak is bewust uitgezet: de onboarding-inbox is gedeeld voor
-// iedereen met onboarding.inbox.send. De module-permissie-cascade
-// hieronder (events.simone.use / onboarding.inbox.send / finance.inbox.send)
-// blijft de enige gate per conv-module.
+// iedereen met onboarding.inbox.send. De module-permissie-cascade in
+// _lib/inbox-verzenden.js blijft de enige gate per conv-module.
 import { getClientIp } from './_lib/audit-customer.js';
-import { sendText, sendTemplate, sendMedia, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
-import { renderTemplatePreview } from './_lib/render-template-preview.js';
-// FIX A no-reply-reminder-bug: onze uitgaande WA-reply moet de dunning-run
-// ontpauzeren + reminder-teller resetten zodat de no-reply-cron pas opnieuw
-// begint na een NIEUWE klant-inbound. Fail-soft.
-import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
-import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
-import { werkSleutel } from './_lib/gesprekken-werkstand.js';
-
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_BODY = 4096; // Meta text limit
-const MAX_TEMPLATE_NAME = 200;
+import { leesVerzendOpdracht, verstuurInGesprek } from './_lib/inbox-verzenden.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -68,336 +67,13 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (finance.inbox.send, events.simone.use of onboarding.inbox.send)' });
   }
 
-  const body = req.body || {};
-  const convId = String(body.conversation_id || '').trim();
-  const mode = String(body.mode || '').toLowerCase();
-  const text = body.body !== undefined ? String(body.body || '').trim() : '';
-  const templateName = String(body.template_name || '').trim();
-  const templateLanguage = String(body.template_language || 'nl').trim().toLowerCase() || 'nl';
-  const templateVariables = body.template_variables && typeof body.template_variables === 'object'
-    ? body.template_variables : null;
-  const templateComponents = Array.isArray(body.template_components) ? body.template_components : [];
-  // Media-mode (image/document/video): link uit whatsapp-media bucket +
-  // optionele caption/filename. Free-form (net als text) → 24h-venster
-  // vereist. Buiten venster: gebruik sendTemplate met media-header.
-  const mediaKind = ['image', 'document', 'video'].includes(mode) ? mode : null;
-  const mediaLink = mediaKind ? String(body.media_link || '').trim() : '';
-  const mediaCaption = mediaKind && body.caption ? String(body.caption).trim().slice(0, 1024) : '';
-  const mediaFilename = mediaKind === 'document' && body.filename ? String(body.filename).trim().slice(0, 200) : '';
+  const gelezen = leesVerzendOpdracht(req.body);
+  if (!gelezen.ok) return res.status(gelezen.http).json(gelezen.payload);
 
-  // Validatie
-  if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
-  if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
-  if (mode !== 'text' && mode !== 'template' && !mediaKind) {
-    return res.status(400).json({ error: "mode moet 'text', 'template', 'image', 'document' of 'video' zijn" });
-  }
-  if (mode === 'text') {
-    if (!text) return res.status(400).json({ error: 'body vereist bij mode=text' });
-    if (text.length > MAX_BODY) return res.status(400).json({ error: `body max ${MAX_BODY} chars` });
-  }
-  if (mode === 'template') {
-    if (!templateName) return res.status(400).json({ error: 'template_name vereist bij mode=template' });
-    if (templateName.length > MAX_TEMPLATE_NAME) return res.status(400).json({ error: `template_name max ${MAX_TEMPLATE_NAME} chars` });
-  }
-  if (mediaKind) {
-    if (!mediaLink) return res.status(400).json({ error: `media_link vereist bij mode=${mediaKind}` });
-    if (!/^https:\/\//i.test(mediaLink)) return res.status(400).json({ error: 'media_link moet https:// zijn' });
-  }
-
-  // Meta-config check
-  const cfg = getConfigStatus();
-  if (!cfg.configured) {
-    return res.status(503).json({
-      error: 'Meta WhatsApp niet geconfigureerd',
-      missing: cfg.missing,
-    });
-  }
-
-  try {
-    // Module-config: finance-WABA-lijn voor outbound routing. Bij ontbreken
-    // valt sendText/sendTemplate terug op env-var (huidige gedrag) zodat
-    // bestaande deploys zonder DB-config blijven werken.
-    let financePnId = null;
-    try {
-      const { data: modCfg, error: modErr } = await supabaseAdmin
-        .from('whatsapp_module_config')
-        .select('phone_number_id')
-        .eq('module', 'finance')
-        .eq('is_active', true)
-        .maybeSingle();
-      if (modErr) {
-        console.error('[inbox-send] module-config lookup:', modErr.message);
-      } else if (modCfg?.phone_number_id) {
-        financePnId = modCfg.phone_number_id;
-      }
-    } catch (e) {
-      console.error('[inbox-send] module-config exception:', e.message);
-    }
-
-    // Conversation ophalen — voor phone_number + 24h check + Fase 2b ACL.
-    const { data: conv, error: convErr } = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .select('id, phone_number, phone_number_id, customer_id, last_inbound_at, last_message_preview')
-      .eq('id', convId)
-      .maybeSingle();
-    if (convErr) throw new Error('conversation lookup: ' + convErr.message);
-    if (!conv) return res.status(404).json({ error: 'Conversation niet gevonden' });
-    if (!conv.phone_number) return res.status(400).json({ error: 'Conversation heeft geen phone_number' });
-
-    // Onboarding-inbox is GEDEELD: de eerdere Fase 2b per-mentor-ACL
-    // (checkOnboardingConvAccess) op deze tak is uitgezet. Elke caller met
-    // onboarding.inbox.send mag op elke onboarding-conv antwoorden. De
-    // module-permissie-cascade hieronder (events.simone.use /
-    // onboarding.inbox.send / finance.inbox.send afgeleid uit
-    // whatsapp_module_config) is de enige toegangscheck per conv-module.
-
-    // Refined module-permission check: derive de module van deze conv via
-    // conv.phone_number_id -> whatsapp_module_config. Voorkomt dat een gebruiker
-    // met alleen events.simone.use namens finance verstuurt (of omgekeerd).
-    // Default = finance bij onbekende pnId → preserve byte-identiek gedrag.
-    let convModule = 'finance';
-    if (conv.phone_number_id) {
-      try {
-        const { data: convMod, error: convModErr } = await supabaseAdmin
-          .from('whatsapp_module_config')
-          .select('module')
-          .eq('phone_number_id', conv.phone_number_id)
-          .eq('is_active', true)
-          .maybeSingle();
-        if (convModErr) {
-          console.error('[inbox-send] conv-module lookup:', convModErr.message);
-        } else if (convMod?.module) {
-          convModule = String(convMod.module).toLowerCase();
-        }
-      } catch (e) {
-        console.error('[inbox-send] conv-module exception:', e.message);
-      }
-    }
-    if (convModule === 'events' && !hasSimoneUse) {
-      return res.status(403).json({ error: 'Geen rechten (events.simone.use voor events-conv)' });
-    }
-    if (convModule === 'onboarding' && !hasOnboardingSend) {
-      return res.status(403).json({ error: 'Geen rechten (onboarding.inbox.send voor onboarding-conv)' });
-    }
-    if (convModule !== 'events' && convModule !== 'onboarding' && !hasFinanceSend) {
-      return res.status(403).json({ error: 'Geen rechten (finance.inbox.send voor finance-conv)' });
-    }
-
-    // 24h-window guard voor free-form text EN media (Meta-regel: alle
-    // free-form berichten vereisen een inbound msg binnen 24h). Buiten
-    // venster: gebruik sendTemplate — voor media kan een template met
-    // media-header via inbox-send-template.js (runtime_media).
-    if (mode === 'text' || mediaKind) {
-      const t = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0;
-      const withinWindow = t && (Date.now() - t) <= TWENTY_FOUR_HOURS_MS;
-      if (!withinWindow) {
-        return res.status(422).json({
-          error: '24h_window_expired',
-          message: mediaKind
-            ? `Buiten 24-uurs venster — vrij ${mediaKind} versturen kan niet meer. Gebruik een approved template met een ${mediaKind}-header.`
-            : 'Buiten 24-uurs venster sinds laatste inbound bericht. Gebruik een approved template.',
-        });
-      }
-    }
-
-    // Afzendlijn-keuze: prefer conversation.phone_number_id (de lijn waarop
-    // het gesprek binnenkwam) zodat antwoord-routing klopt. Fallback op
-    // finance-module-config; uiteindelijk fallback op env-var (= undefined
-    // doorgeven aan sendText/sendTemplate triggert getConfig default).
-    const outboundPnId = conv.phone_number_id || financePnId || undefined;
-
-    // Meta API call. Nieuwe mediaKind-branch gebruikt sendMedia (link-mode
-    // met de publieke bucket-URL). Meta accepteert filename alleen bij
-    // 'document' (image/video negeren het).
-    let metaResult;
-    try {
-      if (mode === 'text') {
-        metaResult = await sendText({ to: conv.phone_number, body: text, phoneNumberId: outboundPnId });
-      } else if (mediaKind) {
-        metaResult = await sendMedia({
-          to           : conv.phone_number,
-          kind         : mediaKind,
-          link         : mediaLink,
-          caption      : mediaCaption || undefined,
-          filename     : mediaFilename || undefined,
-          phoneNumberId: outboundPnId,
-        });
-      } else {
-        metaResult = await sendTemplate({
-          to: conv.phone_number,
-          templateName,
-          languageCode: templateLanguage,
-          components: templateComponents,
-          phoneNumberId: outboundPnId,
-        });
-      }
-    } catch (metaErr) {
-      if (metaErr instanceof MetaNotConfiguredError) {
-        return res.status(503).json({ error: 'Meta WhatsApp niet geconfigureerd', missing: metaErr.missing });
-      }
-      // Meta re-engagement fout 131047 = 24u-venster verlopen. Onze eigen
-      // guard hierboven kijkt naar conv.last_inbound_at in de DB, maar dat
-      // kan "open" zeggen terwijl Meta's venster in werkelijkheid dicht is
-      // (bv. sandbox-gesimuleerde inbound die Meta niet kent). Vertaal 131047
-      // naar dezelfde 422/'24h_window_expired'-shape als de eigen guard
-      // zodat de UI 't identiek afhandelt (badge naar 'verlopen' + toast).
-      // source:'meta' zodat de UI kan onderscheiden of het onze eigen
-      // check was of Meta zelf.
-      const metaCode = Number(metaErr?.metaCode);
-      if (metaCode === 131047 || metaCode === 131051 || metaCode === 131026) {
-        console.warn('[inbox-send] Meta re-engagement fout — vertaald naar 24h_window_expired:', {
-          meta_code   : metaErr.metaCode,
-          meta_subcode: metaErr.metaSubcode,
-          meta_message: metaErr.metaMessage,
-          fbtrace_id  : metaErr.metaFbtrace,
-        });
-        return res.status(422).json({
-          error  : '24h_window_expired',
-          source : 'meta',
-          message: mediaKind
-            ? `Meta's 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Vrij ${mediaKind} versturen kan niet meer — gebruik de Template-knop voor een goedgekeurde template met ${mediaKind}-header.`
-            : 'Meta\'s 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Gebruik de Template-knop om een goedgekeurde template te sturen.',
-          meta_code: metaErr.metaCode,
-        });
-      }
-      console.error('[inbox-send] Meta API fout:', metaErr.message);
-      return res.status(502).json({ error: 'Meta API fout', meta_error: metaErr.message });
-    }
-
-    const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
-    const nowIso = new Date().toISOString();
-
-    // Persist outbound message. Voor mediaKind: media_url = bucket-link,
-    // media_type = kind, body = caption (of filename bij document als geen
-    // caption). Zo rendert de inbox-UI dezelfde thumbnail/download-link
-    // die 'ie voor inbound gebruikt.
-    const insertRow = {
-      conversation_id:    convId,
-      direction:          'out',
-      meta_wamid:         wamid,
-      body:               mode === 'text' ? text : (mediaKind ? (mediaCaption || mediaFilename || null) : null),
-      template_name:      mode === 'template' ? templateName : null,
-      template_variables: mode === 'template' ? (templateVariables || null) : null,
-      media_url:          mediaKind ? mediaLink : null,
-      media_type:         mediaKind || null,
-      status:             'queued',
-      sent_at:            nowIso,
-      sent_by_user_id:    user.id,
-    };
-    const { data: inserted, error: insErr } = await supabaseAdmin
-      .from('whatsapp_messages')
-      .insert(insertRow)
-      .select('id, meta_wamid, status, sent_at')
-      .single();
-    if (insErr) throw new Error('message insert: ' + insErr.message);
-
-    // Conversation last_message_at + preview.
-    // Voor template-mode: render de body via render-template-preview zodat
-    // de inbox-lijst een leesbaar fragment toont i.p.v. '[template] naam'.
-    // Fail-soft: helper valt zelf terug op het label als template niet
-    // gevonden. Bij text/media-mode blijft de bestaande logica ongewijzigd.
-    let preview;
-    if (mode === 'text') {
-      preview = text.slice(0, 120);
-    } else if (mediaKind) {
-      preview = ('[' + mediaKind + '] ' + (mediaCaption || mediaFilename || '')).slice(0, 120);
-    } else {
-      // Template-mode: extract body-parameters uit componentendie zelf en
-      // pass ze aan de helper. templateComponents-shape:
-      //   [{ type: 'body', parameters: [{ type:'text', text: '...' }, ...] }]
-      const bodyComp = Array.isArray(templateComponents)
-        ? templateComponents.find((c) => c?.type === 'body')
-        : null;
-      const bodyParams = Array.isArray(bodyComp?.parameters) ? bodyComp.parameters : [];
-      const tplVars = bodyParams.length
-        ? Object.fromEntries(bodyParams.map((p, i) => [String(i + 1), String(p?.text ?? '')]))
-        : null;
-      const rendered = await renderTemplatePreview({
-        templateName,
-        templateVariables: tplVars,
-        supabase: supabaseAdmin,
-      });
-      preview = rendered.body.slice(0, 120);
-    }
-    const { error: updErr } = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .update({ last_message_at: nowIso, last_message_preview: preview })
-      .eq('id', convId);
-    if (updErr) console.error('[inbox-send] conversation update failed:', updErr.message);
-
-    // Audit log (fail-soft)
-    try {
-      await supabaseAdmin.from('audit_log').insert({
-        user_id:     user.id,
-        action:      mode === 'text' ? 'whatsapp.outbound_text_sent' : 'whatsapp.outbound_template_sent',
-        entity_type: 'whatsapp_message',
-        entity_id:   inserted.id,
-        after_json:  {
-          conversation_id: convId,
-          phone_number:    conv.phone_number,
-          mode,
-          meta_wamid:      wamid,
-          template_name:   mode === 'template' ? templateName : null,
-        },
-        ip_address:  getClientIp(req),
-      });
-    } catch (auditErr) {
-      console.error('[inbox-send] audit insert exception:', auditErr.message);
-    }
-
-    // FIX A no-reply-reminder-bug: onze reply ontpauzeert de dunning-run
-    // (indien paused-by-conversation) + reset de reminder-teller. De cron
-    // begint zo pas opnieuw bij een NIEUWE klant-inbound (die het via de
-    // inbox-webhook opnieuw pauseert). Fail-soft — een fout hier mag de
-    // succesvolle WA-verzending NIET blokkeren (het bericht is al bij Meta).
-    try {
-      const r = await unpauseRunsForConversation(convId);
-      if (r && !r.ok && r.error) {
-        console.warn('[inbox-send] unpause soft-fail:', r.error);
-      }
-    } catch (unpauseErr) {
-      console.warn('[inbox-send] unpause exception (fail-soft):', unpauseErr?.message || unpauseErr);
-    }
-
-    // ── G5 — dit gesprek wacht nu op de KLANT ─────────────────────────────
-    // iris_gesprekken.status werd tot nu toe alleen door Iris zelf bijgewerkt:
-    // 'wacht_op_ons' als er iets binnenkwam, 'wacht_op_klant' als ZIJ iets
-    // stuurde. Antwoordde een mens vanuit dit scherm, dan bleef het op
-    // 'wacht_op_ons' staan.
-    //
-    // Dat maakt het filter "wacht op ons" onbruikbaar: het blijft gesprekken
-    // tonen die je net beantwoord hebt. Een filter die je werk niet ziet,
-    // leert je binnen een dag om het filter niet te gebruiken.
-    //
-    // Faalzacht: het bericht is hier al bij Meta. Een fout hier verandert
-    // niets aan wat de klant kreeg.
-    if (gesprekkenV2Aan()) {
-      try {
-        const sleutel = werkSleutel(convId);
-        if (sleutel) {
-          const { error: wFout } = await supabaseAdmin
-            .from('iris_gesprekken')
-            .update({ status: 'wacht_op_klant', bijgewerkt_op: new Date().toISOString() })
-            .eq('extern_uniek', sleutel)
-            // Een gesprek dat 'geregeld' is of waar een belofte loopt, zetten
-            // we NIET terug: dat zijn standen die een mens bewust heeft
-            // gekozen, en die overschrijven met een automatisme is precies hoe
-            // je iemands werk kwijtraakt.
-            .in('status', ['nieuw', 'wacht_op_ons']);
-          if (wFout) console.warn('[inbox-send] werkstand niet bijgewerkt:', wFout.message);
-        }
-      } catch (wEx) {
-        console.warn('[inbox-send] werkstand uitzondering (faalzacht):', wEx?.message || wEx);
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      message_id: inserted.id,
-      meta_wamid: wamid,
-    });
-  } catch (e) {
-    console.error('[inbox-send]', e.message);
-    return res.status(500).json({ error: e.message });
-  }
+  const uitkomst = await verstuurInGesprek(gelezen.opdracht, {
+    userId : user.id,
+    ip     : getClientIp(req),
+    rechten: { finance: hasFinanceSend, simone: hasSimoneUse, onboarding: hasOnboardingSend },
+  });
+  return res.status(uitkomst.http).json(uitkomst.payload);
 }

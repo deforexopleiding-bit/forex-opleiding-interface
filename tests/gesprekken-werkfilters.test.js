@@ -19,7 +19,13 @@ new Function('window', 'module', src)(win, mod);
 const G = mod.exports;
 
 const LIJST = readFileSync(new URL('../api/inbox-conversations-list.js', import.meta.url), 'utf8');
-const SEND  = readFileSync(new URL('../api/inbox-send.js', import.meta.url), 'utf8');
+// De verzendlogica is naar _lib/inbox-verzenden.js verhuisd toen er een tweede
+// en derde aanroeper bij kwamen (uitgesteld versturen vanuit het scherm en
+// vanuit de cron). De controles hieronder gaan over het GEDRAG, dus ze kijken
+// mee naar waar dat gedrag nu woont; het endpoint wordt apart nagekeken op de
+// bedrading ernaartoe.
+const SEND  = readFileSync(new URL('../api/_lib/inbox-verzenden.js', import.meta.url), 'utf8');
+const ENDPOINT = readFileSync(new URL('../api/inbox-send.js', import.meta.url), 'utf8');
 const SCHERM = readFileSync(new URL('../modules/klanten-v2/views/wanbetalers-v2.js', import.meta.url), 'utf8');
 
 const G1 = { id: '1', customer_id: 'k', iris_status: 'wacht_op_ons' };
@@ -114,6 +120,19 @@ test('het bijwerken mag de verzending nooit omvergooien', () => {
   const i = SEND.indexOf("status: 'wacht_op_klant'");
   const body = SEND.slice(i - 200, i + 1200);
   assert.match(body, /catch \(wEx\)/);
+});
+
+test('het endpoint loopt écht langs de gedeelde functie', () => {
+  // De controles hierboven kijken naar de gedeelde functie. Dat bewijst pas
+  // iets over /api/inbox-send als dat endpoint er ook langs gaat — anders
+  // testen we code die niemand aanroept.
+  assert.match(ENDPOINT, /from '\.\/_lib\/inbox-verzenden\.js'/);
+  assert.match(ENDPOINT, /await verstuurInGesprek\(/);
+  // En niet daarnaast nog een eigen kopie houden.
+  assert.doesNotMatch(ENDPOINT, /sendText\(|sendTemplate\(|sendMedia\(/,
+    'het endpoint hoort Meta niet meer rechtstreeks aan te roepen');
+  assert.doesNotMatch(ENDPOINT, /whatsapp_messages/,
+    'het endpoint hoort het bericht niet meer zelf weg te schrijven');
 });
 
 test('de drie knoppen staan in het scherm, met een teller', () => {
