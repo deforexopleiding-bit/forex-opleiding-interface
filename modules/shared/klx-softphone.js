@@ -237,10 +237,17 @@
   })();
 
   // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
-  // Zelfde regel als _wbxDetectLine in finance.html en fu-softphone in follow-up.
+  // Was dezelfde regel als _wbxDetectLine in finance.html; die kent de lokale-nummer-regel hieronder (nog) niet.
+  // Lokale nummers (0…) volgen de regel uit BelvensterKern: 045-049 met 10
+  // cijfers is een Belgisch gsm en gaat via de BE-lijn. Via de NL-lijn werd
+  // zo'n nummer als NL-vastnummer gekozen en na 1-2 sec geweigerd.
   function detectLine(phone) {
     const p = String(phone || '').trim();
     if (/^\+?32/.test(p) || /^0032/.test(p)) return 'be';
+    const kern = typeof KERN !== 'undefined' ? KERN : null;
+    if (kern && kern.lijnVoorLokaalNummer && /^0[1-9]/.test(p.replace(/[^\d+]/g, ''))) {
+      return kern.lijnVoorLokaalNummer(p) || 'nl';
+    }
     return 'nl';
   }
 

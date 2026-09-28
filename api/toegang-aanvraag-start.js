@@ -30,6 +30,7 @@
 // 0 incasso-writes. Raakt alleen public.toegang_aanvragen.
 
 import { supabaseAdmin } from './supabase.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SOORT_OK = new Set(['7-daagse', 'minicursus']);
@@ -38,16 +39,10 @@ function schoon(v, max) {
   return typeof v === 'string' ? v.trim().slice(0, max) : null;
 }
 
-// Basale E.164-normalisatie (NL/BE default). Idem als public-opstartsessie-book.
-function telefoonE164(raw) {
-  if (!raw) return null;
-  const digits = String(raw).replace(/[^\d+]/g, '');
-  if (!digits) return null;
-  if (digits.startsWith('+')) return digits;
-  const rest = digits.replace(/^0+/, '');
-  if (rest.length >= 9 && rest.length <= 12) return '+31' + rest;
-  return digits;
-}
+// Telefoon naar E.164 via de gedeelde NL/BE-regel (api/_lib/phone-e164.js).
+// De eigen kopie hier plakte +31 voor alles zonder +: '0032471134787' werd
+// '+3132471134787' en '0475716706' '+31475716706'.
+const telefoonE164 = (raw) => telefoonNlBe(raw, { bron: 'toegang-aanvraag-start' });
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

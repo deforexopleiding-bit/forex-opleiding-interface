@@ -74,7 +74,7 @@ export default async function handler(req, res) {
     // bestaande lead moeten die behouden blijven (upsert_lead COALESCE't ze).
     const { data: lead, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
       p: {
-        voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
+        voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon, 'lead-handmatig-toevoegen'),
         bron: 'handmatig', soort: herkomst || 'onbekend', traject: primair,
       },
     });

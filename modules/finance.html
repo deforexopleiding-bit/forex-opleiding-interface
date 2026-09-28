@@ -6781,6 +6781,8 @@
      library die de Follow-up-cockpit gebruikt; registreren gebeurt lazy
      bij de eerste Bel nu-actie via /api/voys-sip-config. -->
 <script src="/modules/shared/sip.min.js"></script>
+<!-- belvenster-kern: dezelfde lijnkeuze voor lokale nummers als de softphone in klanten(-v2). -->
+<script src="/modules/shared/belvenster-kern.js?v=2"></script>
 <script src="/modules/shared/theme-shared.js"></script>
 <script>
 (async () => {
@@ -25053,11 +25055,18 @@
     return CALL_OUTCOMES.find((o) => o.key === key) || { key, label: key, tint: '#64748b' };
   }
 
-  // NL/BE line-detectie op basis van customer.phone (E.164). +32 = BE,
-  // alles anders → NL (default). Zelfde regel als follow-up-cockpit.
+  // NL/BE line-detectie op basis van customer.phone. +32 = BE; een lokaal
+  // 0-nummer volgt de regel uit BelvensterKern (045-049 met 10 cijfers =
+  // Belgisch gsm → BE-lijn, zelfde als klx-softphone detectLine). Via de
+  // NL-lijn werd zo'n nummer als NL-vastnummer gekozen en na 1-2 sec
+  // geweigerd. Anders NL (default).
   function _wbxDetectLine(phone) {
     const p = String(phone || '').trim();
     if (/^\+?32/.test(p) || /^0032/.test(p)) return 'be';
+    const kern = window.BelvensterKern;
+    if (kern && kern.lijnVoorLokaalNummer && /^0[1-9]/.test(p.replace(/[^\d+]/g, ''))) {
+      return kern.lijnVoorLokaalNummer(p) || 'nl';
+    }
     return 'nl';
   }
 

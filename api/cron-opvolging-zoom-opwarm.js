@@ -36,6 +36,7 @@
 // gelezen.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import {
   REDEN, SOORT, SOURCE, MAX_ACHTERSTAND_PER_DAG,
   bepaalOpwarmActie, kiesInstroom, dagInZone,
@@ -240,7 +241,7 @@ async function maakKaart({ afspraak, besluit }) {
   const { error } = await supabaseAdmin.from('opvolging_taken').insert({
     naam       : (afspraak.lead_name && String(afspraak.lead_name).trim()) || 'Naamloos',
     email      : afspraak.lead_email || null,
-    telefoon   : afspraak.lead_phone || null,
+    telefoon   : telefoonNlBe(afspraak.lead_phone, { bron: 'cron-opvolging-zoom-opwarm' }),
     reden      : REDEN,
     reden_code : null,
     bron       : 'call',

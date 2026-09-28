@@ -114,7 +114,7 @@ export default async function handler(req, res) {
     // e-mailwijziging botsen met een andere lead → 23505. Vang dat netjes af
     // als 409 (zoals de account-collisie hierboven) i.p.v. een generieke 500.
     const { error: uErr } = await supabaseAdmin.from('leads').update({
-      voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon),
+      voornaam, achternaam, email, telefoon, telefoon_e164: telefoonE164(telefoon, 'lead-bijwerken'),
       ...(herkomst ? { soort: herkomst } : {}),
     }).eq('id', leadId);
     if (uErr) {

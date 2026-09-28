@@ -55,9 +55,29 @@ function kiesLijn(nummer) {
     }
   }
   if (genormaliseerd.startsWith('0')) {
-    return { lijn: STANDAARD_LIJN, reden: 'lokaal nummer zonder landcode', zeker: false };
+    // Zelfde regel als normaliseerNlBe in api/_lib/phone-e164.js: een
+    // lokaal 045-049-nummer van 10 cijfers is een Belgisch gsm. Belde dat via
+    // de NL-lijn, dan weigerde de operator na 1-2 seconden (28 september).
+    // Nog steeds geen zekerheid, dus zeker:false — de uitleg zegt dat.
+    const lijn = lijnVoorLokaalNummer(genormaliseerd) || STANDAARD_LIJN;
+    return { lijn, reden: 'lokaal nummer zonder landcode', zeker: false };
   }
   return { lijn: STANDAARD_LIJN, reden: 'ander land (+' + genormaliseerd.slice(0, 3) + ')', zeker: false };
+}
+
+/**
+ * Welk land hoort bij een lokaal 0-nummer (alleen cijfers)? SPIEGEL van de
+ * regel in normaliseerNlBe (api/_lib/phone-e164.js) — dit bestand is een
+ * klassiek script en kan die niet importeren. tests/telefoon-nl-be.test.js
+ * houdt de twee gelijk. null = twijfel.
+ */
+function lijnVoorLokaalNummer(cijfers) {
+  const d = String(cijfers == null ? '' : cijfers).replace(/\D/g, '');
+  if (!/^0[1-9]/.test(d)) return null;
+  const n = d.slice(1);
+  if (n.length === 9) return /^4[5-9]/.test(n) ? 'be' : 'nl';
+  if (n.length === 8) return 'be';
+  return null;
 }
 
 /** De zin onder de lijnkeuze. Bij onzekerheid zeggen we dát ook. */
@@ -67,9 +87,11 @@ function lijnUitleg(keuze, beschikbaar = ['nl', 'be']) {
   if (!beschikbaar.includes(keuze.lijn)) {
     return `De ${naam} is niet beschikbaar; er wordt gebeld via de standaardlijn.`;
   }
-  return keuze.zeker
-    ? `${naam} gekozen op ${keuze.reden}.`
-    : `Geen bekend landnummer (${keuze.reden}) — standaardlijn gekozen. Pas aan als dat niet klopt.`;
+  if (keuze.zeker) return `${naam} gekozen op ${keuze.reden}.`;
+  if (keuze.reden === 'lokaal nummer zonder landcode') {
+    return `Geen bekend landnummer (${keuze.reden}) — ${naam} aangenomen. Pas aan als dat niet klopt.`;
+  }
+  return `Geen bekend landnummer (${keuze.reden}) — standaardlijn gekozen. Pas aan als dat niet klopt.`;
 }
 
 // ── De armeerperiode ──────────────────────────────────────────────────────
@@ -136,6 +158,7 @@ function bepaalUitkomst({ inviteVerstuurd, opgenomen, doorOns }) {
 }
 
   global.BelvensterKern = {
+    lijnVoorLokaalNummer,
     LIJNEN, STANDAARD_LIJN, ARMEER_MS,
     AFGEBROKEN_VOOR_INVITE, AFGEBROKEN_VOOR_OPNEMEN,
     kiesLijn, lijnUitleg, beoordeelArmering, bepaalUitkomst,

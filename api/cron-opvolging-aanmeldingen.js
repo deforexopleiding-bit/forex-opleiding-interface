@@ -29,6 +29,7 @@
 // Schrijft uitsluitend in opvolging_taken. event_attendees wordt alleen gelezen.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import {
   bepaalTaakActie, WAKKER_DAGEN_VOOR_EVENT, dagInZone, dagPlus, MASTERCLASS_NIVEAU,
 } from './_lib/opvolging-aanmelding.js';
@@ -185,7 +186,7 @@ export default async function handler(req, res) {
           const { error } = await supabaseAdmin.from('opvolging_taken').insert({
             naam,
             email      : d.email || null,
-            telefoon   : d.phone || null,
+            telefoon   : telefoonNlBe(d.phone, { bron: 'cron-opvolging-aanmeldingen' }),
             reden      : 'aanmelding',
             bron       : 'event',
             bron_ref   : {

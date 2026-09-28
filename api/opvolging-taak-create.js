@@ -35,6 +35,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bepaalStartPoging } from './_lib/opvolging-taak-poging.js';
 import { normaliseerNummer } from './_lib/whatsapp-brug-nummers.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 
 const REDENEN  = new Set(['wil_nog_beslissen', 'no_show_call', 'afgemeld', 'no_show_event', 'niet_ingepland']);
 // 'aanmelding' staat wél in de CHECK-constraint maar bewust niet hierin: die
@@ -148,7 +149,7 @@ export default async function handler(req, res) {
     const velden = {
       naam,
       email      : b.email ? String(b.email).trim() : null,
-      telefoon   : telefoon || null,
+      telefoon   : telefoonNlBe(telefoon, { bron: BRON_SOURCE[bron] }),
       reden,
       bron,
       bron_ref   : { ...bronRef, source: BRON_SOURCE[bron] },

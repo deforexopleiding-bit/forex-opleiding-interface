@@ -117,7 +117,7 @@ export default async function handler(req, res) {
           achternaam     : cust.last_name  || null,
           email          : String(cust.email || '').trim().toLowerCase() || null,
           telefoon       : cust.phone || null,
-          telefoon_e164  : telefoonE164(cust.phone),
+          telefoon_e164  : telefoonE164(cust.phone, 'leadsonderhoud-opstartsessie-create'),
           bron           : 'handmatig',
           soort          : 'opstartsessie',
           traject        : 'opstartsessie',
@@ -172,7 +172,7 @@ export default async function handler(req, res) {
       const { data: rpcLead, error: rpcErr } = await supabaseAdmin.rpc('upsert_lead', {
         p: {
           voornaam, achternaam, email, telefoon,
-          telefoon_e164: telefoonE164(telefoon),
+          telefoon_e164: telefoonE164(telefoon, 'leadsonderhoud-opstartsessie-create'),
           bron: 'handmatig', soort: 'opstartsessie', traject: 'opstartsessie',
         },
       });
