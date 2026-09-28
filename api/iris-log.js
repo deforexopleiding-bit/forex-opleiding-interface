@@ -19,6 +19,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { ochtendantwoord, vensterVanaf } from './_lib/iris/ochtendantwoord.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -64,8 +65,19 @@ export default async function handler(req, res) {
   }
 
   const q = req.query || {};
-  const limiet = Math.min(Math.max(parseInt(q.limiet, 10) || 100, 1), 500);
-  const alleenFouten = String(q.alleen_fouten || '') === '1';
+  // ── HET OCHTENDANTWOORD ────────────────────────────────────────────────
+  // Dezelfde regels, andere vraag. Waar je 's ochtends mee zit is niet "wat
+  // gebeurde er allemaal" maar "moet ik iets weten", en een chronologische
+  // lijst dwingt je dat er zelf uit te halen.
+  //
+  // Het venster begint gisteravond, dus we halen ruimer op dan de standaard
+  // honderd: een nacht met veel verkeer mag niet stilletjes afgekapt worden
+  // waardoor het antwoord te laag uitvalt.
+  const ochtend = String(q.vorm || '') === 'ochtend';
+  const limiet = ochtend
+    ? 500
+    : Math.min(Math.max(parseInt(q.limiet, 10) || 100, 1), 500);
+  const alleenFouten = !ochtend && String(q.alleen_fouten || '') === '1';
   const contactId = String(q.contact_id || '').trim();
 
   try {
@@ -77,7 +89,8 @@ export default async function handler(req, res) {
 
     if (alleenFouten) vraag = vraag.not('fout', 'is', null);
     if (contactId && UUID_RE.test(contactId)) vraag = vraag.eq('contact_id', contactId);
-    if (q.sinds) vraag = vraag.gte('wanneer', String(q.sinds));
+    if (ochtend) vraag = vraag.gte('wanneer', vensterVanaf(new Date()).toISOString());
+    else if (q.sinds) vraag = vraag.gte('wanneer', String(q.sinds));
 
     const { data, error } = await vraag;
     if (error) throw new Error('logboek: ' + error.message);
@@ -97,6 +110,12 @@ export default async function handler(req, res) {
       details: veiligeDetails(r.details),
     }));
 
+    if (ochtend) {
+      // De losse regels gaan MEE terug. Wie na het antwoord toch wil zien wat
+      // er precies stond, hoeft dan niet opnieuw te vragen -- en het is
+      // dezelfde gemaskeerde vorm, dus er lekt niets extra's.
+      return res.status(200).json({ ochtend: ochtendantwoord(items), items, limiet });
+    }
     return res.status(200).json({ items, limiet, alleen_fouten: alleenFouten });
   } catch (e) {
     console.error('[iris-log]', e?.message || e);
