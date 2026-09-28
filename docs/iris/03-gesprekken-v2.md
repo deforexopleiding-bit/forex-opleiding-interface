@@ -145,13 +145,18 @@ nu via `_gv2()`, dat het script teruggeeft óf niets. Daardoor staat
 aanroep die de vlag omzeilt geen kwestie van goed lezen meer maar van een test
 die omvalt.
 
-### G8 (het pollen) — van ≈54 MB per uur naar ≈7
+### G8 (het pollen) — van ≈93 MB per uur naar ≈12
 
 **Was:** de gesprekslijst werd elke **zes seconden** volledig opnieuw opgehaald.
-Het endpoint rekent zelf voor wat dat kost — bij 115 gesprekken ongeveer 90 KB
-per opvraging. Dat is 900 KB per minuut, **54 MB per uur**, 430 MB per werkdag
+Gemeten op 28 september 2026: 211 finance-gesprekken, ongeveer **155 KB** per
+opvraging. Dat is 1,5 MB per minuut, **93 MB per uur**, ruim 700 MB per werkdag
 per geopend tabblad; bij twee mensen het dubbele. En dat terwijl er in een rustig
 uur misschien drie berichten binnenkomen.
+
+> De getallen hieronder stonden er eerst met 115 gesprekken en 90 KB. Dat was de
+> stand bij het bouwen; een half jaar later is het bijna het dubbele. De winst
+> in verhouding is dezelfde gebleven, de absolute besparing is meegegroeid —
+> reden te meer om niet op het oude getal te blijven kijken.
 
 Er was óók al een realtime-kanaal op `whatsapp_messages`. De poll is het
 vangnet, maar draaide onvoorwaardelijk mee — of dat kanaal nu werkte of niet.
@@ -163,9 +168,12 @@ niet om de zes seconden te kijken.
 | Stand | Interval | Per uur |
 |---|---|---|
 | tabblad verborgen | niet pollen | 0 |
-| kanaal **bewezen** | 45 s | ≈ 7 MB |
-| kanaal verbonden, **onbewezen** | 20 s | ≈ 16 MB |
-| geen kanaal | 6 s | ≈ 54 MB (zoals het was) |
+| kanaal **bewezen** | 45 s | ≈ 12,4 MB |
+| kanaal verbonden, **onbewezen** | 20 s | ≈ 27,9 MB |
+| geen kanaal | 6 s | ≈ 93 MB (zoals het was) |
+
+Een rekensom op de gekozen intervallen maal de gemeten 155 KB: 80, 180 en 600
+opvragingen per uur. Groeit de lijst verder, dan groeien deze drie mee.
 
 **Waarom drie standen en niet twee.** "Kanaal verbonden" en "kanaal werkt" zijn
 niet hetzelfde: een abonnement kan keurig `SUBSCRIBED` melden terwijl RLS elk
@@ -404,8 +412,9 @@ oplichten.
 **De opvraging gaat in blokken van 150.** De lijst kan tot 1000 gesprekken
 teruggeven, en een `.in()` met 1000 sleutels van ruim veertig tekens wordt een
 URL van tientallen kilobytes — die knapt ergens tussen PostgREST en de proxy,
-niet met een nette fout maar met een lege lijst of een 414. Bij de 115
-gesprekken van vandaag is het gewoon één blok.
+niet met een nette fout maar met een lege lijst of een 414. Bij 211 gesprekken
+zijn dat er twee — bij het bouwen, met 115, was het er nog één. Precies waarom
+dat blok-mechanisme er staat en niet pas gebouwd wordt als het knelt.
 
 Lukt de hele omweg niet, dan krijgt elke regel géén werkstand en toont de lijst
 wat hij altijd toonde. Uitdrukkelijk in zijn geheel: een halve uitkomst zou
@@ -484,13 +493,47 @@ geladen is; de server ziet de zoekterm pas bij de volgende poll. "Zoeken vindt
 het wel" zou dus pas na een halve minuut kloppen, en een halve waarheid op een
 waarschuwing is erger dan geen waarheid.
 
-> **Wat het écht oplost, en wat dat kost.** Een kolom `last_activity_at` op
-> `whatsapp_conversations`, bijgehouden bij elke inkomende WhatsApp én bij de
-> mailsync. Dan kan de database er op sorteren en kan er een cursor op. Dat is
-> een migratie plus twee nieuwe schrijfpaden op een tabel waar het hard gaat —
-> de moeite waard zodra het knelt, niet nu. Bij 115 gesprekken is er ruim acht
-> keer zoveel ruimte als nodig, en vanaf nu zegt het scherm het zelf als dat
-> verandert.
+#### Gemeten op 28 september 2026, en de afspraak voor later
+
+| | finance | events | onboarding |
+|---|---|---|---|
+| gesprekken | **211** (203 open) | 220 | 61 |
+| cap | 1000 | 1000 | 1000 |
+| `cap_overflow` | nee | nee | nee |
+
+Antwoord ongeveer **155 KB**, laadtijd **0,3–1,2 s**. Er is dus nog ruim vier
+keer zoveel ruimte als nodig.
+
+En één cijfer dat de belangrijkste keuze hierboven bevestigt: bij **42 van de
+211** finance-gesprekken is de mail recenter dan de WhatsApp. Eén op de vijf.
+Sorteren op `last_message_at` alleen zou die allemaal naar beneden duwen. Dat is
+geen randgeval dat je later wel oplost; dat is een vijfde van de lijst op de
+verkeerde plek.
+
+**De cursor komt er zodra één van deze drie waar wordt:**
+
+- een module boven de **600 gesprekken**, of
+- een antwoord boven de **400 KB**, of
+- een laadtijd boven de **2 seconden**.
+
+Tot dan is het de verkeerde investering: het kost een migratie en een nieuw
+schrijfpad op een tabel waar het hard gaat, en het lost een probleem op dat er
+niet is.
+
+**Het ontwerp dat er dan moet komen** — beter dan wat hier eerder stond:
+
+1. Een kolom **`last_email_at`** op `whatsapp_conversations`, die **alleen**
+   door `sync-emails` en `backfill-emails` geschreven wordt.
+2. Een **generated column** `last_activity_at = greatest(last_message_at,
+   last_email_at)`, met een index erop.
+
+Waarom zo, en niet met een schrijfpad aan de WhatsApp-kant erbij: het WA-pad
+verandert dan **niet**. `last_message_at` blijft doen wat het doet, de
+aanmaanmotor leest het ongewijzigd, en de database rekent de samengestelde
+waarde zelf uit — er is geen tweede plek die het kan vergeten bij te werken. De
+eerdere schets ("bijgehouden bij elke inkomende WhatsApp én bij de mailsync")
+had juist wél twee schrijfpaden, en dat is er één te veel op een tabel waar de
+hele dag berichten binnenkomen.
 
 ---
 
@@ -502,7 +545,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
-| G8 | een cursor op de LIJST | kan pas als `last_activity_at` een kolom wordt (zie hierboven); tot dan is de lijst afgekapt-maar-eerlijk |
+| G8 | een cursor op de LIJST | **bewust niet gebouwd** — op 28 sep gemeten en ruim binnen de drempel (zie hierboven); het ontwerp ligt klaar voor wanneer die drempel wél gehaald wordt |
 
 ---
 
@@ -515,10 +558,10 @@ aanstaat. Twee regels kunnen dan meteen ingevuld:
 |---|---|---|
 | is te zien hoeveel venster er nog is | nee | **ja** |
 | is te zien of een bericht aankwam | nee | **ja** |
-| netwerk per uur per tabblad | ≈ 54 MB | **≈ 7 MB** met een bewezen kanaal, ≈ 16 MB zonder, 0 bij een verborgen tabblad |
+| netwerk per uur per tabblad | ≈ 93 MB | **≈ 12,4 MB** met een bewezen kanaal, ≈ 27,9 MB zonder, 0 bij een verborgen tabblad |
 
-Het netwerkgetal is een rekensom op de gekozen intervallen en de 90 KB die het
-endpoint zelf noemt, niet een meting op productie. Dat laatste kan pas als de
+Het netwerkgetal is een rekensom op de gekozen intervallen en de 155 KB die op
+28 september 2026 gemeten is, niet een meting van het verkeer zelf. Dat laatste kan pas als de
 vlag aanstaat — in het netwerkpaneel, met het scherm een uur open.
 
 De klikken per antwoord veranderen pas met G1 (microfoon) en G2 (ongedaan).
