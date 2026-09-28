@@ -179,7 +179,14 @@
     categorie: null,
     zoek: '',
     vanaf: 0,
-    lijst: { bezig: false, fout: null, items: [], totaal: 0, meer: false, opgehaald: false },
+    lijst: {
+      bezig: false, fout: null, items: [], totaal: 0, meer: false, opgehaald: false,
+      // Hoeveel er uit de HOOFDopvraging geladen is. De klok-groep telt niet
+      // mee: die komt maar één keer, bovenaan.
+      geladen: 0,
+      dringendAantal: 0,
+    },
+    ordening: 'dringend',
     gekozen: null,
     gesprek: { bezig: false, fout: null, data: null, voorId: null },
     dossier: { bezig: false, fout: null, data: null, voorId: null },
@@ -250,7 +257,20 @@
 
   /* ── Ophalen ──────────────────────────────────────────────────────────── */
 
-  async function haalLijst() {
+  /**
+   * De lijst ophalen.
+   *
+   * ── DOORLOPEND LADEN (P-4) ──────────────────────────────────────────────
+   * De lijst laadde vijftig per keer en bladeren deed je met vorige/volgende.
+   * Bij 318 items zijn dat zeven keer klikken om te weten of er onderaan nog
+   * iets ligt -- en niemand doet dat zeven keer.
+   *
+   * Nu groeit de lijst: `meerLaden` plakt de volgende groep eronder in plaats
+   * van de vorige te vervangen. `S.vanaf` blijft de cursor, maar loopt over het
+   * aantal uit de HOOFDopvraging, niet over wat er op het scherm staat -- de
+   * klok-groep bovenaan komt maar één keer.
+   */
+  async function haalLijst({ meerLaden = false } = {}) {
     const st = S.lijst;
     if (st.bezig) return;
     st.bezig = true;
@@ -261,13 +281,26 @@
         actie: 'lijst',
         filter: S.filter,
         limiet: '50',
-        vanaf: String(S.vanaf),
+        vanaf: String(meerLaden ? S.vanaf : 0),
+        ordening: S.ordening,
       });
       if (S.categorie) q.set('categorie', S.categorie);
       if (S.zoek.trim()) q.set('zoek', S.zoek.trim());
       const j = await haal('/api/iris-post?' + q.toString());
       if (seq !== S._seq) return; // een nieuwere opvraging was ons voor
-      st.items = Array.isArray(j.items) ? j.items : [];
+      const nieuweItems = Array.isArray(j.items) ? j.items : [];
+      if (meerLaden) {
+        // Ontdubbelen op id. Komt er tussen twee opvragingen een bericht
+        // binnen, dan schuift de volgorde op en zou een gesprek twee keer in
+        // de lijst kunnen staan -- en dan klopt ook de telling eronder niet.
+        const gezien = new Set(st.items.map((r) => r.id));
+        st.items = [...st.items, ...nieuweItems.filter((r) => r && !gezien.has(r.id))];
+      } else {
+        st.items = nieuweItems;
+        st.dringendAantal = Number(j.dringend_aantal) || 0;
+      }
+      S.vanaf = Number(j.volgende_vanaf) || 0;
+      st.geladen = S.vanaf;
       st.totaal = j.totaal || 0;
       st.meer = !!j.meer;
       st.opgehaald = true;
@@ -365,11 +398,16 @@
       // blijft hij draaien na het wisselen van module.
       if (!document.getElementById('irisLijst')) { stopPoll(); return; }
       if (document.hidden) return; // een tabblad op de achtergrond hoeft niets
+      // De balk ververst altijd: drie head-tellingen, geen rijen.
+      haalAandacht();
+      // De LIJST niet, zodra er doorgeladen is. Een verversing zet de lijst
+      // terug op de eerste vijftig, en wie net tot gesprek 210 gescrold was,
+      // staat dan weer bovenaan -- zonder dat hij iets deed. Dat is erger dan
+      // een lijst die dertig seconden achterloopt. Zodra je bovenaan een ander
+      // filter of een andere ordening kiest, begint het verversen weer.
+      if (S.lijst.items.length > 50) return;
       S.lijst.opgehaald = false;
       haalLijst();
-      // Drie head-tellingen, geen rijen: de balk meeverversen kost niets en
-      // een balk die een uur achterloopt is een balk die liegt.
-      haalAandacht();
     }, POLL_MS);
   }
   function stopPoll() {
@@ -427,10 +465,42 @@
     window.__irisZoekTimer = setTimeout(() => { S.lijst.opgehaald = false; haalLijst(); }, 350);
   };
 
-  window.__irisPagina = (richting) => {
-    const nieuw = Math.max(0, S.vanaf + richting * 50);
-    if (nieuw === S.vanaf) return;
-    S.vanaf = nieuw;
+  /* Nog een groep erbij.
+
+     Geen "volgende pagina" meer: de lijst groeit. Wat je al bekeken hebt blijft
+     staan, dus je verliest je plek niet -- en dat is de reden dat bladeren niet
+     werkte: zeven keer klikken en elke keer opnieuw zoeken waar je was. */
+  window.__irisMeer = () => {
+    if (S.lijst.bezig || !S.lijst.meer) return;
+    haalLijst({ meerLaden: true });
+  };
+
+  /* Wat er eerst moet, of wat het laatst binnenkwam.
+
+     Wisselen begint bovenaan opnieuw. Dat moet ook: de twee ordeningen zetten
+     dezelfde gesprekken in een andere volgorde, en halverwege omschakelen zou
+     een lijst geven die noch het een noch het ander is. */
+  /**
+   * Doorlopend laden bij het scrollen.
+   *
+   * Een `onscroll` op de bak zelf, geen IntersectionObserver: het scherm wordt
+   * bij elke wijziging opnieuw getekend, en een observer die aan een element
+   * hangt dat verdwijnt, moet je opruimen. Dat is precies het soort teller dat
+   * in deze module al eerder dubbel bleef draaien (lesson learned 20).
+   *
+   * De drempel is 240 pixels vóór het einde: laden begint dus terwijl er nog
+   * iets te lezen is, in plaats van bij een lijst die al opgehouden is.
+   */
+  window.__irisLijstScroll = (bak) => {
+    if (!bak || S.lijst.bezig || !S.lijst.meer) return;
+    const rest = bak.scrollHeight - bak.scrollTop - bak.clientHeight;
+    if (rest < 240) haalLijst({ meerLaden: true });
+  };
+
+  window.__irisOrdening = (o) => {
+    if (S.ordening === o) return;
+    S.ordening = o;
+    S.vanaf = 0;
     S.lijst.opgehaald = false;
     haalLijst();
     hertekenen();
@@ -1435,6 +1505,27 @@
         <select onchange="__irisCategorie(this.value)"
           style="font-size:11.5px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1);max-width:150px">${cats}</select>
       </div>
+      ${ordeningKeuze()}
+    </div>`;
+  }
+
+  /**
+   * Wat er eerst moet, of wat het laatst binnenkwam.
+   *
+   * Alleen zichtbaar bij de filters waar het iets toevoegt. In "venster bijna
+   * dicht" is alles dringend en zegt de keuze niets; in "niet gekoppeld" is er
+   * geen klok. Een keuze tonen die niets doet, is erger dan geen keuze.
+   */
+  function ordeningKeuze() {
+    if (!['wacht_op_ons', 'alles'].includes(S.filter)) return '';
+    if (S.zoek.trim()) return '';   // wie zoekt, wil vinden, niet gesorteerd worden
+    const knop = (v, l, titel) => `<button class="chip ${S.ordening === v ? 'on' : ''}"
+      style="font-size:11px;padding:3px 9px" title="${esc(titel)}"
+      onclick="__irisOrdening('${v}')">${esc(l)}</button>`;
+    return `<div style="display:flex;gap:5px;align-items:center">
+      <span style="font-size:11px;color:var(--text-3)">Volgorde</span>
+      ${knop('dringend', 'Wat dringt', 'Vensters die bijna dichtgaan bovenaan, de rest nieuwste eerst.')}
+      ${knop('nieuwste', 'Nieuwste', 'Alleen op tijd van binnenkomst.')}
     </div>`;
   }
 
@@ -1444,15 +1535,30 @@
     if (!st.opgehaald && st.bezig) binnen = skelet(8);
     else if (st.fout) binnen = foutBlok(st.fout);
     else if (!st.items.length) binnen = NIETS(S.zoek ? 'Niets gevonden.' : 'Geen gesprekken in dit filter.');
-    else binnen = st.items.map(lijstRij).join('');
+    else binnen = st.items.map((r, i) => {
+      // De scheiding tussen de klok-groep en de rest. Zonder die regel staan er
+      // twee volgordes onder elkaar zonder dat iets zegt waar de ene ophoudt --
+      // en dan lijkt de lijst willekeurig gesorteerd.
+      const kop = (st.dringendAantal && i === 0)
+        ? `<div style="padding:5px 12px;background:var(--amber-soft,var(--surface-2));font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--amber);font-weight:700">Hier dringt de tijd</div>`
+        : ((st.dringendAantal && i === st.dringendAantal)
+          ? `<div style="padding:5px 12px;background:var(--surface-2);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700">De rest, nieuwste eerst</div>`
+          : '');
+      return kop + lijstRij(r);
+    }).join('');
 
-    const pagina = (st.totaal > 50 || S.vanaf > 0)
-      ? `<div style="padding:8px 12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--text-3)">
-          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 9px" onclick="__irisPagina(-1)" ${S.vanaf === 0 ? 'disabled' : ''}>← vorige</button>
-          <span>${S.vanaf + 1}–${S.vanaf + st.items.length} van ${st.totaal}</span>
-          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 9px" onclick="__irisPagina(1)" ${st.meer ? '' : 'disabled'}>volgende →</button>
+    // De voet is geen bladerbalk meer maar een aanslag. De knop blijft staan
+    // naast het scrollen: wie met het toetsenbord werkt of een muis zonder wiel
+    // heeft, komt anders nooit bij de rest.
+    const pagina = st.meer
+      ? `<div style="padding:8px 12px;border-top:1px solid var(--border);display:flex;justify-content:center;align-items:center;gap:9px;font-size:11.5px;color:var(--text-3)">
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 11px"
+            onclick="__irisMeer()" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig…' : 'Meer laden'}</button>
+          <span>${st.items.length} van ${st.totaal}</span>
         </div>`
-      : '';
+      : (st.items.length && st.totaal > st.items.length
+        ? `<div style="padding:8px 12px;border-top:1px solid var(--border);text-align:center;font-size:11.5px;color:var(--text-3)">${st.items.length} van ${st.totaal}</div>`
+        : '');
 
     // Geen eigen rechterrand meer: die hoort bij de KOLOM, want alleen daar
     // is bekend of er rechts nog iets staat. Op een smal scherm is de lijst
@@ -1460,7 +1566,7 @@
     return `<div style="display:flex;flex-direction:column;height:100%;min-width:0">
       ${filterBalk()}
       ${lijstTelling()}
-      <div id="irisLijst" style="flex:1;overflow-y:auto">${binnen}</div>
+      <div id="irisLijst" onscroll="__irisLijstScroll(this)" style="flex:1;overflow-y:auto">${binnen}</div>
       ${pagina}
     </div>`;
   }
