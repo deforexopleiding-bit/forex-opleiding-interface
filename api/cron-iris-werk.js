@@ -29,7 +29,7 @@
 // Auth: Authorization: Bearer $CRON_SECRET.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { haalInstellingen } from './_lib/iris/instellingen.js';
+import { haalInstellingen, hoortInWerkbak } from './_lib/iris/instellingen.js';
 import { zorgVoorContact } from './_lib/iris/koppel.js';
 import { deelIn } from './_lib/iris/classificeer.js';
 import { verstuurConcept } from './iris-verstuur.js';
@@ -478,14 +478,25 @@ async function deelBerichtIn(bericht, instellingen, meldFout) {
 
   // Het gesprek erft de categorie van zijn meest recente inkomende bericht,
   // en gaat op "wacht op ons" staan. Dat is de hele reden dat er een status is.
+  //
+  // MAAR NIET VOOR ALLES. Iris herkende "Meta for Business" prima als spam en
+  // zette hem daarna alsnog op wacht_op_ons, want dat deed deze regel voor
+  // élk ingedeeld bericht. Daarmee is het verschil tussen een triage-hulp en
+  // gewoon een tweede inbox precies één regel code; nu is het een triage-hulp.
+  //
+  // De categorie wordt WÉL geschreven. Het gesprek verdwijnt niet, het staat
+  // alleen niet meer tussen het werk: het filter Spam laat het zien en één klik
+  // zet het terug.
   if (bericht.gesprek_id) {
+    const velden = {
+      categorie: uit.uitkomst.categorie,
+      bijgewerkt_op: new Date().toISOString(),
+    };
+    if (hoortInWerkbak(uit.uitkomst.categorie)) velden.status = 'wacht_op_ons';
+
     const { error: gFout } = await supabaseAdmin
       .from('iris_gesprekken')
-      .update({
-        categorie: uit.uitkomst.categorie,
-        status: 'wacht_op_ons',
-        bijgewerkt_op: new Date().toISOString(),
-      })
+      .update(velden)
       .eq('id', bericht.gesprek_id)
       .in('status', ['nieuw', 'wacht_op_klant']);
     if (gFout) meldFout(`gesprek bijwerken bij ${bericht.id}`, gFout);

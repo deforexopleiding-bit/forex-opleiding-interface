@@ -123,8 +123,17 @@
     venster_bijna_dicht: 'Venster bijna dicht',
     niet_gekoppeld: 'Niet gekoppeld',
     belofte_vandaag: 'Belofte vandaag',
+    spam: 'Spam',
     alles: 'Alles',
   };
+
+  /**
+   * Categorieën die Iris buiten de werkbak houdt.
+   *
+   * Spiegelt GEEN_WERK in api/_lib/iris/instellingen.js. Het scherm gebruikt
+   * het alleen om de juiste knop te tonen; de server beslist.
+   */
+  const GEEN_WERK = ['spam'];
 
   const CATEGORIE_LABELS = {
     facturatie: 'Facturatie',
@@ -714,6 +723,35 @@
     hertekenen();
   };
 
+  /* Een verkeerde indeling terugzetten.
+
+     Iris houdt spam sinds P-2 buiten de werkbak. Dat is het oordeel van een
+     taalmodel, en dat heeft het soms mis. Een echte klant die als reclame
+     wordt weggezet en dan nergens meer opduikt, is erger dan de reclame die we
+     ermee kwijtraken -- dus moet de weg terug één klik zijn.
+
+     Het scherm herlaadt daarna de lijst, want het gesprek hoort nu in een
+     ander filter te staan. Zonder die herlading klopt de lijst niet meer met
+     wat je net gedaan hebt, en dan vertrouw je 'm de volgende keer ook niet. */
+  window.__irisIndeling = async (gesprekId, categorie) => {
+    if (!gesprekId) return;
+    try {
+      await haalRuw('/api/iris-indeling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gesprek_id: gesprekId, categorie }),
+      });
+      toast(categorie === 'spam'
+        ? 'Als spam gemarkeerd. Terug te vinden onder het filter Spam.'
+        : 'Terug tussen het werk gezet.', 'success');
+      S.lijst.opgehaald = false;
+      haalLijst();
+      if (S.gekozen === gesprekId) haalGesprek(gesprekId);
+    } catch (e) {
+      toast(e?.message || 'Indeling wijzigen mislukt', 'error');
+    }
+  };
+
   /* ── Opdrachten ───────────────────────────────────────────────────────── */
 
   async function haalOpdrachten() {
@@ -1260,6 +1298,7 @@
       <span style="font-size:11px;color:var(--text-3)">${esc(g.status || '')}</span>
       <div style="flex:1"></div>
       ${g.categorie ? `<span style="font-size:11px;color:var(--text-3)">${esc(CATEGORIE_LABELS[g.categorie] || g.categorie)}</span>` : ''}
+      ${indelingKnop(g)}
       <button class="btn btn-ghost btn-sm iris-dossier-knop" style="font-size:11.5px;padding:3px 9px"
         onclick="__irisDossier()" title="De dossierkaart open- of dichtklappen">${S.dossierOpen ? 'Dossier ▴' : 'Dossier ▾'}</button>
     </div>`;
@@ -1276,6 +1315,29 @@
       <div style="flex:1;overflow-y:auto;padding:12px 14px">${draad}</div>
       ${voet}
     </div>`;
+  }
+
+  /**
+   * Één klik om een verkeerde indeling terug te zetten.
+   *
+   * Twee richtingen, want ze zijn allebei nodig: Iris zet soms een echte klant
+   * als reclame weg (erg), en soms laat ze reclame staan (vervelend). De
+   * eerste is de reden dat deze knop bestaat.
+   *
+   * Bewust géén keuzelijst met tien categorieën. Wie een gesprek openslaat wil
+   * niet indelen, die wil verder. Naar een specifieke categorie sturen kan via
+   * de server; hier staat alleen de vraag die er op dit moment toe doet.
+   */
+  function indelingKnop(g) {
+    if (!g || !g.id) return '';
+    const isSpam = GEEN_WERK.includes(g.categorie);
+    const label = isSpam ? 'Geen spam' : 'Spam';
+    const titel = isSpam
+      ? 'Toch een echt gesprek: zet het terug tussen het werk.'
+      : 'Reclame of onzin: haal het uit de werkbak. Het blijft vindbaar onder het filter Spam.';
+    const naar = isSpam ? 'overig' : 'spam';
+    return `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:3px 9px"
+      onclick="__irisIndeling('${esc(g.id)}','${naar}')" title="${esc(titel)}">${label}</button>`;
   }
 
   function bericht(b) {

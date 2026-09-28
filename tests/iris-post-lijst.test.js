@@ -89,7 +89,7 @@ test('bouwLijstRij: zonder bericht is de zekerheid null en niet nul', () => {
 test('de filters zijn de vragen die iemand s ochtends stelt', () => {
   assert.deepEqual([...FILTERS], [
     'wacht_op_ons', 'wacht_op_klant', 'venster_bijna_dicht',
-    'niet_gekoppeld', 'belofte_vandaag', 'alles',
+    'niet_gekoppeld', 'belofte_vandaag', 'spam', 'alles',
   ]);
   assert.ok(!FILTERS.includes('open'), '"alle open gesprekken" is geen vraag die iemand stelt');
 });
