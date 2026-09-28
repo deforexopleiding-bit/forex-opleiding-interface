@@ -284,3 +284,70 @@ test('lms-provisioning.telefoonE164 gedraagt zich als de helper', async (t) => {
   assert.equal(telefoonE164(''), null);
   assert.equal(telefoonE164(null), null);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7 · DE SQL-SPIEGEL (docs/sql-migrations/2026-09-28-leads-telefoon-e164-…)
+// ═══════════════════════════════════════════════════════════════════════════
+// Er is hier geen Postgres. Bij het schrijven is de functie lokaal gedraaid en
+// op 20.000 willekeurige invoeren naast normaliseerNlBe gelegd: 0 verschillen.
+// Wat hier blijft: de controlegevallen uit het SQL-bestand moeten in JS
+// dezelfde uitkomst geven, en de trigger moet alleen de COALESCE-tak raken.
+
+const MIGRATIE = readFileSync(
+  join(ROOT, 'docs/sql-migrations/2026-09-28-leads-telefoon-e164-normaliseren.sql'), 'utf8');
+
+function controlegevallen() {
+  const blok = MIGRATIE.slice(
+    MIGRATIE.indexOf('-- CONTROLEGEVALLEN-BEGIN'), MIGRATIE.indexOf('-- CONTROLEGEVALLEN-EINDE'));
+  const rijen = [...blok.matchAll(/\(\s*'([^']*)'\s*,\s*(NULL|'([^']*)')\s*\)/g)];
+  return rijen.map((m) => [m[1], m[2] === 'NULL' ? null : m[3]]);
+}
+
+test('SQL-controlegevallen geven in JS dezelfde uitkomst', () => {
+  const gevallen = controlegevallen();
+  assert.ok(gevallen.length >= 20, 'de controlegevallen zijn niet gevonden: ' + gevallen.length);
+  for (const [invoer, verwacht] of gevallen) {
+    assert.equal(normaliseerNlBe(invoer).telefoon, verwacht, JSON.stringify(invoer));
+  }
+});
+
+test('SQL-controlegevallen dekken elk gemeten foutpatroon', () => {
+  const invoer = controlegevallen().map(([i]) => i);
+  for (const n of ['0475716706', '470497423', '+32470085329', '0032471134787',
+    '00310633298551', '+310682610365', '31 0612348963', '465705330', '3147979884']) {
+    assert.ok(invoer.includes(n), n + ' ontbreekt in de SQL-controlegevallen');
+  }
+});
+
+test('de trigger leidt telefoon_e164 alleen af als de schrijver hem niet zelf zet', () => {
+  const zonderCommentaar = MIGRATIE.split('\n').filter((r) => !r.trim().startsWith('--')).join('\n');
+  // INSERT: alleen bij ontbrekende telefoon_e164.
+  assert.match(zonderCommentaar, /IF NEW\.telefoon_e164 IS NOT NULL OR NEW\.telefoon IS NULL/);
+  // UPDATE: alleen als telefoon verandert én telefoon_e164 gelijk blijft.
+  assert.match(zonderCommentaar,
+    /IF NEW\.telefoon IS NOT DISTINCT FROM OLD\.telefoon\s+OR NEW\.telefoon_e164 IS DISTINCT FROM OLD\.telefoon_e164/);
+  assert.match(zonderCommentaar, /BEFORE INSERT OR UPDATE OF telefoon, telefoon_e164 ON public\.leads/);
+  // Geen UPDATE op bestaande rijen in de migratie zelf.
+  assert.doesNotMatch(zonderCommentaar, /^\s*UPDATE\s+public\.leads/im,
+    'de migratie mag bestaande rijen niet aanraken');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8 · WANBETALERS-SOFTPHONE (finance.html) KIEST DEZELFDE LIJN
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('finance.html laadt de kern en _wbxDetectLine volgt dezelfde regel', () => {
+  const html = readFileSync(join(ROOT, 'modules/finance.html'), 'utf8');
+  assert.match(html, /<script src="\/modules\/shared\/belvenster-kern\.js\?v=\d+"><\/script>/);
+  const start = html.indexOf('function _wbxDetectLine(');
+  const fn = html.slice(start, html.indexOf('function _wbxDigitsFor(', start));
+  const ctx = vm.createContext({ window: { BelvensterKern: KERN } });
+  const detect = vm.runInContext(fn + '\n_wbxDetectLine;', ctx);
+  assert.equal(detect('0475716706'), 'be');
+  assert.equal(detect('0625585610'), 'nl');
+  assert.equal(detect('+32471644261'), 'be');
+  assert.equal(detect('+31475716706'), 'nl');
+  // Zonder kern (script niet geladen): het oude gedrag, geen crash.
+  const zonder = vm.runInContext(fn + '\n_wbxDetectLine;', vm.createContext({ window: {} }));
+  assert.equal(zonder('0475716706'), 'nl');
+});
