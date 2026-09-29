@@ -18,6 +18,10 @@ export const DRY_RUN_KEY = 'crediteer_ronde_dry_run';
 export const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 export const MAX_ITEMS_PER_CALL = 5;
 export const MAX_MONTHS_OVERRIDE = 36;
+// Run-modus 'credit_only': alleen crediteren, NOOIT verlengen/abonnementen
+// aanraken. De execute eist dan expliciete invoice_ids per klant en weigert
+// subscription_id / months_override (dubbelzinnige intentie).
+export const MODE_CREDIT_ONLY = 'credit_only';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 

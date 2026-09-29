@@ -33,11 +33,12 @@ const volgorde = [];               // 'postpone' | 'credit' | 'restore' in aanro
 let postponeGedrag = 'ok';         // 'ok' | 'tl-weigert' | 'db-na-tl'
 let restoreGedrag = 'ok';          // 'ok' | 'tl-weigert'
 let failCredits = new Set();       // factuur-ids waarvoor creditInvoiceCore faalt
-const db = { tables: {}, inserts: [], updates: [] };
+const db = { tables: {}, inserts: [], updates: [], reads: [] };
 
 function nepAdmin() {
   return {
     from(tabel) {
+      db.reads.push(tabel);
       let rows = [...(db.tables[tabel] || [])];
       let op = 'select';
       const k = {
@@ -93,6 +94,7 @@ mock.module(url('api/_lib/subscription-postpone.js'), {
 });
 const { selectCreditable, planExtension, hasScope, isUsableSubscription } = await import(url('api/_lib/crediteer-ronde-core.js'));
 const { default: execute } = await import(url('api/crediteer-ronde-execute.js'));
+const { default: preview } = await import(url('api/crediteer-ronde-preview.js'));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1 · PURE KERN
@@ -150,7 +152,7 @@ const NOTDUE  = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const LATE2   = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 function resetDb({ dryRunRow }) {
-  db.inserts = []; db.updates = [];
+  db.inserts = []; db.updates = []; db.reads = [];
   db.tables = {
     app_settings: dryRunRow === undefined ? [] : [{ key: 'crediteer_ronde_dry_run', value: dryRunRow }],
     customers: [{ id: C1, first_name: 'Anna', last_name: 'Test', is_test: false }, { id: C2, first_name: 'Bram', last_name: 'Test', is_test: false }],
@@ -166,11 +168,11 @@ function resetDb({ dryRunRow }) {
     ],
   };
 }
-async function roep(body) {
+async function roep(body, handler = execute) {
   credits.length = 0; postpones.length = 0; restores.length = 0; volgorde.length = 0;
   let status = 0, out = null;
   const res = { setHeader() {}, status(s) { status = s; return this; }, json(b) { out = b; return this; } };
-  await execute({ method: 'POST', body: { confirm: true, ...body }, headers: {} }, res);
+  await handler({ method: 'POST', body: { confirm: true, ...body }, headers: {} }, res);
   return { status, out };
 }
 
@@ -363,6 +365,159 @@ test('invoice_ids: exact die facturen, ook als er nog andere te-late zijn', asyn
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 2b · MODE credit_only — ALLEEN crediteren, NOOIT verlengen
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Kwartaaleinde 2026-Q3: Jeffrey crediteert alleen, zonder abonnementen aan te
+// raken. Deze modus mag postpone/restore onder GEEN enkele omstandigheid
+// bereiken — ook niet als de klant een bruikbaar per_month-abonnement heeft.
+
+const PAID = '99999999-9999-4999-8999-999999999999';
+const CO = (extra = {}) => ({ mode: 'credit_only', ...extra });
+const debtInserts = () => db.inserts.filter((i) => i.tabel === 'dunning_credited_debt');
+
+test('credit_only live: crediteert exact de gevraagde facturen en roept postpone/restore NOOIT aan', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const { status, out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE] }, { customer_id: C2, invoice_ids: [LATE2] }] }));
+  assert.equal(status, 200);
+  assert.equal(out.mode, 'credit_only');
+  assert.deepEqual(credits, [LATE, LATE2]);
+  assert.deepEqual(volgorde, ['credit', 'credit'], 'alleen credits — geen postpone, geen restore');
+  assert.equal(postpones.length, 0);
+  assert.equal(restores.length, 0);
+  assert.ok(!db.reads.includes('subscriptions') && !db.reads.includes('deals'), 'abonnementen/deals worden niet eens gelezen');
+  assert.deepEqual(out.customers.map((c) => c.status), ['gecrediteerd', 'gecrediteerd']);
+  assert.equal(out.customers[0].extended, null);
+  const rows = debtInserts().flatMap((i) => i.rows);
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((r) => r.subscription_id === null && r.months_extended === 0));
+  assert.equal(out.summary.extended_subscriptions, 0);
+  assert.equal(out.summary.status_counts.gecrediteerd, 2);
+});
+
+test('credit_only: ook bij een deels mislukte credit wordt er NIETS verlengd of teruggezet', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const EXTRA = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  db.tables.invoices.push({ id: EXTRA, customer_id: C1, invoice_number: 'F-5', status: 'open', is_test: false, tl_invoice_id: 'tl5', amount_total: 100, amount_paid: 0, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-10' });
+  failCredits = new Set([EXTRA]);
+  try {
+    const { out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE, EXTRA] }] }));
+    assert.deepEqual(volgorde, ['credit', 'credit']);
+    assert.equal(out.customers[0].status, 'deels_gecrediteerd');
+    assert.equal(debtInserts()[0].rows.length, 1);
+  } finally { failCredits = new Set(); }
+});
+
+test('credit_only: alle credits mislukken → geblokkeerd, geen schuldregels, nog steeds geen postpone', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  failCredits = new Set([LATE]);
+  try {
+    const { out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE] }] }));
+    assert.deepEqual(volgorde, ['credit']);
+    assert.equal(out.customers[0].status, 'geblokkeerd');
+    assert.equal(debtInserts().length, 0);
+    assert.equal(out.customers[0].invoices[0].status, 'mislukt');
+    assert.match(out.customers[0].invoices[0].reden, /weigerde/);
+  } finally { failCredits = new Set(); }
+});
+
+test('credit_only zonder invoice_ids → 400, ook met only_overdue; niets gecrediteerd, geen audit', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  for (const body of [
+    CO({ items: [{ customer_id: C1 }] }),
+    CO({ items: [{ customer_id: C1 }], only_overdue: true }),
+    CO({ items: [{ customer_id: C1, invoice_ids: [] }], only_overdue: true }),
+    CO({ items: [{ customer_id: C1, invoice_ids: [LATE] }, { customer_id: C2 }] }),
+  ]) {
+    const { status, out } = await roep(body);
+    assert.equal(status, 400, JSON.stringify(body));
+    assert.match(out.error, /invoice_ids verplicht/);
+  }
+  assert.equal(credits.length, 0);
+  assert.equal(db.inserts.length, 0, 'geen audit, geen schuld — er is niets gestart');
+});
+
+test('credit_only met subscription_id of months_override → 400 (tegenstrijdige intentie)', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  let r = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE], subscription_id: S_MONTH }] }));
+  assert.equal(r.status, 400);
+  r = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE], months_override: 2 }] }));
+  assert.equal(r.status, 400);
+  assert.equal(credits.length + postpones.length, 0);
+});
+
+test('onbekende mode → 400', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const { status } = await roep({ mode: 'alles', items: [{ customer_id: C1, invoice_ids: [LATE] }] });
+  assert.equal(status, 400);
+  assert.equal(credits.length, 0);
+});
+
+test('credit_only dry-run (instelling ontbreekt): 0 credits, per factuur "zou_crediteren", dry-run-audit met mode', async () => {
+  resetDb({ dryRunRow: undefined });
+  const { out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE] }] }));
+  assert.equal(out.dry_run, true);
+  assert.equal(credits.length + postpones.length + restores.length, 0);
+  assert.equal(debtInserts().length, 0);
+  assert.equal(out.customers[0].status, 'gecrediteerd');
+  assert.deepEqual(out.customers[0].invoices.map((i) => i.status), ['zou_crediteren']);
+  assert.equal(out.summary.credited_invoices, 1);
+  const done = db.inserts.find((i) => i.tabel === 'audit_log' && i.rows.action === 'crediteer_ronde.batch_done_dry_run');
+  assert.equal(done.rows.after_json.mode, 'credit_only');
+  assert.deepEqual(done.rows.after_json.customers[0].invoices.map((i) => i.status), ['zou_crediteren']);
+});
+
+test('credit_only: eindstatus per factuur — gecrediteerd / geweigerd met reden (al betaald, niet van klant)', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  db.tables.invoices.push({ id: PAID, customer_id: C1, invoice_number: 'F-9', status: 'paid', is_test: false, tl_invoice_id: 'tl9', amount_total: 100, amount_paid: 100, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-01' });
+  const { out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE, PAID, LATE2] }] }));
+  assert.deepEqual(credits, [LATE]);
+  const st = Object.fromEntries(out.customers[0].invoices.map((i) => [i.invoice_number || i.invoice_id, [i.status, i.reden]]));
+  assert.deepEqual(st['F-1'], ['gecrediteerd', null]);
+  assert.deepEqual(st['F-9'], ['geweigerd', 'status paid']);
+  assert.deepEqual(st[LATE2], ['geweigerd', 'hoort niet bij deze klant of bestaat niet']);
+});
+
+test('credit_only: niets in scope over → overgeslagen, geen credits', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  db.tables.invoices.push({ id: PAID, customer_id: C1, invoice_number: 'F-9', status: 'paid', is_test: false, tl_invoice_id: 'tl9', amount_total: 100, amount_paid: 100, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-01' });
+  const { out } = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [PAID] }] }));
+  assert.equal(credits.length, 0);
+  assert.equal(out.customers[0].status, 'overgeslagen');
+});
+
+test('preview credit_only: scope verplicht, geen abonnementen, afwijsreden klopt, preview == execute', async () => {
+  resetDb({ dryRunRow: undefined });
+  let r = await roep(CO({ items: [{ customer_id: C1 }] }), preview);
+  assert.equal(r.status, 400);
+  db.tables.invoices.push({ id: PAID, customer_id: C1, invoice_number: 'F-9', status: 'paid', is_test: false, tl_invoice_id: 'tl9', amount_total: 100, amount_paid: 100, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-01' });
+  db.reads = [];
+  r = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE, PAID] }], only_overdue: true }), preview);
+  assert.equal(r.status, 200);
+  assert.equal(r.out.mode, 'credit_only');
+  assert.equal(r.out.dry_run, true);
+  const item = r.out.items[0];
+  assert.deepEqual(item.invoices.map((i) => i.id), [LATE]);
+  assert.deepEqual(item.subscriptions, []);
+  assert.deepEqual(item.rejected, [{ invoice_id: PAID, invoice_number: 'F-9', reden: 'status paid' }]);
+  assert.ok(!db.reads.includes('subscriptions') && !db.reads.includes('deals'));
+  const ex = await roep(CO({ items: [{ customer_id: C1, invoice_ids: [LATE, PAID] }], only_overdue: true }));
+  assert.deepEqual(ex.out.customers[0].credited.map((c) => c.invoice_id), item.invoices.map((i) => i.id), 'preview == execute');
+});
+
+test('preview credit_only: test-/onbekende klant staat in skipped_customers', async () => {
+  resetDb({ dryRunRow: undefined });
+  db.tables.customers.push({ id: '55555555-5555-4555-8555-555555555555', first_name: 'Test', is_test: true });
+  const { out } = await roep(CO({ items: [
+    { customer_id: C1, invoice_ids: [LATE] },
+    { customer_id: '55555555-5555-4555-8555-555555555555', invoice_ids: [LATE] },
+    { customer_id: '66666666-6666-4666-8666-666666666666', invoice_ids: [LATE] },
+  ] }), preview);
+  assert.deepEqual(out.items.map((i) => i.customer_id), [C1]);
+  assert.deepEqual(out.skipped_customers.map((s) => s.reden).sort(), ['klant niet gevonden', 'test-klant']);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 3 · STRUCTUUR
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -386,4 +541,12 @@ test('de UI stuurt per batch hooguit 5 klanten met factuur-ids + only_overdue', 
   assert.match(s, /const BATCH_SIZE = 5;/);
   assert.match(s, /invoice_ids\s*:\s*\(it\.invoices/);
   assert.match(s, /only_overdue: true, run_id/);
+});
+
+test('UI credit_only: stuurt mode mee en strips abonnementvelden vóór de execute', () => {
+  const s = bron('modules/shared/finance-crediteer.js');
+  assert.match(s, /mode: MODE_CREDIT_ONLY/);
+  assert.match(s, /delete i\.subscription_id; delete i\.months_override; delete i\.credit_without_extension;/);
+  assert.match(s, /Server bevestigde de modus "alleen crediteren" niet/);
+  assert.match(bron('modules/finance.html'), /finance-crediteer\.js\?v=3/);
 });

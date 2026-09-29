@@ -3,6 +3,7 @@
 //   items: [{ customer_id, subscription_id|null, invoice_ids?: uuid[],
 //             months_override?: int, credit_without_extension?: boolean }],
 //   only_overdue?: boolean,
+//   mode?: 'credit_only',
 //   run_id?: uuid, batch_index?: int, batch_total?: int,
 //   confirm: true
 // }
@@ -31,9 +32,18 @@
 // "Alleen crediteren" (credit_without_extension=true, bewust gekozen): stap 2
 // en 4 vervallen → 'alleen_gecrediteerd'.
 //
+// MODE 'credit_only': ALLEEN crediteren. Stap 2 en 4 bestaan niet in deze
+// modus — postponeSubscription/restoreSubscription worden nooit aangeroepen,
+// abonnementen/deals worden niet eens gelezen. Eist per klant expliciete
+// invoice_ids (preview == execute) en weigert subscription_id/months_override
+// met 400. Eindstatus: gecrediteerd | deels_gecrediteerd | geblokkeerd |
+// overgeslagen | fout. Schuldregels krijgen subscription_id=null, 0 maanden.
+//
 // Eindstatus per klant (customers[].status):
 //   verlengd_en_gecrediteerd | alleen_gecrediteerd | deels_gecrediteerd |
 //   geblokkeerd (niets veranderd) | overgeslagen (geen facturen in scope) | fout
+// Eindstatus per factuur (customers[].invoices[].status):
+//   zou_crediteren (dry-run) | gecrediteerd | mislukt | niet_uitgevoerd | geweigerd
 //
 // Overig: eigen dry-run-vlag app_settings.crediteer_ronde_dry_run (default
 // AAN; dunning_dry_run blijft onaangeroerd). Audit per batch:
@@ -52,13 +62,44 @@ import { postponeSubscription, restoreSubscription } from './_lib/subscription-p
 import { getClientIp } from './_lib/audit-customer.js';
 import {
   isCrediteerRondeDryRun, selectCreditable, hasScope, openAmountEur, planExtension,
-  todayAmsterdam, OPEN_STATUSES, MAX_ITEMS_PER_CALL,
+  todayAmsterdam, OPEN_STATUSES, MAX_ITEMS_PER_CALL, MODE_CREDIT_ONLY,
 } from './_lib/crediteer-ronde-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
-export const STATUSES = ['verlengd_en_gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'fout'];
+export const STATUSES = ['verlengd_en_gecrediteerd', 'gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'fout'];
+
+const INV_COLS = 'id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, status, tl_invoice_id, is_test, due_date';
+
+// Open facturen van de klant + expliciet gevraagde ids in ELKE status, zodat
+// een al betaalde/gecrediteerde factuur de juiste afwijsreden krijgt.
+async function loadInvoices(cid, invoiceIds) {
+  const { data, error } = await supabaseAdmin.from('invoices').select(INV_COLS).eq('customer_id', cid).in('status', OPEN_STATUSES);
+  if (error) throw new Error('invoices lookup: ' + error.message);
+  const list = [...(data || [])];
+  const have = new Set(list.map((r) => r.id));
+  const missing = (invoiceIds || []).filter((id) => !have.has(id));
+  if (missing.length) {
+    const { data: extra, error: e2 } = await supabaseAdmin.from('invoices').select(INV_COLS).in('id', missing);
+    if (e2) throw new Error('invoices lookup (ids): ' + e2.message);
+    for (const r of extra || []) if (r.customer_id === cid) list.push(r);
+  }
+  return list;
+}
+
+// Eindstatus per factuur.
+function invoiceStatuses({ creditable, rejected, okIds, errors, dryRun }) {
+  const errById = new Map((errors || []).filter((e) => e.scope === 'invoice').map((e) => [e.invoice_id, e.message]));
+  return [
+    ...creditable.map((iv) => ({
+      invoice_id: iv.id, invoice_number: iv.invoice_number || null, open_amount: openAmountEur(iv),
+      status: dryRun ? 'zou_crediteren' : okIds.has(iv.id) ? 'gecrediteerd' : errById.has(iv.id) ? 'mislukt' : 'niet_uitgevoerd',
+      reden: errById.get(iv.id) || null,
+    })),
+    ...rejected.map((r) => ({ invoice_id: r.invoice_id, invoice_number: r.invoice_number || null, open_amount: null, status: 'geweigerd', reden: r.reden })),
+  ];
+}
 
 function quarterOf(dateIso) {
   const d = new Date(dateIso || Date.now());
@@ -101,6 +142,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: `Te veel klanten in één aanroep (max ${MAX_ITEMS_PER_CALL}) — knip de run in batches` });
   }
   const onlyOverdue = body.only_overdue === true;
+  const creditOnly = body.mode === MODE_CREDIT_ONLY;
+  if (body.mode != null && !creditOnly) return res.status(400).json({ error: `Onbekende mode '${body.mode}'` });
 
   const items = [];
   const seen = new Set();
@@ -109,6 +152,16 @@ export default async function handler(req, res) {
     if (!cid || seen.has(cid)) continue;
     seen.add(cid);
     const invoiceIds = Array.isArray(it.invoice_ids) ? it.invoice_ids.filter((x) => typeof x === 'string' && UUID_RE.test(x)) : [];
+    if (creditOnly) {
+      // credit_only: alleen een expliciete factuurlijst telt als scope, en
+      // abonnement-/maandvelden zijn een tegenstrijdige intentie → weigeren.
+      if (invoiceIds.length === 0) {
+        return res.status(400).json({ error: `credit_only: invoice_ids verplicht voor klant ${cid} (only_overdue alleen is niet genoeg).` });
+      }
+      if (it.subscription_id || it.months_override != null) {
+        return res.status(400).json({ error: `credit_only: subscription_id / months_override niet toegestaan (klant ${cid}) — deze modus verlengt nooit.` });
+      }
+    }
     if (!hasScope({ invoiceIds, onlyOverdue })) {
       return res.status(400).json({ error: `Scope verplicht voor klant ${cid}: geef invoice_ids mee of zet only_overdue=true. "Alle open facturen" wordt niet meer gecrediteerd.` });
     }
@@ -134,6 +187,7 @@ export default async function handler(req, res) {
 
   await audit(req, user.id, 'crediteer_ronde.batch_start', {
     run_id: runId, batch_index: batchIndex, batch_total: batchTotal, dry_run: dryRun, only_overdue: onlyOverdue,
+    mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
     items: items.map((i) => ({ customer_id: i.customer_id, subscription_id: i.subscription_id, invoice_ids: i.invoice_ids, months_override: i.months_override, credit_without_extension: i.credit_without_extension })),
     reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal} gestart (${items.length} klant(en))${dryRun ? ' [dry-run]' : ''}`,
   });
@@ -146,6 +200,7 @@ export default async function handler(req, res) {
     extended_months       : 0,
     status_counts         : Object.fromEntries(STATUSES.map((s) => [s, 0])),
     dry_run               : dryRun,
+    mode                  : creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
   };
   const customersOut = [];
 
@@ -153,7 +208,7 @@ export default async function handler(req, res) {
     const cid = it.customer_id;
     const entry = {
       customer_id: cid, customer_name: null, status: null, dry_run: dryRun,
-      credited: [], rejected: [], extended: null, reverted: null, errors: [],
+      credited: [], rejected: [], invoices: [], extended: null, reverted: null, errors: [],
     };
     const finish = (status) => {
       entry.status = status;
@@ -171,13 +226,47 @@ export default async function handler(req, res) {
       if (cust.archived_at || cust.anonymized_at || cust.is_test) { block('customer', 'Klant is gearchiveerd / anoniem / test'); continue; }
       entry.customer_name = customerDisplayName(cust, '(zonder naam)');
 
-      const { data: invs, error: invErr } = await supabaseAdmin.from('invoices')
-        .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, status, tl_invoice_id, is_test, due_date')
-        .eq('customer_id', cid).in('status', OPEN_STATUSES);
-      if (invErr) throw new Error('invoices lookup: ' + invErr.message);
+      const invs = await loadInvoices(cid, it.invoice_ids);
       const { creditable, rejected } = selectCreditable(invs, { invoiceIds: it.invoice_ids, onlyOverdue, today });
       entry.rejected = rejected;
-      if (creditable.length === 0) { finish('overgeslagen'); continue; }
+      entry.invoices = invoiceStatuses({ creditable, rejected, okIds: new Set(), errors: [], dryRun: false });
+      if (creditable.length === 0) {
+        entry.invoices = invoiceStatuses({ creditable, rejected, okIds: new Set(), errors: [], dryRun });
+        finish('overgeslagen'); continue;
+      }
+
+      // ── CREDIT_ONLY: alleen crediteren. Raakt GEEN abonnementen aan —
+      //    postponeSubscription/restoreSubscription worden hier nooit bereikt.
+      if (creditOnly) {
+        const ok = [];
+        if (dryRun) {
+          for (const iv of creditable) ok.push({ invoice_id: iv.id, invoice_number: iv.invoice_number, open_amount: openAmountEur(iv), vat_amount: r2(Number(iv.vat_amount) || 0), tl_credit_note_id: null });
+        } else {
+          for (const iv of creditable) {
+            try {
+              const result = await creditInvoiceCore(iv.id, { description, userId: user.id });
+              ok.push({ invoice_id: iv.id, invoice_number: iv.invoice_number, open_amount: openAmountEur(iv), vat_amount: r2(Number(iv.vat_amount) || 0), tl_credit_note_id: result.tl_credit_note_id });
+            } catch (e) {
+              entry.errors.push({ scope: 'invoice', invoice_id: iv.id, invoice_number: iv.invoice_number, message: e?.message || String(e), code: e?.code || null });
+            }
+          }
+        }
+        entry.credited = ok.map((o) => ({ ...o, dry_run: dryRun }));
+        entry.invoices = invoiceStatuses({ creditable, rejected, okIds: new Set(ok.map((o) => o.invoice_id)), errors: entry.errors, dryRun });
+        summary.credited_invoices += ok.length;
+        summary.credited_incl = r2(summary.credited_incl + ok.reduce((s, o) => s + o.open_amount, 0));
+        let status = ok.length === creditable.length ? 'gecrediteerd' : ok.length === 0 ? 'geblokkeerd' : 'deels_gecrediteerd';
+        if (!dryRun && ok.length > 0) {
+          const { error } = await supabaseAdmin.from('dunning_credited_debt').insert(ok.map((o) => ({
+            customer_id: cid, invoice_id: o.invoice_id, tl_credit_note_id: o.tl_credit_note_id || null,
+            amount_incl: o.open_amount, vat_amount: o.vat_amount, credited_on: runDate, quarter: runQuarter,
+            subscription_id: null, months_extended: 0, created_by: user.id,
+          })));
+          if (error) { entry.errors.push({ scope: 'db', message: 'dunning_credited_debt insert: ' + error.message }); status = 'fout'; }
+        }
+        finish(status);
+        continue;
+      }
 
       let sub = null;
       let plan = null;
@@ -208,6 +297,7 @@ export default async function handler(req, res) {
         entry.credited = creditable.map((iv) => ({ invoice_id: iv.id, invoice_number: iv.invoice_number, open_amount: openAmountEur(iv), vat_amount: r2(Number(iv.vat_amount) || 0), tl_credit_note_id: null, dry_run: true }));
         summary.credited_invoices += entry.credited.length;
         summary.credited_incl = r2(summary.credited_incl + entry.credited.reduce((s, o) => s + o.open_amount, 0));
+        entry.invoices = invoiceStatuses({ creditable, rejected, okIds: new Set(), errors: [], dryRun: true });
         if (sub) {
           entry.extended = { subscription_id: sub.id, months: plan.months, basis: plan.basis, extended: false, would_extend: true, dry_run: true };
           summary.extended_subscriptions++; summary.extended_months += plan.months;
@@ -248,6 +338,7 @@ export default async function handler(req, res) {
         }
       }
       entry.credited = ok.map((o) => ({ ...o, dry_run: false }));
+      entry.invoices = invoiceStatuses({ creditable, rejected, okIds: new Set(ok.map((o) => o.invoice_id)), errors: entry.errors, dryRun: false });
       summary.credited_invoices += ok.length;
       summary.credited_incl = r2(summary.credited_incl + ok.reduce((s, o) => s + o.open_amount, 0));
       const allCredited = ok.length === creditable.length;
@@ -323,12 +414,14 @@ export default async function handler(req, res) {
   const sc = summary.status_counts;
   await audit(req, user.id, dryRun ? 'crediteer_ronde.batch_done_dry_run' : 'crediteer_ronde.batch_done', {
     run_id: runId, batch_index: batchIndex, batch_total: batchTotal, quarter: runQuarter, summary,
+    mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
     customers: customersOut.map((c) => ({
       customer_id: c.customer_id, status: c.status, credited: c.credited.map((x) => x.invoice_id),
+      invoices: c.invoices.map((x) => ({ invoice_id: x.invoice_id, status: x.status, reden: x.reden })),
       extended: c.extended, reverted: c.reverted, errors: c.errors,
     })),
-    reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal}${dryRun ? ' (dry-run)' : ''}: ${sc.verlengd_en_gecrediteerd} verlengd+gecrediteerd, ${sc.alleen_gecrediteerd} alleen gecrediteerd, ${sc.deels_gecrediteerd} deels, ${sc.geblokkeerd} geblokkeerd, ${sc.overgeslagen} overgeslagen, ${sc.fout} fout`,
+    reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal}${dryRun ? ' (dry-run)' : ''}${creditOnly ? ' [alleen crediteren]' : ''}: ${sc.gecrediteerd} gecrediteerd, ${sc.verlengd_en_gecrediteerd} verlengd+gecrediteerd, ${sc.alleen_gecrediteerd} alleen gecrediteerd, ${sc.deels_gecrediteerd} deels, ${sc.geblokkeerd} geblokkeerd, ${sc.overgeslagen} overgeslagen, ${sc.fout} fout`,
   });
 
-  return res.status(200).json({ dry_run: dryRun, run_id: runId, batch_index: batchIndex, batch_total: batchTotal, summary, customers: customersOut });
+  return res.status(200).json({ dry_run: dryRun, mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit', run_id: runId, batch_index: batchIndex, batch_total: batchTotal, summary, customers: customersOut });
 }
