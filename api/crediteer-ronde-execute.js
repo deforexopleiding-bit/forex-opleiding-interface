@@ -1,61 +1,82 @@
 // api/crediteer-ronde-execute.js
-// POST { items: [{ customer_id, subscription_id|null }], confirm: true }
-//
-// Voert de kwartaal-crediteerronde uit voor de meegegeven klanten. Per klant:
-//   1) Alle openstaande facturen (status open/partially_paid/overdue, is_test=false,
-//      met tl_invoice_id én status != 'concept') → creditInvoiceCore per stuk.
-//   2) Als subscription_id meegegeven en het abo hoort bij de klant én heeft
-//      teamleader_subscription_id: postponeSubscription(sub, N) waarbij N =
-//      aantal succesvol gecrediteerde facturen van deze klant (extend/verlengen).
-//   3) Per succesvol gecrediteerde factuur: insert dunning_credited_debt-row.
-//
-// Guardrails:
-//   - Permission: finance.invoice.credit.
-//   - confirm === true is verplicht (voorkomt accidental invocations).
-//   - Globale dry-run: als isDryRunEnabled() true → NIETS boeken; wel
-//     "would do"-summary + audit-log. Zelfde principe als wanbetalers-sandbox.
-//   - Per-klant fail-soft: fout bij crediteren van een factuur brengt de rest
-//     van de batch niet in gevaar; error wordt vastgelegd in de summary.
-//
-// Response:
-// {
-//   dry_run: boolean,
-//   summary: {
-//     total_customers,
-//     credited_invoices,
-//     extended_subscriptions,
-//     skipped_no_invoices,
-//     error_customers
-//   },
-//   customers: [{
-//     customer_id, customer_name, credited:[{invoice_id, tl_credit_note_id}],
-//     extended: { subscription_id, months, extended:true|false }|null,
-//     errors: [{ scope: 'invoice'|'subscription'|'db', invoice_id?, message }]
-//   }]
+// POST {
+//   items: [{ customer_id, subscription_id|null, invoice_ids?: uuid[],
+//             months_override?: int, credit_without_extension?: boolean }],
+//   only_overdue?: boolean,
+//   run_id?: uuid, batch_index?: int, batch_total?: int,
+//   confirm: true
 // }
+//
+// Voert één BATCH (max MAX_ITEMS_PER_CALL klanten) van de crediteerronde uit.
+// De UI knipt een run in batches en stuurt per batch hetzelfde run_id mee.
+//
+// VOLGORDE PER KLANT — het omkeerbare eerst, het onomkeerbare als laatste:
+//   1. Valideren: scope (invoice_ids / only_overdue), abonnement (hoort bij
+//      klant, active, Teamleader-id, einddatum) en verlengplan (per_month of
+//      months_override). Faalt iets → 'geblokkeerd', niets aangeraakt.
+//   2. VERLENGEN, Teamleader-bevestigd (postponeSubscription tlFirst). Weigert
+//      of faalt TL → 'geblokkeerd', er wordt NIETS gecrediteerd.
+//   3. CREDITEREN per factuur (een TL-creditnota is niet terug te draaien).
+//   4. AFSTEMMEN als crediteren (deels) faalt:
+//        - niets gecrediteerd      → verlenging exact terugzetten
+//                                    (restoreSubscription) → 'geblokkeerd'.
+//        - deels, basis per_month  → terugzetten en opnieuw verlengen met het
+//                                    aantal WEL gecrediteerde facturen
+//                                    → 'deels_gecrediteerd'.
+//        - deels, basis override   → verlenging laten staan (handmatig gekozen
+//                                    maanden, niet proportioneel af te leiden)
+//                                    → 'deels_gecrediteerd' + melding.
+//        - terugzetten faalt       → 'fout' met exacte handmatige instructie.
+//   5. Gecrediteerde schuld vastleggen in dunning_credited_debt.
+// "Alleen crediteren" (credit_without_extension=true, bewust gekozen): stap 2
+// en 4 vervallen → 'alleen_gecrediteerd'.
+//
+// Eindstatus per klant (customers[].status):
+//   verlengd_en_gecrediteerd | alleen_gecrediteerd | deels_gecrediteerd |
+//   geblokkeerd (niets veranderd) | overgeslagen (geen facturen in scope) | fout
+//
+// Overig: eigen dry-run-vlag app_settings.crediteer_ronde_dry_run (default
+// AAN; dunning_dry_run blijft onaangeroerd). Audit per batch:
+// 'crediteer_ronde.batch_start' (met de items) vóór het werk en
+// 'crediteer_ronde.batch_done[_dry_run]' erna, beide met run_id — een
+// batch_start zonder batch_done = onderbroken batch.
+//
+// Response: { dry_run, run_id, batch_index, batch_total, summary, customers:[...] }
 
+import crypto from 'crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
-import { isDryRunEnabled } from './_lib/dunning-dry-run.js';
 import { creditInvoiceCore } from './_lib/invoice-credit.js';
-import { postponeSubscription } from './_lib/subscription-postpone.js';
+import { postponeSubscription, restoreSubscription } from './_lib/subscription-postpone.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import {
+  isCrediteerRondeDryRun, selectCreditable, hasScope, openAmountEur, planExtension,
+  todayAmsterdam, OPEN_STATUSES, MAX_ITEMS_PER_CALL,
+} from './_lib/crediteer-ronde-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+
+export const STATUSES = ['verlengd_en_gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'fout'];
 
 function quarterOf(dateIso) {
   const d = new Date(dateIso || Date.now());
-  const q = Math.floor(d.getMonth() / 3) + 1;
-  return `${d.getFullYear()}-Q${q}`;
+  return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
 }
-function openAmountEur(inv) {
-  const t = Number(inv?.amount_total) || 0;
-  const p = Number(inv?.amount_paid)  || 0;
-  const c = Number(inv?.credited_amount) || 0;
-  return Math.max(0, t - p - c);
+
+async function audit(req, userId, action, payload) {
+  try {
+    await supabaseAdmin.from('audit_log').insert({
+      user_id    : userId,
+      action,
+      entity_type: 'crediteer_ronde',
+      entity_id  : null,
+      after_json : payload,
+      reason_text: payload.reason_text || null,
+      ip_address : getClientIp(req),
+    });
+  } catch (e) { console.error('[crediteer-ronde-execute] audit', action, e?.message || e); }
 }
 
 export default async function handler(req, res) {
@@ -75,233 +96,239 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'confirm=true vereist voor deze irreversible actie' });
   }
   const rawItems = Array.isArray(body.items) ? body.items : null;
-  if (!rawItems || rawItems.length === 0) {
-    return res.status(400).json({ error: 'items (array) verplicht' });
+  if (!rawItems || rawItems.length === 0) return res.status(400).json({ error: 'items (array) verplicht' });
+  if (rawItems.length > MAX_ITEMS_PER_CALL) {
+    return res.status(400).json({ error: `Te veel klanten in één aanroep (max ${MAX_ITEMS_PER_CALL}) — knip de run in batches` });
   }
-  if (rawItems.length > 100) {
-    return res.status(400).json({ error: 'Te veel klanten in één run (max 100)' });
-  }
+  const onlyOverdue = body.only_overdue === true;
 
-  // Validate + dedupe.
   const items = [];
   const seen = new Set();
   for (const it of rawItems) {
-    if (!it || typeof it !== 'object') continue;
-    const cid = typeof it.customer_id === 'string' && UUID_RE.test(it.customer_id) ? it.customer_id : null;
+    const cid = typeof it?.customer_id === 'string' && UUID_RE.test(it.customer_id) ? it.customer_id : null;
     if (!cid || seen.has(cid)) continue;
     seen.add(cid);
-    const sid = typeof it.subscription_id === 'string' && UUID_RE.test(it.subscription_id) ? it.subscription_id : null;
-    items.push({ customer_id: cid, subscription_id: sid });
+    const invoiceIds = Array.isArray(it.invoice_ids) ? it.invoice_ids.filter((x) => typeof x === 'string' && UUID_RE.test(x)) : [];
+    if (!hasScope({ invoiceIds, onlyOverdue })) {
+      return res.status(400).json({ error: `Scope verplicht voor klant ${cid}: geef invoice_ids mee of zet only_overdue=true. "Alle open facturen" wordt niet meer gecrediteerd.` });
+    }
+    items.push({
+      customer_id             : cid,
+      subscription_id         : typeof it.subscription_id === 'string' && UUID_RE.test(it.subscription_id) ? it.subscription_id : null,
+      invoice_ids             : invoiceIds.length ? invoiceIds : null,
+      months_override         : it.months_override == null || it.months_override === '' ? null : it.months_override,
+      credit_without_extension: it.credit_without_extension === true,
+    });
   }
   if (items.length === 0) return res.status(400).json({ error: 'Geen geldige items' });
 
-  const dryRun = await isDryRunEnabled();
-  const runAt   = new Date();
-  const runIso  = runAt.toISOString();
-  const runDate = runIso.slice(0, 10);
+  const dryRun     = await isCrediteerRondeDryRun();
+  const runId      = typeof body.run_id === 'string' && UUID_RE.test(body.run_id) ? body.run_id : crypto.randomUUID();
+  const batchIndex = Number.isInteger(body.batch_index) ? body.batch_index : 1;
+  const batchTotal = Number.isInteger(body.batch_total) ? body.batch_total : 1;
+  const runIso     = new Date().toISOString();
+  const runDate    = runIso.slice(0, 10);
   const runQuarter = quarterOf(runIso);
+  const today      = todayAmsterdam();
+  const description = `Crediteerronde ${runQuarter}`;
+
+  await audit(req, user.id, 'crediteer_ronde.batch_start', {
+    run_id: runId, batch_index: batchIndex, batch_total: batchTotal, dry_run: dryRun, only_overdue: onlyOverdue,
+    items: items.map((i) => ({ customer_id: i.customer_id, subscription_id: i.subscription_id, invoice_ids: i.invoice_ids, months_override: i.months_override, credit_without_extension: i.credit_without_extension })),
+    reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal} gestart (${items.length} klant(en))${dryRun ? ' [dry-run]' : ''}`,
+  });
 
   const summary = {
-    total_customers        : items.length,
-    credited_invoices      : 0,
-    extended_subscriptions : 0,
-    skipped_no_invoices    : 0,
-    error_customers        : 0,
-    dry_run                : dryRun,
+    total_customers       : items.length,
+    credited_invoices     : 0,
+    credited_incl         : 0,
+    extended_subscriptions: 0,
+    extended_months       : 0,
+    status_counts         : Object.fromEntries(STATUSES.map((s) => [s, 0])),
+    dry_run               : dryRun,
   };
   const customersOut = [];
 
   for (const it of items) {
     const cid = it.customer_id;
-    const wantSubId = it.subscription_id;
-    const custEntry = {
-      customer_id  : cid,
-      customer_name: null,
-      credited     : [],
-      extended     : null,
-      errors       : [],
-      dry_run      : dryRun,
+    const entry = {
+      customer_id: cid, customer_name: null, status: null, dry_run: dryRun,
+      credited: [], rejected: [], extended: null, reverted: null, errors: [],
     };
+    const finish = (status) => {
+      entry.status = status;
+      summary.status_counts[status]++;
+      customersOut.push(entry);
+    };
+    const block = (scope, message, code = null) => { entry.errors.push({ scope, message, code }); finish('geblokkeerd'); };
 
     try {
-      // A) Klant ophalen (met guard).
+      // ── 1) VALIDEREN ────────────────────────────────────────────────────
       const { data: cust } = await supabaseAdmin.from('customers')
         .select('id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test')
         .eq('id', cid).maybeSingle();
-      if (!cust) {
-        custEntry.errors.push({ scope: 'customer', message: 'Klant niet gevonden' });
-        summary.error_customers++;
-        customersOut.push(custEntry);
-        continue;
-      }
-      if (cust.archived_at || cust.anonymized_at || cust.is_test) {
-        custEntry.errors.push({ scope: 'customer', message: 'Klant is gearchiveerd / anoniem / test' });
-        summary.error_customers++;
-        customersOut.push(custEntry);
-        continue;
-      }
-      custEntry.customer_name = customerDisplayName(cust, '(zonder naam)');
+      if (!cust) { block('customer', 'Klant niet gevonden'); continue; }
+      if (cust.archived_at || cust.anonymized_at || cust.is_test) { block('customer', 'Klant is gearchiveerd / anoniem / test'); continue; }
+      entry.customer_name = customerDisplayName(cust, '(zonder naam)');
 
-      // B) Facturen ophalen die we mogen crediteren.
-      const { data: invs } = await supabaseAdmin.from('invoices')
-        .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, status, tl_invoice_id, is_test')
-        .eq('customer_id', cid).in('status', OPEN_STATUSES).eq('is_test', false);
-      const creditables = (invs || []).filter((iv) => {
-        if (!iv.tl_invoice_id) return false;
-        if (iv.status === 'concept') return false;
-        if (openAmountEur(iv) <= 0) return false;
-        return true;
-      });
-      if (creditables.length === 0) {
-        summary.skipped_no_invoices++;
-        customersOut.push(custEntry);
+      const { data: invs, error: invErr } = await supabaseAdmin.from('invoices')
+        .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, status, tl_invoice_id, is_test, due_date')
+        .eq('customer_id', cid).in('status', OPEN_STATUSES);
+      if (invErr) throw new Error('invoices lookup: ' + invErr.message);
+      const { creditable, rejected } = selectCreditable(invs, { invoiceIds: it.invoice_ids, onlyOverdue, today });
+      entry.rejected = rejected;
+      if (creditable.length === 0) { finish('overgeslagen'); continue; }
+
+      let sub = null;
+      let plan = null;
+      if (it.subscription_id) {
+        const { data: s } = await supabaseAdmin.from('subscriptions')
+          .select('id, deal_id, description, amount, term_count, start_date, end_date, teamleader_subscription_id, postponed_months, original_start_date, original_end_date, status, billing_cycle')
+          .eq('id', it.subscription_id).maybeSingle();
+        if (!s) { block('subscription', 'Abonnement niet gevonden'); continue; }
+        const { data: deal } = await supabaseAdmin.from('deals').select('id, customer_id').eq('id', s.deal_id).maybeSingle();
+        if (!deal || deal.customer_id !== cid) { block('subscription', 'Abonnement hoort niet bij deze klant'); continue; }
+        if (String(s.status || '').toLowerCase() !== 'active') { block('subscription', `Abonnement is niet actief (status ${s.status})`); continue; }
+        if (!s.teamleader_subscription_id) { block('subscription', 'Abonnement heeft geen Teamleader-id — kan niet verlengen'); continue; }
+        if (!s.end_date) { block('subscription', 'Abonnement heeft geen einddatum — verlengen kan niet eenduidig'); continue; }
+        plan = planExtension(s, creditable.length, it.months_override);
+        if (plan.error === 'CYCLE_UNSUPPORTED') {
+          block('subscription', `billing_cycle '${plan.cycle ?? 'onbekend'}' — geen automatische maandentelling. Geef months_override (1-36) mee.`, 'CYCLE_UNSUPPORTED');
+          continue;
+        }
+        if (plan.error) { block('subscription', 'months_override moet een geheel getal 1-36 zijn', plan.error); continue; }
+        sub = s;
+      } else if (!it.credit_without_extension) {
+        block('subscription', 'Geen abonnement gekozen. Kies een abonnement of zet credit_without_extension=true (dan wordt het bedrag nergens heraangeplakt).', 'NO_SUBSCRIPTION');
         continue;
       }
 
-      // C) Crediteer per factuur — dry-run of live.
-      const description = `Crediteerronde ${runQuarter}`;
-      const successfullyCredited = [];
-      for (const iv of creditables) {
+      // ── DRY-RUN: rapporteer wat er zou gebeuren, raak niets aan ──────────
+      if (dryRun) {
+        entry.credited = creditable.map((iv) => ({ invoice_id: iv.id, invoice_number: iv.invoice_number, open_amount: openAmountEur(iv), vat_amount: r2(Number(iv.vat_amount) || 0), tl_credit_note_id: null, dry_run: true }));
+        summary.credited_invoices += entry.credited.length;
+        summary.credited_incl = r2(summary.credited_incl + entry.credited.reduce((s, o) => s + o.open_amount, 0));
+        if (sub) {
+          entry.extended = { subscription_id: sub.id, months: plan.months, basis: plan.basis, extended: false, would_extend: true, dry_run: true };
+          summary.extended_subscriptions++; summary.extended_months += plan.months;
+          finish('verlengd_en_gecrediteerd');
+        } else finish('alleen_gecrediteerd');
+        continue;
+      }
+
+      // ── 2) VERLENGEN (Teamleader-bevestigd) — vóór het crediteren ────────
+      let ext = null;      // { snapshot, subAfter, months }
+      if (sub) {
         try {
-          if (dryRun) {
-            // Alleen "would do" — geen TL-call.
-            custEntry.credited.push({
-              invoice_id       : iv.id,
-              invoice_number   : iv.invoice_number,
-              open_amount      : r2(openAmountEur(iv)),
-              vat_amount       : r2(Number(iv.vat_amount) || 0),
-              tl_credit_note_id: null,
-              dry_run          : true,
-            });
-            successfullyCredited.push({
-              invoice_id       : iv.id,
-              open_amount      : r2(openAmountEur(iv)),
-              vat_amount       : r2(Number(iv.vat_amount) || 0),
-              tl_credit_note_id: null,
-            });
+          const r = await postponeSubscription(sub, plan.months, { userId: user.id, req, tlFirst: true });
+          if (r?.tl?.pushed !== true) throw Object.assign(new Error('Teamleader bevestigde de verlenging niet'), { code: 'TL_NOT_CONFIRMED' });
+          ext = { snapshot: r.snapshot, subAfter: { ...sub, ...(r.subscription || {}) }, months: plan.months };
+          entry.extended = { subscription_id: sub.id, months: plan.months, basis: plan.basis, extended: true, dry_run: false };
+        } catch (e) {
+          entry.extended = { subscription_id: sub.id, months: plan.months, basis: plan.basis, extended: false, dry_run: false };
+          if (e?.code === 'DB_AFTER_TL') {
+            // TL is al verlengd, onze DB niet — niet crediteren, handmatig herstellen.
+            entry.errors.push({ scope: 'subscription', code: 'DB_AFTER_TL', message: `${e.message}. NIETS gecrediteerd. Zet in Teamleader ends_on terug naar ${sub.end_date}.` });
+            finish('fout');
           } else {
-            const result = await creditInvoiceCore(iv.id, { description, userId: user.id });
-            custEntry.credited.push({
-              invoice_id       : iv.id,
-              invoice_number   : iv.invoice_number,
-              open_amount      : r2(openAmountEur(iv)),
-              vat_amount       : r2(Number(iv.vat_amount) || 0),
-              tl_credit_note_id: result.tl_credit_note_id,
-              dry_run          : false,
-            });
-            successfullyCredited.push({
-              invoice_id       : iv.id,
-              open_amount      : r2(openAmountEur(iv)),
-              vat_amount       : r2(Number(iv.vat_amount) || 0),
-              tl_credit_note_id: result.tl_credit_note_id,
-            });
+            block('subscription', `Verlenging niet bevestigd door Teamleader — NIETS gecrediteerd. ${e?.message || e}`, e?.code || 'TL_NOT_CONFIRMED');
           }
-        } catch (e) {
-          custEntry.errors.push({
-            scope     : 'invoice',
-            invoice_id: iv.id,
-            message   : e?.message || String(e),
-            code      : e?.code || null,
-          });
-          // Ga door met volgende factuur — per-item fail-soft.
+          continue;
         }
       }
-      summary.credited_invoices += successfullyCredited.length;
 
-      // D) Sub verlengen — alleen als er iets gecrediteerd is (of dry-run).
-      const nMonths = successfullyCredited.length;
-      let didExtend = false;
-      if (wantSubId && nMonths > 0) {
+      // ── 3) CREDITEREN ─────────────────────────────────────────────────────
+      const ok = [];
+      for (const iv of creditable) {
         try {
-          // Verifieer dat het sub bij deze klant hoort via deal_id.
-          const { data: sub } = await supabaseAdmin.from('subscriptions')
-            .select('id, deal_id, description, amount, term_count, start_date, end_date, teamleader_subscription_id, postponed_months, original_start_date, original_end_date')
-            .eq('id', wantSubId).maybeSingle();
-          if (!sub) throw new Error('Abonnement niet gevonden');
-          const { data: deal } = await supabaseAdmin.from('deals')
-            .select('id, customer_id').eq('id', sub.deal_id).maybeSingle();
-          if (!deal || deal.customer_id !== cid) {
-            throw new Error('Abonnement hoort niet bij deze klant');
-          }
-          if (!sub.teamleader_subscription_id && !dryRun) {
-            // Zonder TL-id kunnen we in prod-mode niet extenden. In dry-run
-            // laten we het door zodat de UI de would-do state kan tonen.
-            throw new Error('Abonnement heeft geen Teamleader-id — kan niet extenden');
-          }
-          if (dryRun) {
-            custEntry.extended = {
-              subscription_id: sub.id,
-              months         : nMonths,
-              extended       : true,
-              dry_run        : true,
-            };
-            didExtend = true;
-          } else {
-            const { extended } = await postponeSubscription(sub, nMonths, { userId: user.id, req });
-            custEntry.extended = {
-              subscription_id: sub.id,
-              months         : nMonths,
-              extended       : !!extended,
-              dry_run        : false,
-            };
-            didExtend = true;
-          }
+          const result = await creditInvoiceCore(iv.id, { description, userId: user.id });
+          ok.push({ invoice_id: iv.id, invoice_number: iv.invoice_number, open_amount: openAmountEur(iv), vat_amount: r2(Number(iv.vat_amount) || 0), tl_credit_note_id: result.tl_credit_note_id });
         } catch (e) {
-          custEntry.errors.push({
-            scope   : 'subscription',
-            message : e?.message || String(e),
-          });
+          entry.errors.push({ scope: 'invoice', invoice_id: iv.id, invoice_number: iv.invoice_number, message: e?.message || String(e), code: e?.code || null });
         }
       }
-      if (didExtend) summary.extended_subscriptions++;
+      entry.credited = ok.map((o) => ({ ...o, dry_run: false }));
+      summary.credited_invoices += ok.length;
+      summary.credited_incl = r2(summary.credited_incl + ok.reduce((s, o) => s + o.open_amount, 0));
+      const allCredited = ok.length === creditable.length;
 
-      // E) dunning_credited_debt inserts — één rij per succesvol gecrediteerde
-      //    factuur. In dry-run: SKIP (nothing persisted).
-      if (!dryRun && successfullyCredited.length > 0) {
-        try {
-          const rows = successfullyCredited.map((sc) => ({
-            customer_id       : cid,
-            invoice_id        : sc.invoice_id,
-            tl_credit_note_id : sc.tl_credit_note_id || null,
-            amount_incl       : sc.open_amount,
-            vat_amount        : sc.vat_amount,
-            credited_on       : runDate,
-            quarter           : runQuarter,
-            subscription_id   : didExtend && custEntry.extended ? custEntry.extended.subscription_id : null,
-            months_extended   : didExtend ? nMonths : 0,
-            created_by        : user.id,
-          }));
-          const { error } = await supabaseAdmin.from('dunning_credited_debt').insert(rows);
-          if (error) throw new Error(error.message);
-        } catch (e) {
-          custEntry.errors.push({ scope: 'db', message: 'dunning_credited_debt insert: ' + (e?.message || String(e)) });
+      // ── 4) AFSTEMMEN verlenging ↔ credits ─────────────────────────────────
+      let finalMonths = ext ? ext.months : 0;
+      let extensionStands = !!ext;
+      let status = ext ? 'verlengd_en_gecrediteerd' : 'alleen_gecrediteerd';
+      if (!allCredited) status = ok.length === 0 ? 'geblokkeerd' : 'deels_gecrediteerd';
+
+      if (ext && !allCredited) {
+        const needRestore = ok.length === 0 || plan.basis === 'per_month';
+        if (needRestore) {
+          try {
+            await restoreSubscription(ext.subAfter, ext.snapshot, { userId: user.id, req, reason: `Crediteerronde ${runQuarter}: ${ok.length}/${creditable.length} gecrediteerd — verlenging teruggezet` });
+            entry.reverted = { restored_to: ext.snapshot.end_date, ok: true };
+            extensionStands = false; finalMonths = 0;
+          } catch (e) {
+            entry.reverted = { restored_to: ext.snapshot.end_date, ok: false };
+            entry.errors.push({ scope: 'subscription', code: 'REVERT_FAILED', message: `Verlenging (+${ext.months} mnd) kon NIET worden teruggezet: ${e?.message || e}. Handmatig: zet ends_on in Teamleader en end_date in de DB terug naar ${ext.snapshot.end_date} (term_count ${ext.snapshot.term_count}).` });
+            status = 'fout';
+          }
+          // per_month + deels gecrediteerd → opnieuw verlengen met het juiste aantal.
+          if (entry.reverted?.ok && ok.length > 0) {
+            try {
+              const { data: fresh } = await supabaseAdmin.from('subscriptions')
+                .select('id, deal_id, description, amount, term_count, start_date, end_date, teamleader_subscription_id, postponed_months, original_start_date, original_end_date, status, billing_cycle')
+                .eq('id', sub.id).maybeSingle();
+              const r = await postponeSubscription(fresh || sub, ok.length, { userId: user.id, req, tlFirst: true });
+              if (r?.tl?.pushed !== true) throw new Error('Teamleader bevestigde de her-verlenging niet');
+              extensionStands = true; finalMonths = ok.length;
+              entry.extended = { ...entry.extended, months: ok.length, extended: true, adjusted_from: ext.months };
+            } catch (e) {
+              entry.extended = { ...entry.extended, extended: false };
+              entry.errors.push({ scope: 'subscription', code: 'REEXTEND_FAILED', message: `${ok.length} factuur/facturen gecrediteerd maar de her-verlenging (+${ok.length} mnd) mislukte: ${e?.message || e}. Handmatig verlengen met +${ok.length} mnd.` });
+              status = 'fout';
+            }
+          } else if (entry.reverted?.ok) {
+            entry.extended = { ...entry.extended, extended: false };
+          }
+        } else {
+          // override-basis, deels gecrediteerd: maanden waren bewust gekozen voor
+          // de hele set en zijn niet proportioneel af te leiden → laten staan.
+          entry.errors.push({ scope: 'subscription', code: 'OVERRIDE_PARTIAL', message: `Verlenging +${ext.months} mnd (handmatig gekozen) blijft staan terwijl ${creditable.length - ok.length} factuur/facturen NIET gecrediteerd zijn. Controleer het aantal maanden.` });
         }
       }
+      if (extensionStands) { summary.extended_subscriptions++; summary.extended_months += finalMonths; }
 
-      customersOut.push(custEntry);
+      // ── 5) SCHULD VASTLEGGEN ──────────────────────────────────────────────
+      if (ok.length > 0) {
+        const rows = ok.map((o) => ({
+          customer_id      : cid,
+          invoice_id       : o.invoice_id,
+          tl_credit_note_id: o.tl_credit_note_id || null,
+          amount_incl      : o.open_amount,
+          vat_amount       : o.vat_amount,
+          credited_on      : runDate,
+          quarter          : runQuarter,
+          subscription_id  : extensionStands ? sub.id : null,
+          months_extended  : extensionStands ? finalMonths : 0,
+          created_by       : user.id,
+        }));
+        const { error } = await supabaseAdmin.from('dunning_credited_debt').insert(rows);
+        if (error) { entry.errors.push({ scope: 'db', message: 'dunning_credited_debt insert: ' + error.message }); if (status !== 'fout') status = 'fout'; }
+      }
+      finish(status);
     } catch (e) {
-      custEntry.errors.push({ scope: 'customer', message: e?.message || String(e) });
-      summary.error_customers++;
-      customersOut.push(custEntry);
+      entry.errors.push({ scope: 'customer', message: e?.message || String(e) });
+      finish(entry.credited.length || entry.extended?.extended ? 'fout' : 'geblokkeerd');
     }
   }
 
-  // Aggregate audit-log entry — één regel per run, fail-soft.
-  try {
-    await supabaseAdmin.from('audit_log').insert({
-      user_id     : user.id,
-      action      : dryRun ? 'crediteer_ronde.dry_run' : 'crediteer_ronde.executed',
-      entity_type : 'crediteer_ronde',
-      entity_id   : null,
-      after_json  : { summary, quarter: runQuarter, customer_count: items.length },
-      reason_text : `Crediteerronde ${runQuarter} — ${items.length} klant(en), ${summary.credited_invoices} facturen ${dryRun ? '(dry-run)' : 'gecrediteerd'}`,
-      ip_address  : getClientIp(req),
-    });
-  } catch (e) { console.error('[crediteer-ronde-execute] audit', e?.message || e); }
-
-  return res.status(200).json({
-    dry_run  : dryRun,
-    summary,
-    customers: customersOut,
+  const sc = summary.status_counts;
+  await audit(req, user.id, dryRun ? 'crediteer_ronde.batch_done_dry_run' : 'crediteer_ronde.batch_done', {
+    run_id: runId, batch_index: batchIndex, batch_total: batchTotal, quarter: runQuarter, summary,
+    customers: customersOut.map((c) => ({
+      customer_id: c.customer_id, status: c.status, credited: c.credited.map((x) => x.invoice_id),
+      extended: c.extended, reverted: c.reverted, errors: c.errors,
+    })),
+    reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal}${dryRun ? ' (dry-run)' : ''}: ${sc.verlengd_en_gecrediteerd} verlengd+gecrediteerd, ${sc.alleen_gecrediteerd} alleen gecrediteerd, ${sc.deels_gecrediteerd} deels, ${sc.geblokkeerd} geblokkeerd, ${sc.overgeslagen} overgeslagen, ${sc.fout} fout`,
   });
+
+  return res.status(200).json({ dry_run: dryRun, run_id: runId, batch_index: batchIndex, batch_total: batchTotal, summary, customers: customersOut });
 }

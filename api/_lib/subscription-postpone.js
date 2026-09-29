@@ -29,12 +29,28 @@ export function addMonthsStr(dateStr, n) {
 
 // Verschuift/verlengt één sub. Returnt { subscription, tl, extended }.
 // Gooit bij een DB-fout (caller vangt af / telt als fail).
-export async function postponeSubscription(sub, months, { userId = null, req = null, todayStr = null } = {}) {
+// tlFirst (opt-in, default false = oud gedrag): eerst Teamleader bijwerken en
+// pas bij bevestiging (2xx) de DB. Faalt TL → typed error TL_NOT_CONFIRMED en
+// GEEN DB-wijziging, zodat DB en TL nooit uit elkaar lopen. Gebruikt door de
+// crediteerronde; de overige callers houden DB-eerst + TL best-effort.
+function typedError(code, message, extra = {}) {
+  const e = new Error(message); e.code = code; Object.assign(e, extra); return e;
+}
+
+export async function postponeSubscription(sub, months, { userId = null, req = null, todayStr = null, tlFirst = false } = {}) {
   const m = Number(months);
   const today = todayStr || new Date().toISOString().slice(0, 10);
   const running = !!(sub.start_date && sub.start_date < today); // start < vandaag = al lopend
 
   const before = { start_date: sub.start_date, end_date: sub.end_date, term_count: sub.term_count, postponed_months: sub.postponed_months || 0 };
+  // Volledige toestand vóór deze wijziging — voor restoreSubscription(). Exacte
+  // waarden terugzetten i.p.v. "min N maanden": addMonthsStr loopt over de
+  // maandgrens (31 jan + 1 = 3 mrt), dus terugrekenen is niet altijd exact.
+  const snapshot = {
+    start_date: sub.start_date ?? null, end_date: sub.end_date ?? null,
+    term_count: sub.term_count ?? null, postponed_months: sub.postponed_months || 0,
+    original_start_date: sub.original_start_date ?? null, original_end_date: sub.original_end_date ?? null,
+  };
   const patch = { postponed_months: (Number(sub.postponed_months) || 0) + m };
   let newStart = sub.start_date;
   let newEnd = sub.end_date;
@@ -54,12 +70,38 @@ export async function postponeSubscription(sub, months, { userId = null, req = n
     if (sub.original_start_date == null) { patch.original_start_date = sub.start_date; patch.original_end_date = sub.end_date || null; }
   }
 
-  const { data: updated, error } = await supabaseAdmin.from('subscriptions').update(patch).eq('id', sub.id).select('*').single();
-  if (error) throw error;
+  const tlBody = { id: sub.teamleader_subscription_id };
+  if (!running && newStart) tlBody.starts_on = newStart; // lopend: starts_on ongemoeid laten
+  if (newEnd) tlBody.ends_on = newEnd;
 
-  // TL best-effort: subscriptions.update.
   let tl = { pushed: false };
-  if (sub.teamleader_subscription_id) {
+  if (tlFirst) {
+    if (!sub.teamleader_subscription_id) throw typedError('NO_TL_ID', 'Abonnement heeft geen Teamleader-id');
+    if (!newEnd) throw typedError('NO_END_DATE', 'Abonnement heeft geen einddatum — verlengen kan niet eenduidig');
+    let r;
+    try {
+      r = await tlFetch('/subscriptions.update', { method: 'POST', body: JSON.stringify(tlBody) });
+    } catch (e) {
+      throw typedError('TL_NOT_CONFIRMED', 'Teamleader niet bereikbaar: ' + e.message);
+    }
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw typedError('TL_NOT_CONFIRMED', `Teamleader weigerde de verlenging (HTTP ${r.status}): ${txt.slice(0, 200)}`, { tlStatus: r.status });
+    }
+    tl = { pushed: true };
+  }
+
+  const { data: updated, error } = await supabaseAdmin.from('subscriptions').update(patch).eq('id', sub.id).select('*').single();
+  if (error) {
+    if (tlFirst) {
+      // TL is al bijgewerkt maar de DB niet: expliciet melden, nooit stil.
+      throw typedError('DB_AFTER_TL', `Teamleader is verlengd maar de database-update faalde: ${error.message}. Handmatig rechtzetten: subscriptions.id=${sub.id}`, { tlBody });
+    }
+    throw error;
+  }
+
+  // TL best-effort (alleen oud pad): subscriptions.update.
+  if (!tlFirst && sub.teamleader_subscription_id) {
     try {
       const tok = await getActiveToken();
       if (tok) {
@@ -83,5 +125,45 @@ export async function postponeSubscription(sub, months, { userId = null, req = n
     });
   } catch (e) { console.error('[sub-postpone] audit:', e.message); }
 
-  return { subscription: updated, tl, extended: running };
+  return { subscription: updated, tl, extended: running, snapshot };
+}
+
+// Draait een postponeSubscription() terug naar de EXACTE momentopname van
+// daarvoor. Altijd Teamleader eerst; de DB alleen na een 2xx. Faalt TL →
+// TL_NOT_CONFIRMED en de DB blijft zoals hij is (DB en TL blijven gelijk,
+// beide nog verlengd). Faalt de DB na TL → DB_AFTER_TL (expliciet, nooit stil).
+//   sub      = de huidige (verlengde) rij: id, teamleader_subscription_id, start_date
+//   snapshot = result.snapshot uit postponeSubscription()
+export async function restoreSubscription(sub, snapshot, { userId = null, req = null, reason = null } = {}) {
+  if (!sub?.teamleader_subscription_id) throw typedError('NO_TL_ID', 'Abonnement heeft geen Teamleader-id');
+  if (!snapshot?.end_date) throw typedError('NO_END_DATE', 'Geen oorspronkelijke einddatum om naar terug te zetten');
+  const tlBody = { id: sub.teamleader_subscription_id, ends_on: snapshot.end_date };
+  if (snapshot.start_date && snapshot.start_date !== sub.start_date) tlBody.starts_on = snapshot.start_date;
+  let r;
+  try {
+    r = await tlFetch('/subscriptions.update', { method: 'POST', body: JSON.stringify(tlBody) });
+  } catch (e) {
+    throw typedError('TL_NOT_CONFIRMED', 'Terugdraaien: Teamleader niet bereikbaar: ' + e.message);
+  }
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw typedError('TL_NOT_CONFIRMED', `Terugdraaien: Teamleader weigerde (HTTP ${r.status}): ${txt.slice(0, 200)}`, { tlStatus: r.status });
+  }
+  const patch = {
+    start_date: snapshot.start_date, end_date: snapshot.end_date, term_count: snapshot.term_count,
+    postponed_months: snapshot.postponed_months, original_start_date: snapshot.original_start_date,
+    original_end_date: snapshot.original_end_date,
+  };
+  const { data: restored, error } = await supabaseAdmin.from('subscriptions').update(patch).eq('id', sub.id).select('*').single();
+  if (error) {
+    throw typedError('DB_AFTER_TL', `Teamleader is teruggezet maar de database niet: ${error.message}. Handmatig: subscriptions.id=${sub.id} → ${JSON.stringify(patch)}`, { patch });
+  }
+  try {
+    await supabaseAdmin.from('audit_log').insert({
+      user_id: userId, action: 'subscription.postpone_reverted', entity_type: 'subscription', entity_id: sub.id,
+      before_json: { start_date: sub.start_date, end_date: sub.end_date }, after_json: patch,
+      reason_text: reason || 'Verlenging teruggedraaid', ip_address: req ? getClientIp(req) : null,
+    });
+  } catch (e) { console.error('[sub-postpone] audit revert:', e.message); }
+  return { subscription: restored };
 }
