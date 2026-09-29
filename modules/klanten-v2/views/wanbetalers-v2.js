@@ -6857,7 +6857,7 @@
     const invsHtml = invs.length ? invs.slice(0, 12).map((iv) => {
       const nr = iv.invoice_number || iv.id;
       const openEur = (iv.amount_open != null) ? Number(iv.amount_open)
-                    : Math.max(0, (Number(iv.amount_total) || 0) - (Number(iv.amount_paid) || 0));
+                    : Math.max(0, (Number(iv.amount_total) || 0) - (Number(iv.amount_paid) || 0) - (Number(iv.credited_amount) || 0));
       return `<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px">
         <span style="font-family:'IBM Plex Mono',monospace">${esc(nr)}</span>
         <span style="font-family:'IBM Plex Mono',monospace">${eur(openEur)}</span>

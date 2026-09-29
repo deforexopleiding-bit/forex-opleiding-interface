@@ -228,7 +228,7 @@ export default async function handler(req, res) {
           const credited = Number(inv.credited_amount) || 0;
           const fullyCredited = credited > 0 && total > 0 && credited >= total;
           if (fullyCredited) continue; // sluit ge-crediteerde facturen uit
-          const amountOpen = Math.max(0, total - paid);
+          const amountOpen = Math.max(0, total - paid - credited);
           if (amountOpen <= 0) continue; // niets meer openstaand
           // days_overdue: hele dagen tussen due_date en vandaag (lokale dagen
           // volstaan — facturen-datums zijn date-only, geen tijdcomponent).

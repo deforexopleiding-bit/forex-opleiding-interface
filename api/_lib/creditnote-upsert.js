@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
+import { bepaalBetaalstand, EPS } from './factuur-betaald.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 function amt(o) {
@@ -103,18 +104,63 @@ export async function recomputeCreditedAmount(invoiceIds) {
       const { data: rows } = await supabaseAdmin
         .from('credit_notes').select('amount_total').eq('invoice_id', invoiceId);
       const sum = Math.round((rows || []).reduce((a, r) => a + (Number(r.amount_total) || 0), 0) * 100) / 100;
+
+      const { data: voor, error: voorErr } = await supabaseAdmin.from('invoices')
+        .select('id, customer_id, deal_id, tl_subscription_id, invoice_number, status, amount_total, amount_paid, credited_amount')
+        .eq('id', invoiceId).maybeSingle();
+      if (voorErr) throw new Error(voorErr.message);
+      const patch = { credited_amount: sum, updated_at: new Date().toISOString() };
+
+      // GECREDITEERD ≠ BETAALD. Kwam de creditnota binnen NA de factuur (de
+      // uurlijkse sync doet eerst facturen, dan creditnota's), dan staat de
+      // factuur nog als 'paid' met de verrekening in amount_paid. Status en
+      // betaald bedrag schuiven mee — alleen als het gecrediteerde bedrag
+      // echt verandert; oude rijen raakt dit niet (daarvoor is de datafix).
+      // Invariant: amount_paid = tlBetaald − credited_amount (zie
+      // invoice-upsert), dus tlBetaald = amount_paid + oude credited_amount.
+      let naarGecrediteerd = false;
+      if (voor && Math.abs(sum - r2(voor.credited_amount)) > EPS && voor.status !== 'concept') {
+        const { data: pays } = await supabaseAdmin.from('payments').select('amount').eq('invoice_id', invoiceId);
+        const echteBetalingen = r2((pays || []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
+        const stand = bepaalBetaalstand({
+          totaal: r2(voor.amount_total),
+          tlBetaald: r2(voor.amount_paid) + r2(voor.credited_amount),
+          gecrediteerd: sum, echteBetalingen,
+          tlStatus: voor.status,
+        });
+        patch.status = stand.status;
+        patch.amount_paid = stand.betaald;
+        if (stand.status !== 'paid') patch.paid_date = null;
+        naarGecrediteerd = stand.status === 'credited' && voor.status !== 'credited';
+      }
+
       // De update geeft de rij terug: zo weten we bij WELKE klant dit hoorde
       // en of het bedrag daadwerkelijk anders is dan wat er stond. Dat scheelt
       // de spiegel een ronde bij elke hersync die niets verandert.
       const { data: naRij, error } = await supabaseAdmin
         .from('invoices')
-        .update({ credited_amount: sum, updated_at: new Date().toISOString() })
+        .update(patch)
         .eq('id', invoiceId)
         .select('customer_id, credited_amount')
         .maybeSingle();
       if (error) throw new Error(error.message);
       stats.updated++;
       if (naRij?.customer_id) geraakteKlanten.add(naRij.customer_id);
+
+      // Sales-bonus: een creditnota die rechtstreeks in Teamleader gemaakt is,
+      // komt alleen HIER als creditering binnen. Zonder deze aanroep bleef een
+      // al 'earned' bonus op een gecrediteerde aanbetaling staan. Fail-soft.
+      if (naarGecrediteerd) {
+        try {
+          const { voidBonusForCreditedInvoice } = await import('./sales-bonus.js');
+          await voidBonusForCreditedInvoice(
+            { id: voor.id, deal_id: voor.deal_id, tl_subscription_id: voor.tl_subscription_id, invoice_number: voor.invoice_number },
+            { source: 'creditnote-recompute' },
+          );
+        } catch (e) {
+          console.warn('[creditnote-upsert] sales-bonus void soft-fail', invoiceId, e?.message || e);
+        }
+      }
     } catch (e) {
       stats.errors++;
       console.error('[creditnote-upsert] recompute', invoiceId, e.message);

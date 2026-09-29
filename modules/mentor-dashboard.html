@@ -978,6 +978,7 @@
     const termRows = (s.termijnen || []).map((t) => {
       let badge;
       if (t.status === 'betaald')            badge = '<span class="badge badge-green">Betaald</span>';
+      else if (t.status === 'gecrediteerd')  badge = '<span class="badge" title="Factuur gecrediteerd — geen betaling en geen bonus">Gecrediteerd</span>';
       else if (t.status === 'achterstallig') badge = '<span class="badge badge-red" title="Vervaldatum voorbij en nog niet betaald">Achterstallig</span>';
       else                                    badge = '<span class="badge badge-amber">Open</span>';
       return `<tr>

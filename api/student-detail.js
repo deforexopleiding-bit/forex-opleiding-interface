@@ -135,7 +135,7 @@ export default async function handler(req, res) {
         const paid     = Number(inv.amount_paid) || 0;
         const fullyCredited = total > 0 && credited >= total;
         const isOpenLike = !fullyCredited && (inv.status === 'open' || inv.status === 'partially_paid');
-        const outstanding = isOpenLike ? Math.max(0, total - paid) : 0;
+        const outstanding = isOpenLike ? Math.max(0, total - paid - credited) : 0;
         if (isOpenLike) {
           result.financial.open_count++;
           result.financial.open_total += outstanding;

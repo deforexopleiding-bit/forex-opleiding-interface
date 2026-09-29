@@ -76,7 +76,7 @@ export default async function handler(req, res) {
     .select(`
       id, action_type, status, created_at, arrangement_id, invoice_id, customer_id,
       customer:customers(id, first_name, last_name, company_name, is_company),
-      invoice:invoices(id, invoice_number, amount_total, amount_paid)
+      invoice:invoices(id, invoice_number, amount_total, amount_paid, credited_amount)
     `)
     .in('status', NON_TERMINAL_STATUSES)
     .in('action_type', MANUAL_ACTION_TYPES)
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       invoice: inv ? {
         id:          inv.id,
         number:      inv.invoice_number,
-        amount_open: Number(inv.amount_total || 0) - Number(inv.amount_paid || 0),
+        amount_open: Math.max(0, Number(inv.amount_total || 0) - Number(inv.amount_paid || 0) - Number(inv.credited_amount || 0)),
       } : null,
       arrangement_id: r.arrangement_id || null,
     };

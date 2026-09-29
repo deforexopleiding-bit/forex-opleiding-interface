@@ -43,6 +43,7 @@
 // 401/403/405 zoals andere mentor-endpoints.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from './_lib/factuur-betaald.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 
@@ -216,7 +217,7 @@ export async function computeBonusOverview(effectiveUserId) {
     if (invoiceIds.length) {
       const { data: invs } = await supabaseAdmin
         .from('invoices')
-        .select('id, amount_total, amount_paid, status, paid_date')
+        .select('id, amount_total, amount_paid, credited_amount, status, paid_date')
         .in('id', invoiceIds);
       for (const v of invs || []) invoiceById.set(v.id, v);
     }
@@ -243,7 +244,7 @@ export async function computeBonusOverview(effectiveUserId) {
     if (uniqTlSubIds.length) {
       const { data: subInvs, error: subInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('id, tl_subscription_id, amount_total, amount_paid, status, paid_date, due_date')
+        .select('id, tl_subscription_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date')
         .in('tl_subscription_id', uniqTlSubIds);
       if (!subInvErr) {
         for (const inv of (subInvs || [])) {
@@ -252,7 +253,7 @@ export async function computeBonusOverview(effectiveUserId) {
             subPaidMap.set(inv.tl_subscription_id, { paid_total: 0, last_paid_date: null });
           }
           const acc = subPaidMap.get(inv.tl_subscription_id);
-          acc.paid_total += Number(inv.amount_paid) || 0;
+          acc.paid_total += betaaldBedrag(inv);
           if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
             acc.last_paid_date = inv.paid_date;
           }
@@ -277,7 +278,7 @@ export async function computeBonusOverview(effectiveUserId) {
     if (customerIds.length) {
       const { data: custInvs, error: custInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('id, customer_id, amount_total, amount_paid, status, paid_date, due_date')
+        .select('id, customer_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date')
         .in('customer_id', customerIds);
       if (!custInvErr) {
         for (const inv of (custInvs || [])) {
@@ -286,16 +287,17 @@ export async function computeBonusOverview(effectiveUserId) {
             custPaidMap.set(inv.customer_id, { paid_total: 0, last_paid_date: null });
           }
           const acc = custPaidMap.get(inv.customer_id);
-          acc.paid_total += Number(inv.amount_paid) || 0;
+          acc.paid_total += betaaldBedrag(inv);
           if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
             acc.last_paid_date = inv.paid_date;
           }
           if (!invoicesByCust.has(inv.customer_id)) invoicesByCust.set(inv.customer_id, []);
           invoicesByCust.get(inv.customer_id).push(inv);
           // Overdue: due_date < vandaag EN nog niet volledig betaald.
-          const total = Number(inv.amount_total) || 0;
-          const paid  = Number(inv.amount_paid)  || 0;
-          if (inv.due_date && inv.due_date < todayISO && paid < total) {
+          // Open = totaal − betaald − gecrediteerd: een (deels) gecrediteerde
+          // factuur is geen achterstand.
+          const open  = openBedrag(inv);
+          if (inv.due_date && inv.due_date < todayISO && open > 0.005) {
             if (!custOverdueMap.has(inv.customer_id)) {
               custOverdueMap.set(inv.customer_id, { count: 0, amount: 0, ids: new Set() });
             }
@@ -303,7 +305,7 @@ export async function computeBonusOverview(effectiveUserId) {
             if (!od.ids.has(inv.id)) {
               od.ids.add(inv.id);
               od.count += 1;
-              od.amount += Math.max(0, total - paid);
+              od.amount += open;
             }
           }
         }
@@ -678,7 +680,7 @@ export async function computeBonusOverview(effectiveUserId) {
       // 'uitbetaald' → 1, anders 0. Beide routes doen niks extra bij
       // schemaUnknown / perTermInc<=0.
       const invoice  = invoiceById.get(r.source_invoice_id) || null;
-      const paidAmt  = Number(invoice?.amount_paid) || 0;
+      const paidAmt  = invoice ? betaaldBedrag(invoice) : 0;
 
       // Route B: totaal betaald — MAX van subscription- en customer-route.
       // Waarom max en niet else-if: als de subscription 1 gekoppelde betaalde
@@ -740,11 +742,9 @@ export async function computeBonusOverview(effectiveUserId) {
         // Fallback: gebruik ledger-status — 'uitbetaald'=1, anders 0.
         nbPaid = r.status === 'uitbetaald' ? 1 : 0;
       } else if (invList && invList.length) {
-        const paidCount = invList.filter((inv) => {
-          const tot = Number(inv.amount_total) || 0;
-          const pd  = Number(inv.amount_paid)  || 0;
-          return tot > 0 && pd + 0.005 >= tot;
-        }).length;
+        // Een volledig gecrediteerde factuur is geen betaalde termijn, ook
+        // niet als een oude rij nog 'paid' + amount_paid = totaal zegt.
+        const paidCount = invList.filter((inv) => (Number(inv.amount_total) || 0) > 0 && telAlsBetaald(inv)).length;
         nbPaid = Math.max(0, Math.min(termCount, paidCount));
       } else {
         // Geen factuurlijst → oude bedrag-deling als fallback.
@@ -774,11 +774,12 @@ export async function computeBonusOverview(effectiveUserId) {
         let effectiveYmd;
         let isPaidTerm;
         let bucketDate;
+        let isCreditedTerm = false;
         if (invForTerm) {
           effectiveYmd = invForTerm.due_date || calcYmd;
           const total  = Number(invForTerm.amount_total) || 0;
-          const paid   = Number(invForTerm.amount_paid)  || 0;
-          isPaidTerm   = total > 0 && paid + 0.005 >= total;
+          isCreditedTerm = isVolledigGecrediteerd(invForTerm);
+          isPaidTerm   = total > 0 && telAlsBetaald(invForTerm);
           bucketDate   = invForTerm.due_date ? new Date(invForTerm.due_date + 'T00:00:00Z') : calcDate;
         } else {
           effectiveYmd = calcYmd;
@@ -787,8 +788,10 @@ export async function computeBonusOverview(effectiveUserId) {
         }
 
         // Status: 'betaald' | 'achterstallig' (open + due voorbij) | 'open' (toekomst).
+        // 'gecrediteerd': niet betaald, niet achterstallig, geen verwacht geld.
         let tStatus;
-        if (isPaidTerm)                    tStatus = 'betaald';
+        if (isCreditedTerm)                tStatus = 'gecrediteerd';
+        else if (isPaidTerm)               tStatus = 'betaald';
         else if (effectiveYmd < todayISO)  tStatus = 'achterstallig';
         else                                tStatus = 'open';
 
@@ -802,7 +805,7 @@ export async function computeBonusOverview(effectiveUserId) {
         // als monthOpen (openstaande termijnen, toekomst). open_total blijft
         // ALLEEN open termijnen (KPI ongewijzigd). monthAmount = paid+open per
         // maand (backward-compat). monthBreakdown: per bijdrage (voor tooltip).
-        if (!schemaUnknown) {
+        if (!schemaUnknown && !isCreditedTerm) {
           const k = ymKey(bucketDate);
           if (isPaidTerm) {
             if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + tAmount));

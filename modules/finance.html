@@ -18395,7 +18395,7 @@
       const ent = inv.tl_department_id ? (ENT_LABEL[inv.tl_department_id] || '') : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${esc(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const payItem = (canRegister && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" type="button" data-inv-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
-      const removeItem = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" type="button" data-inv-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
+      const removeItem = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0 && !((Number(inv.credited_amount) || 0) > 0 && (Number(inv.credited_amount) || 0) >= (Number(inv.amount_total) || 0) - 0.005)) ? `<button class="sr-menu-item danger" type="button" data-inv-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
       return `<tr class="clickable-row" data-inv-row="${i}">
         <td style="padding:0"><div class="statusstrip-bar" style="background:${m.bar}"></div></td>
         <td><span class="sr-uname">${esc(inv.invoice_number)}</span>${ent ? `<br><span class="sr-cellsub">${esc(ent)}</span>` : ''}</td>
@@ -18554,7 +18554,7 @@
     // Betalingen-kaart.
     const payCard = document.getElementById('invPayCard');
     if (payCard) {
-      const remLink = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? ` · <a href="#" id="invRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
+      const remLink = (canRemove && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0 && !((Number(inv.credited_amount) || 0) > 0 && (Number(inv.credited_amount) || 0) >= (Number(inv.amount_total) || 0) - 0.005)) ? ` · <a href="#" id="invRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
       payCard.innerHTML = (Number(inv.amount_paid) || 0) > 0
         ? `<div class="inv-drow"><span class="lbl">Betaald${inv.paid_date ? ' op ' + fmtDate(inv.paid_date) : ''}</span><span>${eur(inv.amount_paid)}${remLink}</span></div><div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur(inv.amount_open)}</span></div>`
         : `<div style="font-size:13px;color:var(--text-dim)">Nog geen betalingen · openstaand <strong>${eur(inv.amount_open)}</strong></div>`;

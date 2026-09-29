@@ -214,7 +214,11 @@
     const isCredited  = st === 'credited' || st === 'partially_credited';
     const isPaid      = st === 'paid';
     const canRegister = !isConcept && !isCredited && paidNum + 0.005 < totNum;  // open bedrag
-    const canRemove   = !isConcept && paidNum > 0;                              // heeft payments
+    // Volledig gecrediteerd: het "betaalde" bedrag is de verrekening van de
+    // creditnota, geen betaling → niet terugdraaien (server weigert ook, 409).
+    const credNum     = Number(inv.credited_amount || 0);
+    const volledigGecrediteerd = st === 'credited' || (credNum > 0 && credNum >= totNum - 0.005);
+    const canRemove   = !isConcept && paidNum > 0 && !volledigGecrediteerd;       // heeft payments
     const canCredit   = !isConcept;                                             // conceptless
     const canSend     = true;                                                   // ook resend na send
     const canUpdate   = isConcept;                                              // enkel concept

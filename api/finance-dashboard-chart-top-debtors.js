@@ -58,14 +58,14 @@ export default async function handler(req, res) {
   try {
     const { data: invs, error } = await supabaseAdmin
       .from('invoices')
-      .select('customer_id, amount_total, amount_paid')
+      .select('customer_id, amount_total, amount_paid, credited_amount')
       .in('status', ['open', 'overdue', 'partially_paid']);
     if (error) throw new Error('top-debtors invoices: ' + error.message);
 
     const perCustomer = new Map(); // customerId → { openAmount, openCount }
     for (const r of (invs || [])) {
       if (!r.customer_id) continue;
-      const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0));
+      const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0) - (Number(r.credited_amount) || 0));
       if (open <= 0) continue;
       const cur = perCustomer.get(r.customer_id) || { openAmount: 0, openCount: 0 };
       cur.openAmount += open;

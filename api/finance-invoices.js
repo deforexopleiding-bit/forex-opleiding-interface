@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       const total = Number(inv.amount_total) || 0;
       const credited = Number(inv.credited_amount) || 0;
       const fullyCredited = credited > 0 && total > 0 && credited >= total;
-      const outstanding = Math.max(0, total - (Number(inv.amount_paid) || 0));
+      const outstanding = Math.max(0, total - (Number(inv.amount_paid) || 0) - credited);
       // Openstaand/Te laat: open of partially_paid, en NIET volledig gecrediteerd.
       const isOpen = (inv.status === 'open' || inv.status === 'partially_paid') && !fullyCredited;
       if (isOpen) { openTotal += outstanding; openCount++; }
@@ -152,7 +152,7 @@ export default async function handler(req, res) {
         amount_paid: Number(inv.amount_paid) || 0,
         credited_amount: credited,
         amount_net: r2(total - credited),
-        amount_open: r2(Math.max(0, total - (Number(inv.amount_paid) || 0))),
+        amount_open: r2(Math.max(0, total - (Number(inv.amount_paid) || 0) - credited)),
         vat_amount: inv.vat_amount != null ? Number(inv.vat_amount) : null,
         issue_date: inv.issue_date,
         due_date: inv.due_date,

@@ -103,7 +103,7 @@ export default async function handler(req, res) {
     {
       const { data, error } = await supabaseAdmin
         .from('invoices')
-        .select('due_date, amount_total, amount_paid, status')
+        .select('due_date, amount_total, amount_paid, credited_amount, status')
         .in('status', ['open', 'overdue', 'partially_paid'])
         .gte('due_date', todayKey)
         .lte('due_date', until)
@@ -112,7 +112,7 @@ export default async function handler(req, res) {
       for (const r of (data || [])) {
         if (!r.due_date) continue;
         const dk = String(r.due_date).slice(0, 10);
-        const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0));
+        const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0) - (Number(r.credited_amount) || 0));
         if (open <= 0) continue;
         expectedMap.set(dk, (expectedMap.get(dk) || 0) + open);
       }

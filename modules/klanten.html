@@ -1344,7 +1344,7 @@ async function renderFacturenTab() {
       const credited = Number(inv.credited_amount) || 0;
       const detItem = `<button class="sr-menu-item" data-ko-inv="${i}"><i class="ti ti-eye"></i> Bekijk details</button>`;
       const payItem = (canReg && inv.tl_invoice_id && ['open', 'partially_paid', 'overdue'].includes(inv.display_status)) ? `<button class="sr-menu-item" data-ko-pay="${i}"><i class="ti ti-cash"></i> Betaling registreren</button>` : '';
-      const remItem = (canRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? `<button class="sr-menu-item danger" data-ko-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
+      const remItem = (canRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0 && !((Number(inv.credited_amount) || 0) > 0 && (Number(inv.credited_amount) || 0) >= (Number(inv.amount_total) || 0) - 0.005)) ? `<button class="sr-menu-item danger" data-ko-remove="${i}"><i class="ti ti-arrow-back-up"></i> Betaling terugdraaien</button>` : '';
       const tlItem = inv.tl_invoice_id ? `<a class="sr-menu-item" href="https://focus.teamleader.eu/invoice_detail.php?id=${escapeHtml(inv.tl_invoice_id)}" target="_blank"><i class="ti ti-external-link"></i> Open in Teamleader</a>` : '';
       const pdfItem = inv.tl_invoice_id ? `<button class="sr-menu-item" onclick="koInvoicePdf('${escapeHtml(inv.tl_invoice_id)}')"><i class="ti ti-file-type-pdf"></i> Open PDF</button>` : '';
       const menu = `<div class="sr-menu"><button class="sr-ibtn sr-menu-toggle" title="Meer"><i class="ti ti-dots"></i></button><div class="sr-menu-pop">${detItem}${payItem}${remItem}${pdfItem}${tlItem}</div></div>`;
@@ -1712,7 +1712,7 @@ function koOpenInvoice(inv) {
   // Betalingen-kaart.
   const payEl = document.getElementById('koInvPay');
   if (payEl) {
-    const remLink = (koInvCanRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0) ? ` · <a href="#" id="koRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
+    const remLink = (koInvCanRem && inv.tl_invoice_id && (Number(inv.amount_paid) || 0) > 0 && !((Number(inv.credited_amount) || 0) > 0 && (Number(inv.credited_amount) || 0) >= (Number(inv.amount_total) || 0) - 0.005)) ? ` · <a href="#" id="koRemoveLink" style="color:var(--red,#dc2626)">terugdraaien</a>` : '';
     payEl.innerHTML = (Number(inv.amount_paid) || 0) > 0
       ? `<div class="inv-drow"><span class="lbl">Betaald${inv.paid_date ? ' op ' + dd(inv.paid_date) : ''}</span><span>${eur2(inv.amount_paid)}${remLink}</span></div><div class="inv-drow"><span class="lbl">Openstaand</span><span>${eur2(inv.amount_open)}</span></div>`
       : `<div style="font-size:13px;color:var(--text-dim)">Nog geen betalingen · openstaand <strong>${eur2(inv.amount_open)}</strong></div>`;

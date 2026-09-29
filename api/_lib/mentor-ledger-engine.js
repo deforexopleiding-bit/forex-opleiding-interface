@@ -13,6 +13,7 @@
 // network calls; alleen Supabase Admin client.
 
 import { supabaseAdmin } from '../supabase.js';
+import { betaaldBedrag, telAlsBetaald } from './factuur-betaald.js';
 
 /**
  * 1e betaalde factuur van een klant → alle openstaande bonus-entries voor
@@ -360,16 +361,19 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   if (tlSubIds.length) {
     const { data: invs } = await supabaseAdmin
       .from('invoices')
-      .select('tl_subscription_id, amount_paid, amount_total, paid_date, status')
+      .select('tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
       .in('tl_subscription_id', tlSubIds);
     for (const inv of (invs || [])) {
-      const paid  = Number(inv.amount_paid)  || 0;
+      // Een volledig gecrediteerde factuur is geen betaling en geen termijn
+      // (zie api/_lib/factuur-betaald.js) — ook niet als een oude rij nog
+      // 'paid' + amount_paid = totaal zegt.
+      const paid  = betaaldBedrag(inv);
       const total = Number(inv.amount_total) || 0;
       paidTotal += paid;
-      if (inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
+      if (paid > 0 && inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
         lastPaidDate = inv.paid_date;
       }
-      if (total <= 0 || paid < total) continue; // niet volledig betaald → niet als termijn
+      if (total <= 0 || !telAlsBetaald(inv)) continue; // niet voldaan → niet als termijn
       if (!paidTermsBySub.has(inv.tl_subscription_id)) {
         paidTermsBySub.set(inv.tl_subscription_id, []);
       }
@@ -386,11 +390,12 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   if (paidTotal <= 0) {
     const { data: invs } = await supabaseAdmin
       .from('invoices')
-      .select('amount_paid, paid_date')
+      .select('amount_paid, amount_total, credited_amount, paid_date')
       .eq('customer_id', customerId);
     for (const inv of (invs || [])) {
-      paidTotal += Number(inv.amount_paid) || 0;
-      if (inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
+      const paid = betaaldBedrag(inv);
+      paidTotal += paid;
+      if (paid > 0 && inv.paid_date && (!lastPaidDate || inv.paid_date > lastPaidDate)) {
         lastPaidDate = inv.paid_date;
       }
     }
@@ -666,12 +671,13 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   // ── 2) Facturen van de klant — paid_total per tl_sub_id + customer-breed ─
   const { data: allInvs } = await supabaseAdmin
     .from('invoices')
-    .select('tl_subscription_id, amount_paid, amount_total, paid_date, status')
+    .select('tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
     .eq('customer_id', customerId);
-  const custPaidTotal   = _r2((allInvs || []).reduce((s, i) => s + (Number(i.amount_paid) || 0), 0));
+  // Volledig gecrediteerd telt als 0 betaald (zie api/_lib/factuur-betaald.js).
+  const custPaidTotal   = _r2((allInvs || []).reduce((s, i) => s + betaaldBedrag(i), 0));
   let custLastPaidDate  = null;
   for (const inv of (allInvs || [])) {
-    if (inv.paid_date && (!custLastPaidDate || inv.paid_date > custLastPaidDate)) {
+    if (betaaldBedrag(inv) > 0 && inv.paid_date && (!custLastPaidDate || inv.paid_date > custLastPaidDate)) {
       custLastPaidDate = inv.paid_date;
     }
   }
@@ -682,8 +688,9 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       paidBySub.set(inv.tl_subscription_id, { paid: 0, lastPaidDate: null });
     }
     const acc = paidBySub.get(inv.tl_subscription_id);
-    acc.paid += Number(inv.amount_paid) || 0;
-    if (inv.paid_date && (!acc.lastPaidDate || inv.paid_date > acc.lastPaidDate)) {
+    const paid = betaaldBedrag(inv);
+    acc.paid += paid;
+    if (paid > 0 && inv.paid_date && (!acc.lastPaidDate || inv.paid_date > acc.lastPaidDate)) {
       acc.lastPaidDate = inv.paid_date;
     }
   }

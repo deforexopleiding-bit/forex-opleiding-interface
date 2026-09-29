@@ -115,7 +115,7 @@ export default async function handler(req, res) {
       if (total <= 0) continue;
       if (credited >= total) continue; // volledig gecrediteerd → uit
       const paid = Number(inv.amount_paid) || 0;
-      const open = Math.max(0, total - paid);
+      const open = Math.max(0, total - paid - credited);
       items.push({
         invoice_id    : inv.id,
         invoice_number: inv.invoice_number,

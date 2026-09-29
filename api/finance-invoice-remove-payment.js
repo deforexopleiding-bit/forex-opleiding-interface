@@ -60,12 +60,29 @@ export default async function handler(req, res) {
 
   try {
     // Resolve onze factuur (op id of tl_invoice_id).
-    let q = supabaseAdmin.from('invoices').select('id, customer_id, tl_invoice_id, amount_total, amount_paid, status');
+    let q = supabaseAdmin.from('invoices').select('id, customer_id, tl_invoice_id, amount_total, amount_paid, credited_amount, status');
     q = invoice_id ? q.eq('id', invoice_id) : q.eq('tl_invoice_id', tl_invoice_id);
     const { data: inv } = await q.maybeSingle();
     if (!inv) return res.status(404).json({ error: 'Factuur niet gevonden' });
     if (!inv.tl_invoice_id) return res.status(400).json({ error: 'Factuur heeft geen Teamleader-id' });
     const prevStatus = inv.status;
+
+    // Staat er een creditnota op en hebben WIJ geen betaling geregistreerd,
+    // dan is het "betaalde" bedrag de verrekening van die creditnota — geen
+    // betaling. removePayments zou dan iets anders terugdraaien dan de
+    // gebruiker denkt. (Facturen zónder creditnota blijven terug te draaien:
+    // de meeste betalingen worden in Teamleader geboekt, zonder rij hier.)
+    if ((Number(inv.credited_amount) || 0) > 0) {
+      const { count: nPay, error: payErr } = await supabaseAdmin.from('payments')
+        .select('id', { count: 'exact', head: true }).eq('invoice_id', inv.id);
+      if (payErr) return res.status(500).json({ error: 'payments lezen: ' + payErr.message });
+      if (!nPay) {
+        return res.status(409).json({
+          error: 'Deze factuur is gecrediteerd en heeft geen geregistreerde betaling — het "betaalde" bedrag is de verrekening van de creditnota. Niets teruggedraaid.',
+          code: 'GECREDITEERD_GEEN_BETALING',
+        });
+      }
+    }
 
     // 1. TL-FIRST: verwijder alle betalingen. Faal → GEEN DB-mutatie.
     const body = { id: inv.tl_invoice_id };

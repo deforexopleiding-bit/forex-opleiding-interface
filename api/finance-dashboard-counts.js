@@ -104,7 +104,7 @@ async function computeTotaalOpenstaand() {
   try {
     const { data, error } = await supabaseAdmin
       .from('invoices')
-      .select('amount_total, amount_paid')
+      .select('amount_total, amount_paid, credited_amount')
       .in('status', ['open', 'overdue', 'partially_paid']);
     if (error) {
       console.error('[finance-dashboard-counts] totaalOpenstaand fail:', error.message);
@@ -114,7 +114,7 @@ async function computeTotaalOpenstaand() {
     for (const r of (data || [])) {
       const tot = Number(r.amount_total) || 0;
       const paid = Number(r.amount_paid) || 0;
-      sum += Math.max(0, tot - paid);
+      sum += Math.max(0, tot - paid - (Number(r.credited_amount) || 0));
     }
     return Math.round(sum * 100) / 100;
   } catch (e) {
@@ -198,7 +198,7 @@ async function computeCashflowVerwacht30d() {
     const target = new Date(today.getTime() + 30 * 86400000).toISOString().slice(0, 10);
     const { data, error } = await supabaseAdmin
       .from('invoices')
-      .select('amount_total, amount_paid')
+      .select('amount_total, amount_paid, credited_amount')
       .in('status', ['open', 'overdue', 'partially_paid'])
       .lte('due_date', target);
     if (error) {
@@ -209,7 +209,7 @@ async function computeCashflowVerwacht30d() {
     for (const r of (data || [])) {
       const tot = Number(r.amount_total) || 0;
       const paid = Number(r.amount_paid) || 0;
-      sum += Math.max(0, tot - paid);
+      sum += Math.max(0, tot - paid - (Number(r.credited_amount) || 0));
     }
     return Math.round(sum * 100) / 100;
   } catch (e) {
