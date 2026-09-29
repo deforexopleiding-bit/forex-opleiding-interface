@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     // huidige volumes is een client-side bucket-berekening sub-200ms.
     const { data, error } = await supabaseAdmin
       .from('invoices')
-      .select('id, due_date, amount_total, amount_paid, status')
+      .select('id, due_date, amount_total, amount_paid, credited_amount, status')
       .in('status', ['open', 'overdue', 'partially_paid']);
     if (error) throw new Error('aging: ' + error.message);
 
@@ -79,7 +79,7 @@ export default async function handler(req, res) {
       const days = Math.floor((todayMs - due) / 86400000);
       const k = bucketKey(days);
       if (!k) continue;
-      const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0));
+      const open = Math.max(0, (Number(r.amount_total) || 0) - (Number(r.amount_paid) || 0) - (Number(r.credited_amount) || 0));
       buckets[k].count += 1;
       buckets[k].openAmount += open;
     }

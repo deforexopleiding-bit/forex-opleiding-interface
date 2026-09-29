@@ -23,6 +23,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { createNotification } from './notify.js';
+import { isVolledigGecrediteerd } from './factuur-betaald.js';
 
 // Resolve { id, reservation_fee_invoice_id } van de deal die bij deze factuur hoort.
 async function resolveDeal(inv) {
@@ -124,6 +125,13 @@ async function _voidActiveBonus(dealId, reason, source) {
  */
 export async function earnBonusForPaidInvoice(inv) {
   try {
+    // Vangnet: een VOLLEDIG gecrediteerde factuur is geen betaling, ook niet
+    // als een (oude) rij nog 'paid' zegt. Zie api/_lib/factuur-betaald.js.
+    if (inv?.id) {
+      const { data: rij } = await supabaseAdmin.from('invoices')
+        .select('amount_total, credited_amount').eq('id', inv.id).maybeSingle();
+      if (rij && isVolledigGecrediteerd(rij)) return { ok: true, skipped: 'credited' };
+    }
     const deal = await resolveDeal(inv);
     if (!deal) return { ok: true, skipped: 'no_deal' };
     const { data: bonus } = await supabaseAdmin.from('bonuses')

@@ -9,6 +9,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
+import { bepaalBetaalstand } from './factuur-betaald.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 function amt(o) {
@@ -101,9 +102,42 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
   const payable = amt(t.payable);
   const due = amt(t.due);
   const vat = (incl != null && excl != null) ? r2(incl - excl) : null;
-  const paid = (payable != null && due != null) ? Math.max(0, r2(payable - due)) : (inv.paid === true ? r2(incl) : 0);
-  const status = mapStatus(inv, payable, due);
+  // Wat Teamleader als voldaan ziet. LET OP: een verrekende creditnota telt
+  // daar ook in mee — zie bepaalBetaalstand hieronder.
+  const tlPaid = (payable != null && due != null) ? Math.max(0, r2(payable - due)) : (inv.paid === true ? r2(incl) : 0);
+  const tlStatus = mapStatus(inv, payable, due);
   const issue = isoDate(inv.invoice_date) || isoDate(inv.booked_on) || new Date().toISOString().slice(0, 10);
+
+  const { data: existing } = await supabaseAdmin.from('invoices')
+    .select('id, status, deal_id, amount_paid').eq('tl_invoice_id', inv.id).maybeSingle();
+
+  // GECREDITEERD ≠ BETAALD. Teamleader verrekent een creditnota met de
+  // factuur (due = 0, paid = true); zonder deze stap werd dat status 'paid' +
+  // amount_paid = volledig bedrag (29-09-2026: 281 van 282 gecrediteerde
+  // facturen). Creditnota's staan in credit_notes (via tl_invoice_id, of via
+  // onze invoice_id); echte betalingen die wij registreerden in payments.
+  const cnFilter = [`tl_invoice_id.eq.${inv.id}`];
+  if (existing?.id) cnFilter.push(`invoice_id.eq.${existing.id}`);
+  const { data: cnRows, error: cnErr } = await supabaseAdmin.from('credit_notes')
+    .select('id, amount_total').or(cnFilter.join(','));
+  if (cnErr) throw new Error('credit_notes lezen: ' + cnErr.message);
+  const cnSeen = new Map((cnRows || []).map((c) => [c.id, Number(c.amount_total) || 0]));
+  const gecrediteerd = r2([...cnSeen.values()].reduce((s, v) => s + v, 0));
+  let echteBetalingen = 0;
+  if (gecrediteerd > 0 && existing?.id) {
+    const { data: pays, error: payErr } = await supabaseAdmin.from('payments').select('amount').eq('invoice_id', existing.id);
+    if (payErr) throw new Error('payments lezen: ' + payErr.message);
+    echteBetalingen = r2((pays || []).reduce((s, p) => s + (Number(p.amount) || 0), 0));
+  }
+  const stand = bepaalBetaalstand({ totaal: incl, tlBetaald: tlPaid, gecrediteerd, echteBetalingen, tlStatus });
+  const status = stand.status;
+  const paid = stand.betaald;
+  // Zonder creditnota: betaaldatum exact zoals altijd. Met creditnota: alleen
+  // een betaaldatum als de factuur ook echt betaald is (de TL-paid_at is dan
+  // de datum van de verrekening, geen betaling).
+  const paidDate = gecrediteerd > 0
+    ? (status === 'paid' ? (isoDate(inv.paid_at) || isoDate(inv.updated_at) || null) : null)
+    : (isoDate(inv.paid_at) || (status === 'paid' ? (isoDate(inv.updated_at) || null) : null));
 
   // Drafts hebben geen nummer → placeholder CONCEPT-<tl_id>.
   const rawNumber = (inv.invoice_number && String(inv.invoice_number).trim()) || null;
@@ -117,10 +151,11 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     invoice_number: invoiceNumber,
     amount_total: r2(incl),
     amount_paid: paid,
+    credited_amount: gecrediteerd,
     vat_amount: vat,
     issue_date: issue,
     due_date: isoDate(inv.due_on) || null,
-    paid_date: isoDate(inv.paid_at) || (status === 'paid' ? (isoDate(inv.updated_at) || null) : null),
+    paid_date: paidDate,
     status,
     is_manual: opts.is_manual || false,
     pushed_to_tl: opts.pushed_to_tl || false,
@@ -142,8 +177,6 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     resolvedDealId = sub?.deal_id || null;
   }
 
-  const { data: existing } = await supabaseAdmin.from('invoices')
-    .select('id, status, deal_id, amount_paid').eq('tl_invoice_id', inv.id).maybeSingle();
   const oldStatus = existing?.status || null;
   // `amount_paid` komt er alleen bij voor de LMS-spiegel onderaan: die
   // moet kunnen zien of er ECHT iets veranderd is. Een uurlijkse

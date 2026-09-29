@@ -742,6 +742,7 @@
   }
   function _bonusTermStatusPill(status) {
     if (status === 'betaald')       return H.pill('ok',     'Betaald');
+    if (status === 'gecrediteerd')  return H.pill('neutral', 'Gecrediteerd');
     if (status === 'achterstallig') return H.pill('danger', 'Achterstallig');
     return H.pill('warn', 'Open');
   }

@@ -8099,7 +8099,7 @@
     const persInitials = ((custName || 'TK').split(/\s+/).map(w => w ? w[0] : '').join('').slice(0, 2) || 'TK').toUpperCase();
     const custPhone = hasCust ? (cust.phone || '—') : '';
     const custEmail = hasCust ? (cust.email || '—') : '';
-    const totalOpen = invs.reduce((s, i) => s + (Number(i.amount_total || 0) - Number(i.amount_paid || 0)), 0);
+    const totalOpen = invs.reduce((s, i) => s + Math.max(0, Number(i.amount_total || 0) - Number(i.amount_paid || 0) - Number(i.credited_amount || 0)), 0);
     const runStatus = ctx?.active_run?.status || null;
     const runStatusText = runStatus ? String(runStatus).toUpperCase() : (hasCust ? 'READY' : 'IDLE');
     const runPillClass = ({
