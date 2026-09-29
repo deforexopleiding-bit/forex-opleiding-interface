@@ -46,11 +46,17 @@
     executing      : false,
     executeProgress: null,               // { batch, total } tijdens een batch-run
     executeResult  : null,               // geaggregeerd resultaat over alle batches
+    // Run-modus. creditOnly = de schakelaar in de footer; previewMode = wat de
+    // server in de preview bevestigde ('credit_only' | 'extend_and_credit').
+    // In credit_only verlengt de server NOOIT en weigert hij abonnementvelden.
+    creditOnly     : false,
+    previewMode    : 'extend_and_credit',
   };
 
   // Eindstatus per klant zoals de execute die teruggeeft (+ client-side skip).
   const STATUS_LABEL = {
     verlengd_en_gecrediteerd: { label: 'Verlengd + gecrediteerd', color: '#10b981' },
+    gecrediteerd            : { label: 'Gecrediteerd',             color: '#10b981' },
     alleen_gecrediteerd     : { label: 'Alleen gecrediteerd',      color: '#f59e0b' },
     deels_gecrediteerd      : { label: 'Deels gecrediteerd',       color: '#f59e0b' },
     geblokkeerd             : { label: 'Geblokkeerd (niets veranderd)', color: '#f59e0b' },
@@ -58,11 +64,22 @@
     overgeslagen_keuze      : { label: 'Overgeslagen (keuze)',          color: 'var(--text-dim)' },
     fout                    : { label: 'FOUT — handmatig nakijken',     color: '#dc2626' },
   };
-  const STATUS_ORDER = ['verlengd_en_gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'overgeslagen_keuze', 'fout'];
+  const STATUS_ORDER = ['verlengd_en_gecrediteerd', 'gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'overgeslagen_keuze', 'fout'];
 
   const CHOICE_SKIP = '__skip__';
   const CHOICE_ONLY_CREDIT = '__only_credit__';
   const BATCH_SIZE = 5;                  // = MAX_ITEMS_PER_CALL server-side
+  const MODE_CREDIT_ONLY = 'credit_only';
+  const isCreditOnlyRun = () => state.previewMode === MODE_CREDIT_ONLY;
+
+  // Eindstatus per factuur (customers[].invoices[].status van de execute).
+  const INV_STATUS_LABEL = {
+    zou_crediteren : { label: 'zou crediteren', color: 'var(--text-dim)' },
+    gecrediteerd   : { label: 'gecrediteerd',   color: '#10b981' },
+    mislukt        : { label: 'MISLUKT',        color: '#dc2626' },
+    niet_uitgevoerd: { label: 'niet uitgevoerd', color: '#f59e0b' },
+    geweigerd      : { label: 'geweigerd',      color: 'var(--text-faint)' },
+  };
 
   function usableSubs(it) {
     return (it.subscriptions || []).filter((s) => s.usable === true);
@@ -70,6 +87,10 @@
   // Wat er voor deze klant verstuurd wordt, of de reden waarom (nog) niet.
   function planFor(it) {
     const chosen = state.previewChosen.get(it.customer_id);
+    if (isCreditOnlyRun()) {
+      // credit_only: geen abonnementkeuze — meenemen (alleen crediteren) of overslaan.
+      return chosen === CHOICE_SKIP ? { ready: true, skip: true } : { ready: true, onlyCredit: true, months: 0 };
+    }
     if (chosen === undefined) return { ready: false, reason: 'kies een abonnement' };
     if (chosen === CHOICE_SKIP) return { ready: true, skip: true };
     if (chosen === CHOICE_ONLY_CREDIT) return { ready: true, onlyCredit: true, months: 0 };
@@ -226,6 +247,9 @@
 
         <div class="cred-footer">
           <div class="cred-selection-info" id="credSelectionInfo">Nog geen selectie</div>
+          <label class="cred-mode-toggle" title="Crediteert alleen de te-late facturen. Abonnementen worden NIET verlengd of aangeraakt.">
+            <input type="checkbox" id="credOnlyToggle" /> Alleen crediteren (geen abonnementen verlengen)
+          </label>
           <button class="fin-btn primary" id="credRunBtn" type="button" disabled title="Selecteer eerst één of meer klanten">Crediteer geselecteerde</button>
         </div>
       </div>
@@ -276,6 +300,14 @@
         }
         load();
       });
+    });
+
+    state.host.querySelector('#credOnlyToggle')?.addEventListener('change', (ev) => {
+      const cb = ev.target;
+      if (cb.checked && !confirm('Alleen crediteren: de te-late facturen worden gecrediteerd en het bedrag wordt NERGENS heraangeplakt — er wordt geen enkel abonnement verlengd. Deze modus geldt voor de hele run. Doorgaan?')) {
+        cb.checked = false;
+      }
+      state.creditOnly = !!cb.checked;
     });
 
     // "Crediteer geselecteerde" → open preview-overlay.
@@ -443,12 +475,16 @@
     state.previewError = null;
     state.previewItems = [];
     state.previewChosen = new Map();
+    state.previewMode = 'extend_and_credit';
     state.executeResult = null;
     renderOverlay();
     try {
       // Scope = alleen te-late facturen. De execute krijgt straks exact de
       // factuur-ids uit deze preview mee (preview == execute).
-      const payload = JSON.stringify({ customer_ids: Array.from(state.selected), only_overdue: true });
+      const payload = JSON.stringify({
+        customer_ids: Array.from(state.selected), only_overdue: true,
+        ...(state.creditOnly ? { mode: MODE_CREDIT_ONLY } : {}),
+      });
       const res = window.AgentShared && typeof window.AgentShared.apiFetch === 'function'
         ? await window.AgentShared.apiFetch('/api/crediteer-ronde-preview', {
             method: 'POST',
@@ -468,6 +504,8 @@
       const j = await res.json();
       state.previewDryRun = !!j?.dry_run;
       state.previewItems  = Array.isArray(j?.items) ? j.items : [];
+      state.previewMode   = j?.mode === MODE_CREDIT_ONLY ? MODE_CREDIT_ONLY : 'extend_and_credit';
+      if (state.creditOnly && !isCreditOnlyRun()) throw new Error('Server bevestigde de modus "alleen crediteren" niet — niets uitgevoerd.');
       // Default keuze per klant (previewChosen):
       //   0 bruikbare abo's → SKIP (niet crediteren; eerst een abo regelen).
       //   1 bruikbaar abo   → dat abo.
@@ -475,6 +513,7 @@
       // 'Alleen crediteren' (ONLY_CREDIT) kan alleen expliciet gekozen worden.
       state.previewMonths = new Map();
       for (const it of state.previewItems) {
+        if (isCreditOnlyRun()) { state.previewChosen.set(it.customer_id, CHOICE_ONLY_CREDIT); continue; }
         const usable = usableSubs(it);
         if (usable.length === 0)      state.previewChosen.set(it.customer_id, CHOICE_SKIP);
         else if (usable.length === 1) state.previewChosen.set(it.customer_id, usable[0].id);
@@ -559,7 +598,7 @@
     el.innerHTML = `
       <div class="cred-modal cred-modal-wide">
         <div class="cred-modal-header">
-          <h3>Preview crediteerronde ${state.previewDryRun ? '<span class="cred-dryrun-badge">DRY-RUN</span>' : ''}</h3>
+          <h3>Preview crediteerronde ${state.previewDryRun ? '<span class="cred-dryrun-badge">DRY-RUN</span>' : ''}${isCreditOnlyRun() ? '<span class="cred-dryrun-badge" style="color:#dc2626;border-color:rgba(220,38,38,.36);background:rgba(220,38,38,.1)">ALLEEN CREDITEREN</span>' : ''}</h3>
           <button class="cred-close" type="button" data-cred-close>×</button>
         </div>
         <div class="cred-modal-body">
@@ -572,7 +611,7 @@
 
           <div class="cred-preview-summary">
             <div>Alleen <strong>te-late</strong> facturen · <strong>${toRun}</strong> klant${toRun === 1 ? '' : 'en'} · <strong>${grandCount}</strong> facturen · totaal ${fmtEur(grandIncl)} (waarvan ${fmtEur(grandVat)} BTW)</div>
-            <div style="font-size:12.5px;margin-top:4px">Verlengen: ${extendCount} abonnement${extendCount === 1 ? '' : 'en'} (+${extendMonths} mnd totaal) · alleen crediteren: ${onlyCredit} · overgeslagen: ${skippedByChoice} · in ${batches || 0} batch${batches === 1 ? '' : 'es'} van max ${BATCH_SIZE}</div>
+            ${isCreditOnlyRun() ? `<div style="font-size:12.5px;margin-top:4px;color:#dc2626">Alleen crediteren — er wordt GEEN abonnement verlengd of aangeraakt · overgeslagen: ${skippedByChoice} · in ${batches || 0} batch${batches === 1 ? '' : 'es'} van max ${BATCH_SIZE}</div>` : `<div style="font-size:12.5px;margin-top:4px">Verlengen: ${extendCount} abonnement${extendCount === 1 ? '' : 'en'} (+${extendMonths} mnd totaal) · alleen crediteren: ${onlyCredit} · overgeslagen: ${skippedByChoice} · in ${batches || 0} batch${batches === 1 ? '' : 'es'} van max ${BATCH_SIZE}</div>`}
             ${skipped.length > 0 ? `<div style="color:var(--text-faint);font-size:12px;margin-top:4px">${skipped.length} klant(en) hebben geen te-late, crediteerbare facturen — vallen buiten deze run.</div>` : ''}
             ${notReady.length > 0 ? `<div style="color:#f59e0b;font-size:12.5px;margin-top:4px">${notReady.length} klant(en) wachten op een keuze (abonnement of aantal maanden).</div>` : ''}
           </div>
@@ -615,6 +654,12 @@
         renderOverlay();
       });
     });
+    el.querySelectorAll('[data-cred-include]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.previewChosen.set(btn.dataset.credInclude, CHOICE_ONLY_CREDIT);
+        renderOverlay();
+      });
+    });
     el.querySelectorAll('[data-cred-skip]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.previewChosen.set(btn.dataset.credSkip, CHOICE_SKIP);
@@ -642,7 +687,11 @@
     const pickBtn = (label, primary) => nSubs ? `<button class="fin-btn${primary ? ' primary' : ''}" type="button" data-cred-choose-sub="${cid}">${label}</button>` : '';
 
     let subBlock = '';
-    if (chosen === CHOICE_SKIP) {
+    if (isCreditOnlyRun()) {
+      subBlock = chosen === CHOICE_SKIP
+        ? `<div class="cred-sub-line" style="color:var(--text-faint)"><span>Wordt in deze run <strong>overgeslagen</strong>.</span><button class="fin-btn" type="button" data-cred-include="${cid}">Toch meenemen</button></div>`
+        : `<div class="cred-sub-line"><span>Alleen crediteren — abonnementen worden niet aangeraakt</span>${skipBtn}</div>`;
+    } else if (chosen === CHOICE_SKIP) {
       subBlock = `
         <div class="cred-sub-line" style="color:var(--text-faint)">
           <span>${nSubs === 0 ? 'Geen bruikbaar abonnement (actief + Teamleader-id) — ' : ''}wordt in deze run <strong>overgeslagen</strong>.</span>
@@ -799,6 +848,15 @@
       });
     }
     if (!items.length) { toast('Niets om uit te voeren', 'warning'); return; }
+    const creditOnlyRun = isCreditOnlyRun();
+    if (creditOnlyRun) {
+      // Server weigert abonnementvelden in credit_only — alleen klant + factuur-ids.
+      for (const i of items) { delete i.subscription_id; delete i.months_override; delete i.credit_without_extension; }
+      if (!state.previewDryRun) {
+        const n = items.reduce((a, i) => a + i.invoice_ids.length, 0);
+        if (!confirm(`DEFINITIEF: ${n} facturen van ${items.length} klanten worden in Teamleader gecrediteerd. Een creditnota is niet terug te draaien. Er wordt GEEN abonnement verlengd. Doorgaan?`)) return;
+      }
+    }
 
     const runId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : null;
     const total = Math.ceil(items.length / BATCH_SIZE);
@@ -806,7 +864,7 @@
     const agg = {
       dry_run: null, run_id: runId, batches_done: 0, batches_total: total, aborted: null,
       summary: { total_customers: 0, credited_invoices: 0, credited_incl: 0, extended_subscriptions: 0, extended_months: 0,
-        status_counts: { verlengd_en_gecrediteerd: 0, alleen_gecrediteerd: 0, deels_gecrediteerd: 0, geblokkeerd: 0, overgeslagen: 0, fout: 0 } },
+        status_counts: { verlengd_en_gecrediteerd: 0, gecrediteerd: 0, alleen_gecrediteerd: 0, deels_gecrediteerd: 0, geblokkeerd: 0, overgeslagen: 0, fout: 0 } },
       customers: [],
       not_processed: [],   // latere batches die nooit zijn verstuurd
       unknown: [],         // de batch die afbrak: status onbekend → audit_log
@@ -821,6 +879,7 @@
         const j = await postExecute({
           items: items.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE),
           only_overdue: true, run_id: agg.run_id || undefined, batch_index: b + 1, batch_total: total, confirm: true,
+          ...(creditOnlyRun ? { mode: MODE_CREDIT_ONLY } : {}),
         });
         agg.run_id = agg.run_id || j.run_id;
         agg.dry_run = j.dry_run;
@@ -900,6 +959,10 @@
                   ${c.extended ? ` · abo +${c.extended.months} mnd ${c.extended.dry_run ? '(zou)' : (c.extended.extended ? '<span style="color:#10b981">✓ TL bevestigd</span>' : '<span style="color:#dc2626">✗ niet verlengd</span>')}` : ''}
                   ${c.reverted ? (c.reverted.ok ? ` · verlenging teruggezet naar ${esc(c.reverted.restored_to)}` : ' · <span style="color:#dc2626">terugzetten MISLUKT</span>') : ''}
                 </div>
+                ${c.invoices?.length ? `<div style="font-size:12px;margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px">${c.invoices.map((iv) => {
+                  const is = INV_STATUS_LABEL[iv.status] || { label: iv.status || '—', color: 'var(--text-dim)' };
+                  return `<span title="${esc(iv.reden || '')}"><span style="font-family:ui-monospace,monospace">${esc(iv.invoice_number || String(iv.invoice_id).slice(0, 8))}</span> <span style="color:${is.color}">${esc(is.label)}${iv.reden ? ' (' + esc(iv.reden) + ')' : ''}</span></span>`;
+                }).join('')}</div>` : ''}
                 ${c.errors?.length ? `<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:#dc2626">${c.errors.map((e) => `<li>${esc(e.scope)}: ${esc(e.message)}</li>`).join('')}</ul>` : ''}
               </div>`;
             }).join('')}
@@ -949,6 +1012,7 @@
       .cred-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
       .cred-selection-info { font-size:13px; color:var(--text); font-weight:500; }
       .cred-footer button[disabled] { opacity:.55; cursor:not-allowed; }
+      .cred-mode-toggle { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-dim); margin-left:auto; cursor:pointer; }
 
       /* PR-2 overlay + modal + popup */
       .cred-overlay { position:fixed; inset:0; z-index:1200; background:rgba(0,0,0,.55); display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; }

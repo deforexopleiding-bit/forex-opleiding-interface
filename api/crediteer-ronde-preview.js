@@ -33,8 +33,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 import {
-  isCrediteerRondeDryRun, selectCreditable, openAmountEur, daysOverdue,
-  todayAmsterdam, planExtension, isUsableSubscription, OPEN_STATUSES,
+  isCrediteerRondeDryRun, selectCreditable, openAmountEur, daysOverdue, hasScope,
+  todayAmsterdam, planExtension, isUsableSubscription, OPEN_STATUSES, MODE_CREDIT_ONLY,
 } from './_lib/crediteer-ronde-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -54,6 +54,7 @@ export default async function handler(req, res) {
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const onlyOverdue = body.only_overdue === true;
+  const creditOnly = body.mode === MODE_CREDIT_ONLY;
   // Normaliseer beide body-vormen naar Map<customer_id, invoice_ids|null>.
   const scopeByCustomer = new Map();
   if (Array.isArray(body.items)) {
@@ -71,6 +72,12 @@ export default async function handler(req, res) {
   const customerIds = [...scopeByCustomer.keys()];
   if (customerIds.length === 0) return res.status(400).json({ error: 'Geen geldige customer_ids' });
   if (customerIds.length > 200) return res.status(400).json({ error: 'Te veel klanten in één preview (max 200)' });
+  if (creditOnly) {
+    const zonderScope = customerIds.filter((cid) => !hasScope({ invoiceIds: scopeByCustomer.get(cid), onlyOverdue }));
+    if (zonderScope.length) {
+      return res.status(400).json({ error: `credit_only: scope verplicht (invoice_ids of only_overdue) — ontbreekt voor ${zonderScope.length} klant(en)` });
+    }
+  }
 
   try {
     const dryRun = await isCrediteerRondeDryRun();
@@ -83,12 +90,18 @@ export default async function handler(req, res) {
       .in('id', customerIds);
     if (cErr) throw new Error('customers lookup: ' + cErr.message);
     const custMap = new Map();
+    const skippedCustomers = [];
+    const seenCust = new Set((customers || []).map((c) => c.id));
+    for (const cid of customerIds) if (!seenCust.has(cid)) skippedCustomers.push({ customer_id: cid, reden: 'klant niet gevonden' });
     for (const c of customers || []) {
-      if (c.archived_at || c.anonymized_at || c.is_test) continue;
+      if (c.archived_at || c.anonymized_at || c.is_test) {
+        skippedCustomers.push({ customer_id: c.id, customer_name: customerDisplayName(c, '(zonder naam)'), reden: c.is_test ? 'test-klant' : 'gearchiveerd/geanonimiseerd' });
+        continue;
+      }
       custMap.set(c.id, c);
     }
     if (custMap.size === 0) {
-      return res.status(200).json({ dry_run: dryRun, scope: { only_overdue: onlyOverdue }, items: [] });
+      return res.status(200).json({ dry_run: dryRun, mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit', scope: { only_overdue: onlyOverdue }, items: [], skipped_customers: skippedCustomers });
     }
     const activeIds = Array.from(custMap.keys());
 
@@ -100,9 +113,23 @@ export default async function handler(req, res) {
       .in('status', OPEN_STATUSES)
       .order('due_date', { ascending: true });
     if (invErr) throw new Error('invoices lookup: ' + invErr.message);
+    // Expliciet gevraagde ids ook ophalen als ze niet (meer) open zijn, zodat
+    // de afwijsreden klopt ("status paid" i.p.v. "bestaat niet").
+    const invList = [...(invRows || [])];
+    const wantedIds = [...scopeByCustomer.values()].flat().filter(Boolean);
+    const haveIds = new Set(invList.map((r) => r.id));
+    const missing = wantedIds.filter((id) => !haveIds.has(id));
+    for (let k = 0; k < missing.length; k += 150) {
+      const { data: extra, error: exErr } = await supabaseAdmin.from('invoices')
+        .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, vat_amount, issue_date, due_date, status, tl_invoice_id, is_test')
+        .in('id', missing.slice(k, k + 150));
+      if (exErr) throw new Error('invoices lookup (ids): ' + exErr.message);
+      invList.push(...(extra || []));
+    }
 
     // 3) Deals + subscriptions per klant.
-    const { data: deals } = await supabaseAdmin
+    // credit_only: abonnementen zijn niet relevant — niet eens ophalen.
+    const { data: deals } = creditOnly ? { data: [] } : await supabaseAdmin
       .from('deals').select('id, customer_id').in('customer_id', activeIds).is('archived_at', null);
     const dealToCustomer = new Map((deals || []).map((d) => [d.id, d.customer_id]));
     let subs = [];
@@ -126,7 +153,7 @@ export default async function handler(req, res) {
     const items = [];
     for (const cid of activeIds) {
       const cust = custMap.get(cid);
-      const invs = (invRows || []).filter((iv) => iv.customer_id === cid);
+      const invs = invList.filter((iv) => iv.customer_id === cid);
       const { creditable, rejected } = selectCreditable(invs, {
         invoiceIds: scopeByCustomer.get(cid), onlyOverdue, today,
       });
@@ -175,8 +202,10 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       dry_run: dryRun,
+      mode   : creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
       scope  : { only_overdue: onlyOverdue, per_customer_invoice_ids: [...scopeByCustomer.values()].some(Boolean) },
       items,
+      skipped_customers: skippedCustomers,
     });
   } catch (e) {
     console.error('[crediteer-ronde-preview]', e?.message || e);
