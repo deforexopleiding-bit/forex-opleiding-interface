@@ -51,6 +51,13 @@
     // In credit_only verlengt de server NOOIT en weigert hij abonnementvelden.
     creditOnly     : false,
     previewMode    : 'extend_and_credit',
+    // Vaste scope-lijst (credit_only): { ids, fingerprint } na "Scope-lijst
+    // laden". De ronde pakt dan EXACT deze ids — niets uit de tabel, niets op
+    // basis van "te laat op de rundag". previewScope = scope_check van de server.
+    scope          : null,
+    previewScope   : null,
+    scopeAck       : false,              // afwijking (afvallers) expliciet gezien
+    loader         : null,               // { text, fileName, expected, parsed } in het laad-venster
   };
 
   // Eindstatus per klant zoals de execute die teruggeeft (+ client-side skip).
@@ -72,6 +79,50 @@
   const MODE_CREDIT_ONLY = 'credit_only';
   const isCreditOnlyRun = () => state.previewMode === MODE_CREDIT_ONLY;
 
+  // ── Scope-lijst: parsen + vingerafdruk ─────────────────────────────────
+  // Recept (gelijk aan de server, api/_lib/crediteer-ronde-core.js):
+  // ids oplopend sorteren, joinen met '\n', UTF-8, sha256 hex.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const UUID_ANY = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+  const SCOPE_KEYS = ['factuur_ids', 'invoice_ids', 'ids', 'facturen', 'invoices', 'items'];
+  function scopeIdsFromJson(v) {
+    if (Array.isArray(v)) {
+      if (v.every((x) => typeof x === 'string')) return v;
+      if (v.every((x) => x && typeof x === 'object')) return v.map((o) => o.factuur_id ?? o.invoice_id ?? o.id ?? '');
+      return null;
+    }
+    if (v && typeof v === 'object') {
+      for (const k of SCOPE_KEYS) if (k in v) { const r = scopeIdsFromJson(v[k]); if (r) return r; }
+    }
+    return null;
+  }
+  // JSON (array van ids, array van {factuur_id|invoice_id|id}, of object met
+  // factuur_ids/invoice_ids/ids/facturen) — of platte tekst met ids.
+  function parseScopeText(text) {
+    const t = String(text || '').trim();
+    if (!t) return { ids: [], invalid: 0, duplicates: 0, error: null };
+    let raw = null;
+    if (t[0] === '[' || t[0] === '{') {
+      try { raw = scopeIdsFromJson(JSON.parse(t)); } catch (_) { return { ids: [], invalid: 0, duplicates: 0, error: 'Geen geldige JSON' }; }
+      if (!raw) return { ids: [], invalid: 0, duplicates: 0, error: 'Onbekend JSON-formaat — verwacht een lijst factuur-ids (of factuur_ids / facturen[].factuur_id)' };
+    } else {
+      raw = t.match(UUID_ANY) || [];
+    }
+    const ids = raw.map((x) => String(x).trim().toLowerCase());
+    const invalid = ids.filter((x) => !UUID_RE.test(x)).length;
+    const duplicates = ids.length - new Set(ids).size;
+    return { ids, invalid, duplicates, error: null };
+  }
+  async function scopeFingerprint(ids) {
+    const sorted = [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(sorted.join('\n')));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  const CAT_LABEL = {
+    betaald: 'betaald', al_gecrediteerd: 'al gecrediteerd', geen_tl_id: 'geen Teamleader-id', niet_gevonden: 'niet gevonden',
+    niet_vervallen: 'nog niet vervallen', test: 'test', klant_uitgesloten: 'klant uitgesloten', andere: 'andere reden',
+  };
+
   // Eindstatus per factuur (customers[].invoices[].status van de execute).
   const INV_STATUS_LABEL = {
     zou_crediteren : { label: 'zou crediteren', color: 'var(--text-dim)' },
@@ -87,6 +138,7 @@
   // Wat er voor deze klant verstuurd wordt, of de reden waarom (nog) niet.
   function planFor(it) {
     const chosen = state.previewChosen.get(it.customer_id);
+    if (state.scope) return { ready: true, onlyCredit: true, months: 0 };
     if (isCreditOnlyRun()) {
       // credit_only: geen abonnementkeuze — meenemen (alleen crediteren) of overslaan.
       return chosen === CHOICE_SKIP ? { ready: true, skip: true } : { ready: true, onlyCredit: true, months: 0 };
@@ -210,7 +262,10 @@
             <h2>Crediteren</h2>
             <p class="cred-subtitle">Startpunt voor de kwartaalronde — selecteer welke klanten je nu gaat crediteren. Klanten met ≥2 open facturen zijn standaard voorgevinkt.</p>
           </div>
-          <button class="sr-ibtn" id="credRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="fin-btn" id="credScopeBtn" type="button" title="Crediteer EXACT een gereviewde lijst factuur-ids (alleen crediteren)"><i class="ti ti-list-check"></i> Scope-lijst laden</button>
+            <button class="sr-ibtn" id="credRefreshBtn" type="button" title="Vernieuwen"><i class="ti ti-refresh"></i></button>
+          </div>
         </div>
 
         <div class="cred-kpis" id="credKpis"></div>
@@ -257,6 +312,7 @@
 
     // Wire.
     state.host.querySelector('#credRefreshBtn')?.addEventListener('click', load);
+    state.host.querySelector('#credScopeBtn')?.addEventListener('click', openScopeLoader);
     state.host.querySelectorAll('[data-cred-filter]').forEach((btn) => {
       btn.addEventListener('click', () => {
         state.filter = btn.dataset.credFilter || 'all';
@@ -469,6 +525,74 @@
     return el;
   }
 
+  // ── Scope-lijst laden (venster) ─────────────────────────────────────
+  function openScopeLoader() {
+    state.loader = { text: '', fileName: null, expected: '', parsed: parseScopeText(''), actual: null };
+    state.previewOpen = true;
+    state.executeResult = null;
+    renderOverlay();
+  }
+  async function refreshLoader() {
+    const L = state.loader;
+    L.parsed = parseScopeText(L.text);
+    L.actual = L.parsed.ids.length ? await scopeFingerprint(L.parsed.ids) : null;
+    renderOverlay();
+  }
+  function loaderVerdict(L) {
+    const p = L.parsed;
+    const exp = String(L.expected || '').trim().toLowerCase();
+    if (p.error) return { ok: false, msg: p.error };
+    if (!p.ids.length) return { ok: false, msg: 'Nog geen ids geladen' };
+    if (p.invalid) return { ok: false, msg: `${p.invalid} ongeldige id(s) in de lijst` };
+    if (p.duplicates) return { ok: false, msg: `${p.duplicates} dubbele id(s) in de lijst` };
+    if (!/^[0-9a-f]{64}$/.test(exp)) return { ok: false, msg: 'Vul de verwachte vingerafdruk uit de review in (64 tekens)' };
+    if (L.actual !== exp) return { ok: false, msg: 'Vingerafdruk klopt NIET met de verwachte waarde — lijst geblokkeerd' };
+    return { ok: true, msg: 'Vingerafdruk klopt' };
+  }
+  function renderScopeLoader(el) {
+    const L = state.loader;
+    const v = loaderVerdict(L);
+    el.innerHTML = `
+      <div class="cred-modal">
+        <div class="cred-modal-header"><h3>Scope-lijst laden <span class="cred-dryrun-badge" style="color:#dc2626;border-color:rgba(220,38,38,.36);background:rgba(220,38,38,.1)">ALLEEN CREDITEREN</span></h3><button class="cred-close" type="button" data-cred-close>×</button></div>
+        <div class="cred-modal-body">
+          <p style="margin:0 0 10px;font-size:13px;color:var(--text-dim)">De ronde crediteert EXACT de facturen uit deze lijst — niets uit de tabel en niets op basis van "te laat op de rundag". Facturen die intussen niet meer crediteerbaar zijn vallen af (de set wordt alleen kleiner). Abonnementen worden niet aangeraakt.</p>
+          <label style="display:block;font-size:12.5px;font-weight:600;margin-bottom:4px">JSON-bestand</label>
+          <input type="file" id="credScopeFile" accept=".json,.txt,.csv,application/json,text/plain" />
+          ${L.fileName ? `<span style="font-size:12px;color:var(--text-faint);margin-left:6px">${esc(L.fileName)}</span>` : ''}
+          <label style="display:block;font-size:12.5px;font-weight:600;margin:12px 0 4px">…of plak de factuur-ids</label>
+          <textarea id="credScopeText" rows="5" style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px" placeholder="Eén id per regel, of de JSON-inhoud">${esc(L.text)}</textarea>
+          <label style="display:block;font-size:12.5px;font-weight:600;margin:12px 0 4px">Verwachte vingerafdruk (sha256 uit de review)</label>
+          <input type="text" id="credScopeExpected" value="${esc(L.expected)}" style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px" placeholder="64 hex-tekens" spellcheck="false" autocomplete="off" />
+          <div class="cred-scope-box" style="margin-top:12px">
+            <div>Lijst: <strong>${L.parsed.ids.length}</strong> ids${L.parsed.duplicates ? ` · <span style="color:#dc2626">${L.parsed.duplicates} dubbel</span>` : ''}${L.parsed.invalid ? ` · <span style="color:#dc2626">${L.parsed.invalid} ongeldig</span>` : ''}</div>
+            <div style="font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;margin-top:4px">Vingerafdruk: ${L.actual ? esc(L.actual) : '—'}</div>
+            <div style="margin-top:6px;font-weight:600;color:${v.ok ? '#10b981' : '#dc2626'}">${v.ok ? '✓' : '✗'} ${esc(v.msg)}</div>
+          </div>
+        </div>
+        <div class="cred-modal-footer">
+          <button class="fin-btn" type="button" data-cred-close>Annuleren</button>
+          <button class="fin-btn primary" type="button" id="credScopePreview" ${v.ok ? '' : 'disabled'}>Preview met deze lijst</button>
+        </div>
+      </div>`;
+    el.querySelectorAll('[data-cred-close]').forEach((b) => b.addEventListener('click', closePreview));
+    el.querySelector('#credScopeFile')?.addEventListener('change', async (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      L.text = await file.text();
+      L.fileName = file.name;
+      await refreshLoader();
+    });
+    el.querySelector('#credScopeText')?.addEventListener('change', async (ev) => { L.text = ev.target.value; L.fileName = null; await refreshLoader(); });
+    el.querySelector('#credScopeExpected')?.addEventListener('change', (ev) => { L.expected = ev.target.value; renderOverlay(); });
+    el.querySelector('#credScopePreview')?.addEventListener('click', () => {
+      if (!loaderVerdict(L).ok) return;
+      state.scope = { ids: L.parsed.ids.slice(), fingerprint: L.actual };
+      state.loader = null;
+      openPreview();
+    });
+  }
+
   async function openPreview() {
     state.previewOpen = true;
     state.previewLoading = true;
@@ -476,15 +600,17 @@
     state.previewItems = [];
     state.previewChosen = new Map();
     state.previewMode = 'extend_and_credit';
+    state.previewScope = null;
+    state.scopeAck = false;
     state.executeResult = null;
     renderOverlay();
     try {
       // Scope = alleen te-late facturen. De execute krijgt straks exact de
       // factuur-ids uit deze preview mee (preview == execute).
-      const payload = JSON.stringify({
-        customer_ids: Array.from(state.selected), only_overdue: true,
-        ...(state.creditOnly ? { mode: MODE_CREDIT_ONLY } : {}),
-      });
+      const payload = JSON.stringify(state.scope
+        // Vaste lijst: GEEN klantselectie uit de tabel — de server groepeert de ids.
+        ? { mode: MODE_CREDIT_ONLY, only_overdue: true, scope: { invoice_ids: state.scope.ids, fingerprint: state.scope.fingerprint } }
+        : { customer_ids: Array.from(state.selected), only_overdue: true, ...(state.creditOnly ? { mode: MODE_CREDIT_ONLY } : {}) });
       const res = window.AgentShared && typeof window.AgentShared.apiFetch === 'function'
         ? await window.AgentShared.apiFetch('/api/crediteer-ronde-preview', {
             method: 'POST',
@@ -505,7 +631,13 @@
       state.previewDryRun = !!j?.dry_run;
       state.previewItems  = Array.isArray(j?.items) ? j.items : [];
       state.previewMode   = j?.mode === MODE_CREDIT_ONLY ? MODE_CREDIT_ONLY : 'extend_and_credit';
-      if (state.creditOnly && !isCreditOnlyRun()) throw new Error('Server bevestigde de modus "alleen crediteren" niet — niets uitgevoerd.');
+      if ((state.creditOnly || state.scope) && !isCreditOnlyRun()) throw new Error('Server bevestigde de modus "alleen crediteren" niet — niets uitgevoerd.');
+      if (state.scope) {
+        state.previewScope = j?.scope_check || null;
+        if (!state.previewScope || state.previewScope.fingerprint !== state.scope.fingerprint || state.previewScope.count !== state.scope.ids.length) {
+          throw new Error('Server bevestigde de scope-lijst niet (vingerafdruk/aantal wijkt af) — niets uitgevoerd.');
+        }
+      }
       // Default keuze per klant (previewChosen):
       //   0 bruikbare abo's → SKIP (niet crediteren; eerst een abo regelen).
       //   1 bruikbaar abo   → dat abo.
@@ -529,6 +661,10 @@
 
   function closePreview() {
     state.previewOpen = false;
+    state.scope = null;
+    state.previewScope = null;
+    state.scopeAck = false;
+    state.loader = null;
     state.previewLoading = false;
     state.previewItems = [];
     state.previewChosen = new Map();
@@ -541,6 +677,8 @@
     const el = overlayEl();
     if (!state.previewOpen) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
+
+    if (state.loader) { renderScopeLoader(el); return; }
 
     // After-execute summary?
     if (state.executeResult) {
@@ -589,8 +727,13 @@
     }
     const toRun = runnable.length - skippedByChoice - notReady.length;
 
+    // Scope-lijst: preview moet de lijst volledig verantwoorden (elke id óf
+    // crediteerbaar óf geweigerd), en afvallers moeten expliciet gezien zijn.
+    const sc = state.scope ? state.previewScope : null;
+    const scopeBlocked = !!state.scope && (!sc || !sc.complete || (sc.rejected_count > 0 && !state.scopeAck));
+
     // Bevestigen kan pas als elke klant een afgeronde keuze heeft.
-    const canConfirm = toRun > 0 && notReady.length === 0 && !state.executing;
+    const canConfirm = toRun > 0 && notReady.length === 0 && !state.executing && !scopeBlocked;
     const batches = Math.ceil(toRun / BATCH_SIZE);
 
     const runLabelSuffix = state.previewDryRun ? ' (dry-run: niks boeken)' : '';
@@ -609,8 +752,9 @@
             </div>
           ` : ''}
 
+          ${sc ? renderScopeCheck(sc) : ''}
           <div class="cred-preview-summary">
-            <div>Alleen <strong>te-late</strong> facturen · <strong>${toRun}</strong> klant${toRun === 1 ? '' : 'en'} · <strong>${grandCount}</strong> facturen · totaal ${fmtEur(grandIncl)} (waarvan ${fmtEur(grandVat)} BTW)</div>
+            <div>${sc ? 'Uit de <strong>scope-lijst</strong>' : 'Alleen <strong>te-late</strong> facturen'} · <strong>${toRun}</strong> klant${toRun === 1 ? '' : 'en'} · <strong>${grandCount}</strong> facturen · totaal ${fmtEur(grandIncl)} (waarvan ${fmtEur(grandVat)} BTW)</div>
             ${isCreditOnlyRun() ? `<div style="font-size:12.5px;margin-top:4px;color:#dc2626">Alleen crediteren — er wordt GEEN abonnement verlengd of aangeraakt · overgeslagen: ${skippedByChoice} · in ${batches || 0} batch${batches === 1 ? '' : 'es'} van max ${BATCH_SIZE}</div>` : `<div style="font-size:12.5px;margin-top:4px">Verlengen: ${extendCount} abonnement${extendCount === 1 ? '' : 'en'} (+${extendMonths} mnd totaal) · alleen crediteren: ${onlyCredit} · overgeslagen: ${skippedByChoice} · in ${batches || 0} batch${batches === 1 ? '' : 'es'} van max ${BATCH_SIZE}</div>`}
             ${skipped.length > 0 ? `<div style="color:var(--text-faint);font-size:12px;margin-top:4px">${skipped.length} klant(en) hebben geen te-late, crediteerbare facturen — vallen buiten deze run.</div>` : ''}
             ${notReady.length > 0 ? `<div style="color:#f59e0b;font-size:12.5px;margin-top:4px">${notReady.length} klant(en) wachten op een keuze (abonnement of aantal maanden).</div>` : ''}
@@ -639,6 +783,7 @@
 
     el.querySelectorAll('[data-cred-close]').forEach((b) => b.addEventListener('click', closePreview));
     el.querySelector('#credConfirmBtn')?.addEventListener('click', executeRun);
+    el.querySelector('#credScopeAck')?.addEventListener('change', (ev) => { state.scopeAck = !!ev.target.checked; renderOverlay(); });
     // Sub-picker knoppen.
     el.querySelectorAll('[data-cred-choose-sub]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -676,6 +821,25 @@
     });
   }
 
+  function renderScopeCheck(sc) {
+    const ok = sc.complete && sc.rejected_count === 0;
+    return `
+      <div class="cred-scope-box" style="border-color:${ok ? '#10b981' : '#f59e0b'};margin-bottom:12px">
+        <div style="font-size:14px">Lijst: <strong>${sc.count}</strong> ids · preview: <strong style="color:#10b981">${sc.creditable}</strong> crediteerbaar · <strong style="color:${sc.rejected_count ? '#dc2626' : 'inherit'}">${sc.rejected_count}</strong> geweigerd</div>
+        <div style="font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;margin-top:4px">Vingerafdruk: ${esc(sc.fingerprint)} <span style="color:#10b981">✓ door server nagerekend</span></div>
+        ${!sc.complete ? '<div style="color:#dc2626;font-weight:600;margin-top:6px">✗ Preview verantwoordt niet elke id uit de lijst — bevestigen geblokkeerd.</div>' : ''}
+        ${sc.rejected_count ? `
+          <div style="margin-top:8px;font-weight:600;color:#dc2626">Valt af (wordt NIET gecrediteerd):</div>
+          <table class="cred-scope-rej"><thead><tr><th>Factuur</th><th>Klant</th><th>Reden</th></tr></thead><tbody>
+            ${sc.rejected.map((r) => `<tr><td class="mono">${esc(r.invoice_number || r.invoice_id)}</td><td>${esc(r.customer_name || '—')}</td><td>${esc(CAT_LABEL[r.categorie] || r.categorie)} <span style="color:var(--text-faint)">(${esc(r.reden)})</span></td></tr>`).join('')}
+          </tbody></table>
+          <label style="display:flex;gap:6px;align-items:flex-start;margin-top:8px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="credScopeAck" ${state.scopeAck ? 'checked' : ''} />
+            <span>Ik heb gezien dat <strong>${sc.rejected_count}</strong> factuur/facturen afvallen. Crediteer alleen de <strong>${sc.creditable}</strong> resterende.</span>
+          </label>` : '<div style="margin-top:6px;color:#10b981;font-weight:600">✓ Preview is gelijk aan de lijst.</div>'}
+      </div>`;
+  }
+
   function renderPreviewCard(it) {
     const cid     = esc(it.customer_id);
     const chosen  = state.previewChosen.get(it.customer_id);
@@ -687,7 +851,9 @@
     const pickBtn = (label, primary) => nSubs ? `<button class="fin-btn${primary ? ' primary' : ''}" type="button" data-cred-choose-sub="${cid}">${label}</button>` : '';
 
     let subBlock = '';
-    if (isCreditOnlyRun()) {
+    if (state.scope) {
+      subBlock = `<div class="cred-sub-line"><span>Uit de scope-lijst — alleen crediteren, abonnementen worden niet aangeraakt</span></div>`;
+    } else if (isCreditOnlyRun()) {
       subBlock = chosen === CHOICE_SKIP
         ? `<div class="cred-sub-line" style="color:var(--text-faint)"><span>Wordt in deze run <strong>overgeslagen</strong>.</span><button class="fin-btn" type="button" data-cred-include="${cid}">Toch meenemen</button></div>`
         : `<div class="cred-sub-line"><span>Alleen crediteren — abonnementen worden niet aangeraakt</span>${skipBtn}</div>`;
@@ -852,6 +1018,15 @@
     if (creditOnlyRun) {
       // Server weigert abonnementvelden in credit_only — alleen klant + factuur-ids.
       for (const i of items) { delete i.subscription_id; delete i.months_override; delete i.credit_without_extension; }
+      if (state.scope) {
+        const sc = state.previewScope;
+        if (!sc || !sc.complete || (sc.rejected_count > 0 && !state.scopeAck)) { toast('Scope-controle niet rond — niets uitgevoerd', 'warning'); return; }
+        if (sc.rejected_count > 0) {
+          const lines = sc.rejected.slice(0, 25).map((r) => `- ${r.invoice_number || r.invoice_id}: ${CAT_LABEL[r.categorie] || r.categorie}`);
+          if (sc.rejected.length > 25) lines.push(`- … en nog ${sc.rejected.length - 25} (zie de lijst in het venster)`);
+          if (!confirm(`AFWIJKING: ${sc.rejected_count} van de ${sc.count} facturen uit de lijst vallen af en worden NIET gecrediteerd:\n${lines.join('\n')}\n\nDoorgaan met alleen de ${sc.creditable} resterende?`)) return;
+        }
+      }
       if (!state.previewDryRun) {
         const n = items.reduce((a, i) => a + i.invoice_ids.length, 0);
         if (!confirm(`DEFINITIEF: ${n} facturen van ${items.length} klanten worden in Teamleader gecrediteerd. Een creditnota is niet terug te draaien. Er wordt GEEN abonnement verlengd. Doorgaan?`)) return;
@@ -880,6 +1055,7 @@
           items: items.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE),
           only_overdue: true, run_id: agg.run_id || undefined, batch_index: b + 1, batch_total: total, confirm: true,
           ...(creditOnlyRun ? { mode: MODE_CREDIT_ONLY } : {}),
+          ...(state.scope ? { scope: { invoice_ids: state.scope.ids, fingerprint: state.scope.fingerprint } } : {}),
         });
         agg.run_id = agg.run_id || j.run_id;
         agg.dry_run = j.dry_run;
@@ -1012,6 +1188,10 @@
       .cred-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; background:var(--bg-elev); border:1px solid var(--border); border-radius:10px; }
       .cred-selection-info { font-size:13px; color:var(--text); font-weight:500; }
       .cred-footer button[disabled] { opacity:.55; cursor:not-allowed; }
+      .cred-scope-box { padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-elev-2, rgba(255,255,255,.02)); font-size:13px; }
+      .cred-scope-rej { width:100%; border-collapse:collapse; font-size:12px; margin-top:4px; }
+      .cred-scope-rej th, .cred-scope-rej td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--border-subtle, var(--border)); }
+      .cred-scope-rej td.mono { font-family:ui-monospace, SFMono-Regular, monospace; }
       .cred-mode-toggle { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text-dim); margin-left:auto; cursor:pointer; }
 
       /* PR-2 overlay + modal + popup */
@@ -1081,5 +1261,7 @@
   window.FinanceCrediteer = {
     __loaded: true,
     mount,
+    // Voor tests: dezelfde parse- en hash-functies als het laad-venster.
+    _scope: { parseScopeText, scopeFingerprint },
   };
 })();

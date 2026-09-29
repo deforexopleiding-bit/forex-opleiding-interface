@@ -5,6 +5,13 @@
 //   { items: [{ customer_id, invoice_ids?: uuid[] }], only_overdue?: boolean }
 // Body (legacy, blijft werken):
 //   { customer_ids: uuid[], only_overdue?: boolean }
+// Body (vaste scope-lijst, alleen met mode 'credit_only'):
+//   { mode: 'credit_only', scope: { invoice_ids: uuid[], fingerprint }, only_overdue? }
+//   → de server groepeert de ids zelf per klant; response.scope_check =
+//     { count, fingerprint, creditable, rejected_count, complete,
+//       rejected:[{ invoice_id, invoice_number, customer_id, customer_name, reden, categorie }] }
+//     categorie: betaald | al_gecrediteerd | geen_tl_id | niet_gevonden |
+//                niet_vervallen | test | klant_uitgesloten | andere
 //
 // Scope: met invoice_ids en/of only_overdue=true toont de preview EXACT de
 // facturen die crediteer-ronde-execute met dezelfde scope zou crediteren
@@ -35,6 +42,7 @@ import { customerDisplayName } from './_lib/customer-name.js';
 import {
   isCrediteerRondeDryRun, selectCreditable, openAmountEur, daysOverdue, hasScope,
   todayAmsterdam, planExtension, isUsableSubscription, OPEN_STATUSES, MODE_CREDIT_ONLY,
+  parseScope, rejectCategory,
 } from './_lib/crediteer-ronde-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -55,9 +63,32 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const onlyOverdue = body.only_overdue === true;
   const creditOnly = body.mode === MODE_CREDIT_ONLY;
-  // Normaliseer beide body-vormen naar Map<customer_id, invoice_ids|null>.
+  // Normaliseer alle body-vormen naar Map<customer_id, invoice_ids|null>.
   const scopeByCustomer = new Map();
-  if (Array.isArray(body.items)) {
+  // Vaste scope-lijst: de server groepeert de ids zelf per klant.
+  let scope = null;
+  const scopeNotFound = [];
+  if (body.scope != null) {
+    if (!creditOnly) return res.status(400).json({ error: 'scope-lijst kan alleen met mode credit_only' });
+    scope = parseScope(body.scope);
+    if (!scope.ok) return res.status(400).json({ error: scope.error });
+    try {
+      const found = new Set();
+      for (let k = 0; k < scope.ids.length; k += 150) {
+        const { data, error } = await supabaseAdmin.from('invoices').select('id, customer_id').in('id', scope.ids.slice(k, k + 150));
+        if (error) throw new Error('scope lookup: ' + error.message);
+        for (const r of data || []) {
+          found.add(r.id);
+          (scopeByCustomer.get(r.customer_id) || scopeByCustomer.set(r.customer_id, []).get(r.customer_id)).push(r.id);
+        }
+      }
+      for (const id of scope.ids) if (!found.has(id)) scopeNotFound.push(id);
+    } catch (e) {
+      console.error('[crediteer-ronde-preview] scope', e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Interne fout' });
+    }
+    if (scopeByCustomer.size === 0) return res.status(400).json({ error: 'Geen enkele factuur uit de scope-lijst gevonden' });
+  } else if (Array.isArray(body.items)) {
     for (const it of body.items) {
       const cid = typeof it?.customer_id === 'string' && UUID_RE.test(it.customer_id) ? it.customer_id : null;
       if (!cid) continue;
@@ -200,10 +231,40 @@ export default async function handler(req, res) {
       });
     }
 
+    // Controleblok voor de vaste scope-lijst: elke id uit de lijst is óf
+    // crediteerbaar óf geweigerd met reden. Er komt nooit iets bij.
+    let scopeCheck = null;
+    if (scope) {
+      const invById = new Map(invList.map((r) => [r.id, r]));
+      const nameOf = new Map(items.map((it) => [it.customer_id, it.customer_name]));
+      const rejected = [];
+      for (const it of items) {
+        for (const r of it.rejected) {
+          rejected.push({ invoice_id: r.invoice_id, invoice_number: r.invoice_number, customer_id: it.customer_id, customer_name: it.customer_name,
+            reden: r.reden, categorie: rejectCategory(invById.get(r.invoice_id), r.reden) });
+        }
+      }
+      for (const s of skippedCustomers) {
+        for (const id of scopeByCustomer.get(s.customer_id) || []) {
+          rejected.push({ invoice_id: id, invoice_number: invById.get(id)?.invoice_number || null, customer_id: s.customer_id, customer_name: s.customer_name || nameOf.get(s.customer_id) || null,
+            reden: `klant uitgesloten (${s.reden})`, categorie: 'klant_uitgesloten' });
+        }
+      }
+      for (const id of scopeNotFound) rejected.push({ invoice_id: id, invoice_number: null, customer_id: null, customer_name: null, reden: 'factuur niet gevonden', categorie: 'niet_gevonden' });
+      const creditableCount = items.reduce((s, it) => s + it.invoices.length, 0);
+      scopeCheck = {
+        count: scope.ids.length, fingerprint: scope.fingerprint,
+        creditable: creditableCount, rejected_count: rejected.length,
+        complete: creditableCount + rejected.length === scope.ids.length,
+        rejected,
+      };
+    }
+
     return res.status(200).json({
       dry_run: dryRun,
       mode   : creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
       scope  : { only_overdue: onlyOverdue, per_customer_invoice_ids: [...scopeByCustomer.values()].some(Boolean) },
+      scope_check: scopeCheck,
       items,
       skipped_customers: skippedCustomers,
     });
