@@ -15,6 +15,7 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -92,7 +93,7 @@ mock.module(url('api/_lib/subscription-postpone.js'), {
     },
   },
 });
-const { selectCreditable, planExtension, hasScope, isUsableSubscription } = await import(url('api/_lib/crediteer-ronde-core.js'));
+const { selectCreditable, planExtension, hasScope, isUsableSubscription, scopeFingerprint, parseScope } = await import(url('api/_lib/crediteer-ronde-core.js'));
 const { default: execute } = await import(url('api/crediteer-ronde-execute.js'));
 const { default: preview } = await import(url('api/crediteer-ronde-preview.js'));
 
@@ -518,6 +519,152 @@ test('preview credit_only: test-/onbekende klant staat in skipped_customers', as
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 2c · VASTE SCOPE-LIJST — de gereviewde lijst is leidend, niet "te laat op de rundag"
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Kwartaaleinde 2026-Q3: 240 gereviewde factuur-ids. Via de tabel zou de UI
+// op de rundag ook facturen meenemen die ná de review vervallen zijn (op
+// 29-09 al 14 stuks binnen een week). Met de lijst kan de set alleen kleiner
+// worden (betaald / niet crediteerbaar), nooit groter.
+
+const EXPECTED_240 = '6c7de869eafc09e9e96ae1ecc4a41b317ee17084db21570841f696c5eb28dbee';
+const LIJST_240 = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/crediteerronde-scope-240.json'), 'utf8'));
+const LATE_X = '77777777-7777-4777-8777-777777777777';   // te laat, NIET in de lijst
+const ONBEKEND = '88888888-8888-4888-8888-888888888888';
+const scopeVan = (ids) => ({ invoice_ids: ids, fingerprint: scopeFingerprint(ids) });
+
+// De UI-helpers, geladen uit het echte browserbestand (zelfde recept als de server).
+function uiScope() {
+  const ctx = { window: { crypto: globalThis.crypto }, TextEncoder, console };
+  vm.runInNewContext(bron('modules/shared/finance-crediteer.js'), ctx);
+  return ctx.window.FinanceCrediteer._scope;
+}
+
+test('vingerafdruk van de 240-lijst = 6c7de869… (server-recept)', () => {
+  assert.equal(LIJST_240.length, 240);
+  assert.equal(scopeFingerprint(LIJST_240), EXPECTED_240);
+  assert.equal(scopeFingerprint([...LIJST_240].reverse()), EXPECTED_240, 'volgorde in het bestand maakt niet uit');
+});
+
+test('een gewijzigde lijst geeft een andere vingerafdruk en wordt geweigerd', () => {
+  const minEen = LIJST_240.slice(1);
+  const eenErbij = [...LIJST_240, LATE_X];
+  const dubbel = [...LIJST_240, LIJST_240[0]];
+  for (const l of [minEen, eenErbij]) {
+    assert.notEqual(scopeFingerprint(l), EXPECTED_240);
+    const r = parseScope({ invoice_ids: l, fingerprint: EXPECTED_240 });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /vingerafdruk klopt niet/);
+  }
+  assert.match(parseScope({ invoice_ids: dubbel, fingerprint: EXPECTED_240 }).error, /dubbele/);
+  assert.equal(parseScope({ invoice_ids: LIJST_240, fingerprint: EXPECTED_240 }).ok, true);
+});
+
+test('UI-helpers: zelfde vingerafdruk voor array, dry-run-JSON én geplakte tekst; klant-ids tellen niet mee', async () => {
+  const { parseScopeText, scopeFingerprint: uiHash } = uiScope();
+  const alsArray = parseScopeText(JSON.stringify(LIJST_240));
+  const alsDryrun = parseScopeText(JSON.stringify({ facturen: LIJST_240.map((id) => ({ factuur_id: id, klant_id: C1 })) }));
+  const alsTekst = parseScopeText(LIJST_240.join('\n'));
+  for (const p of [alsArray, alsDryrun, alsTekst]) {
+    assert.equal(p.ids.length, 240);
+    assert.equal(p.duplicates + p.invalid, 0);
+    assert.equal(await uiHash(p.ids), EXPECTED_240);
+  }
+  const gewijzigd = parseScopeText(JSON.stringify(LIJST_240.slice(1)));
+  assert.notEqual(await uiHash(gewijzigd.ids), EXPECTED_240);
+  assert.equal(parseScopeText(JSON.stringify([...LIJST_240, LIJST_240[0]])).duplicates, 1);
+});
+
+function scopeDb() {
+  resetDb({ dryRunRow: { enabled: false } });
+  db.tables.invoices.push(
+    { id: LATE_X, customer_id: C1, invoice_number: 'F-X', status: 'open', is_test: false, tl_invoice_id: 'tlx', amount_total: 100, amount_paid: 0, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-20' },
+    { id: PAID, customer_id: C1, invoice_number: 'F-9', status: 'paid', is_test: false, tl_invoice_id: 'tl9', amount_total: 100, amount_paid: 100, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-01' },
+  );
+}
+
+test('preview met scope-lijst: lijst is leidend — een te-late factuur die NIET in de lijst staat komt er niet bij', async () => {
+  scopeDb();
+  const lijst = [LATE, LATE2, PAID, ONBEKEND];
+  const { status, out } = await roep(CO({ only_overdue: true, scope: scopeVan(lijst) }), preview);
+  assert.equal(status, 200);
+  const ids = out.items.flatMap((it) => it.invoices.map((i) => i.id)).sort();
+  assert.deepEqual(ids, [LATE, LATE2].sort(), 'LATE_X is te laat maar staat niet in de lijst');
+  const sc = out.scope_check;
+  assert.equal(sc.count, 4);
+  assert.equal(sc.fingerprint, scopeFingerprint(lijst));
+  assert.equal(sc.creditable, 2);
+  assert.equal(sc.rejected_count, 2);
+  assert.equal(sc.complete, true);
+  assert.deepEqual(Object.fromEntries(sc.rejected.map((r) => [r.invoice_id, r.categorie])), { [PAID]: 'betaald', [ONBEKEND]: 'niet_gevonden' });
+  assert.deepEqual(out.items.map((it) => it.subscriptions), [[], []]);
+});
+
+test('scope-lijst: niet-crediteerbare ids vallen af met reden (al gecrediteerd / geen TL-id / klant uitgesloten)', async () => {
+  scopeDb();
+  const CRED = 'abababab-abab-4bab-8bab-abababababab';
+  const NOTL = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+  const TESTK = '55555555-5555-4555-8555-555555555555';
+  const TESTINV = 'efefefef-efef-4fef-8fef-efefefefefef';
+  db.tables.customers.push({ id: TESTK, first_name: 'Test', is_test: true });
+  db.tables.invoices.push(
+    { id: CRED, customer_id: C2, invoice_number: 'F-C', status: 'credited', is_test: false, tl_invoice_id: 'tlc', amount_total: 100, amount_paid: 0, credited_amount: 100, vat_amount: 17.36, due_date: '2026-08-01' },
+    { id: NOTL, customer_id: C2, invoice_number: 'F-N', status: 'open', is_test: false, tl_invoice_id: null, amount_total: 100, amount_paid: 0, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-01' },
+    { id: TESTINV, customer_id: TESTK, invoice_number: 'F-T', status: 'open', is_test: false, tl_invoice_id: 'tlt', amount_total: 1, amount_paid: 0, credited_amount: 0, vat_amount: 0.17, due_date: '2026-08-01' },
+  );
+  const lijst = [LATE2, CRED, NOTL, TESTINV];
+  const { out } = await roep(CO({ only_overdue: true, scope: scopeVan(lijst) }), preview);
+  const cat = Object.fromEntries(out.scope_check.rejected.map((r) => [r.invoice_id, r.categorie]));
+  assert.deepEqual(cat, { [CRED]: 'al_gecrediteerd', [NOTL]: 'geen_tl_id', [TESTINV]: 'klant_uitgesloten' });
+  assert.equal(out.scope_check.creditable, 1);
+  assert.ok(out.scope_check.creditable <= lijst.length, 'nooit groter dan de lijst');
+});
+
+test('execute met scope-lijst: crediteert alleen ids uit de lijst; id buiten de lijst → 400 en NIETS gecrediteerd', async () => {
+  scopeDb();
+  const lijst = [LATE, LATE2, PAID];
+  const sc = scopeVan(lijst);
+  // Een batch die LATE_X (te laat, niet in de lijst) probeert mee te sturen:
+  let r = await roep(CO({ only_overdue: true, scope: sc, items: [{ customer_id: C1, invoice_ids: [LATE, LATE_X] }] }));
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /NIET in de scope-lijst/);
+  assert.equal(credits.length, 0);
+  assert.equal(db.inserts.length, 0, 'geen audit: er is niets gestart');
+  // Netjes binnen de lijst (PAID wordt server-side geweigerd → set wordt kleiner):
+  r = await roep(CO({ only_overdue: true, scope: sc, items: [{ customer_id: C1, invoice_ids: [LATE, PAID] }, { customer_id: C2, invoice_ids: [LATE2] }] }));
+  assert.equal(r.status, 200);
+  assert.deepEqual(credits, [LATE, LATE2]);
+  assert.equal(postpones.length + restores.length, 0);
+  assert.equal(r.out.customers[0].invoices.find((i) => i.invoice_id === PAID).status, 'geweigerd');
+  const start = db.inserts.find((i) => i.tabel === 'audit_log' && i.rows.action === 'crediteer_ronde.batch_start');
+  assert.equal(start.rows.after_json.scope_fingerprint, sc.fingerprint);
+  assert.equal(start.rows.after_json.scope_count, 3);
+});
+
+test('execute/preview: verkeerde vingerafdruk of scope zonder credit_only → 400, niets gecrediteerd', async () => {
+  scopeDb();
+  const fout = { invoice_ids: [LATE], fingerprint: EXPECTED_240 };
+  let r = await roep(CO({ scope: fout, items: [{ customer_id: C1, invoice_ids: [LATE] }] }));
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /vingerafdruk klopt niet/);
+  r = await roep(CO({ scope: fout }), preview);
+  assert.equal(r.status, 400);
+  r = await roep({ scope: scopeVan([LATE]), items: [{ customer_id: C1, subscription_id: S_MONTH, invoice_ids: [LATE] }] });
+  assert.equal(r.status, 400);
+  assert.match(r.out.error, /alleen met mode credit_only/);
+  assert.equal(credits.length + postpones.length, 0);
+});
+
+test('UI: scope-pad stuurt de volledige lijst + vingerafdruk mee en blokkeert op afwijking', () => {
+  const s = bron('modules/shared/finance-crediteer.js');
+  assert.match(s, /scope: \{ invoice_ids: state\.scope\.ids, fingerprint: state\.scope\.fingerprint \}/);
+  assert.match(s, /sorted\.join\('\\n'\)/, 'recept: sorteren + newline-join');
+  assert.match(s, /Vingerafdruk klopt NIET met de verwachte waarde/);
+  assert.match(s, /scopeBlocked/);
+  assert.match(s, /AFWIJKING: /);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 3 · STRUCTUUR
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -548,5 +695,5 @@ test('UI credit_only: stuurt mode mee en strips abonnementvelden vóór de execu
   assert.match(s, /mode: MODE_CREDIT_ONLY/);
   assert.match(s, /delete i\.subscription_id; delete i\.months_override; delete i\.credit_without_extension;/);
   assert.match(s, /Server bevestigde de modus "alleen crediteren" niet/);
-  assert.match(bron('modules/finance.html'), /finance-crediteer\.js\?v=3/);
+  assert.match(bron('modules/finance.html'), /finance-crediteer\.js\?v=4/);
 });

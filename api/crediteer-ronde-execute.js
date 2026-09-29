@@ -38,6 +38,10 @@
 // invoice_ids (preview == execute) en weigert subscription_id/months_override
 // met 400. Eindstatus: gecrediteerd | deels_gecrediteerd | geblokkeerd |
 // overgeslagen | fout. Schuldregels krijgen subscription_id=null, 0 maanden.
+// Optioneel scope: { invoice_ids: [VOLLEDIGE gereviewde lijst], fingerprint }
+// (alleen credit_only): hash wordt nagerekend en elke invoice_id in deze batch
+// moet in de lijst staan, anders 400 vóór er iets gebeurt. Fingerprint + aantal
+// staan in de batch-audit.
 //
 // Eindstatus per klant (customers[].status):
 //   verlengd_en_gecrediteerd | alleen_gecrediteerd | deels_gecrediteerd |
@@ -62,7 +66,7 @@ import { postponeSubscription, restoreSubscription } from './_lib/subscription-p
 import { getClientIp } from './_lib/audit-customer.js';
 import {
   isCrediteerRondeDryRun, selectCreditable, hasScope, openAmountEur, planExtension,
-  todayAmsterdam, OPEN_STATUSES, MAX_ITEMS_PER_CALL, MODE_CREDIT_ONLY,
+  todayAmsterdam, OPEN_STATUSES, MAX_ITEMS_PER_CALL, MODE_CREDIT_ONLY, parseScope,
 } from './_lib/crediteer-ronde-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -144,6 +148,15 @@ export default async function handler(req, res) {
   const onlyOverdue = body.only_overdue === true;
   const creditOnly = body.mode === MODE_CREDIT_ONLY;
   if (body.mode != null && !creditOnly) return res.status(400).json({ error: `Onbekende mode '${body.mode}'` });
+  // Vaste scope-lijst: de volledige gereviewde lijst + bevestigde vingerafdruk
+  // reizen met elke batch mee. Hash wordt nagerekend; elke id in deze batch
+  // moet in de lijst staan → de ronde kan alleen kleiner worden, nooit groter.
+  let scope = null;
+  if (body.scope != null) {
+    if (!creditOnly) return res.status(400).json({ error: 'scope-lijst kan alleen met mode credit_only' });
+    scope = parseScope(body.scope);
+    if (!scope.ok) return res.status(400).json({ error: scope.error });
+  }
 
   const items = [];
   const seen = new Set();
@@ -160,6 +173,12 @@ export default async function handler(req, res) {
       }
       if (it.subscription_id || it.months_override != null) {
         return res.status(400).json({ error: `credit_only: subscription_id / months_override niet toegestaan (klant ${cid}) — deze modus verlengt nooit.` });
+      }
+      if (scope) {
+        const outside = invoiceIds.filter((id) => !scope.idSet.has(id.toLowerCase()));
+        if (outside.length) {
+          return res.status(400).json({ error: `${outside.length} factuur-id(s) van klant ${cid} staan NIET in de scope-lijst (${scope.fingerprint.slice(0, 12)}…) — niets uitgevoerd.` });
+        }
       }
     }
     if (!hasScope({ invoiceIds, onlyOverdue })) {
@@ -188,6 +207,7 @@ export default async function handler(req, res) {
   await audit(req, user.id, 'crediteer_ronde.batch_start', {
     run_id: runId, batch_index: batchIndex, batch_total: batchTotal, dry_run: dryRun, only_overdue: onlyOverdue,
     mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
+    scope_fingerprint: scope?.fingerprint || null, scope_count: scope?.ids.length || null,
     items: items.map((i) => ({ customer_id: i.customer_id, subscription_id: i.subscription_id, invoice_ids: i.invoice_ids, months_override: i.months_override, credit_without_extension: i.credit_without_extension })),
     reason_text: `Crediteerronde ${runQuarter} — batch ${batchIndex}/${batchTotal} gestart (${items.length} klant(en))${dryRun ? ' [dry-run]' : ''}`,
   });
@@ -415,6 +435,7 @@ export default async function handler(req, res) {
   await audit(req, user.id, dryRun ? 'crediteer_ronde.batch_done_dry_run' : 'crediteer_ronde.batch_done', {
     run_id: runId, batch_index: batchIndex, batch_total: batchTotal, quarter: runQuarter, summary,
     mode: creditOnly ? MODE_CREDIT_ONLY : 'extend_and_credit',
+    scope_fingerprint: scope?.fingerprint || null, scope_count: scope?.ids.length || null,
     customers: customersOut.map((c) => ({
       customer_id: c.customer_id, status: c.status, credited: c.credited.map((x) => x.invoice_id),
       invoices: c.invoices.map((x) => ({ invoice_id: x.invoice_id, status: x.status, reden: x.reden })),
