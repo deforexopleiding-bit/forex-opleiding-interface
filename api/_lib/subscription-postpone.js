@@ -29,7 +29,15 @@ export function addMonthsStr(dateStr, n) {
 
 // Verschuift/verlengt één sub. Returnt { subscription, tl, extended }.
 // Gooit bij een DB-fout (caller vangt af / telt als fail).
-export async function postponeSubscription(sub, months, { userId = null, req = null, todayStr = null } = {}) {
+// tlFirst (opt-in, default false = oud gedrag): eerst Teamleader bijwerken en
+// pas bij bevestiging (2xx) de DB. Faalt TL → typed error TL_NOT_CONFIRMED en
+// GEEN DB-wijziging, zodat DB en TL nooit uit elkaar lopen. Gebruikt door de
+// crediteerronde; de overige callers houden DB-eerst + TL best-effort.
+function typedError(code, message, extra = {}) {
+  const e = new Error(message); e.code = code; Object.assign(e, extra); return e;
+}
+
+export async function postponeSubscription(sub, months, { userId = null, req = null, todayStr = null, tlFirst = false } = {}) {
   const m = Number(months);
   const today = todayStr || new Date().toISOString().slice(0, 10);
   const running = !!(sub.start_date && sub.start_date < today); // start < vandaag = al lopend
@@ -54,12 +62,38 @@ export async function postponeSubscription(sub, months, { userId = null, req = n
     if (sub.original_start_date == null) { patch.original_start_date = sub.start_date; patch.original_end_date = sub.end_date || null; }
   }
 
-  const { data: updated, error } = await supabaseAdmin.from('subscriptions').update(patch).eq('id', sub.id).select('*').single();
-  if (error) throw error;
+  const tlBody = { id: sub.teamleader_subscription_id };
+  if (!running && newStart) tlBody.starts_on = newStart; // lopend: starts_on ongemoeid laten
+  if (newEnd) tlBody.ends_on = newEnd;
 
-  // TL best-effort: subscriptions.update.
   let tl = { pushed: false };
-  if (sub.teamleader_subscription_id) {
+  if (tlFirst) {
+    if (!sub.teamleader_subscription_id) throw typedError('NO_TL_ID', 'Abonnement heeft geen Teamleader-id');
+    if (!newEnd) throw typedError('NO_END_DATE', 'Abonnement heeft geen einddatum — verlengen kan niet eenduidig');
+    let r;
+    try {
+      r = await tlFetch('/subscriptions.update', { method: 'POST', body: JSON.stringify(tlBody) });
+    } catch (e) {
+      throw typedError('TL_NOT_CONFIRMED', 'Teamleader niet bereikbaar: ' + e.message);
+    }
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw typedError('TL_NOT_CONFIRMED', `Teamleader weigerde de verlenging (HTTP ${r.status}): ${txt.slice(0, 200)}`, { tlStatus: r.status });
+    }
+    tl = { pushed: true };
+  }
+
+  const { data: updated, error } = await supabaseAdmin.from('subscriptions').update(patch).eq('id', sub.id).select('*').single();
+  if (error) {
+    if (tlFirst) {
+      // TL is al bijgewerkt maar de DB niet: expliciet melden, nooit stil.
+      throw typedError('DB_AFTER_TL', `Teamleader is verlengd maar de database-update faalde: ${error.message}. Handmatig rechtzetten: subscriptions.id=${sub.id}`, { tlBody });
+    }
+    throw error;
+  }
+
+  // TL best-effort (alleen oud pad): subscriptions.update.
+  if (!tlFirst && sub.teamleader_subscription_id) {
     try {
       const tok = await getActiveToken();
       if (tok) {
