@@ -43,6 +43,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
+import { telAlsBetaald } from './factuur-betaald.js';
 import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
 } from './onboarding-bedenktijd.js';
@@ -251,14 +252,21 @@ async function verwijderSpiegel(lms, onboardingId, alsAfwezig = null) {
   };
 }
 
-/** Is er minstens één betaalde factuur voor deze klant? */
+/**
+ * Is er minstens één ECHT betaalde factuur voor deze klant?
+ *
+ * Een volledig gecrediteerde factuur staat na de Teamleader-sync ook als
+ * 'paid' — die telt hier NIET (zie api/_lib/factuur-betaald.js). Zonder deze
+ * regel zag de mentor "eerste factuur betaald" bij een student van wie alleen
+ * de reserveringsfee gecrediteerd was.
+ */
 async function leesEersteFactuurBetaald(customerId) {
   if (!customerId) return false;
   const { data, error } = await supabaseAdmin
-    .from('invoices').select('id').eq('customer_id', customerId)
-    .eq('status', 'paid').limit(1);
+    .from('invoices').select('id, status, amount_total, credited_amount')
+    .eq('customer_id', customerId).eq('status', 'paid');
   if (error) throw new Error('invoices lezen: ' + error.message);
-  return Array.isArray(data) && data.length > 0;
+  return Array.isArray(data) && data.some(telAlsBetaald);
 }
 
 /**
