@@ -42,7 +42,7 @@ mock.module(url('api/_lib/teamleader-token.js'), {
   },
 });
 mock.module(url('api/_lib/audit-customer.js'), { namedExports: { getClientIp: () => null } });
-const { postponeSubscription } = await import(url('api/_lib/subscription-postpone.js'));
+const { postponeSubscription, restoreSubscription } = await import(url('api/_lib/subscription-postpone.js'));
 
 const SUB = { id: 's1', teamleader_subscription_id: 'tl-s1', start_date: '2026-01-01', end_date: '2027-01-01', term_count: 12, postponed_months: 0 };
 const reset = (s) => { dbUpdates.length = 0; tlCalls.length = 0; tlStatus = s; };
@@ -68,6 +68,35 @@ test('tlFirst zonder Teamleader-id → NO_TL_ID, niets aangeraakt', async () => 
   reset(204);
   await assert.rejects(postponeSubscription({ ...SUB, teamleader_subscription_id: null }, 1, { tlFirst: true, todayStr: '2026-09-29' }), (e) => e.code === 'NO_TL_ID');
   assert.equal(tlCalls.length + subUpdates().length, 0);
+});
+
+test('postpone geeft een exacte momentopname terug (voor terugzetten)', async () => {
+  reset(204);
+  const r = await postponeSubscription({ ...SUB, original_end_date: null }, 1, { tlFirst: true, todayStr: '2026-09-29' });
+  assert.deepEqual(r.snapshot, { start_date: '2026-01-01', end_date: '2027-01-01', term_count: 12, postponed_months: 0, original_start_date: null, original_end_date: null });
+});
+
+test('restore: Teamleader eerst, dan de EXACTE oude waarden in de DB (geen terugrekenen)', async () => {
+  reset(204);
+  // Maandgrens: 31 jan + 1 mnd = 3 mrt via setMonth. Terugrekenen zou 3 feb geven.
+  const snap = { start_date: '2026-01-01', end_date: '2027-01-31', term_count: 12, postponed_months: 0, original_start_date: null, original_end_date: null };
+  await restoreSubscription({ id: 's1', teamleader_subscription_id: 'tl-s1', start_date: '2026-01-01', end_date: '2027-03-03' }, snap);
+  assert.deepEqual(tlCalls[0].body, { id: 'tl-s1', ends_on: '2027-01-31' });
+  assert.deepEqual(subUpdates()[0].patch, { start_date: '2026-01-01', end_date: '2027-01-31', term_count: 12, postponed_months: 0, original_start_date: null, original_end_date: null });
+});
+
+test('restore: Teamleader weigert → TL_NOT_CONFIRMED en GEEN DB-update', async () => {
+  reset(400);
+  await assert.rejects(
+    restoreSubscription({ id: 's1', teamleader_subscription_id: 'tl-s1', start_date: '2026-01-01' }, { end_date: '2027-01-01', start_date: '2026-01-01' }),
+    (e) => e.code === 'TL_NOT_CONFIRMED');
+  assert.equal(subUpdates().length, 0);
+});
+
+test('restore van een verschoven (nog niet gestart) abo zet ook starts_on terug', async () => {
+  reset(204);
+  await restoreSubscription({ id: 's1', teamleader_subscription_id: 'tl-s1', start_date: '2026-12-01' }, { start_date: '2026-11-01', end_date: '2027-11-01', term_count: 12, postponed_months: 0 });
+  assert.deepEqual(tlCalls[0].body, { id: 'tl-s1', ends_on: '2027-11-01', starts_on: '2026-11-01' });
 });
 
 test('zonder tlFirst: oud gedrag — DB eerst, TL-weigering alleen gerapporteerd', async () => {

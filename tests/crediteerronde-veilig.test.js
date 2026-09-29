@@ -28,7 +28,11 @@ const TODAY = '2026-09-29';
 // en wordt alles pas daarna dynamisch geïmporteerd.
 const credits = [];
 const postpones = [];
-let postponeGedrag = 'ok';
+const restores = [];
+const volgorde = [];               // 'postpone' | 'credit' | 'restore' in aanroepvolgorde
+let postponeGedrag = 'ok';         // 'ok' | 'tl-weigert' | 'db-na-tl'
+let restoreGedrag = 'ok';          // 'ok' | 'tl-weigert'
+let failCredits = new Set();       // factuur-ids waarvoor creditInvoiceCore faalt
 const db = { tables: {}, inserts: [], updates: [] };
 
 function nepAdmin() {
@@ -62,14 +66,28 @@ mock.module(url('api/supabase.js'), {
 mock.module(url('api/_lib/requirePermission.js'), { namedExports: { requirePermission: async () => true } });
 mock.module(url('api/_lib/audit-customer.js'), { namedExports: { getClientIp: () => '127.0.0.1' } });
 mock.module(url('api/_lib/invoice-credit.js'), {
-  namedExports: { creditInvoiceCore: async (id) => { credits.push(id); return { tl_credit_note_id: 'cn-' + id }; } },
+  namedExports: {
+    creditInvoiceCore: async (id) => {
+      volgorde.push('credit');
+      if (failCredits.has(id)) { const e = new Error('Teamleader weigerde de creditnota (HTTP 400).'); e.code = 'TL_REFUSED'; throw e; }
+      credits.push(id); return { tl_credit_note_id: 'cn-' + id };
+    },
+  },
 });
 mock.module(url('api/_lib/subscription-postpone.js'), {
   namedExports: {
     postponeSubscription: async (sub, months, opts) => {
+      volgorde.push('postpone');
       postpones.push({ sub: sub.id, months, tlFirst: opts?.tlFirst });
       if (postponeGedrag === 'tl-weigert') { const e = new Error('Teamleader weigerde (HTTP 400)'); e.code = 'TL_NOT_CONFIRMED'; throw e; }
-      return { tl: { pushed: true }, extended: true };
+      if (postponeGedrag === 'db-na-tl') { const e = new Error('Teamleader is verlengd maar de database-update faalde'); e.code = 'DB_AFTER_TL'; throw e; }
+      return { tl: { pushed: true }, extended: true, snapshot: { end_date: sub.end_date, start_date: sub.start_date, term_count: 12 }, subscription: { ...sub, end_date: 'verlengd' } };
+    },
+    restoreSubscription: async (sub, snapshot) => {
+      volgorde.push('restore');
+      restores.push({ sub: sub.id, naar: snapshot.end_date });
+      if (restoreGedrag === 'tl-weigert') { const e = new Error('Terugdraaien: Teamleader weigerde'); e.code = 'TL_NOT_CONFIRMED'; throw e; }
+      return { subscription: { ...sub, end_date: snapshot.end_date } };
     },
   },
 });
@@ -149,7 +167,7 @@ function resetDb({ dryRunRow }) {
   };
 }
 async function roep(body) {
-  credits.length = 0; postpones.length = 0;
+  credits.length = 0; postpones.length = 0; restores.length = 0; volgorde.length = 0;
   let status = 0, out = null;
   const res = { setHeader() {}, status(s) { status = s; return this; }, json(b) { out = b; return this; } };
   await execute({ method: 'POST', body: { confirm: true, ...body }, headers: {} }, res);
@@ -199,7 +217,9 @@ test('onbekende billing_cycle zonder months_override → geblokkeerd VÓÓR cred
   resetDb({ dryRunRow: { enabled: false } });
   const { out } = await roep({ items: [{ customer_id: C2, subscription_id: S_NULL }], only_overdue: true });
   assert.equal(credits.length, 0, 'geen credit zonder verlengplan');
-  assert.equal(out.summary.blocked_customers, 1);
+  assert.equal(postpones.length, 0, 'ook geen verlenging');
+  assert.equal(out.summary.status_counts.geblokkeerd, 1);
+  assert.equal(out.customers[0].status, 'geblokkeerd');
   assert.equal(out.customers[0].errors[0].code, 'CYCLE_UNSUPPORTED');
 });
 
@@ -211,19 +231,117 @@ test('onbekende cyclus mét months_override → crediteren + verlengen met die m
   assert.equal(out.customers[0].extended.basis, 'override');
 });
 
-test('Teamleader weigert de verlenging → extended:false + expliciete fout, schuld zonder abo-koppeling', async () => {
+test('VOLGORDE: eerst verlengen (TL-bevestigd), pas daarna crediteren', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
+  assert.deepEqual(volgorde, ['postpone', 'credit']);
+  assert.equal(out.customers[0].status, 'verlengd_en_gecrediteerd');
+});
+
+test('verlenging faalt (Teamleader weigert) → 0 credits voor die klant, status geblokkeerd', async () => {
   resetDb({ dryRunRow: { enabled: false } });
   postponeGedrag = 'tl-weigert';
   try {
     const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
     const c = out.customers[0];
+    assert.equal(credits.length, 0, 'GEEN credit zonder bevestigde verlenging');
+    assert.deepEqual(volgorde, ['postpone']);
+    assert.equal(c.status, 'geblokkeerd');
     assert.equal(c.extended.extended, false);
-    assert.ok(c.errors.some((e) => e.code === 'TL_NOT_CONFIRMED' && /NIET verlengd/.test(e.message)));
+    assert.ok(c.errors.some((e) => e.code === 'TL_NOT_CONFIRMED' && /NIETS gecrediteerd/.test(e.message)));
+    assert.equal(db.inserts.filter((i) => i.tabel === 'dunning_credited_debt').length, 0);
     assert.equal(out.summary.extended_subscriptions, 0);
-    const debt = db.inserts.find((i) => i.tabel === 'dunning_credited_debt');
-    assert.equal(debt.rows[0].subscription_id, null);
-    assert.equal(debt.rows[0].months_extended, 0);
   } finally { postponeGedrag = 'ok'; }
+});
+
+test('TL verlengd maar DB niet (DB_AFTER_TL) → 0 credits, status fout met instructie', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  postponeGedrag = 'db-na-tl';
+  try {
+    const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
+    assert.equal(credits.length, 0);
+    assert.equal(out.customers[0].status, 'fout');
+    assert.match(out.customers[0].errors[0].message, /ends_on terug naar 2027-01-01/);
+  } finally { postponeGedrag = 'ok'; }
+});
+
+test('crediteren faalt ná geslaagde verlenging → verlenging exact teruggezet, status geblokkeerd', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  failCredits = new Set([LATE]);
+  try {
+    const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
+    const c = out.customers[0];
+    assert.deepEqual(volgorde, ['postpone', 'credit', 'restore']);
+    assert.deepEqual(restores, [{ sub: S_MONTH, naar: '2027-01-01' }], 'terug naar de exacte oude einddatum');
+    assert.equal(c.status, 'geblokkeerd');
+    assert.equal(c.reverted.ok, true);
+    assert.equal(c.extended.extended, false);
+    assert.equal(db.inserts.filter((i) => i.tabel === 'dunning_credited_debt').length, 0);
+    assert.equal(out.summary.extended_subscriptions, 0);
+  } finally { failCredits = new Set(); }
+});
+
+test('terugzetten mislukt → status fout met exacte handmatige instructie', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  failCredits = new Set([LATE]); restoreGedrag = 'tl-weigert';
+  try {
+    const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
+    const c = out.customers[0];
+    assert.equal(c.status, 'fout');
+    assert.equal(c.reverted.ok, false);
+    assert.ok(c.errors.some((e) => e.code === 'REVERT_FAILED' && /terug naar 2027-01-01/.test(e.message)));
+  } finally { failCredits = new Set(); restoreGedrag = 'ok'; }
+});
+
+test('per_month deels gecrediteerd → terugzetten + opnieuw verlengen met het aantal WEL gecrediteerd', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const EXTRA = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  db.tables.invoices.push({ id: EXTRA, customer_id: C1, invoice_number: 'F-5', status: 'open', is_test: false, tl_invoice_id: 'tl5', amount_total: 100, amount_paid: 0, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-10' });
+  failCredits = new Set([EXTRA]);
+  try {
+    const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }], only_overdue: true });
+    const c = out.customers[0];
+    assert.deepEqual(volgorde, ['postpone', 'credit', 'credit', 'restore', 'postpone']);
+    assert.deepEqual(postpones.map((p) => p.months), [2, 1], 'eerst +2 (gepland), na terugzetten +1 (werkelijk)');
+    assert.equal(c.status, 'deels_gecrediteerd');
+    assert.equal(c.extended.months, 1);
+    assert.equal(c.extended.adjusted_from, 2);
+    const debt = db.inserts.find((i) => i.tabel === 'dunning_credited_debt');
+    assert.equal(debt.rows.length, 1);
+    assert.equal(debt.rows[0].months_extended, 1);
+  } finally { failCredits = new Set(); }
+});
+
+test('override-basis deels gecrediteerd → verlenging blijft, status deels + expliciete melding', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const EXTRA = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  db.tables.invoices.push({ id: EXTRA, customer_id: C2, invoice_number: 'F-6', status: 'open', is_test: false, tl_invoice_id: 'tl6', amount_total: 100, amount_paid: 0, credited_amount: 0, vat_amount: 17.36, due_date: '2026-08-10' });
+  failCredits = new Set([EXTRA]);
+  try {
+    const { out } = await roep({ items: [{ customer_id: C2, subscription_id: S_NULL, months_override: 4 }], only_overdue: true });
+    const c = out.customers[0];
+    assert.equal(restores.length, 0);
+    assert.equal(c.status, 'deels_gecrediteerd');
+    assert.ok(c.errors.some((e) => e.code === 'OVERRIDE_PARTIAL'));
+  } finally { failCredits = new Set(); }
+});
+
+test('"alleen crediteren" (bewust) → geen verlenging, status alleen_gecrediteerd', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const { out } = await roep({ items: [{ customer_id: C1, subscription_id: null, credit_without_extension: true }], only_overdue: true });
+  assert.deepEqual(volgorde, ['credit']);
+  assert.equal(out.customers[0].status, 'alleen_gecrediteerd');
+});
+
+test('eindstatus per klant + batch_done-audit met status per klant', async () => {
+  resetDb({ dryRunRow: { enabled: false } });
+  const { out } = await roep({ items: [{ customer_id: C1, subscription_id: S_MONTH }, { customer_id: C2, subscription_id: S_NULL }], only_overdue: true });
+  assert.deepEqual(out.customers.map((c) => c.status), ['verlengd_en_gecrediteerd', 'geblokkeerd']);
+  assert.equal(out.summary.status_counts.verlengd_en_gecrediteerd, 1);
+  assert.equal(out.summary.status_counts.geblokkeerd, 1);
+  const done = db.inserts.find((i) => i.tabel === 'audit_log' && i.rows.action === 'crediteer_ronde.batch_done');
+  assert.deepEqual(done.rows.after_json.customers.map((c) => c.status), ['verlengd_en_gecrediteerd', 'geblokkeerd']);
+  assert.ok(done.rows.after_json.run_id);
 });
 
 test('geen abonnement gekozen → geblokkeerd, tenzij credit_without_extension expliciet', async () => {

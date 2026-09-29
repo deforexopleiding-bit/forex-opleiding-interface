@@ -48,6 +48,18 @@
     executeResult  : null,               // geaggregeerd resultaat over alle batches
   };
 
+  // Eindstatus per klant zoals de execute die teruggeeft (+ client-side skip).
+  const STATUS_LABEL = {
+    verlengd_en_gecrediteerd: { label: 'Verlengd + gecrediteerd', color: '#10b981' },
+    alleen_gecrediteerd     : { label: 'Alleen gecrediteerd',      color: '#f59e0b' },
+    deels_gecrediteerd      : { label: 'Deels gecrediteerd',       color: '#f59e0b' },
+    geblokkeerd             : { label: 'Geblokkeerd (niets veranderd)', color: '#f59e0b' },
+    overgeslagen            : { label: 'Overgeslagen (geen facturen)',  color: 'var(--text-dim)' },
+    overgeslagen_keuze      : { label: 'Overgeslagen (keuze)',          color: 'var(--text-dim)' },
+    fout                    : { label: 'FOUT — handmatig nakijken',     color: '#dc2626' },
+  };
+  const STATUS_ORDER = ['verlengd_en_gecrediteerd', 'alleen_gecrediteerd', 'deels_gecrediteerd', 'geblokkeerd', 'overgeslagen', 'overgeslagen_keuze', 'fout'];
+
   const CHOICE_SKIP = '__skip__';
   const CHOICE_ONLY_CREDIT = '__only_credit__';
   const BATCH_SIZE = 5;                  // = MAX_ITEMS_PER_CALL server-side
@@ -773,10 +785,11 @@
     if (state.executing) return;
     const runnable = state.previewItems.filter((it) => (it.invoices || []).length > 0);
     const items = [];
+    const skippedByChoice = [];
     for (const it of runnable) {
       const p = planFor(it);
       if (!p.ready) { toast(`${it.customer_name}: ${p.reason}`, 'warning'); return; }
-      if (p.skip) continue;
+      if (p.skip) { skippedByChoice.push({ customer_id: it.customer_id, customer_name: it.customer_name, status: 'overgeslagen_keuze', errors: [], credited: [] }); continue; }
       items.push({
         customer_id             : it.customer_id,
         subscription_id         : p.onlyCredit ? null : p.sub.id,
@@ -789,10 +802,14 @@
 
     const runId = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : null;
     const total = Math.ceil(items.length / BATCH_SIZE);
+    const nameOf = new Map(runnable.map((it) => [it.customer_id, it.customer_name]));
     const agg = {
       dry_run: null, run_id: runId, batches_done: 0, batches_total: total, aborted: null,
-      summary: { total_customers: 0, credited_invoices: 0, credited_incl: 0, extended_subscriptions: 0, extended_months: 0, skipped_no_invoices: 0, blocked_customers: 0, error_customers: 0 },
+      summary: { total_customers: 0, credited_invoices: 0, credited_incl: 0, extended_subscriptions: 0, extended_months: 0,
+        status_counts: { verlengd_en_gecrediteerd: 0, alleen_gecrediteerd: 0, deels_gecrediteerd: 0, geblokkeerd: 0, overgeslagen: 0, fout: 0 } },
       customers: [],
+      not_processed: [],   // latere batches die nooit zijn verstuurd
+      unknown: [],         // de batch die afbrak: status onbekend → audit_log
     };
     state.executing = true;
     state.executeProgress = { batch: 0, total };
@@ -808,21 +825,30 @@
         agg.run_id = agg.run_id || j.run_id;
         agg.dry_run = j.dry_run;
         agg.batches_done++;
-        for (const k of Object.keys(agg.summary)) agg.summary[k] = Math.round(((agg.summary[k] || 0) + (Number(j.summary?.[k]) || 0)) * 100) / 100;
+        for (const k of ['total_customers', 'credited_invoices', 'credited_incl', 'extended_subscriptions', 'extended_months']) {
+          agg.summary[k] = Math.round(((agg.summary[k] || 0) + (Number(j.summary?.[k]) || 0)) * 100) / 100;
+        }
+        for (const [k, v] of Object.entries(j.summary?.status_counts || {})) agg.summary.status_counts[k] = (agg.summary.status_counts[k] || 0) + (Number(v) || 0);
         agg.customers.push(...(j.customers || []));
       }
     } catch (e) {
-      agg.aborted = `Gestopt bij batch ${agg.batches_done + 1}/${total}: ${e?.message || String(e)}. Batches 1-${agg.batches_done} zijn verwerkt; open de preview opnieuw om de rest te doen (al gecrediteerde facturen vallen er dan vanzelf uit).`;
+      const failed = agg.batches_done;                                   // 0-based index van de afgebroken batch
+      const label = (it) => ({ customer_id: it.customer_id, customer_name: nameOf.get(it.customer_id) || it.customer_id.slice(0, 8) });
+      agg.unknown = items.slice(failed * BATCH_SIZE, (failed + 1) * BATCH_SIZE).map(label);
+      agg.not_processed = items.slice((failed + 1) * BATCH_SIZE).map(label);
+      agg.aborted = `Gestopt bij batch ${failed + 1}/${total}: ${e?.message || String(e)}. Batches 1-${failed} zijn volledig verwerkt. ${agg.unknown.length} klant(en) uit batch ${failed + 1} hebben een ONBEKENDE status (controleer audit_log op run_id); ${agg.not_processed.length} klant(en) zijn niet verwerkt.`;
       toast(agg.aborted, 'error');
     } finally {
+      agg.customers.push(...skippedByChoice);
       state.executing = false;
       state.executeProgress = null;
       state.executeResult = agg;
       const s = agg.summary;
       if (!agg.aborted) {
         const label = agg.dry_run ? 'Dry-run voltooid' : 'Crediteerronde voltooid';
-        const issues = s.error_customers + s.blocked_customers;
-        toast(`${label} · ${s.credited_invoices} facturen · ${s.extended_subscriptions} abonnementen verlengd${issues ? ` · ${issues} klant(en) met fouten/geblokkeerd` : ''}`, issues ? 'warning' : 'success');
+        const sc = s.status_counts;
+        const issues = sc.fout + sc.geblokkeerd + sc.deels_gecrediteerd;
+        toast(`${label} · ${s.credited_invoices} facturen · ${s.extended_subscriptions} abonnementen verlengd${issues ? ` · ${issues} klant(en) vragen aandacht` : ''}`, issues ? 'warning' : 'success');
       }
       if (agg.dry_run === false) load();
       renderOverlay();
@@ -843,26 +869,40 @@
           ${r.aborted ? `<div class="cred-dryrun-note" style="border-color:#dc2626;color:#dc2626"><i class="ti ti-alert-triangle"></i> ${esc(r.aborted)}</div>` : ''}
           <div style="font-size:12px;color:var(--text-faint);margin-bottom:8px">Run-id ${esc(r.run_id || '—')} · ${r.batches_done || 0}/${r.batches_total || 0} batches · terug te vinden in audit_log (crediteer_ronde.batch_*)</div>
           <div class="cred-result-grid">
-            <div><span>Klanten</span><strong>${s.total_customers || 0}</strong></div>
             <div><span>Facturen ${dry ? '(zou crediteren)' : 'gecrediteerd'}</span><strong>${s.credited_invoices || 0}</strong></div>
             <div><span>Bedrag incl. ${dry ? '(zou)' : ''}</span><strong>${fmtEur(s.credited_incl || 0)}</strong></div>
             <div><span>Abonnementen ${dry ? '(zou verlengen)' : 'verlengd (TL-bevestigd)'}</span><strong>${s.extended_subscriptions || 0} · +${s.extended_months || 0} mnd</strong></div>
-            <div><span>Geblokkeerd (niets gecrediteerd)</span><strong style="${s.blocked_customers ? 'color:#f59e0b' : ''}">${s.blocked_customers || 0}</strong></div>
-            <div><span>Overgeslagen (geen facturen)</span><strong>${s.skipped_no_invoices || 0}</strong></div>
-            <div><span>Fouten (klanten)</span><strong style="${s.error_customers ? 'color:#dc2626' : ''}">${s.error_customers || 0}</strong></div>
+            ${STATUS_ORDER.map((k) => {
+              const n = k === 'overgeslagen_keuze' ? (r.customers || []).filter((c) => c.status === k).length : (s.status_counts?.[k] || 0);
+              return `<div><span>${esc(STATUS_LABEL[k].label)}</span><strong style="color:${STATUS_LABEL[k].color}">${n}</strong></div>`;
+            }).join('')}
+            ${r.unknown?.length ? `<div><span>Onbekend (afgebroken batch)</span><strong style="color:#dc2626">${r.unknown.length}</strong></div>` : ''}
+            ${r.not_processed?.length ? `<div><span>Niet verwerkt</span><strong style="color:#f59e0b">${r.not_processed.length}</strong></div>` : ''}
           </div>
+          ${r.unknown?.length || r.not_processed?.length ? `
+            <div class="cred-preview-card" style="border-color:#dc2626">
+              ${r.unknown?.length ? `<div style="font-weight:600;color:#dc2626">Status onbekend — batch brak af (controleer audit_log op run_id ${esc(r.run_id || '—')}):</div>
+                <div style="font-size:12.5px;margin:4px 0 8px">${r.unknown.map((c) => esc(c.customer_name)).join(', ')}</div>` : ''}
+              ${r.not_processed?.length ? `<div style="font-weight:600;color:#f59e0b">Niet verwerkt (nog niets gebeurd):</div>
+                <div style="font-size:12.5px;margin-top:4px">${r.not_processed.map((c) => esc(c.customer_name)).join(', ')}</div>` : ''}
+            </div>` : ''}
           <div class="cred-result-list">
-            ${(r.customers || []).map((c) => `
+            ${(r.customers || []).map((c) => {
+              const st = STATUS_LABEL[c.status] || { label: c.status || '—', color: 'var(--text-dim)' };
+              return `
               <div class="cred-result-row">
-                <div style="font-weight:600">${esc(c.customer_name || c.customer_id.slice(0, 8))}</div>
+                <div style="display:flex;justify-content:space-between;gap:8px">
+                  <span style="font-weight:600">${esc(c.customer_name || c.customer_id.slice(0, 8))}</span>
+                  <span style="font-size:12px;font-weight:700;color:${st.color}">${esc(dry && c.status !== 'overgeslagen_keuze' ? st.label + ' (zou)' : st.label)}</span>
+                </div>
                 <div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">
                   ${c.credited?.length ? `${c.credited.length} ${dry ? 'zou gecrediteerd worden' : 'gecrediteerd'}` : 'niets gecrediteerd'}
-                  ${c.extended ? ` · abo +${c.extended.months} mnd ${c.extended.dry_run ? '(zou)' : (c.extended.extended ? '<span style="color:#10b981">✓ TL bevestigd</span>' : '<span style="color:#dc2626">✗ NIET verlengd</span>')}` : ''}
-                  ${c.errors?.length ? ` · <span style="color:#dc2626">${c.errors.length} fout(en)</span>` : ''}
+                  ${c.extended ? ` · abo +${c.extended.months} mnd ${c.extended.dry_run ? '(zou)' : (c.extended.extended ? '<span style="color:#10b981">✓ TL bevestigd</span>' : '<span style="color:#dc2626">✗ niet verlengd</span>')}` : ''}
+                  ${c.reverted ? (c.reverted.ok ? ` · verlenging teruggezet naar ${esc(c.reverted.restored_to)}` : ' · <span style="color:#dc2626">terugzetten MISLUKT</span>') : ''}
                 </div>
                 ${c.errors?.length ? `<ul style="margin:4px 0 0 18px;padding:0;font-size:12px;color:#dc2626">${c.errors.map((e) => `<li>${esc(e.scope)}: ${esc(e.message)}</li>`).join('')}</ul>` : ''}
-              </div>
-            `).join('')}
+              </div>`;
+            }).join('')}
           </div>
         </div>
         <div class="cred-modal-footer">
