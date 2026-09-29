@@ -214,7 +214,14 @@
        scherm valt terug op de oude opmaak als window.GESPREKKEN_V2 er niet
        is. Zie docs/iris/02-gesprekken-audit.md, gaten G3 en G9. -->
   <script src="../shared/gesprekken-v2.js?v=6"></script>
-  <script src="views/wanbetalers-v2.js?v=62"></script>
+  <!-- Spraak naar tekst. MOET vóór wanbetalers-v2.js én iris.js staan: allebei
+       die schermen tonen geen microfoon als window.IRIS_SPRAAK er niet is.
+       Stond eerst alleen vóór iris.js; sinds de gesprekken-module dezelfde
+       microfoon gebruikt (gat G1) hoort hij hierboven. Eén implementatie, twee
+       schermen — een tweede zou betekenen dat een verbetering aan de ene kant
+       de andere niet bereikt. -->
+  <script src="../iris/spraak.js?v=1"></script>
+  <script src="views/wanbetalers-v2.js?v=63"></script>
   <script src="views/setter-payout-v2.js?v=4"></script>
   <script src="views/opvolging-v2.js?v=71"></script>
   <script src="views/support-v2.js?v=5"></script>
@@ -227,9 +234,6 @@
        regel in MODS in app-shell.js nodig (`id: 'iris', preview: true`), anders
        geeft goMod() een stille return en toont de schil Dashboard. Bewaakt door
        tests/iris-schil-registratie.test.js. -->
-  <!-- Spraak naar tekst. MOET vóór iris.js staan: dat scherm valt terug op
-       "deze browser kan niet meeluisteren" als window.IRIS_SPRAAK er niet is. -->
-  <script src="../iris/spraak.js?v=1"></script>
   <script src="../iris/iris.js?v=11"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->

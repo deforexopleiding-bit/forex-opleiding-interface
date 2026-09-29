@@ -4765,6 +4765,7 @@
       ? window.KV_V2.helpers.emojiPickerButtonHtml('wbxComposeTxt', '😊')
       : '';
     const moreBtn = `<button class="btn btn-ghost btn-sm" style="font-size:12.5px;padding:4px 9px;font-weight:700;position:relative" onclick="event.stopPropagation();__wbxInboxComposeMenu()" title="Meer">⋮${composeMenu}</button>`;
+    const micBtn = _inboxMicHtml();
 
     return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
@@ -4774,7 +4775,7 @@
       ${composerHtml}
       ${errLine}
       <div style="display:flex;justify-content:flex-end;gap:5px;margin-top:8px;align-items:center;flex-wrap:wrap">
-        ${attachBtn}${tplBtn}${qrBtn}${joostBtn}${emojiBtn}${moreBtn}
+        ${micBtn}${attachBtn}${tplBtn}${qrBtn}${joostBtn}${emojiBtn}${moreBtn}
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;margin-left:6px" onclick="__wbxInboxSend()" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Bezig…' : 'Verstuur'}</button>
       </div>
     </div>`;
@@ -4791,6 +4792,82 @@
     if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
     return `<div id="wbxInboxComposeMenu" style="position:absolute;bottom:100%;right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 -6px 18px rgba(0,0,0,.14);min-width:210px;overflow:hidden;margin-bottom:4px">${items.join('')}</div>`;
   }
+
+  /* ── G1 — inspreken in plaats van typen ────────────────────────────────────
+     Iris had al een microfoon; de gesprekken-module niet. Dit is dezelfde
+     microfoon, niet een tweede: modules/iris/spraak.js levert window.IRIS_SPRAAK
+     en die wordt hier alleen aangeroepen. Een tweede implementatie zou betekenen
+     dat een verbetering aan de ene kant de andere kant niet bereikt — en dat
+     merk je pas als iemand klaagt dat het "in het andere scherm wél werkt".
+
+     Wat er NOOIT gebeurt: automatisch versturen. De tekst landt in het veld en
+     daar blijft hij staan tot iemand op Verstuur drukt. Inspreken is een manier
+     van typen, geen manier van versturen — dat onderscheid is het verschil
+     tussen een handige knop en een knop waar je bang voor bent. */
+  function _inboxMicHtml() {
+    const gv = _gv2();
+    if (!gv) return '';
+    const SP = (typeof window !== 'undefined') ? window.IRIS_SPRAAK : null;
+    // Kan deze browser het niet, dan tonen we de knop niet. Een knop die
+    // niets doet is erger dan geen knop: die laat je twijfelen aan je
+    // microfoon in plaats van aan je browser.
+    if (!SP || !SP.browserKanSpraak(window)) return '';
+
+    const bezig = !!_ui.inbox.spraakBezig;
+    return `<button class="btn btn-ghost btn-sm"
+      style="font-size:13px;padding:4px 9px;color:${bezig ? 'var(--rose)' : 'var(--text-2)'};${bezig ? 'animation:wbxMicPuls 1.2s ease-in-out infinite' : ''}"
+      onclick="__wbxInboxMic()"
+      title="${bezig ? 'Stoppen met opnemen' : 'Spreek je bericht in'}">${bezig ? '⏹' : '🎙'}</button>
+      <style>@keyframes wbxMicPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
+  }
+
+  window.__wbxInboxMic = () => {
+    const gv = _gv2();
+    if (!gv) return;
+    // Loopt er al een opname? Dan is deze klik de stopknop.
+    if (_ui.inbox.spraakHerkenner) {
+      try { _ui.inbox.spraakHerkenner.stop(); } catch (_) {}
+      return;
+    }
+
+    const SP = window.IRIS_SPRAAK;
+    const h = SP && SP.maakHerkenner(window, { taal: SP.TAAL });
+    if (!h) { _toast('Deze browser kan niet luisteren. Typen kan wel.', 'warn'); return; }
+
+    const c = _ui.inbox.compose;
+    // Wat er al staat blijft staan: je spreekt iets bij, je gooit niets weg.
+    const beginTekst = c.text || '';
+
+    const schrijfInVeld = (tekst) => {
+      c.text = tekst;
+      const el = document.getElementById('wbxComposeTxt');
+      // Rechtstreeks in het veld schrijven en niet via een hertekening: die
+      // zou de cursor verzetten en het veld onder je handen laten springen
+      // terwijl je nog aan het praten bent.
+      if (el && el.value !== tekst) el.value = tekst;
+    };
+
+    _ui.inbox.spraakHerkenner = h;
+    _ui.inbox.spraakBezig = true;
+    try { window.DFO?.render?.(); } catch (_) {}
+
+    // De tussenstand meeschrijven, zodat je ziet dat er geluisterd wordt.
+    // Een microfoon die pas na afloop iets toont, voelt als een microfoon die
+    // stuk is, en dan ga je harder praten of opnieuw beginnen.
+    h.onTekst((alles, tussentijds) => {
+      schrijfInVeld(SP.voegSamen(SP.voegSamen(beginTekst, alles), tussentijds));
+    });
+    h.onFout((tekst) => { _toast(tekst, 'warn'); });
+    h.onEinde((alles) => {
+      _ui.inbox.spraakHerkenner = null;
+      _ui.inbox.spraakBezig = false;
+      schrijfInVeld(SP.voegSamen(beginTekst, alles));
+      if (!String(alles || '').trim()) _toast('Er is niets verstaan.', 'warn');
+      try { window.DFO?.render?.(); } catch (_) {}
+    });
+
+    h.start();
+  };
 
   function _inboxCtxHtml(convId) {
     const ctx = _live.inbox.ctx.byConv[convId];
