@@ -1059,7 +1059,7 @@
             <tr style="border-top:1px solid var(--border);font-weight:600"><td style="padding:10px 0">Totaal</td><td></td><td></td><td style="text-align:right" class="money">${eur(total)}</td></tr>
           </tbody>
         </table>
-        <div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Tarieven vast in <code>api/_lib/coaching-earnings.js</code>. Aantallen komen live uit Bubble sessies-koppeling.</div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Tarieven vast in <code>api/_lib/coaching-earnings.js</code>. Aantallen komen live uit de afgeronde sessies en no-shows in het LMS.</div>
       `)}
     </div>
     ${renderConfirmModal()}`;
