@@ -250,6 +250,23 @@ export function resolveContent(payload) {
 }
 
 /**
+ * Richting van een GHL-API-bericht → 'in' | 'out' | null (onbekend = skip).
+ * Verhuisd uit api/cron-lisa-conversations-poll.js (2026-10-01) zodat poll en
+ * scripts/lisa-ig-backfill.mjs dezelfde regel gebruiken.
+ */
+export function detectDirection(msg) {
+  const dir = String(msg?.direction || '').toLowerCase();
+  if (dir === 'inbound' || dir === 'in') return 'in';
+  if (dir === 'outbound' || dir === 'out') return 'out';
+  const type = String(msg?.type || '').toLowerCase();
+  if (type.includes('inbound')) return 'in';
+  if (type.includes('outbound')) return 'out';
+  // Heuristiek: userId zonder contactId = outbound (door user verstuurd).
+  if (msg?.userId && !msg?.contactId) return 'out';
+  return null;
+}
+
+/**
  * Whitelist-guard (defensief, voor code die zelf message_type wil kiezen).
  * Retourneert 'unknown' als de input niet in de whitelist zit.
  */

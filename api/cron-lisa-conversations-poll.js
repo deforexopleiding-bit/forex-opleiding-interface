@@ -11,6 +11,13 @@
 //
 // Dedup-sleutel: `lisa_messages.ghl_message_id` (partial unique index
 // `idx_lisa_msg_ghl`, migratie 003). Idempotent bij re-runs.
+// Sinds 2026-10-01 kan de webhook berichten ZONDER GHL-id opslaan (met een
+// synthetische 'syn:'-id); deze poll upgradet zo'n rij naar de echte id via
+// ingestLisaMessage() — zie api/_lib/lisa-message-ingest.js.
+//
+// Stilte-alarm: elke run ook controleerIgStilte() (api/_lib/lisa-ig-stilte.js)
+// — meldt managers + mail als er X uur geen IG-instroom is of de webhook stil
+// valt terwijl de poll nog berichten vindt.
 //
 // Backfill: watermark = MAX(sent_at) van bestaande lisa_messages met
 // ghl_message_id, minus 60 min veiligheid. Bij eerste run met stilte sinds
@@ -22,7 +29,13 @@
 // Auth: CRON_SECRET via Authorization header (of Vercel cron intern).
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
-import { resolveContent } from './_lib/lisa-message-type.js';
+import { resolveContent, detectDirection } from './_lib/lisa-message-type.js';
+import { ingestLisaMessage } from './_lib/lisa-message-ingest.js';
+import { controleerIgStilte } from './_lib/lisa-ig-stilte.js';
+import { createNotification } from './_lib/notify.js';
+import { sendMail } from './_lib/email.js';
+
+const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const GHL_VERSION  = '2021-04-15';
@@ -79,18 +92,6 @@ function isInstagram(msgOrConv) {
   return raw.includes('instagram') || raw === 'ig' || raw === 'type_ig';
 }
 
-function detectDirection(msg) {
-  const dir = String(msg?.direction || '').toLowerCase();
-  if (dir === 'inbound' || dir === 'in') return 'in';
-  if (dir === 'outbound' || dir === 'out') return 'out';
-  const type = String(msg?.type || '').toLowerCase();
-  if (type.includes('inbound')) return 'in';
-  if (type.includes('outbound')) return 'out';
-  // Heuristiek: userId zonder contactId = outbound (door user verstuurd).
-  if (msg?.userId && !msg?.contactId) return 'out';
-  return null;
-}
-
 async function ghlFetch(url) {
   return fetch(url, {
     headers: {
@@ -145,6 +146,14 @@ export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
+  // 2026-10-01 — stilte-alarm vóór de GHL-loop: goedkoop (3 selects), en zo
+  // draait het ook als de loop op ABORT_MS afbreekt of GHL-env ontbreekt.
+  // Faalzacht: controleerIgStilte() gooit nooit. Zie api/_lib/lisa-ig-stilte.js.
+  const stilte = await controleerIgStilte({
+    notify: createNotification,
+    mail: ({ subject, html }) => sendMail({ to: ALARM_NAAR, subject, html }),
+  });
+
   if (!process.env.GHL_API_KEY || !process.env.GHL_LOCATION_ID) {
     return res.status(500).json({ error: 'GHL_API_KEY of GHL_LOCATION_ID niet geconfigureerd.' });
   }
@@ -159,6 +168,7 @@ export default async function handler(req, res) {
     contacts_iterated:   0,
     messages_seen:       0,
     messages_upserted:   0,
+    messages_upgraded:   0,              // id-loze webhook-rij kreeg de echte GHL-id
     conversations_created: 0,
     dedup_skipped:       0,
     errors:              0,
@@ -172,6 +182,7 @@ export default async function handler(req, res) {
       .from('lisa_messages')
       .select('sent_at')
       .not('ghl_message_id', 'is', null)
+      .not('ghl_message_id', 'like', 'syn:%')   // synthetische webhook-ids tellen niet
       .order('sent_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -317,28 +328,26 @@ export default async function handler(req, res) {
             }
 
             // BP3 v5 (2026-09-02) — .insert() met 23505-catch i.p.v. .upsert()
-            // met onConflict-hint. PostgREST accepteert partial UNIQUE-index
-            // (WHERE ghl_message_id IS NOT NULL) niet betrouwbaar als
-            // on-conflict-target (42P10) — silent-failure. Nu:
-            //   - error.code '23505' → duplicate (tel als dedup_skipped, geen fout)
-            //   - andere error → console.error met code/message/details/hint
-            const { error: insErr } = await supabaseAdmin.from('lisa_messages').insert({
-              conversation_id: lisaConvId,
+            // (PostgREST accepteert de partial UNIQUE-index niet betrouwbaar
+            // als on-conflict-target). Sinds 2026-10-01 via ingestLisaMessage():
+            // eerst zoeken naar een id-loze tweeling (syn:… of NULL) die de
+            // webhook eerder opsloeg. Zo'n rij krijgt hier de ECHTE GHL-id
+            // (+ sent_at = dateAdded) i.p.v. dat er een tweede rij naast komt.
+            // Zie api/_lib/lisa-message-ingest.js.
+            const ingest = await ingestLisaMessage(supabaseAdmin, {
+              conversationId: lisaConvId,
               direction,
-              content:         msgContent,
-              message_type:    msgType,
-              attachment_url:  msgAttachmentUrl,
-              sent_at:         sentAt,
-              ai_generated:    false,
-              ghl_message_id:  ghlMsgId,
+              content:        msgContent,
+              messageType:    msgType,
+              attachmentUrl:  msgAttachmentUrl,
+              ghlMessageId:   ghlMsgId,
+              sentAt,
             });
-            if (insErr) {
-              if (insErr.code === '23505') {
-                stats.dedup_skipped++;
-                continue;
-              }
+            if (ingest.status === 'duplicate') { stats.dedup_skipped++; continue; }
+            if (ingest.status === 'upgraded')  { stats.messages_upgraded++; continue; }
+            if (ingest.status === 'error') {
               console.error('[lisa-poll] insert faalde:',
-                insErr.code, insErr.message, insErr.details || '', insErr.hint || '',
+                ingest.error?.code, ingest.error?.message,
                 { ghl_message_id: ghlMsgId, conv_id: lisaConvId, message_type: msgType });
               stats.errors++;
               continue;
@@ -375,6 +384,7 @@ export default async function handler(req, res) {
     }
 
     stats.duration_ms = Date.now() - startTime;
+    stats.stilte = { gemeten: stilte.gemeten, alarm: stilte.alarm, redenen: stilte.redenen || [], gemeld: !!stilte.gemeld };
     console.log('[lisa-poll] done:', JSON.stringify(stats));
     return res.status(200).json(stats);
   } catch (err) {
