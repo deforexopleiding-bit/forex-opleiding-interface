@@ -17,8 +17,12 @@
 //     offertebedrag (afrondingsverschil vs. echte mismatch).
 //
 // Structuur:
-//   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + sales + ledger-regels.
-//   /Uitbetalen — manager-only: bundelen (setter + periode → run).
+//   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + commissie per maand
+//                + sales + ledger-regels.
+//   /Rapporten — setter-maandrapporten (vaste vergoeding + commissie);
+//                setter.payout.manage: genereren / goedkeuren / uitbetaald.
+//                Dit is het ENIGE uitbetaalpad voor setters (de oude
+//                uitbetaalronde is uitgeschakeld).
 
 (function () {
   'use strict';
@@ -109,30 +113,8 @@
   window.__spSetCustomFrom = (v) => { _sp.from = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
   window.__spSetCustomTo   = (v) => { _sp.to   = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
 
-  window.__spRunPayout = async () => {
-    // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
-    // gebruik canSync (super_admin-wildcard zit al in de helper).
-    const canPayout = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('setter.payout.manage'));
-    if (!canPayout) {
-      window.KV?.toast?.('Geen rechten (setter.payout.manage)', 'warn'); return;
-    }
-    const setterId = _sp.selectedSetter || (_sp.data && _sp.data.setter_user_id);
-    if (!setterId) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const first = today.slice(0, 8) + '01';
-    const start = prompt('Periode start (YYYY-MM-DD)', first); if (!start) return;
-    const end   = prompt('Periode einde (YYYY-MM-DD)', today); if (!end) return;
-    try {
-      const r = await window.KV.authedJson('/api/setter-payout-run', {
-        method: 'POST',
-        body: JSON.stringify({ setter_user_id: setterId, period_start: start, period_end: end }),
-      });
-      window.KV?.toast?.(r?.entry_count ? `Payout aangemaakt: ${r.entry_count} regels, ${eur(r.total_amount || 0)}` : 'Geen vrijgegeven regels in deze periode', 'ok');
-      loadOverview(setterId);
-    } catch (e) {
-      window.KV?.toast?.('Payout mislukt: ' + (e?.message || 'onbekend'), 'warn');
-    }
-  };
+  // De oude uitbetaalronde-knop is verwijderd (het endpoint weigert met 410):
+  // setter-commissie wordt alleen nog uitbetaald via de tab Rapporten.
 
   function _kpi(label, val, color) {
     return `<div style="flex:1;min-width:180px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
@@ -440,7 +422,8 @@
     if (!_sp.monthly && !_sp.monthlyLoading && !_sp.monthlyError) { _sp.monthlyLoading = true; queueMicrotask(() => loadMonthly(_sp.selectedSetter)); }
     // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
     // gebruik canSync + ensurePermissionsLoaded. Zonder deze fix zag zelfs
-    // super_admin geen staff-picker of "Uitbetaalronde draaien"-knop.
+    // super_admin geen staff-picker. (De "Uitbetaalronde draaien"-knop is
+    // weg sinds het maandrapport — uitbetalen gaat via tab Rapporten.)
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
       _sp._permsWarmed = true;
       window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
@@ -490,10 +473,7 @@
       ${_timelineChart()}
       ${_monthlySection()}
       ${_salesTable(d.sales)}
-      ${canPayout ? `<div style="margin-bottom:14px">
-        <button class="btn btn-primary" style="font-size:12.5px;padding:6px 12px" onclick="window.__spRunPayout()">Uitbetaalronde draaien</button>
-        <span style="margin-left:10px;font-size:11.5px;color:var(--text-3)">Bundelt alle vrijgegeven regels in de gekozen periode.</span>
-      </div>` : ''}
+      ${canPayout ? `<div style="margin-bottom:14px;font-size:11.5px;color:var(--text-3)">Uitbetalen gaat via het maandrapport: tab <b>Rapporten</b> (bovenaan deze module) → goedkeuren → uitbetaald.</div>` : ''}
       <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Uitbetaalregels (in periode)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="tbl-wrap">
@@ -513,9 +493,148 @@
     </div>`;
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // Tab Rapporten — setter-maandrapport (vaste vergoeding + commissie).
+  // Setter ziet eigen rapporten; setter.payout.manage mag genereren,
+  // goedkeuren, uitbetaald zetten en heropenen.
+  // ══════════════════════════════════════════════════════════════════════
+  const _spR = { data: null, loading: false, error: null, open: null, busy: false, forSetter: undefined };
+
+  async function loadReports(setterId) {
+    _spR.loading = true; _spR.error = null; _spR.forSetter = setterId || null;
+    if (window.DFO?.render) window.DFO.render();
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('reports', '/api/setter-reports' + q);
+    _spR.loading = false;
+    if (!j) _spR.error = 'Kon rapporten niet laden'; else _spR.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  window.__spRToggle = (id) => { _spR.open = (_spR.open === id) ? null : id; if (window.DFO?.render) window.DFO.render(); };
+
+  async function _reportAction(body, okMsg) {
+    if (_spR.busy) return;
+    _spR.busy = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/setter-reports', { method: 'POST', body: JSON.stringify(body) });
+      window.KV?.toast?.(okMsg, 'ok');
+    } catch (e) {
+      window.KV?.toast?.('Mislukt: ' + (e?.message || 'onbekend'), 'warn');
+    } finally {
+      _spR.busy = false;
+      loadReports(_spR.forSetter).catch(() => {});
+    }
+  }
+  window.__spRGenerate = () => {
+    const setterId = _sp.selectedSetter || (_spR.data && _spR.data.setter_user_id);
+    if (!setterId) return;
+    const d = new Date();
+    const vorige = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+    const month = prompt('Rapport genereren voor maand (YYYY-MM)', vorige);
+    if (!month) return;
+    _reportAction({ action: 'generate', setter_user_id: setterId, month }, 'Concept-rapport bijgewerkt');
+  };
+  window.__spRAction = (action, id) => {
+    const vragen = {
+      approve:   'Rapport goedkeuren? Het concept wordt eerst herberekend.',
+      mark_paid: 'Rapport markeren als UITBETAALD? De commissieregels in dit rapport worden definitief geboekt als uitbetaald.',
+      reopen:    'Goedgekeurd rapport heropenen (terug naar concept)?',
+    };
+    if (!confirm(vragen[action] || 'Doorgaan?')) return;
+    _reportAction({ action, report_id: id }, { approve: 'Goedgekeurd', mark_paid: 'Uitbetaald', reopen: 'Heropend' }[action] || 'Klaar');
+  };
+
+  function _statusChip(s) {
+    const map = { concept: ['var(--amber)', 'concept'], goedgekeurd: ['var(--brand)', 'goedgekeurd'], uitbetaald: ['var(--emerald)', '✓ uitbetaald'] };
+    const [c, l] = map[s] || ['var(--text-3)', s];
+    return `<span style="color:${c};font-weight:600">${esc(l)}</span>`;
+  }
+
+  function _reportLines(r) {
+    const rows = (r.lines || []).map((l) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(l.label)}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${l.betaal_datum ? esc(fmtDate(l.betaal_datum)) : ''}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--text-3)">${l.basis == null ? '' : esc(eur(l.basis))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};font-weight:600;color:${Number(l.amount) < 0 ? 'var(--rose)' : 'var(--text-1)'}">${esc(eur(l.amount))}</td>
+      </tr>`).join('');
+    return `<div style="padding:12px 16px;border-top:1px dashed var(--border)"><div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+        <th style="padding:5px 10px">Omschrijving</th><th style="padding:5px 10px">Betaald op</th>
+        <th style="padding:5px 10px;text-align:right">Ontvangen</th><th style="padding:5px 10px;text-align:right">Bedrag</th>
+      </tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text-3)">Geen regels.</td></tr>`}</tbody>
+      <tfoot><tr><td colspan="3" style="padding:6px 10px;font-size:12px;font-weight:600">Totaal (incl. btw)</td>
+        <td style="padding:6px 10px;font-size:12px;${_num};font-weight:700">${esc(eur(r.total))}</td></tr></tfoot>
+    </table></div></div>`;
+  }
+
+  function rapportenView() {
+    const _canSync = (k) => !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(k));
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
+      _sp._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const isAdmin = _canSync('setter.ledger.admin');
+    const canManage = _canSync('setter.payout.manage');
+    if (isAdmin && !_spStaff.items && !_spStaff.loading) queueMicrotask(() => loadStaff());
+    if (!_spR.loading && (_spR.forSetter === undefined || _spR.forSetter !== (_sp.selectedSetter || null)) && !_spR.error) {
+      _spR.loading = true;
+      queueMicrotask(() => loadReports(_sp.selectedSetter));
+    }
+    const staff = _spStaff.items || [];
+    const picker = isAdmin ? `<div style="margin-bottom:14px">
+        <label style="font-size:11.5px;color:var(--text-3);margin-right:8px">Bekijk setter:</label>
+        <select onchange="window.__spSelectSetter(this.value)" style="padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px">
+          <option value="">— Ikzelf —</option>
+          ${staff.map((s) => `<option value="${esc(s.id)}" ${_sp.selectedSetter === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    const intro = `<div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Per maand: je vaste vergoeding plus de commissie op betalingen die in die maand binnenkwamen (incl. btw). Een concept wordt elke dag bijgewerkt tot het is goedgekeurd.</div>`;
+    const genKnop = canManage
+      ? `<div style="margin-bottom:14px"><button class="btn" style="font-size:12.5px;padding:6px 12px" ${_spR.busy ? 'disabled' : ''} onclick="window.__spRGenerate()">Rapport genereren / bijwerken</button></div>`
+      : '';
+    if (_spR.loading && !_spR.data) return `<div class="pad" style="padding:20px">${picker}${intro}<div>Laden…</div></div>`;
+    if (_spR.error) return `<div class="pad" style="padding:20px">${picker}<div style="color:var(--rose)">⚠ ${esc(_spR.error)}</div></div>`;
+    const d = _spR.data || { reports: [] };
+    if (d.migratie_nodig) {
+      return `<div class="pad" style="padding:20px">${picker}${intro}<div style="padding:16px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--r-sm);font-size:12.5px">Maandrapporten zijn nog niet beschikbaar: de database-migratie <code>2026-10-01-setter-maandrapport.sql</code> is nog niet gedraaid.</div></div>`;
+    }
+    const rows = (d.reports || []).map((r) => {
+      const open = _spR.open === r.id;
+      const acties = canManage ? [
+        r.status === 'concept'     ? `<button class="btn btn-primary" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('approve','${esc(r.id)}')">Goedkeuren</button>` : '',
+        r.status === 'goedgekeurd' ? `<button class="btn btn-primary" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('mark_paid','${esc(r.id)}')">Uitbetaald</button>` : '',
+        r.status === 'goedgekeurd' ? `<button class="btn" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('reopen','${esc(r.id)}')">Heropenen</button>` : '',
+      ].join(' ') : '';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window.__spRToggle('${esc(r.id)}')">
+          <td style="padding:8px 10px;font-size:12.5px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(maandLabel(r.period_month))}</td>
+          <td style="padding:8px 10px;font-size:12px">${_statusChip(r.status)}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.fee_total))}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.commission_total))}</td>
+          <td style="padding:8px 10px;font-size:12.5px;${_num};font-weight:700">${esc(eur(r.total))}</td>
+          <td style="padding:8px 10px;text-align:right;white-space:nowrap">${acties}</td>
+        </tr>${open ? `<tr><td colspan="6" style="padding:0">${_reportLines(r)}</td></tr>` : ''}`;
+    }).join('');
+    return `<div class="pad" style="padding:20px">
+      ${picker}${intro}${genKnop}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden"><div class="tbl-wrap">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+            <th style="padding:8px 10px">Maand</th><th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px;text-align:right">Vaste vergoeding</th><th style="padding:8px 10px;text-align:right">Commissie</th>
+            <th style="padding:8px 10px;text-align:right">Totaal</th><th style="padding:8px 10px"></th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Nog geen maandrapporten. Op de 1e van elke maand wordt het rapport van de vorige maand klaargezet.</td></tr>`}</tbody>
+        </table>
+      </div></div>
+    </div>`;
+  }
+
   window.DFO = window.DFO || { VIEWS: {} };
   window.DFO.VIEWS = window.DFO.VIEWS || {};
   window.DFO.VIEWS['setter-payout/Overzicht'] = overzichtView;
+  window.DFO.VIEWS['setter-payout/Rapporten'] = rapportenView;
 
   // Registreer als v2-native module bij de klanten-v2 shell zodat de
   // hash-router (#setter-payout) 'em oppikt i.p.v. terug te vallen op
