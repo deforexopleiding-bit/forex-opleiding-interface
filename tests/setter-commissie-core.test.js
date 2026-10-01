@@ -78,21 +78,67 @@ test('afronding telescopisch: 3 × 33,33 → Σ = round2(99,99 × 3 %)', () => {
   assert.equal(som, Math.round(99.99 * 3) / 100);
 });
 
-test('creditnota na commissie → negatieve correctie, betaaldatum = rundatum', () => {
+test('forward-only: creditnota NA boeking → geen nieuwe regel, niets negatiefs, geboekte commissie blijft', () => {
   const geboekt = reken([{ inv: inv(), deal: DEAL, bron: 'deal' }]).mutaties.map(alsRegel);
   // Na PR #1699: volledig gecrediteerd → status credited, amount_paid 0.
-  const r = reken([{ inv: inv({ status: 'credited', amount_paid: 0, credited_amount: 600 }), deal: DEAL, bron: 'deal' }], geboekt);
-  assert.equal(r.mutaties.length, 1);
-  assert.equal(r.mutaties[0].basis, -600);
-  assert.equal(r.mutaties[0].amount, -18);
-  assert.equal(r.mutaties[0].betaal_datum, '2026-10-20');
-  assert.match(r.mutaties[0].note, /correctie/);
-  assert.equal(r.facturen[0].reden, 'correctie');
+  const vol = reken([{ inv: inv({ status: 'credited', amount_paid: 0, credited_amount: 600 }), deal: DEAL, bron: 'deal' }], geboekt);
+  assert.equal(vol.mutaties.length, 0);
+  assert.equal(vol.facturen[0].reden, 'gecrediteerd_na_boeking_blijft_staan');
+  assert.equal(vol.facturen[0].gewenste_commissie, 18, 'de geboekte 18 blijft de stand');
+  // Deels gecrediteerd (200 terug) → ook niets.
+  const deels = reken([{ inv: inv({ amount_paid: 400, credited_amount: 200 }), deal: DEAL, bron: 'deal' }], geboekt);
+  assert.equal(deels.mutaties.length, 0);
 });
 
-test('credit-veilig: oude rij "paid" + amount_paid = totaal maar volledig gecrediteerd → geen commissie', () => {
-  const r = reken([{ inv: inv({ status: 'paid', amount_paid: 600, credited_amount: 600 }), deal: DEAL, bron: 'deal' }]);
-  assert.equal(r.mutaties.length, 0);
+test('forward-only: creditnota VÓÓR boeking → geen regel (ook niet via een oude "paid"-rij)', () => {
+  const nieuw = reken([{ inv: inv({ status: 'credited', amount_paid: 0, credited_amount: 600 }), deal: DEAL, bron: 'deal' }]);
+  assert.equal(nieuw.mutaties.length, 0);
+  assert.equal(nieuw.facturen[0].reden, 'gecrediteerd_geen_commissie');
+  const oudeRij = reken([{ inv: inv({ status: 'paid', amount_paid: 600, credited_amount: 600 }), deal: DEAL, bron: 'deal' }]);
+  assert.equal(oudeRij.mutaties.length, 0);
+});
+
+test('forward-only: herbetaling na creditnota telt niet dubbel (geboekte basis = hoogwatermerk)', () => {
+  let bestaand = reken([{ inv: inv({ amount_paid: 300, status: 'partially_paid' }), deal: DEAL, bron: 'deal' }]).mutaties.map(alsRegel);
+  // 300 betaald en geboekt; daarna creditnota → betaald zakt naar 0: niets.
+  assert.equal(reken([{ inv: inv({ amount_paid: 0, credited_amount: 300, status: 'open' }), deal: DEAL, bron: 'deal' }], bestaand).mutaties.length, 0);
+  // Opnieuw 300 betaald → nog steeds ≤ geboekte basis → niets.
+  assert.equal(reken([{ inv: inv({ amount_paid: 300, credited_amount: 300 }), deal: DEAL, bron: 'deal' }], bestaand).mutaties.length, 0);
+  // Daarna 600 betaald → alleen de 300 boven het hoogwatermerk.
+  const r = reken([{ inv: inv({ amount_paid: 600, credited_amount: 0 }), deal: DEAL, bron: 'deal' }], bestaand);
+  assert.equal(r.mutaties.length, 1);
+  assert.equal(r.mutaties[0].basis, 300);
+  assert.equal(r.mutaties[0].amount, 9);
+  bestaand = bestaand.concat(r.mutaties.map(alsRegel));
+  assert.equal(bestaand.reduce((s, e) => s + e.amount, 0), 18, 'nooit meer dan 3 % van 600');
+});
+
+test('forward-only: elke mutatie is strikt positief; stap die op € 0,00 afrondt wordt niet geboekt', () => {
+  const stappen = [100, 250, 250, 600, 0, 600];
+  let bestaand = [];
+  for (const paid of stappen) {
+    const r = reken([{ inv: inv({ amount_paid: paid }), deal: DEAL, bron: 'deal' }], bestaand);
+    for (const m of r.mutaties) { assert.ok(m.amount > 0 && m.basis > 0, `positief: ${m.amount}`); }
+    bestaand = bestaand.concat(r.mutaties.map(alsRegel));
+  }
+  assert.equal(bestaand.length, 3, '100, +150, +350');
+  assert.equal(Math.round(bestaand.reduce((s, e) => s + e.amount, 0) * 100) / 100, 18);
+  // 1 cent × 3 % = 0,0003 → afgerond 0 → geen regel.
+  assert.equal(reken([{ inv: inv({ amount_paid: 0.01, amount_total: 0.01 }), deal: DEAL, bron: 'deal' }]).mutaties.length, 0);
+});
+
+test('boekMutaties weigert een regel van <= 0 (vangnet)', async () => {
+  const { boekMutaties } = await import('../api/_lib/setter-commissie-core.js');
+  const inserts = [];
+  const db = { from: () => ({ insert: async (row) => { inserts.push(row); return { error: null }; } }) };
+  const r = await boekMutaties(db, [
+    { idempotency_key: 'a', amount: -3, basis: -100 },
+    { idempotency_key: 'b', amount: 0, basis: 0.01 },
+    { idempotency_key: 'c', amount: 3, basis: 100 },
+  ]);
+  assert.equal(r.created, 1);
+  assert.equal(r.errors.length, 2);
+  assert.deepEqual(inserts.map((x) => x.idempotency_key), ['c']);
 });
 
 test('alleen betalingen vanaf effective_from; inactieve config / geen config → niets', () => {

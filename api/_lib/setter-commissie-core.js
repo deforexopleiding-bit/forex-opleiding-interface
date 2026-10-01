@@ -17,43 +17,50 @@
 //   - pct en scope uit setter_config: alleen is_active, en alleen facturen met
 //     paid_date >= effective_from.
 //
-// ── RECONCILE i.p.v. WATERMARK ───────────────────────────────────────────
-// Per (setter, factuur): gewenste basis = betaaldBedrag(inv); geboekte basis =
-// Σ setter_ledger_entries.basis. Verschil ≥ 1 cent → één nieuwe regel met
-// het VERSCHIL. Daardoor:
-//   - geen watermark: een terug-gedateerde betaling of een factuur die pas
-//     later aan de deal gekoppeld wordt, wordt de volgende run gewoon gezien;
-//   - deelbetalingen werken (elke stap een regel met de delta);
-//   - idempotent: tweede run → verschil 0 → niets. idempotency_key =
-//     `${setter}:inv:${invoice_id}:${n}:${betaald_centen}` met n = aantal
-//     bestaande regels voor die factuur. Twee gelijktijdige runs maken
-//     dezelfde sleutel → de UNIQUE-index laat er één door (23505 = al gedaan).
-//   - pct-wijziging raakt alleen NIEUW geld: het bedrag van een regel is
-//     round2(nieuw × pct) − round2(oud × pct) over de basis, op het pct van
-//     het moment van boeken.
+// ── FORWARD-ONLY RECONCILE i.p.v. WATERMARK ──────────────────────────────
+// Zelfde model als de mentorbonus: geboekte commissie blijft staan, er wordt
+// NOOIT teruggeboekt (geen clawback, geen negatieve regels).
 //
-// ── CREDIT / TERUGDRAAIEN NA COMMISSIE ───────────────────────────────────
-// BESLUIT: negatieve correctieregels (clawback), niet forward-only. Wordt een
-// factuur waarop al commissie geboekt is (deels) gecrediteerd of zakt het
-// betaalde bedrag, dan daalt de gewenste basis → een regel met een NEGATIEF
-// bedrag, status 'vrijgegeven', die in de volgende uitbetaling wordt
-// verrekend. Reden: de regel is "% van wat echt binnenkwam"; een creditnota
-// betekent dat het geld er niet (meer) is. Forward-only (zoals de
-// mentorbonus) zou commissie laten staan op geld dat terugging.
-// Betaaldatum van een correctie = de rundatum (de creditdatum kennen we niet).
-// Bekende beperking: setter_payouts.total_amount heeft CHECK >= 0 — een
-// uitbetaalronde met netto negatief saldo faalt en moet wachten op nieuwe
-// commissie.
+// Per (setter, factuur):
+//   ontvangen      = betaaldBedrag(inv) op het moment van de run (een
+//                    volledig gecrediteerde factuur = 0, ook als een oude rij
+//                    nog 'paid' + amount_paid = totaal zegt);
+//   geboekte basis = Σ setter_ledger_entries.basis voor die factuur;
+//   delta          = max(0, ontvangen − geboekte basis).
+// Alleen als delta ≥ € 0,01 EN het commissiebedrag van die stap > 0 komt er
+// één nieuwe regel bij. Een regel is dus altijd positief.
+//
+// De geboekte basis werkt als HOOGWATERMERK per factuur:
+//   - creditnota NA boeking → ontvangen zakt onder de geboekte basis →
+//     delta 0 → niets (de geboekte commissie blijft staan, er komt niets af);
+//   - creditnota VÓÓR boeking → ontvangen = 0 → niets;
+//   - herbetaling na een creditnota → er komt pas weer commissie bij voor
+//     het deel BOVEN de eerder geboekte basis. Per factuur wordt dus nooit
+//     meer basis geboekt dan het hoogste bedrag dat er ooit tegelijk als
+//     ontvangen op stond → geen dubbeltelling.
+//   - deelbetalingen: elke stap een regel met de (positieve) delta.
+//   - geen watermark nodig: een terug-gedateerde betaling of een factuur die
+//     pas later aan de deal gekoppeld wordt, wordt de volgende run gezien.
+//
+// Idempotentie: idempotency_key =
+//   `${setter}:inv:${invoice_id}:${n}:${ontvangen_centen}`
+// met n = aantal bestaande regels voor (setter, factuur). Een tweede run ziet
+// delta 0 → niets. Twee gelijktijdige runs maken dezelfde sleutel → de
+// UNIQUE-index laat er één door (23505 = al geboekt). Na een boeking stijgt n,
+// dus een volgende stap krijgt altijd een nieuwe, unieke sleutel.
+//
+// Bedrag per stap = round2(nieuw × pct) − round2(oud × pct) over de basis
+// (telescopisch: Σ stappen = round2(totaal × pct)); een pct-wijziging raakt
+// alleen nieuw geld.
 //
 // Niet meegenomen (gerapporteerd als 'overgeslagen', nooit geboekt):
-//   - setter zonder actieve setter_config;
+//   - setter zonder (actieve) setter_config;
 //   - factuur betaald vóór effective_from;
 //   - testfacturen (is_test);
-//   - gearchiveerde deals / afgewezen offertes (isUitgeslotenDeal) — daar
-//     boeken we niets bij (ook geen correctie), het geld wordt wel getoond.
+//   - gearchiveerde deals / afgewezen offertes (isUitgeslotenDeal);
 //   - betaald zonder paid_date (komt in de data niet voor; defensief).
 
-import { betaaldBedrag } from './factuur-betaald.js';
+import { betaaldBedrag, isVolledigGecrediteerd } from './factuur-betaald.js';
 import { isUitgeslotenDeal, round2 } from './setter-sale-plan.js';
 
 export const DRY_RUN_KEY = 'setter_commissie_dry_run';
@@ -108,10 +115,10 @@ export function commissieVoorStap(oudeBasis, nieuweBasis, pct) {
  * @param {object}   p.cfg            setter_config-rij (pct, is_active, effective_from) of null
  * @param {Array}    p.facturen       [{ inv, deal, bron }]
  * @param {Array}    p.bestaand       setter_ledger_entries van deze setter (invoice_id, basis, amount)
- * @param {string}   p.vandaag        'YYYY-MM-DD' (betaaldatum van correcties)
  * @returns {{ mutaties: Array, overgeslagen: Array, facturen: Array }}
+ *   Elke mutatie heeft basis > 0 en amount > 0 (forward-only).
  */
-export function berekenCommissieMutaties({ setterId, cfg, facturen = [], bestaand = [], vandaag }) {
+export function berekenCommissieMutaties({ setterId, cfg, facturen = [], bestaand = [] }) {
   const mutaties = [];
   const overgeslagen = [];
   const perFactuur = [];
@@ -147,16 +154,22 @@ export function berekenCommissieMutaties({ setterId, cfg, facturen = [], bestaan
     if (!cfg) { skip('geen_setter_config'); continue; }
     if (!cfg.is_active) { skip('setter_config_inactief'); continue; }
     if (ontvangen > 0.005 && !paidDate) { skip('betaald_zonder_betaaldatum'); continue; }
-    // Buiten de looptijd van de regeling: niets boeken én niets corrigeren.
+    // Buiten de looptijd van de regeling: niets boeken.
     if (paidDate && vanaf && paidDate < vanaf) { skip('betaald_voor_effective_from'); continue; }
-    if (!paidDate && al.aantal === 0) { regel.reden = 'nog_niet_betaald'; continue; }
 
-    regel.gewenste_commissie = round2(al.amount + commissieVoorStap(al.basis, ontvangen, pct));
-    const deltaBasis = round2(ontvangen - al.basis);
-    if (Math.abs(deltaBasis) < 0.01) { regel.reden = al.aantal ? 'al_geboekt' : 'nog_niet_betaald'; continue; }
+    // Forward-only: de geboekte basis is het hoogwatermerk.
+    const hoogste = Math.max(al.basis, ontvangen);
+    regel.gewenste_commissie = round2(al.amount + commissieVoorStap(al.basis, hoogste, pct));
+    const deltaBasis = round2(Math.max(0, ontvangen - al.basis));
+    const bedrag = commissieVoorStap(al.basis, al.basis + deltaBasis, pct);
+    if (deltaBasis < 0.01 || bedrag <= 0) {
+      if (al.aantal && ontvangen + 0.005 < al.basis) regel.reden = 'gecrediteerd_na_boeking_blijft_staan';
+      else if (al.aantal) regel.reden = 'al_geboekt';
+      else if (isVolledigGecrediteerd(inv)) regel.reden = 'gecrediteerd_geen_commissie';
+      else regel.reden = 'nog_niet_betaald';
+      continue;
+    }
 
-    const isCorrectie = deltaBasis < 0;
-    const centen = Math.round(ontvangen * 100);
     mutaties.push({
       setter_user_id: setterId,
       deal_id: deal.id,
@@ -166,17 +179,16 @@ export function berekenCommissieMutaties({ setterId, cfg, facturen = [], bestaan
       basis: deltaBasis,
       basis_incl_btw: true,
       pct,
-      amount: commissieVoorStap(al.basis, ontvangen, pct),
+      amount: bedrag,
       status: 'vrijgegeven',
-      idempotency_key: `${setterId}:inv:${inv.id}:${al.aantal}:${centen}`,
-      betaal_datum: isCorrectie ? vandaag : paidDate,
+      idempotency_key: `${setterId}:inv:${inv.id}:${al.aantal}:${Math.round(ontvangen * 100)}`,
+      betaal_datum: paidDate,
       note: [
         inv.invoice_number ? `Factuur ${inv.invoice_number}` : 'Factuur',
         bron === 'reserveringsfee' ? 'reserveringsfee' : null,
-        isCorrectie ? `correctie: ontvangen ${ontvangen.toFixed(2)} (was ${al.basis.toFixed(2)})` : null,
       ].filter(Boolean).join(' · '),
     });
-    regel.reden = isCorrectie ? 'correctie' : 'te_boeken';
+    regel.reden = 'te_boeken';
   }
   return { mutaties, overgeslagen, facturen: perFactuur };
 }
@@ -209,7 +221,9 @@ export function maandOverzicht({ entries = [], facturen = [], pct = 0 }) {
     if (f.gewenste_commissie == null || !f.paid_date) continue;
     const b = get(f.paid_date.slice(0, 7));
     b.ontvangen = round2(b.ontvangen + f.ontvangen);
-    b.berekend = round2(b.berekend + round2(f.ontvangen * n(pct) / 100));
+    // Forward-only: berekend = wat er (al of straks) geboekt staat voor deze
+    // factuur — een creditnota na boeking verlaagt dat niet.
+    b.berekend = round2(b.berekend + n(f.gewenste_commissie));
   }
   return [...m.values()].sort((a, b) => b.maand.localeCompare(a.maand));
 }
@@ -265,7 +279,7 @@ export async function laadCommissieData(db, { setterIds = null } = {}) {
 }
 
 /** Combineer data → plan per setter. Pure. */
-export function planCommissie(data, { vandaag }) {
+export function planCommissie(data, _opts = {}) {
   const koppeling = koppelFacturenAanDeals(data);
   const perSetter = [];
   for (const sid of data.setterIds) {
@@ -276,7 +290,7 @@ export function planCommissie(data, { vandaag }) {
       if (k && k.deal.setter_user_id === sid) facturen.push({ inv, ...k });
     }
     const bestaand = data.entries.filter((e) => e.setter_user_id === sid);
-    const r = berekenCommissieMutaties({ setterId: sid, cfg, facturen, bestaand, vandaag });
+    const r = berekenCommissieMutaties({ setterId: sid, cfg, facturen, bestaand });
     perSetter.push({
       setter_user_id: sid,
       config: cfg,
@@ -320,6 +334,12 @@ export async function isSetterCommissieDryRun(db) {
 export async function boekMutaties(db, mutaties) {
   const out = { created: 0, skipped: 0, errors: [] };
   for (const m of mutaties) {
+    // Forward-only vangnet: nooit een regel van <= 0 boeken.
+    if (!(Number(m.amount) > 0) || !(Number(m.basis) > 0)) {
+      console.error('[setter-commissie] regel <= 0 geweigerd', m.idempotency_key, m.amount);
+      out.errors.push({ key: m.idempotency_key, error: 'bedrag of basis <= 0 geweigerd (forward-only)' });
+      continue;
+    }
     try {
       const { error } = await db.from('setter_ledger_entries').insert(m);
       if (!error) { out.created++; continue; }

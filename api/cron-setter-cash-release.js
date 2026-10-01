@@ -2,8 +2,10 @@
 //
 // Dagelijkse cron (schedule: 0 6 * * * — via vercel.json, ongewijzigd).
 // Boekt setter-commissie op FACTUREN: pct % van elk bedrag dat echt binnenkwam
-// op een factuur van een setter-deal. Volledige regels + het besluit over
-// creditnota's (negatieve correctieregels): zie _lib/setter-commissie-core.js.
+// op een factuur van een setter-deal. FORWARD-ONLY (zoals de mentorbonus):
+// geboekte commissie blijft staan, een latere creditnota boekt niets terug;
+// er wordt nooit een regel van <= 0 geboekt. Volledige regels: zie
+// _lib/setter-commissie-core.js.
 //
 // Vervangt de oude flow (payments-tabel + setter_watermark): die zag alleen
 // betalingen die in het CRM geregistreerd waren (±43 van ±1.400 betaalde
