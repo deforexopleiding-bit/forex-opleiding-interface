@@ -3,8 +3,13 @@
 // Setter-maandrapporten (tab Rapporten in de Commissie-module).
 //
 // GET  ?setter_user_id=<uuid>   (optioneel; default: user zelf)
-//   → { setter_user_id, reports: [{ id, period_month, status, fee_total,
-//       commission_total, total, generated_at, approved_at, paid_at, lines:[…] }] }
+//   → { setter_user_id, btw_pct, reports: [{ id, period_month, status,
+//       btw_pct, fee_excl/_btw/_incl, commission_excl/_btw/_incl,
+//       total_excl/_btw/_incl, (aliassen fee_total/commission_total/total
+//       = incl), legacy_btw, generated_at, approved_at, paid_at,
+//       lines:[{ …, btw_pct, amount_excl, amount_btw, amount_incl }] }] }
+//   btw_pct komt uit SETTER_BTW_PCT (_lib/setter-report-core.js) — de UI
+//   hardcodeert het tarief niet.
 //   Gate: setter.ledger.view; een andere setter vereist setter.ledger.admin.
 //
 // POST { action, … }   Gate: setter.payout.manage
@@ -21,35 +26,49 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { computeAndUpsertSetterReport, normalizeMonthStart, migratieFout } from './_lib/setter-report-core.js';
+import {
+  computeAndUpsertSetterReport, normalizeMonthStart, migratieFout, normaliseerRapport, SETTER_BTW_PCT,
+} from './_lib/setter-report-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const REPORT_BASE = 'id, setter_user_id, period_month, status, fee_total, commission_total, total, generated_at, approved_at, paid_at';
+const REPORT_BTW = ', btw_pct, fee_excl, fee_btw, fee_incl, commission_excl, commission_btw, commission_incl, total_excl, total_btw, total_incl';
+const LINE_BASE = 'id, report_id, kind, label, invoice_id, deal_id, customer_id, betaal_datum, basis, pct, amount, position';
+const LINE_BTW = ', btw_pct, amount_excl, amount_btw, amount_incl';
+
 async function lijst(res, setterId) {
-  const { data: reports, error } = await supabaseAdmin.from('setter_monthly_reports')
-    .select('id, setter_user_id, period_month, status, fee_total, commission_total, total, generated_at, approved_at, paid_at')
+  // Met btw-kolommen; vóór migratie 2026-10-01-setter-rapport-btw (kolom ontbreekt) terugvallen
+  // op de oude kolommen — die rapporten worden dan als legacy (incl.) gesplitst.
+  const haal = (btw) => supabaseAdmin.from('setter_monthly_reports')
+    .select(REPORT_BASE + (btw ? REPORT_BTW : ''))
     .eq('setter_user_id', setterId).order('period_month', { ascending: false }).limit(36);
+  let metBtw = true;
+  let { data: reports, error } = await haal(true);
+  if (error && migratieFout(error)) { metBtw = false; ({ data: reports, error } = await haal(false)); }
   if (error) {
-    if (migratieFout(error)) return res.status(200).json({ setter_user_id: setterId, reports: [], migratie_nodig: true });
+    if (migratieFout(error)) return res.status(200).json({ setter_user_id: setterId, reports: [], migratie_nodig: true, btw_pct: SETTER_BTW_PCT });
     throw new Error('rapporten: ' + error.message);
   }
   const ids = (reports || []).map((r) => r.id);
   let lines = [];
   if (ids.length) {
     const { data, error: lErr } = await supabaseAdmin.from('setter_monthly_report_lines')
-      .select('id, report_id, kind, label, invoice_id, deal_id, customer_id, betaal_datum, basis, pct, amount, position')
+      .select(LINE_BASE + (metBtw ? LINE_BTW : ''))
       .in('report_id', ids).order('position', { ascending: true });
     if (lErr) throw new Error('regels: ' + lErr.message);
     lines = data || [];
   }
-  const num = (v) => Number(v) || 0;
   return res.status(200).json({
     setter_user_id: setterId,
-    reports: (reports || []).map((r) => ({
-      ...r,
-      fee_total: num(r.fee_total), commission_total: num(r.commission_total), total: num(r.total),
-      lines: lines.filter((l) => l.report_id === r.id).map((l) => ({ ...l, amount: num(l.amount), basis: l.basis == null ? null : num(l.basis) })),
-    })),
+    // Het huidige tarief (voor nieuwe/herberekende rapporten); elk rapport en
+    // elke regel heeft daarnaast z'n eigen btw_pct.
+    btw_pct: SETTER_BTW_PCT,
+    btw_migratie_nodig: !metBtw,
+    reports: (reports || []).map((r) => {
+      const { report, lines: ls } = normaliseerRapport(r, lines.filter((l) => l.report_id === r.id));
+      return { ...report, lines: ls };
+    }),
   });
 }
 
@@ -101,7 +120,12 @@ export default async function handler(req, res) {
       if (!UUID_RE.test(setterId)) return res.status(400).json({ error: 'setter_user_id (uuid) vereist' });
       if (!month) return res.status(400).json({ error: 'month (YYYY-MM) vereist' });
       const r = await computeAndUpsertSetterReport({ db: supabaseAdmin, setterId, monthStart: month, actorId: user.id });
-      if (r.skipped) return res.status(409).json({ error: `Rapport is al ${r.status}`, code: 'AL_DEFINITIEF', ...r });
+      if (r.skipped) {
+        const uitleg = r.status === 'goedgekeurd'
+          ? 'Rapport is al goedgekeurd — eerst "Heropenen", dan opnieuw genereren.'
+          : `Rapport is al ${r.status} en wordt niet meer herberekend.`;
+        return res.status(409).json({ ...r, error: uitleg, code: 'AL_DEFINITIEF' });
+      }
       return res.status(200).json({ ok: true, ...r });
     }
 

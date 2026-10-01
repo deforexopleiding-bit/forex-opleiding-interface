@@ -551,21 +551,40 @@
     return `<span style="color:${c};font-weight:600">${esc(l)}</span>`;
   }
 
+  // Btw-tarief komt uit de API (rapport/regel btw_pct, anders het huidige
+  // tarief uit setter-reports) — niet hardcoded in de UI.
+  const pctTekst = (p) => String(Number(p || 0)).replace('.', ',');
+  const btwKop = (p) => `Btw ${pctTekst(p)}%`;
+
   function _reportLines(r) {
+    const td = (v, extra = '') => `<td style="padding:5px 10px;font-size:12px;${_num}${extra}">${esc(eur(v))}</td>`;
     const rows = (r.lines || []).map((l) => `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:5px 10px;font-size:12px">${esc(l.label)}</td>
         <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${l.betaal_datum ? esc(fmtDate(l.betaal_datum)) : ''}</td>
         <td style="padding:5px 10px;font-size:12px;${_num};color:var(--text-3)">${l.basis == null ? '' : esc(eur(l.basis))}</td>
-        <td style="padding:5px 10px;font-size:12px;${_num};font-weight:600;color:${Number(l.amount) < 0 ? 'var(--rose)' : 'var(--text-1)'}">${esc(eur(l.amount))}</td>
+        ${td(l.amount_excl)}${td(l.amount_btw, ';color:var(--text-3)')}${td(l.amount_incl, ';font-weight:600')}
       </tr>`).join('');
-    return `<div style="padding:12px 16px;border-top:1px dashed var(--border)"><div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+    const sub = (label, e, b, i, sterk) => `<tr${sterk ? ' style="border-top:1px solid var(--border)"' : ''}>
+        <td colspan="3" style="padding:5px 10px;font-size:12px;${sterk ? 'font-weight:700' : 'color:var(--text-2)'}">${esc(label)}</td>
+        ${td(e, sterk ? ';font-weight:700' : '')}${td(b, sterk ? ';font-weight:700' : ';color:var(--text-3)')}${td(i, sterk ? ';font-weight:700' : ';font-weight:600')}
+      </tr>`;
+    const legacy = r.legacy_btw
+      ? `<div style="margin-bottom:8px;font-size:11.5px;color:var(--amber)">Dit rapport is gemaakt vóór de btw-uitsplitsing: de bedragen zijn toen als incl. btw opgeslagen en hier alleen voor weergave gesplitst. Heropenen en opnieuw genereren rekent het met de huidige regels.</div>`
+      : '';
+    return `<div style="padding:12px 16px;border-top:1px dashed var(--border)">${legacy}<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
       <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
         <th style="padding:5px 10px">Omschrijving</th><th style="padding:5px 10px">Betaald op</th>
-        <th style="padding:5px 10px;text-align:right">Ontvangen</th><th style="padding:5px 10px;text-align:right">Bedrag</th>
+        <th style="padding:5px 10px;text-align:right">Ontvangen</th>
+        <th style="padding:5px 10px;text-align:right">Excl. btw</th>
+        <th style="padding:5px 10px;text-align:right">${esc(btwKop(r.btw_pct))}</th>
+        <th style="padding:5px 10px;text-align:right">Incl. btw</th>
       </tr></thead>
-      <tbody>${rows || `<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text-3)">Geen regels.</td></tr>`}</tbody>
-      <tfoot><tr><td colspan="3" style="padding:6px 10px;font-size:12px;font-weight:600">Totaal (incl. btw)</td>
-        <td style="padding:6px 10px;font-size:12px;${_num};font-weight:700">${esc(eur(r.total))}</td></tr></tfoot>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text-3)">Geen regels.</td></tr>`}</tbody>
+      <tfoot>
+        ${sub('Vaste vergoeding', r.fee_excl, r.fee_btw, r.fee_incl)}
+        ${sub('Commissie', r.commission_excl, r.commission_btw, r.commission_incl)}
+        ${sub('Totaal', r.total_excl, r.total_btw, r.total_incl, true)}
+      </tfoot>
     </table></div></div>`;
   }
 
@@ -590,7 +609,7 @@
           ${staff.map((s) => `<option value="${esc(s.id)}" ${_sp.selectedSetter === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
         </select>
       </div>` : '';
-    const intro = `<div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Per maand: je vaste vergoeding plus de commissie op betalingen die in die maand binnenkwamen (incl. btw). Een concept wordt elke dag bijgewerkt tot het is goedgekeurd.</div>`;
+    const intro = `<div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Per maand: je vaste vergoeding (excl. btw, btw komt erbij) plus de commissie op betalingen die in die maand binnenkwamen (commissie is incl. btw, hier uitgesplitst). Een concept wordt bijgewerkt tot het is goedgekeurd.</div>`;
     const genKnop = canManage
       ? `<div style="margin-bottom:14px"><button class="btn" style="font-size:12.5px;padding:6px 12px" ${_spR.busy ? 'disabled' : ''} onclick="window.__spRGenerate()">Rapport genereren / bijwerken</button></div>`
       : '';
@@ -610,9 +629,9 @@
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window.__spRToggle('${esc(r.id)}')">
           <td style="padding:8px 10px;font-size:12.5px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(maandLabel(r.period_month))}</td>
           <td style="padding:8px 10px;font-size:12px">${_statusChip(r.status)}</td>
-          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.fee_total))}</td>
-          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.commission_total))}</td>
-          <td style="padding:8px 10px;font-size:12.5px;${_num};font-weight:700">${esc(eur(r.total))}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.total_excl))}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num};color:var(--text-3)">${esc(eur(r.total_btw))}</td>
+          <td style="padding:8px 10px;font-size:12.5px;${_num};font-weight:700">${esc(eur(r.total_incl))}</td>
           <td style="padding:8px 10px;text-align:right;white-space:nowrap">${acties}</td>
         </tr>${open ? `<tr><td colspan="6" style="padding:0">${_reportLines(r)}</td></tr>` : ''}`;
     }).join('');
@@ -622,8 +641,9 @@
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
             <th style="padding:8px 10px">Maand</th><th style="padding:8px 10px">Status</th>
-            <th style="padding:8px 10px;text-align:right">Vaste vergoeding</th><th style="padding:8px 10px;text-align:right">Commissie</th>
-            <th style="padding:8px 10px;text-align:right">Totaal</th><th style="padding:8px 10px"></th>
+            <th style="padding:8px 10px;text-align:right">Excl. btw</th>
+            <th style="padding:8px 10px;text-align:right">${esc(btwKop(d.btw_pct))}</th>
+            <th style="padding:8px 10px;text-align:right">Incl. btw</th><th style="padding:8px 10px"></th>
           </tr></thead>
           <tbody>${rows || `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Nog geen maandrapporten. Op de 1e van elke maand wordt het rapport van de vorige maand klaargezet.</td></tr>`}</tbody>
         </table>
