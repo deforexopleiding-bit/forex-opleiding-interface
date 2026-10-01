@@ -172,6 +172,12 @@
   <script src="../shared/belvenster-kern.js?v=2"></script>
   <script src="../shared/klx-softphone.js?v=1e4"></script>
 
+  <!-- Wat een call-uitkomst betekent (Sale / Opvolgen / No show / …), één plek
+       voor server en scherm: window.CallUitkomstCategorie. Kern is gelijk aan
+       api/_lib/call-uitkomst-categorie.js; tests/call-uitkomst-categorie.test.js
+       bewaakt dat. Vóór de views, zodat elke view hem kan lezen. -->
+  <script src="../shared/call-uitkomst-categorie.js?v=1"></script>
+
   <!-- V2-module-views (klassieke scripts; registeren zichzelf in DFO.VIEWS) -->
   <script src="views/_shared-v2.js?v=11"></script>
   <!-- Het etiket op een opvolgtaak, gedeeld door opvolging-v2 en
@@ -216,7 +222,7 @@
   <script src="../shared/gesprekken-v2.js?v=6"></script>
   <script src="views/wanbetalers-v2.js?v=63"></script>
   <script src="views/setter-payout-v2.js?v=9"></script>
-  <script src="views/opvolging-v2.js?v=71"></script>
+  <script src="views/opvolging-v2.js?v=72"></script>
   <script src="views/support-v2.js?v=5"></script>
   <!-- Iris. Eigen map (modules/iris/) zoals afgesproken, maar geregistreerd als
        schil-weergave zodat navigatie, rechten en uiterlijk uit de schil komen.

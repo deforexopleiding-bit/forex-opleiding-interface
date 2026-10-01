@@ -19,6 +19,7 @@
 import { createUserClient } from './supabase.js';
 import { addGhlTags, tagsFromOutcome } from './ghl-tag-helper.js';
 import { createGhlAppointment } from './_lib/ghl-appointment.js';
+import { erfSetterVelden } from './_lib/setter-keten.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -168,7 +169,7 @@ export default async function handler(req, res) {
   // ── Fetch parent appointment (vroeg — voor validate-first + child-insert + tags) ──
   const { data: parentAppt, error: apptErr } = await supabase
     .from('follow_up_appointments')
-    .select('id, status, ghl_appointment_id, zoom_meeting_id, zoom_join_url, lead_name, lead_email, lead_phone, lead_ghl_contact_id, owner_id, duration_minutes')
+    .select('id, status, ghl_appointment_id, zoom_meeting_id, zoom_join_url, lead_name, lead_email, lead_phone, lead_ghl_contact_id, owner_id, duration_minutes, setter_user_id, booking_source')
     .eq('id', appointment_id)
     .maybeSingle();
 
@@ -298,6 +299,9 @@ export default async function handler(req, res) {
       ghl_appointment_id: ghlNew?.id              ?? null,
       zoom_meeting_id:    ghlNew?.zoom_meeting_id ?? null,
       zoom_join_url:      ghlNew?.zoom_join_url   ?? null,
+      // De vervolg-call hoort bij dezelfde boeking: setter en bron reizen mee.
+      // Zie api/_lib/setter-keten.js.
+      ...erfSetterVelden(parentAppt),
     };
 
     const { data: insertedAppt, error: insertErr } = await supabase

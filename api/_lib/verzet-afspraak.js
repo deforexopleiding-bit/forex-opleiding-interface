@@ -40,6 +40,7 @@
 import { updateZoomMeetingTime } from './zoom-meeting.js';
 import { updateGhlAppointmentTime } from './ghl-appointment.js';
 import { stuurVerzetBericht } from './afspraak-status-notify.js';
+import { erfSetterVelden } from './setter-keten.js';
 
 /** Standaardduur van een zoomcall, gelijk aan de rest van de module. */
 export const VERZET_DUUR_MIN = 30;
@@ -140,6 +141,10 @@ export async function verzetAfspraak({
       // echte afspraak terugkomt staat morgen in Daves lijst en in het
       // rapport — precies de rommel die een test moet vermijden.
       ...(afspraak.is_test === true ? { is_test: true } : {}),
+      // Wie de call boekte reist mee (setter_user_id + booking_source). Zonder
+      // dit hangt de call die écht plaatsvindt aan niemand, en mist de setter
+      // hem in haar rapport. Alleen gevulde waarden — zie api/_lib/setter-keten.js.
+      ...erfSetterVelden(afspraak),
     })
     .select()
     .single();

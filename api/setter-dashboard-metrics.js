@@ -62,19 +62,26 @@ export default async function handler(req, res) {
     const period = parseSetterPeriod(req.query || {});
 
     // ── Boekingen in de periode + (voor UX-continuïteit) week+maand ────
+    // Een BOEKING is de oorspronkelijke rij: parent_appointment_id IS NULL.
+    // Sinds 1 okt 2026 erven verzette opvolgers de setter (api/_lib/setter-
+    // keten.js); zonder dit filter telde één verzette boeking twee keer. De
+    // statussen hieronder tellen de opvolgers wél mee — daar staat de afloop.
     const [appPeriodeRes, appWeekRes, appMaandRes, allApptsRes] = await Promise.all([
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', period.from)
         .lt('scheduled_at', period.to),
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', windowStart(7)),
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', windowStart(30)),
       // Statussen voor opkomst/no-show — begrensd door de gekozen periode.
       supabaseAdmin.from('follow_up_appointments')

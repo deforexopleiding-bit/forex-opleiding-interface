@@ -5,6 +5,7 @@
 // Body: {
 //   appointment_id : uuid,
 //   outcome        : 'gesprek_gehad' | 'sale' | 'wilt_niet_meer' | 'niet_geschikt'
+//                  | 'geen_geld' | 'onbereikbaar'
 //                  | 'no_show' | 'later_opnieuw' | 'terugbel' | 'verzetten' | 'annuleren',
 //   terugbel_datum?: ISO,        // vereist bij terugbel; optioneel bij later
 //   lead_kind?     : 'bel'|'zoom', // bij terugbel; default 'bel'
@@ -13,7 +14,20 @@
 //   duration_minutes?: number,   // bij verzetten (default 30)
 //   reden?         : string,     // bij annuleren
 //   note?          : string,     // vrije toevoeging ACHTER de vaste notitie
+//   zonder_terugbel_lead?: true, // alleen bij no_show: GEEN terugbel-lead (+2u)
 // }
+//
+// OVER `zonder_terugbel_lead` (1 okt 2026)
+// No-show vastleggen en een terugbel-lead aanmaken zijn twee verschillende
+// dingen. De cockpit wil allebei; Opvolging wil alleen het eerste, want
+// Opvolging zet de persoon zelf al terug in de lijst — een tweede lead in het
+// oude systeem is dan dezelfde persoon twee keer op Daves bord.
+// Contract: precies `true` (boolean) schakelt de lead-aanmaak uit. Elke andere
+// waarde — ontbreken, 'true', 1 — is het oude gedrag. Bestaande aanroepers
+// sturen hem niet mee en houden dus byte voor byte wat ze hadden. De vlag
+// raakt alleen no_show: status, uitkomst, GHL ('noshow') en undo blijven gelijk.
+// De notitie zegt dan eerlijk dat er géén nabelactie is gepland, en de response
+// draagt `terugbel_lead_overgeslagen: true`.
 //
 // OVER `note` (6 sep 2026, item Q)
 // De notitieteksten hieronder zijn vast per outcome, en dat blijft zo. `note`
@@ -36,9 +50,21 @@
 //   niet_geschikt  → appointment.status='cancelled' + note (klant niet
 //                    geschikt voor onze opleiding; call was al gevoerd,
 //                    behandeling analoog aan wilt_niet_meer)
+//   geen_geld      → appointment.status='completed' + note. Er is WEL
+//                    gesproken, er is geen sale om financiële redenen. Daarom
+//                    'completed' (de call vond plaats) en niet 'cancelled';
+//                    GHL 'showed', Zoom-meeting weg, geen follow_up_lead.
+//   onbereikbaar   → appointment.status='no_show' + note. De call kwam niet
+//                    tot stand (lead niet te bereiken). Bewust 'no_show' en
+//                    niet 'completed': er is niet gesproken, en elke lijst die
+//                    op status filtert (agenda, rapport) moet hem behandelen
+//                    als een gemiste call. GHL 'noshow', Zoom blijft staan
+//                    (net als bij no_show), en NOOIT een terugbel-lead — de
+//                    opvolging loopt via Opvolging.
 //   no_show        → appointment.status='no_show' + nieuwe follow_up_lead
 //                    (source='manual', lead_kind='bel', lead_status=
-//                    'terugbellen', terugbel_datum=now()+2u)
+//                    'terugbellen', terugbel_datum=now()+2u) — tenzij
+//                    zonder_terugbel_lead === true, dan zonder lead
 //   later_opnieuw  → appointment.status='completed' + nieuwe follow_up_lead
 //                    met snoozed_until=now()+snooze_months (default 3)
 //   terugbel       → appointment.status='completed' + nieuwe follow_up_lead
@@ -66,9 +92,15 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // refactor-PR — het risico op silent-drift raakt live-CRM-data. Zie AUDIT
 // lesson 20 mei 2026 ("no_show wordt onverwacht gezet") — daar veroorzaakte
 // een soortgelijke drift al eerder productie-fouten.
+//
+// geen_geld en onbereikbaar (1 okt 2026) zijn TOEGEVOEGD, er is niets
+// hernoemd of samengevoegd. De weergave voor rapporten staat op één plek:
+// api/_lib/call-uitkomst-categorie.js. Komt hier een waarde bij, zet hem daar
+// ook neer — tests/call-uitkomst-categorie.test.js faalt anders.
 const OUTCOMES = new Set([
   'gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt', 'no_show',
   'later_opnieuw', 'terugbel', 'verzetten', 'annuleren',
+  'geen_geld', 'onbereikbaar',
 ]);
 
 // Mapping van interne outcome → GHL appointmentStatus.
@@ -96,14 +128,26 @@ const GHL_STATUS_FOR_OUTCOME = {
   niet_geschikt : 'showed',
   later_opnieuw : 'showed',
   terugbel      : 'showed',
+  geen_geld     : 'showed',   // er is gesproken — alleen geen sale
   no_show       : 'noshow',
+  onbereikbaar  : 'noshow',   // de call kwam niet tot stand
 };
 
 // Uitkomsten die NAAST de GHL-status ook de Zoom-meeting VERWIJDEREN
 // (via deleteZoomMeeting). Zorgt dat de meeting uit Dave's Zoom-account
 // verdwijnt zodra we weten dat de call niet meer plaatsvindt of al is
 // geweest. Onze eigen DB-status volgt de bestaande logica.
-const AGENDA_REMOVING_OUTCOMES = new Set(['gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt']);
+// geen_geld hoort erbij (de call is geweest); onbereikbaar NIET, net als
+// no_show: de meeting kan nog nodig zijn als de lead alsnog inbelt.
+const AGENDA_REMOVING_OUTCOMES = new Set(['gesprek_gehad', 'sale', 'wilt_niet_meer', 'niet_geschikt', 'geen_geld']);
+
+/**
+ * Wil de aanroeper bij no_show GEEN terugbel-lead? Alleen bij precies `true`.
+ * Zie het blok 'OVER zonder_terugbel_lead' bovenaan.
+ */
+export function zonderTerugbelLead(body) {
+  return !!body && typeof body === 'object' && body.zonder_terugbel_lead === true;
+}
 
 // Uitkomsten die NIET automatisch teruggedraaid kunnen worden — hun
 // GHL-actie is destructief (afspraak weg / verplaatst) en 'confirmed'
@@ -535,6 +579,7 @@ export default async function handler(req, res) {
     let newStatus = null;
     let noteText  = '';
     let followupLead = null;    // { lead_id, already }
+    let terugbelLeadOvergeslagen = false;
     let extraWarnings = [];
 
     if (outcome === 'gesprek_gehad') {
@@ -553,6 +598,24 @@ export default async function handler(req, res) {
       // klant hoort niet meer op de werklijst.
       newStatus = 'cancelled';
       noteText  = 'Niet geschikt voor opleiding — call was al gevoerd, GHL/Zoom afgeboekt';
+    } else if (outcome === 'geen_geld') {
+      // Gesproken, geen sale om financiële redenen. 'completed' omdat de call
+      // plaatsvond; geen follow_up_lead — de opvolging (als die er komt) loopt
+      // via de module die de knop aanbood.
+      newStatus = 'completed';
+      noteText  = 'Geen geld — gesprek gevoerd, geen sale om financiële redenen';
+    } else if (outcome === 'onbereikbaar') {
+      // De call kwam niet tot stand. Status 'no_show' (er is niet gesproken),
+      // maar ZONDER terugbel-lead: wie deze knop aanbiedt regelt de opvolging
+      // zelf. Zie de kop voor waarom dit geen 'completed' is.
+      newStatus = 'no_show';
+      noteText  = 'Onbereikbaar — call niet tot stand gekomen, geen terugbel-lead aangemaakt';
+    } else if (outcome === 'no_show' && zonderTerugbelLead(body)) {
+      // Zelfde vastlegging als hieronder, zonder de lead. De zin begint met
+      // 'No-show' zoals altijd, maar belooft geen nabelactie die er niet is.
+      newStatus = 'no_show';
+      noteText  = 'No-show — geen terugbel-lead aangemaakt (opvolging via Opvolging)';
+      terugbelLeadOvergeslagen = true;
     } else if (outcome === 'no_show') {
       newStatus = 'no_show';
       noteText  = 'No-show — nabellen gepland (+2u)';
@@ -658,6 +721,8 @@ export default async function handler(req, res) {
       appointment_id: appointmentId,
       new_status    : newStatus,
       followup_lead : followupLead,
+      // Alleen aanwezig als de aanroeper de lead bewust uitschakelde.
+      ...(terugbelLeadOvergeslagen ? { terugbel_lead_overgeslagen: true } : {}),
       warnings      : extraWarnings.length ? extraWarnings : undefined,
     });
   } catch (e) {

@@ -231,7 +231,12 @@ export default async function handler(req, res) {
 
     // Setter-override: appointmentsetter mag zichzelf altijd als setter zetten
     // zodat de scope-guard 'em later toestaat de eigen call te wijzigen.
-    const apptId = result?.follow_up_appointment_id || result?.appointmentId || null;
+    //
+    // createAppointmentForLead() geeft `appointment_id` terug. Hier stond
+    // `follow_up_appointment_id || appointmentId`, en die bestaan geen van
+    // beide: apptId was altijd null, de override draaide nooit en de response
+    // gaf null als afspraak-id. De oude namen blijven als terugval staan.
+    const apptId = result?.appointment_id || result?.follow_up_appointment_id || result?.appointmentId || null;
     if (apptId) {
       try {
         const { data: prof } = await supabaseAdmin
