@@ -39,13 +39,25 @@ export default async function handler(req, res) {
   if (!DATE_RE.test(String(period_end   || ''))) return res.status(400).json({ error: 'period_end (YYYY-MM-DD) vereist' });
 
   try {
-    const { data: entries, error: eErr } = await supabaseAdmin
-      .from('setter_ledger_entries')
-      .select('id, amount')
-      .eq('setter_user_id', setter_user_id)
-      .eq('status', 'vrijgegeven')
-      .gte('created_at', `${period_start}T00:00:00Z`)
-      .lte('created_at', `${period_end}T23:59:59Z`);
+    // Regels die al in een setter-maandrapport zitten (monthly_report_id)
+    // worden via dat rapport uitbetaald → hier overslaan, anders dubbel.
+    // Fail-soft vóór migratie 2026-10-01-setter-maandrapport.sql: zonder de
+    // kolom (42703) zonder dat filter.
+    const query = (metRapportFilter) => {
+      let q = supabaseAdmin
+        .from('setter_ledger_entries')
+        .select('id, amount')
+        .eq('setter_user_id', setter_user_id)
+        .eq('status', 'vrijgegeven')
+        .gte('created_at', `${period_start}T00:00:00Z`)
+        .lte('created_at', `${period_end}T23:59:59Z`);
+      if (metRapportFilter) q = q.is('monthly_report_id', null);
+      return q;
+    };
+    let { data: entries, error: eErr } = await query(true);
+    if (eErr && (eErr.code === '42703' || /monthly_report_id/.test(eErr.message || ''))) {
+      ({ data: entries, error: eErr } = await query(false));
+    }
     if (eErr) throw eErr;
 
     const rows = entries || [];
@@ -73,7 +85,8 @@ export default async function handler(req, res) {
     const { error: uErr } = await supabaseAdmin
       .from('setter_ledger_entries')
       .update({ status: 'uitbetaald', payout_id: payout.id, paid_at: nowIso })
-      .in('id', ids);
+      .in('id', ids)
+      .eq('status', 'vrijgegeven');
     if (uErr) throw uErr;
 
     // Zet payout status ook op uitbetaald (in dit MVP betekent bundelen =
