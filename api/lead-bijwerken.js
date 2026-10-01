@@ -17,6 +17,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { vindOfMaakAccount, zetGrant, telefoonE164, vanIso, totIso } from './_lib/lms-provisioning.js';
+import { vindLeadAccount, isEmailBezetFout } from './_lib/lead-lms-account.js';
 
 const EMAIL_RE = /.+@.+\..+/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -85,16 +86,10 @@ export default async function handler(req, res) {
       if (!bySlug.has(String(g.slug))) return res.status(400).json({ error: `Onbekend product: ${g.slug}` });
     }
 
-    // Account zoeken (op lead_id, anders op oude email).
-    let account = null;
-    const { data: opLead } = await supabaseAdmin
-      .from('lms_gebruikers').select('id, auth_id, email').eq('lead_id', leadId).maybeSingle();
-    account = opLead || null;
-    if (!account && oudeEmail) {
-      const { data: opMail } = await supabaseAdmin
-        .from('lms_gebruikers').select('id, auth_id, email').eq('email', oudeEmail).maybeSingle();
-      account = opMail || null;
-    }
+    // Account zoeken (op lead_id, anders op oude email). Gedeelde helper met
+    // lead-welkom-resend.js. Een leesfout gaf hier vroeger stil `null` (en dus
+    // "geen account"); die negeren we nog steeds, om het gedrag gelijk te houden.
+    const { account } = await vindLeadAccount(supabaseAdmin, { leadId, email: oudeEmail });
 
     // E-MAIL-SYNC eerst (voordat we iets schrijven), zodat een botsing niets
     // half doorvoert.
@@ -102,8 +97,7 @@ export default async function handler(req, res) {
     if (emailGewijzigd && account?.auth_id) {
       const { error: aErr } = await supabaseAdmin.auth.admin.updateUserById(account.auth_id, { email });
       if (aErr) {
-        const msg = (aErr.message || '').toLowerCase();
-        if (msg.includes('already') || msg.includes('registered') || aErr.status === 422 || aErr.code === 'email_exists') {
+        if (isEmailBezetFout(aErr)) {
           return res.status(409).json({ error: 'Dit e-mailadres is al in gebruik door een ander account.' });
         }
         throw new Error('auth updateUserById: ' + aErr.message);
