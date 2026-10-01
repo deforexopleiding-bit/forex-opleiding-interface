@@ -15,7 +15,8 @@
 //
 // WAT DEZE TESTS BEWAKEN:
 //   1. welk outcome er per knop vertrekt;
-//   2. dat GEEN van die drie een nieuwe follow_up_lead veroorzaakt;
+//   2. dat GEEN van die knoppen een nieuwe follow_up_lead veroorzaakt (no-show
+//      sinds 1 okt 2026 via de vlag zonder_terugbel_lead);
 //   3. dat een mislukte uitkomst ZICHTBAAR wordt in plaats van stil;
 //   4. dat de motor zonder `note` byte voor byte doet wat hij deed.
 
@@ -134,57 +135,90 @@ test('wil nog beslissen wordt gesprek_gehad', async () => {
   assert.equal(uitkomstVerzoek(w.verzoeken).body.outcome, 'gesprek_gehad');
 });
 
-test('no-show schrijft NIETS door, en dat is met opzet', async () => {
-  // Het outcome no_show maakt een nieuwe follow_up_lead met terugbel over twee
-  // uur, en Opvolging zet die persoon vandaag al terug in de lijst. Diezelfde
-  // dubbeling die we bij 'wil nog beslissen' vermijden.
+test('no-show wordt vastgelegd, ZONDER terugbel-lead (besluit 1 okt 2026)', async () => {
+  // Het outcome no_show maakt in de motor standaard een follow_up_lead met
+  // terugbel over twee uur, en Opvolging zet die persoon vandaag al terug in de
+  // lijst. Sinds de vlag zonder_terugbel_lead kan het allebei: de no-show staat
+  // vast, en er komt geen tweede lead.
   const w = laadView();
   const r = await w.H.schrijfCallUitkomst('no_show', call(), '');
-  assert.equal(r, null);
-  assert.equal(uitkomstVerzoek(w.verzoeken), undefined, 'er hoort niets te vertrekken');
+  assert.equal(r.ok, true);
+  const b = uitkomstVerzoek(w.verzoeken).body;
+  assert.equal(b.outcome, 'no_show');
+  assert.equal(b.zonder_terugbel_lead, true, 'zonder vlag maakt de motor een dubbele lead');
 });
 
-test('de mapping bevat precies drie knoppen', () => {
+test('geen geld en onbereikbaar schrijven hun eigen woord door', async () => {
+  for (const [knop, outcome] of [['geen_geld', 'geen_geld'], ['onbereikbaar', 'onbereikbaar']]) {
+    const w = laadView();
+    const r = await w.H.schrijfCallUitkomst(knop, call(), 'notitie');
+    assert.equal(r.ok, true, knop);
+    const b = uitkomstVerzoek(w.verzoeken).body;
+    assert.equal(b.outcome, outcome);
+    assert.equal(b.zonder_terugbel_lead, true);
+    assert.equal(b.note, 'notitie');
+  }
+});
+
+test('de mapping bevat precies zes knoppen', () => {
   const w = laadView();
   assert.deepEqual(Object.keys(w.H.CALL_UITKOMST).sort(),
-    ['geen_interesse', 'klant_geworden', 'wil_nog_beslissen']);
-  assert.equal(w.H.outcomeVoorUitkomst('no_show'), null);
+    ['geen_geld', 'geen_interesse', 'klant_geworden', 'no_show', 'onbereikbaar', 'wil_nog_beslissen']);
+  assert.equal(w.H.outcomeVoorUitkomst('no_show'), 'no_show');
   assert.equal(w.H.outcomeVoorUitkomst('iets_anders'), null);
+});
+
+test('elke knop in de mapping kent de motor', () => {
+  const b = readFileSync(MOTOR, 'utf8');
+  const set = b.match(/const OUTCOMES = new Set\(\[([\s\S]*?)\]\)/)[1];
+  const motor = new Set([...set.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  const w = laadView();
+  for (const outcome of Object.values(w.H.CALL_UITKOMST)) {
+    assert.ok(motor.has(outcome), outcome + ' staat niet in OUTCOMES van de motor');
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 2 · GEEN VAN DE DRIE MAAKT EEN NIEUWE follow_up_lead
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de drie gekozen outcomes roepen createFollowupLead niet aan', () => {
+/** De tak van de motor die bij deze kop hoort, tot de volgende tak. */
+function motorTak(b, kop) {
+  const i = b.indexOf(kop);
+  assert.ok(i > 0, 'de motor hoort de tak ' + kop + ' te hebben');
+  const eind = b.indexOf('} else if (outcome ===', i + 10);
+  return b.slice(i, eind > 0 ? eind : i + 900);
+}
+
+test('de gekozen outcomes roepen createFollowupLead niet aan', () => {
   // Dit is de reden dat het gesprek_gehad is en geen terugbel of later_opnieuw:
   // die maken een lead in het oude systeem, terwijl Opvolging voor diezelfde
   // persoon al een kaart maakt. Dan staat dezelfde lead in twee modules op Dave
   // te wachten.
+  //
+  // no_show doet dat wél — maar alleen in de tak ZONDER de vlag. Opvolging
+  // stuurt de vlag altijd mee, dus de tak die Opvolging raakt is de vlag-tak.
   const b = readFileSync(MOTOR, 'utf8');
   const w = laadView();
   for (const outcome of Object.values(w.H.CALL_UITKOMST)) {
-    const i = b.indexOf("outcome === '" + outcome + "'");
-    assert.ok(i > 0, 'de motor hoort ' + outcome + ' te kennen');
-    // Tot de volgende tak: daarbinnen mag geen lead-aanmaak staan.
-    const eind = b.indexOf('} else if (outcome ===', i + 10);
-    const tak = b.slice(i, eind > 0 ? eind : i + 600);
-    assert.ok(!/createFollowupLead/.test(tak), outcome + ' maakt een follow_up_lead aan');
+    const kop = outcome === 'no_show'
+      ? "outcome === 'no_show' && zonderTerugbelLead(body)"
+      : "outcome === '" + outcome + "')";
+    assert.ok(!/createFollowupLead/.test(motorTak(b, kop)), outcome + ' maakt een follow_up_lead aan');
   }
 });
 
-test('de drie outcomes die dat WEL doen staan er niet in', () => {
-  // Een test die alleen bewijst dat onze drie het niet doen kan slagen doordat
-  // niemand het doet. Deze legt vast dat het verschil echt bestaat.
+test('de outcomes die dat WEL doen — en no_show zonder vlag', () => {
+  // Een test die alleen bewijst dat onze outcomes het niet doen kan slagen
+  // doordat niemand het doet. Deze legt vast dat het verschil echt bestaat, en
+  // dat de cockpit (die geen vlag stuurt) zijn terugbel-lead houdt.
   const b = readFileSync(MOTOR, 'utf8');
   for (const outcome of ['no_show', 'later_opnieuw', 'terugbel']) {
-    const i = b.indexOf("outcome === '" + outcome + "'");
-    const eind = b.indexOf('} else if (outcome ===', i + 10);
-    const tak = b.slice(i, eind > 0 ? eind : i + 900);
-    assert.match(tak, /createFollowupLead/, outcome + ' hoort er juist wél een te maken');
+    assert.match(motorTak(b, "outcome === '" + outcome + "')"), /createFollowupLead/,
+      outcome + ' hoort er juist wél een te maken');
   }
   const w = laadView();
-  for (const gevaarlijk of ['no_show', 'later_opnieuw', 'terugbel']) {
+  for (const gevaarlijk of ['later_opnieuw', 'terugbel']) {
     assert.ok(!Object.values(w.H.CALL_UITKOMST).includes(gevaarlijk),
       gevaarlijk + ' hoort niet in de mapping te staan');
   }
@@ -285,16 +319,17 @@ test('note raakt de status en de GHL-sync niet aan', () => {
   assert.match(code, /appendApptNote\(appointmentId, metExtraNote\(noteText, body\.note\)\)/);
 });
 
-test('de twee woordenlijsten zijn niet aangeraakt', () => {
+test('de twee woordenlijsten zijn niet aangeraakt — alleen aangevuld', () => {
   // De hele reden dat we aanhaken en niet consolideren. Zie het incident van
-  // 20 mei in het waarschuwingsblok.
+  // 20 mei in het waarschuwingsblok. Op 1 okt 2026 kwamen geen_geld en
+  // onbereikbaar ERBIJ; geen bestaand woord is hernoemd of weggehaald.
   const b = readFileSync(MOTOR, 'utf8');
   const i = b.indexOf('const OUTCOMES = new Set([');
   const blok = b.slice(i, b.indexOf(']);', i));
   assert.deepEqual(
     (blok.match(/'[a-z_]+'/g) || []).map((x) => x.replace(/'/g, '')).sort(),
-    ['annuleren', 'gesprek_gehad', 'later_opnieuw', 'niet_geschikt', 'no_show',
-     'sale', 'terugbel', 'verzetten', 'wilt_niet_meer'].sort());
+    ['annuleren', 'geen_geld', 'gesprek_gehad', 'later_opnieuw', 'niet_geschikt', 'no_show',
+     'onbereikbaar', 'sale', 'terugbel', 'verzetten', 'wilt_niet_meer'].sort());
   assert.match(b, /NIET consolideren zonder aparte/, 'de waarschuwing hoort te blijven staan');
 });
 
@@ -398,10 +433,54 @@ test('KNOP: wil nog beslissen stuurt gesprek_gehad', async () => {
   assert.equal(v.body.outcome, 'gesprek_gehad');
 });
 
-test('KNOP: no-show stuurt nog steeds geen uitkomst', async () => {
+test('KNOP: no-show legt no_show vast zonder lead, en zet hem terug in de lijst', async () => {
   const w = laadView();
-  await klikDoorDeKnop(w, 'no_show', { call: call() });
-  assert.equal(uitkomstVerzoek(w.verzoeken), undefined, 'no-show blijft met rust');
+  const r = await klikDoorDeKnop(w, 'no_show', { call: call() });
+  assert.equal(r.geklikt, true);
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.ok(v, 'de no-show hoort vastgelegd te worden');
+  assert.equal(v.body.outcome, 'no_show');
+  assert.equal(v.body.zonder_terugbel_lead, true);
+  // De rest van het no-show-gedrag is ongewijzigd: vandaag terug, geen poging.
+  const kaart = w.verzoeken.find((x) => x.url.includes('opvolging-taak-create'));
+  assert.ok(kaart, 'de kaart hoort er nog steeds te komen');
+  assert.equal(kaart.body.reden, 'no_show_call');
+  assert.equal(kaart.body.poging_resultaat, undefined, 'een no-show is geen belpoging');
+});
+
+test('KNOP: onbereikbaar gaat als no-show terug in de lijst, met de echte reden erbij', async () => {
+  const w = laadView();
+  const r = await klikDoorDeKnop(w, 'onbereikbaar', { call: call(), invoer: { 'opv-cn': 'voicemail' } });
+  assert.equal(r.geklikt, true);
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.equal(v.body.outcome, 'onbereikbaar');
+  assert.equal(v.body.zonder_terugbel_lead, true);
+  const kaart = w.verzoeken.find((x) => x.url.includes('opvolging-taak-create'));
+  assert.equal(kaart.body.reden, 'no_show_call');
+  assert.match(kaart.body.notitie, /^Onbereikbaar bij de call — voicemail$/);
+  assert.equal(kaart.body.poging_resultaat, undefined);
+});
+
+test('KNOP: geen geld legt alleen de uitkomst vast, zonder kaart', async () => {
+  const w = laadView();
+  const r = await klikDoorDeKnop(w, 'geen_geld', { call: call(), invoer: { 'opv-cn': 'pas na de zomer' } });
+  assert.equal(r.geklikt, true);
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.equal(v.body.outcome, 'geen_geld');
+  assert.equal(v.body.note, 'pas na de zomer');
+  assert.equal(w.verzoeken.filter((x) => x.url.includes('opvolging-taak-create')).length, 0,
+    'geen geld maakt geen werklijstkaart');
+});
+
+test('het afrondscherm toont de twee nieuwe knoppen', () => {
+  const w = laadView();
+  w.M.zetCalls([call()]);
+  w.window.__opvCallAfrond(0);
+  const html = w.M.modalHtml();
+  assert.match(html, /__opvCallUitkomst\('geen_geld'\)/);
+  assert.match(html, /Geen geld/);
+  assert.match(html, /__opvCallUitkomst\('onbereikbaar'\)/);
+  assert.match(html, /Onbereikbaar/);
 });
 
 test('geen enkel bevestigingsscherm sluit nog zonder te schrijven', () => {

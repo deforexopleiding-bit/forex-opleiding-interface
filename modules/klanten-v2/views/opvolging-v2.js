@@ -3662,7 +3662,9 @@
         opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
         opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
         opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')") +
-        // DE VIJFDE IS GEEN UITKOMST. De andere vier zeggen iets over een
+        opt('&#128184;', 'var(--o-ambs)', 'Geen geld', 'Wel gesproken, maar hij kan het nu niet betalen. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_geld')") +
+        opt('&#128245;', 'var(--o-reds)', 'Onbereikbaar', 'Je kreeg hem niet te pakken. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('onbereikbaar')") +
+        // DE LAATSTE IS GEEN UITKOMST. De andere zeggen iets over een
         // gesprek dat geweest is; deze zegt dat het gesprek nog moet komen.
         // Daarom een eigen venster en geen __opvCallUitkomst: er wordt niets
         // beoordeeld, er wordt verplaatst.
@@ -3708,9 +3710,24 @@
         '<textarea id="opv-cn" rows="3" placeholder="Waarom haakt hij af?"></textarea>' +
         '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_interesse\')">Vastleggen</button>');
     }
+    if (u === 'geen_geld') {
+      return scrim('Geen geld', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Er is gesproken, maar hij kan het nu niet betalen. Er komt <b>geen taak</b> bij.<br><br>' +
+        'De afspraak wordt vastgelegd als <b>geen geld</b>, zodat het rapport het onderscheid ziet met geen interesse.</div>' +
+        '<textarea id="opv-cn" rows="2" placeholder="Wat zei hij over het geld? (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_geld\')">Vastleggen</button>');
+    }
+    if (u === 'onbereikbaar') {
+      return scrim('Onbereikbaar', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call. ' +
+        'De afspraak wordt vastgelegd als <b>onbereikbaar</b>; er komt geen tweede terugbelactie in het oude systeem bij.</div>' +
+        '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'onbereikbaar\')">Zet terug in de lijst</button>');
+    }
     if (u === 'no_show') {
       return scrim('No-show', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call.</div>' +
+        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call. ' +
+        'De afspraak wordt vastgelegd als <b>no-show</b>; er komt geen tweede terugbelactie in het oude systeem bij.</div>' +
         '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
         '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'no_show\')">Zet terug in de lijst</button>');
     }
@@ -4624,14 +4641,24 @@
   // erger dan wat we repareren. 'gesprek_gehad' zet alleen de status en schrijft
   // een notitie, en dat is precies wat we willen.
   //
-  // NO-SHOW STAAT ER MET OPZET NIET IN. Het outcome 'no_show' maakt óók een
-  // follow_up_lead (terugbel over twee uur), en Opvolging zet die persoon
-  // vandaag al terug in de lijst. Diezelfde dubbeling. Die vraag ligt bij Maxim;
-  // tot hij beslist doet no-show wat hij deed.
+  // NO-SHOW WORDT SINDS 1 OKTOBER WÉL VASTGELEGD (besluit Jeffrey), maar ZONDER
+  // de terugbel-lead. Het outcome 'no_show' maakte altijd óók een
+  // follow_up_lead (terugbel over twee uur), terwijl Opvolging die persoon
+  // vandaag al terug in de lijst zet — dezelfde dubbeling als hierboven. De
+  // motor kent daarvoor de vlag `zonder_terugbel_lead: true`; schrijfCallUitkomst
+  // stuurt hem bij ELKE uitkomst mee, want Opvolging wil nooit een lead in het
+  // oude systeem. De motor negeert hem bij alles behalve no_show.
+  //
+  // geen_geld en onbereikbaar zijn nieuwe motor-woorden die zelf nooit een lead
+  // maken. Wat ze in rapporten betekenen staat in
+  // api/_lib/call-uitkomst-categorie.js (window.CallUitkomstCategorie).
   const CALL_UITKOMST = {
     klant_geworden   : 'sale',
     geen_interesse   : 'wilt_niet_meer',
     wil_nog_beslissen: 'gesprek_gehad',
+    no_show          : 'no_show',
+    geen_geld        : 'geen_geld',
+    onbereikbaar     : 'onbereikbaar',
   };
 
   /** Welk outcome hoort bij deze knop? null = niet doorschrijven. */
@@ -4664,6 +4691,9 @@
       await post('/api/follow-up-appointment-outcome', {
         appointment_id: apptId,
         outcome,
+        // Nooit een terugbel-lead in het oude systeem: Opvolging zet de persoon
+        // zelf terug in de lijst. Zie het blok boven CALL_UITKOMST.
+        zonder_terugbel_lead: true,
         // Daves eigen woorden gaan mee ACHTER de vaste zin van de motor. Zonder
         // deze regel ziet wie de afspraakkaart opent 'geen interesse' zonder
         // waarom.
@@ -4712,6 +4742,15 @@
       return;
     }
 
+    // Geen geld: er is gesproken, er komt geen taak bij — net als bij een sale
+    // alleen de uitkomst. Een eventuele notitie reist mee naar de motor.
+    if (uitkomst === 'geen_geld') {
+      const res = await schrijfCallUitkomst(uitkomst, c, notitie);
+      _ui.modal = null; leegTakenCache(); render();
+      meldUitkomst(res, { bewaardHier: false, notitie });
+      return;
+    }
+
     // Geen interesse levert bewust GEEN OPEN taak op — net als bij een event dat
     // zo eindigt. Een kaart die meteen dicht is komt met nul belpogingen in
     // Afgerond terecht en krijgt daar het oordeel 'te weinig moeite', terwijl
@@ -4751,14 +4790,22 @@
 
     const uitkomstRes = await schrijfCallUitkomst(uitkomst, c, notitie);
 
+    // Onbereikbaar loopt hier precies als no-show: vandaag terug in de lijst,
+    // geen belpoging. De kaart krijgt reden no_show_call (de server kent geen
+    // aparte reden), dus zet de notitie erbij wat er echt gebeurde.
+    const nietGesproken = uitkomst === 'no_show' || uitkomst === 'onbereikbaar';
+    const kaartNotitie = uitkomst === 'onbereikbaar'
+      ? 'Onbereikbaar bij de call' + (notitie ? ' — ' + notitie : '')
+      : (notitie || null);
+
     try {
       await post('/api/opvolging-taak-create', {
         naam       : c.naam,
         email      : c.email || null,
         telefoon   : c.telefoon || null,
-        reden      : uitkomst === 'no_show' ? 'no_show_call' : 'wil_nog_beslissen',
-        due        : uitkomst === 'no_show' ? vandaag() : due,
-        notitie    : notitie || null,
+        reden      : nietGesproken ? 'no_show_call' : 'wil_nog_beslissen',
+        due        : nietGesproken ? vandaag() : due,
+        notitie    : kaartNotitie,
         badge_label: 'Call ' + nl(callBadgeDag(c)),
         bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
         // Alleen bij 'wil nog beslissen' een poging: dat gesprek is echt
@@ -4766,7 +4813,7 @@
         // alleen niemand opdagen. Zou hij hier toch meetellen, dan staat de
         // verse kaart vandaag op 1 van 2 terwijl Dave die persoon nog nooit aan
         // de lijn heeft gehad, en klopt de dekking op het dashboard niet meer.
-        ...(uitkomst === 'no_show' ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
+        ...(nietGesproken ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
       });
       _ui.modal = null; leegTakenCache(); render();
       meldUitkomst(uitkomstRes, { bewaardHier: true, notitie });

@@ -91,7 +91,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       ghl_appointment_id:       result.ghl_appointment_id       || result.ghl_id       || null,
-      follow_up_appointment_id: result.follow_up_appointment_id || result.appointmentId || null,
+      // De lib geeft `appointment_id`; de andere twee namen bestaan niet en
+      // gaven hier altijd null. Zie leadsonderhoud-opstartsessie-create.js.
+      follow_up_appointment_id: result.appointment_id || result.follow_up_appointment_id || result.appointmentId || null,
       zoom_meeting_id:          result.zoom_meeting_id          || null,
       zoom_join_url:            result.zoom_join_url            || null,
     });

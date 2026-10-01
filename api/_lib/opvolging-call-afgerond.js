@@ -41,6 +41,8 @@ const LABEL = {
   terugbel      : 'terugbellen',
   verzetten     : 'verzet',
   annuleren     : 'geannuleerd',
+  geen_geld     : 'geen geld',
+  onbereikbaar  : 'onbereikbaar',
 };
 
 /**
