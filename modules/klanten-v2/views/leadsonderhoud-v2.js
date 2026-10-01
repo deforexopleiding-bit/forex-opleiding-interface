@@ -418,6 +418,12 @@
               const geefToegangBtn = (idForBtn && extendable)
                 ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsGeefToegang('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="Verleen 7-daagse trial-toegang + stuur welkomstmail">Geef toegang</button>`
                 : '';
+              // Inloglink opnieuw naar het BESTAANDE account (gedeelde popup
+              // views/_inlog-opnieuw.js). Geen account → de popup verwijst naar
+              // "Geef toegang".
+              const inlogBtn = idForBtn
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsInlogOpnieuw('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="Inloggegevens opnieuw versturen (optioneel naar een ander adres)">Inlog opnieuw</button>`
+                : '';
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>
@@ -430,7 +436,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td class="optional" style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
                 <td class="optional" style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
-                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${geefToegangBtn}${extendBtn}</td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${inlogBtn}${geefToegangBtn}${extendBtn}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -587,7 +593,8 @@
     let product = null;
     const t = String(kies).trim();
     if (t === '1' || t === '7-daagse' || t === '7')       product = '7-daagse';
-    else if (t === '2' || t === 'mini-cursus' || t === 'mini') product = 'mini-cursus';
+    // 'minicursus' = de echte lms_producten.slug ('mini-cursus' gaf 400).
+    else if (t === '2' || t === 'mini-cursus' || t === 'minicursus' || t === 'mini') product = 'minicursus';
     else { _lsInbToast('Onbekende keuze. Typ 1 of 2.', 'warn'); return; }
 
     const ok = confirm('Verleen ' + product + ' trial-toegang aan ' + (leadName || 'deze lead') + '? De welkomstmail wordt automatisch verstuurd.');
@@ -611,6 +618,28 @@
     } catch (e) {
       _lsInbToast('Netwerkfout: ' + (e?.message || e), 'warn');
     }
+  };
+
+  // Inloggegevens opnieuw versturen — Contacten-rij én Gesprekken-kop. Gedeelde
+  // popup uit views/_inlog-opnieuw.js (ook gebruikt door Leads → Meer acties).
+  window.__lsInlogOpnieuw = (leadId, leadName) => {
+    if (!leadId) return;
+    if (!window.InlogOpnieuw || typeof window.InlogOpnieuw.open !== 'function') {
+      _lsInbToast('Inlog-popup niet geladen — ververs de pagina.', 'warn');
+      return;
+    }
+    window.InlogOpnieuw.open({
+      leadId,
+      naam: leadName || '',
+      onKlaar: (res) => {
+        // Adres gewijzigd → lijsten opnieuw laden zodat het nieuwe adres klopt.
+        if (res && res.email_gewijzigd) {
+          _live.contacten.lastKey = null;
+          _lsInb.convs.fetched = false;
+          if (window.DFO?.render) window.DFO.render();
+        }
+      },
+    });
   };
 
   // BP2 v3: "Nieuwe lead"-actie → deep-link naar bestaande leads-v2 create-flow.
@@ -1867,7 +1896,8 @@
             })() : ''}
             ${row.lead_id ? `
             <button class="btn btn-primary btn-sm" onclick="__lsInbOpenAppointmentPicker()" title="Direct een Zoom-afspraak inschieten (bestaande GHL-contact vereist)">${svg(I.cal || I.check, 'width:13px;height:13px')} Direct inschieten</button>
-            <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>
+            <button class="btn btn-ghost btn-sm" onclick="__lsInlogOpnieuw('${String(row.lead_id).replace(/'/g, "\\'")}', '${String(naam || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" title="Inloggegevens opnieuw versturen (optioneel naar een ander adres)">Inlog opnieuw…</button>` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:13px">

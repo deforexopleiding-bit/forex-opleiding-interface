@@ -1,6 +1,7 @@
 // api/lead-toegang-verlenen.js
 //
-// POST { lead_id: <uuid>, product?: 'mini-cursus'|'7-daagse'|<slug>, duur_dagen?: <int> }
+// POST { lead_id: <uuid>, product?: 'minicursus'|'7-daagse'|<slug>, duur_dagen?: <int> }
+//   (aliassen als 'mini-cursus' / 'mini' / '7 daagse' worden genormaliseerd)
 //
 // "Geef toegang"-knop voor Romy (+ manager/admin). Verleent trial-toegang
 // tot een van de twee setter-relevante producten en verstuurt de inlog-
@@ -23,7 +24,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { vindOfMaakAccount, zetGrant, telefoonE164, vanIso, totIso } from './_lib/lms-provisioning.js';
-import { stuurWelkom } from './_lib/welkom.js';
+import { stuurWelkom, welkomUitkomst } from './_lib/welkom.js';
+import { normaliseerProductSlug } from './_lib/lead-lms-account.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_TRIAL_DAYS = 7;
@@ -43,9 +45,9 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const leadId    = String(body.lead_id || '').trim();
   // v2: accepteer 'product' (nieuwe key) én 'product_slug' (backward-compat).
-  const slugRaw   = (body.product || body.product_slug)
-    ? String(body.product || body.product_slug).trim().toLowerCase()
-    : null;
+  // Aliassen ('mini-cursus', 'mini', '7 daagse', …) → echte lms_producten.slug;
+  // de UI stuurde 'mini-cursus' terwijl de slug 'minicursus' is → 400.
+  const slugRaw   = normaliseerProductSlug(body.product || body.product_slug);
   const duurDagen = Number.isFinite(Number(body.duur_dagen))
     ? Math.max(1, Math.min(365, Math.round(Number(body.duur_dagen))))
     : DEFAULT_TRIAL_DAYS;
@@ -110,7 +112,11 @@ export default async function handler(req, res) {
         telefoon: telefoonE164(lead.telefoon || '', 'lead-toegang-verlenen'),
         kanalen: ['email'],
       });
-      mailStatus = { ok: !!wa?.ok, detail: wa || null };
+      // stuurWelkom geeft een ARRAY per kanaal; de oude check las `.ok` op
+      // die array (altijd undefined) en de toast meldde ten onrechte
+      // "welkomstmail MISLUKT".
+      const u = welkomUitkomst(wa, 'email');
+      mailStatus = { ok: u.ok, reden: u.reden, detail: wa || null };
     } catch (mailErr) {
       mailStatus = { ok: false, error: mailErr?.message || String(mailErr) };
       console.warn('[lead-toegang-verlenen] welkom-mail (soft):', mailErr?.message || mailErr);
