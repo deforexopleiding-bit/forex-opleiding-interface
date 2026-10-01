@@ -9,6 +9,13 @@
 //   - Sales-lijst: geattribueerde deals (ook vóór eerste betaling).
 //   - Lijngrafiek 6 mnd verleden + 18 mnd forecast — SVG, theme-aware.
 //
+// Setter-salesoverzicht (2026-10):
+//   - Saleslijst op deals.total_amount (incl. btw): Naam | Bedrag | Traject |
+//     Eerste termijn | Termijnen | Offerte | Ontvangen | Verwachte commissie.
+//   - Klik op een rij → betaalplan (reserveringsfee / aanbetaling / N ×
+//     termijn met datums), commissie per betaling en de aansluiting op het
+//     offertebedrag (afrondingsverschil vs. echte mismatch).
+//
 // Structuur:
 //   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + sales + ledger-regels.
 //   /Uitbetalen — manager-only: bundelen (setter + periode → run).
@@ -34,6 +41,7 @@
     period: 'maand',                   // 'dag'|'week'|'maand'|'jaar'|'custom'
     from: '', to: '',                  // custom dates YYYY-MM-DD
     timeline: null, timelineLoading: false, timelineError: null,
+    openSale: null,                    // deal_id van het opengeklapte sale-detail
   };
   const _spStaff = { items: null, loading: false };
 
@@ -77,6 +85,7 @@
   window.__spSelectSetter = (id) => {
     _sp.selectedSetter = id || null;
     _sp.timeline = null;
+    _sp.openSale = null;
     loadOverview(id).catch(() => {});
     loadTimeline(id).catch(() => {});
   };
@@ -228,37 +237,148 @@
   }
 
   // ── Sales-lijst (geattribueerde deals, ook vóór betaling) ─────────────
+  // Klik op een rij → detail met het betaalplan (reserveringsfee /
+  // aanbetaling / termijnen), commissie per betaling en de aansluiting op
+  // het offertebedrag. Alle bedragen incl. BTW (deals.total_amount).
+  const fmtDate = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : '—';
+  };
+  const _num = 'text-align:right;font-variant-numeric:tabular-nums';
+  window.__spToggleSale = (id) => {
+    _sp.openSale = (_sp.openSale === id) ? null : id;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  function _offerteChip(s) {
+    if (!s.in_afwachting) return '<span style="color:var(--emerald);font-weight:600">✓ geaccepteerd</span>';
+    return `<span style="color:var(--amber);font-weight:600">◔ ${esc(s.offerte_status_label || 'in afwachting')}</span>`;
+  }
+
+  function _aansluitingBlok(plan) {
+    const a = plan.aansluiting || {};
+    const delen = [];
+    if (plan.reserveringsfee?.van_toepassing) delen.push(`reserveringsfee ${eur(plan.reserveringsfee.bedrag)}`);
+    if (plan.aanbetaling?.bedrag > 0) delen.push(`aanbetaling ${eur(plan.aanbetaling.bedrag)}`);
+    if (plan.termijnen?.aantal > 0) delen.push(`${plan.termijnen.aantal} × ${eur(plan.termijnen.bedrag)}`);
+    const som = `${delen.join(' + ') || '—'} = <b>${esc(eur(a.som))}</b> · offertebedrag <b>${esc(eur(a.totaal))}</b>`;
+    const stijl = {
+      ok:         ['var(--emerald)', '✓ Sluit aan'],
+      afronding:  ['var(--amber)',   '≈ Afrondingsverschil'],
+      mismatch:   ['var(--rose)',    '⚠ Sluit NIET aan'],
+      geen_plan:  ['var(--amber)',   '⚠ Geen betaalplan'],
+    }[a.status] || ['var(--text-3)', ''];
+    return `<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-left:3px solid ${stijl[0]};border-radius:var(--r-sm);font-size:12px;color:var(--text-2)">
+      <div><span style="font-weight:600;color:${stijl[0]}">${esc(stijl[1])}</span> — ${som}</div>
+      ${a.melding ? `<div style="margin-top:4px;color:${stijl[0]}">${esc(a.melding)}</div>` : ''}
+    </div>`;
+  }
+
+  function _saleDetail(s) {
+    const plan = s.plan || {};
+    const pct = Number(plan.pct || 0);
+    const heeftOntvangen = Array.isArray(s.ontvangen_regels);
+    const kv = (k, v) => `<div style="min-width:150px"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">${esc(k)}</div><div style="font-size:12.5px;color:var(--text-1);margin-top:2px">${v}</div></div>`;
+    const fee = plan.reserveringsfee || {};
+    const info = [
+      kv('Bedrag (incl. btw)', `<b>${esc(eur(s.bedrag))}</b>`),
+      kv('Traject', esc(s.traject || '—')),
+      kv('Offerte', _offerteChip(s) + (s.geaccepteerd_op ? ` <span style="color:var(--text-3)">${esc(fmtDate(s.geaccepteerd_op))}</span>` : '')),
+      kv('Deal-datum', esc(fmtDate(s.deal_datum))),
+      kv('Start cursus', esc(fmtDate(s.start_cursus))),
+      kv('Eerste termijn', esc(fmtDate(s.eerste_termijn))),
+      kv('Aantal termijnen', esc(String(plan.termijnen?.aantal || 0))),
+      kv('Bedrag per termijn', esc(eur(plan.termijnen?.bedrag || 0))),
+      kv('Aanbetaling', plan.aanbetaling?.bedrag > 0 ? `${esc(eur(plan.aanbetaling.bedrag))} <span style="color:var(--text-3)">op ${esc(fmtDate(plan.aanbetaling.datum))}</span>` : '—'),
+      kv('Reserveringsfee', fee.van_toepassing
+        ? `${esc(eur(fee.bedrag))} <span style="color:var(--text-3)">${fee.factuur_id ? 'gefactureerd' : 'wordt gefactureerd bij aanmaken abonnement'}</span>`
+        : '—'),
+    ].join('');
+    const soortLabel = (r) => r.soort === 'termijn' ? `Termijn ${r.nr}` : (r.soort === 'aanbetaling' ? 'Aanbetaling' : 'Reserveringsfee');
+    const schemaRows = (plan.schema || []).map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(soortLabel(r))}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${r.datum ? esc(fmtDate(r.datum)) : 'bij aanmaken abonnement'}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num}">${esc(eur(r.bedrag))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--brand)">${esc(eur(r.commissie))}</td>
+      </tr>`).join('');
+    const ontvangenBlok = heeftOntvangen ? _ontvangenTabel(s) : '';
+    return `<div style="padding:14px 16px;background:var(--surface-2, var(--surface));border-top:1px dashed var(--border)">
+      ${s.in_afwachting ? `<div style="margin-bottom:10px;font-size:12px;color:var(--amber)">Offerte is nog niet geaccepteerd — commissie ontstaat pas na acceptatie én betaling.</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:14px 22px;margin-bottom:12px">${info}</div>
+      <div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin:6px 0">Gepland betaalschema · jouw ${esc(pct.toFixed(2).replace('.', ','))}% per betaling</div>
+      <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+          <th style="padding:5px 10px">Moment</th><th style="padding:5px 10px">Gepland</th>
+          <th style="padding:5px 10px;text-align:right">Bedrag</th><th style="padding:5px 10px;text-align:right">Commissie</th>
+        </tr></thead>
+        <tbody>${schemaRows || `<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text-3)">Geen betaalplan op de deal.</td></tr>`}</tbody>
+        <tfoot><tr>
+          <td colspan="2" style="padding:6px 10px;font-size:12px;font-weight:600">Totaal bij volledige betaling</td>
+          <td style="padding:6px 10px;font-size:12px;${_num};font-weight:600">${esc(eur(plan.aansluiting?.som || 0))}</td>
+          <td style="padding:6px 10px;font-size:12px;${_num};font-weight:700;color:var(--brand)">${esc(eur(plan.commissie_totaal || 0))}</td>
+        </tr></tfoot>
+      </table></div>
+      ${_aansluitingBlok(plan)}
+      ${ontvangenBlok}
+    </div>`;
+  }
+
+  // Fase B vult sale.ontvangen_regels (facturen met wat er echt binnenkwam).
+  function _ontvangenTabel(s) {
+    const regels = s.ontvangen_regels || [];
+    if (!regels.length) {
+      return `<div style="margin-top:12px;font-size:12px;color:var(--text-3)">Nog geen ontvangen betalingen op deze sale.</div>`;
+    }
+    const rows = regels.map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(r.factuurnummer || '—')}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${esc(r.soort || '')}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${esc(fmtDate(r.betaald_op))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num}">${esc(eur(r.ontvangen))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--brand)">${esc(eur(r.commissie))}</td>
+      </tr>`).join('');
+    return `<div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin:14px 0 6px">Ontvangen</div>
+      <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+          <th style="padding:5px 10px">Factuur</th><th style="padding:5px 10px">Soort</th><th style="padding:5px 10px">Betaald op</th>
+          <th style="padding:5px 10px;text-align:right">Ontvangen</th><th style="padding:5px 10px;text-align:right">Commissie</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
   function _salesTable(sales) {
     if (!Array.isArray(sales) || !sales.length) {
       return `<div style="padding:28px;text-align:center;color:var(--text-3);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px">Nog geen geattribueerde sales.</div>`;
     }
-    const statusChip = (s) => {
-      if (s === 'volledig')     return '<span style="color:var(--emerald);font-weight:600">✓ betaald</span>';
-      if (s === 'gedeeltelijk') return '<span style="color:var(--amber)">◐ gedeeltelijk</span>';
-      return '<span style="color:var(--text-3)">— geen betaling</span>';
-    };
-    const rows = sales.map((s) => `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:7px 10px;font-size:12px">${esc(s.customer || '—')}</td>
-      <td style="padding:7px 10px;font-size:12px;color:var(--text-3)">${esc(s.deal_ref || '—')}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums">${esc(eur(s.bedrag))}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums">${esc(eur(s.betaald))}</td>
-      <td style="padding:7px 10px;font-size:11.5px">${statusChip(s.betaal_status)}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--brand)">${esc(eur(s.verwachte_commissie))}</td>
-      <td style="padding:7px 10px;font-size:11.5px;color:var(--text-3)">${esc(String(s.created_at || '').slice(0, 10))}</td>
-    </tr>`).join('');
+    const COLS = 8;
+    const rows = sales.map((s) => {
+      const open = _sp.openSale === s.deal_id;
+      const waarschuwing = s.plan?.aansluiting?.status === 'mismatch' || s.plan?.aansluiting?.status === 'geen_plan'
+        ? ' <span title="Betaalplan sluit niet aan op het offertebedrag" style="color:var(--rose)">⚠</span>' : '';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer${open ? ';background:var(--surface-2, transparent)' : ''}" onclick="window.__spToggleSale('${esc(s.deal_id)}')">
+        <td style="padding:7px 10px;font-size:12px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(s.customer || '—')}${waarschuwing}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.bedrag))}</td>
+        <td style="padding:7px 10px;font-size:12px">${esc(s.traject || '—')}</td>
+        <td style="padding:7px 10px;font-size:12px;color:var(--text-2)">${esc(fmtDate(s.eerste_termijn))}</td>
+        <td style="padding:7px 10px;font-size:12px;text-align:center">${esc(String(s.aantal_termijnen || 0))}</td>
+        <td style="padding:7px 10px;font-size:11.5px">${_offerteChip(s)}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.betaald))}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num};font-weight:600;color:var(--brand)">${esc(eur(s.verwachte_commissie))}</td>
+      </tr>${open ? `<tr><td colspan="${COLS}" style="padding:0">${_saleDetail(s)}</td></tr>` : ''}`;
+    }).join('');
     return `<div style="margin-bottom:20px">
-      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Mijn sales (geattribueerd)</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:4px">Mijn sales (geattribueerd)</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">Bedragen incl. btw (offertebedrag). Klik op een sale voor het betaalplan en je commissie per betaling.</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="tbl-wrap">
           <table style="width:100%;border-collapse:collapse;font-size:12.5px">
             <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
-              <th style="padding:8px 10px">Klant</th>
-              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px">Naam</th>
               <th style="padding:8px 10px;text-align:right">Bedrag</th>
-              <th style="padding:8px 10px;text-align:right">Betaald</th>
-              <th style="padding:8px 10px">Betaalstatus</th>
+              <th style="padding:8px 10px">Traject</th>
+              <th style="padding:8px 10px" title="payment_term_start_date — datum van de eerste termijn">Eerste termijn</th>
+              <th style="padding:8px 10px;text-align:center">Termijnen</th>
+              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px;text-align:right">Ontvangen</th>
               <th style="padding:8px 10px;text-align:right">Verwachte commissie</th>
-              <th style="padding:8px 10px">Aangemaakt</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -318,6 +438,7 @@
         ${_kpi('Nog te verwachten (forecast)', t.forecast_nog_te_verwachten, 'var(--text-1)')}
         ${_kpi('Vervallen door annulering',   t.vervallen_door_annulering,  'var(--rose)')}
       </div>
+      ${Number(t.in_afwachting_offerte) > 0 ? `<div style="margin:-12px 0 20px;font-size:12px;color:var(--text-3)">Daarnaast <b>${esc(eur(t.in_afwachting_offerte))}</b> commissie op offertes die nog niet geaccepteerd zijn (niet in de forecast).</div>` : ''}
       ${_timelineChart()}
       ${_salesTable(d.sales)}
       ${canPayout ? `<div style="margin-bottom:14px">
