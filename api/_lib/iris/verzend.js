@@ -75,12 +75,17 @@ export function keurVerzending({
     laatsteInbound,
     stilleUrenInstelling,
     automatisch: !doorMens,
+    // Mail kent het venster niet — dat is een regel van Meta over WhatsApp.
+    // Dit stond hieronder als een eigen regel (`kanaal === 'email' ? 'tekst'`),
+    // náást dezelfde regel in magVersturen. Twee plekken die hetzelfde moeten
+    // weten, lopen een keer uit de pas; nu weet magVersturen het en niemand
+    // anders.
+    kanaal,
     nu,
   });
   if (!v.mag) blokkades.push(v.reden);
 
-  // Mail kent het venster niet — dat is een regel van Meta over WhatsApp.
-  const vorm = kanaal === 'email' ? 'tekst' : v.vorm;
+  const vorm = v.vorm;
 
   // 4. De dosering. Ook hier: alleen voor wat Iris uit zichzelf doet. Een mens
   // die drie keer op een dag iets moet sturen, heeft daar een reden voor.

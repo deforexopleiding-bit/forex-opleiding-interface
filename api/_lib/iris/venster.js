@@ -169,9 +169,27 @@ export function stilleUren(instelling, nu = new Date()) {
  * @returns {{mag: boolean, vorm: 'tekst'|'template'|null, reden: string,
  *            venster: object, stil: object}}
  */
-export function magVersturen({ laatsteInbound, stilleUrenInstelling, automatisch = true, nu = new Date() } = {}) {
+export function magVersturen({ laatsteInbound, stilleUrenInstelling, automatisch = true, kanaal = 'whatsapp', nu = new Date() } = {}) {
   const venster = vensterStand(laatsteInbound, nu);
   const stil = stilleUren(stilleUrenInstelling, nu);
+
+  // Het servicevenster en de template-plicht zijn regels van META over
+  // WHATSAPP. Voor mail bestaan ze niet: je mag iemand antwoorden wanneer je
+  // wilt, met wat je wilt.
+  //
+  // Zonder deze tak zei Iris bij elke mail ouder dan 24 uur dat er alleen nog
+  // een goedgekeurde WhatsApp-template mocht — en dat is geen scheve badge maar
+  // een blokkade op het antwoorden zelf. Precies bij mail, waar het vaak over
+  // advocaten en betalingsregelingen gaat.
+  //
+  // De stille uren gelden WEL, want die gaan over wanneer wíj iemand lastig
+  // vallen en niet over wat Meta toestaat.
+  if (kanaal && kanaal !== 'whatsapp') {
+    if (automatisch && stil.stil) {
+      return { mag: false, vorm: null, reden: stil.reden, venster: null, stil };
+    }
+    return { mag: true, vorm: 'tekst', reden: null, venster: null, stil };
+  }
 
   // Stille uren gelden alleen voor wat Iris uit zichzelf doet. Een mens die om
   // half elf 's avonds bewust op Verstuur drukt, weet wat hij doet — daar hoort
