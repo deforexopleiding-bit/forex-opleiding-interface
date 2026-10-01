@@ -1,21 +1,21 @@
 // api/setter-overview.js
 //
-// GET ?setter_user_id=<uuid>  (optioneel â€” default: user zelf)
+// GET ?setter_user_id=<uuid>  (optioneel — default: user zelf)
 //
 // Retourneert Romy's overzicht met de 4 getallen:
-//   - uitbetaald_totaal       â€” sum(amount) WHERE status='uitbetaald'
-//   - deze_maand_te_ontvangen â€” sum(amount) WHERE status='vrijgegeven'
-//   - forecast_nog_te_verwachten â€” (deal.total_amount âˆ’ ontvangen) Ã— pct over
+//   - uitbetaald_totaal       — sum(amount) WHERE status='uitbetaald'
+//   - deze_maand_te_ontvangen — sum(amount) WHERE status='vrijgegeven'
+//   - forecast_nog_te_verwachten — (deal.total_amount − ontvangen) × pct over
 //                                  GEACCEPTEERDE sales (incl. BTW)
-//   - vervallen_door_annulering â€” idem, deals waarvan alle abonnementen zijn
+//   - vervallen_door_annulering — idem, deals waarvan alle abonnementen zijn
 //                                  geannuleerd
-//   (+ in_afwachting_offerte â€” idem, offerte nog niet geaccepteerd)
+//   (+ in_afwachting_offerte — idem, offerte nog niet geaccepteerd)
 // Plus ledger-regels en de saleslijst met per sale het betaalplan
 // (_lib/setter-sale-plan.js) voor het detail.
 //
 // Gate:
-//   - setter.ledger.view â€” setter zelf ziet eigen data.
-//   - setter.ledger.admin â€” manager+ mag andere setters bekijken.
+//   - setter.ledger.view — setter zelf ziet eigen data.
+//   - setter.ledger.admin — manager+ mag andere setters bekijken.
 //
 // INCASSO-VEILIG: leest UITSLUITEND setter_ledger_entries + setter_config
 // + deals + traject_variants + subscriptions + invoices + customers.
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
   try {
     const period = parseSetterPeriod(req.query || {});
 
-    // â”€â”€ Setter-config voor pct â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Setter-config voor pct ────────────────────────────────────────────
     const { data: cfg } = await supabaseAdmin
       .from('setter_config')
       .select('user_id, pct, is_active, effective_from')
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       ? { pct, is_active: !!cfg.is_active, effective_from: cfg.effective_from || null }
       : null;
 
-    // â”€â”€ Ledger totals + regels â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Ledger totals + regels ────────────────────────────────────────────
     // Ledger-entries in de periode (bepaalt uitbetaald/vrijgegeven totalen
     // + de regels-lijst). Forecast + vervallen blijven vooruitkijkend.
     const { data: entries } = await supabaseAdmin
@@ -88,15 +88,15 @@ export default async function handler(req, res) {
       else if (r.status === 'vrijgegeven') vrijgegeven += a;
     }
 
-    // â”€â”€ Sales + forecast + vervallen â€” via deals (incl. BTW) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Sales + forecast + vervallen — via deals (incl. BTW) ─────────────
     // Deals worden NIET begrensd door de periode: forecast is vooruitkijkend
-    // en de sales-lijst laat Ã¡lle geattribueerde deals zien zodat een sale
-    // ook direct zichtbaar is vÃ³Ã³r de eerste betaling.
+    // en de sales-lijst laat álle geattribueerde deals zien zodat een sale
+    // ook direct zichtbaar is vóór de eerste betaling.
     //
-    // Bedrag = deals.total_amount (INCL. BTW â€” deal_line_items hebben
-    // price_includes_vat=true). Vroeger: Î£ facturen Ã³f Î£ abonnementÃ—termijnen
-    // (EXCL. BTW) â†’ een sale zonder abonnement (offerte geaccepteerd, wizard
-    // nog niet gedraaid) stond op â‚¬ 0. Gearchiveerde deals en afgewezen
+    // Bedrag = deals.total_amount (INCL. BTW — deal_line_items hebben
+    // price_includes_vat=true). Vroeger: Σ facturen óf Σ abonnement×termijnen
+    // (EXCL. BTW) → een sale zonder abonnement (offerte geaccepteerd, wizard
+    // nog niet gedraaid) stond op € 0. Gearchiveerde deals en afgewezen
     // offertes vallen eruit (isUitgeslotenDeal).
     const { data: dealsRaw, error: dealsErr } = await supabaseAdmin
       .from('deals')
@@ -134,7 +134,7 @@ export default async function handler(req, res) {
       for (const t of (tvRes.data || [])) trajectNaam[t.id] = t.name || null;
     }
 
-    // â”€â”€ Labels voor ledger-regels + sales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Labels voor ledger-regels + sales ────────────────────────────────
     const dealIdSet = [...new Set([
       ...rows.map((r) => r.deal_id).filter(Boolean),
       ...dealIds,
@@ -171,7 +171,7 @@ export default async function handler(req, res) {
       paid_at:    r.paid_at,
     }));
 
-    // â”€â”€ Sales-lijst â€” per deal: plan (aanbetaling/fee/termijnen), offerte-
+    // ── Sales-lijst — per deal: plan (aanbetaling/fee/termijnen), offerte-
     //    status, ontvangen, verwachte commissie. Het detail (klik op een rij)
     //    rendert uit sale.plan; ontvangen_regels vult fase B (facturen).
     const sales = deals.map((d) => bouwSaleRegel({
@@ -182,8 +182,8 @@ export default async function handler(req, res) {
       ontvangen: ontvangenByDeal[d.id] || 0,
     }));
 
-    // â”€â”€ Forecast / vervallen / in afwachting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    //   forecast  = geaccepteerde sales: (totaal âˆ’ ontvangen) Ã— pct
+    // ── Forecast / vervallen / in afwachting ─────────────────────────────
+    //   forecast  = geaccepteerde sales: (totaal − ontvangen) × pct
     //   vervallen = idem, maar alle abonnementen van de deal zijn geannuleerd
     //   in_afwachting = offerte nog niet geaccepteerd (bv. alleen 'verstuurd')
     const CANCELLED = new Set(['cancelled', 'deactivated', 'geannuleerd']);
