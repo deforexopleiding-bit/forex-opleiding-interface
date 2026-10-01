@@ -21,14 +21,13 @@
 
 -- 1) Betaaldatum per commissieregel: de maand waarin de commissie valt is de
 --    maand van de BETALING (invoices.paid_date), niet die van de cron-run.
---    Correctieregels (creditnota na commissie) krijgen de rundatum.
+--    Forward-only: er bestaan geen negatieve correctieregels.
 ALTER TABLE public.setter_ledger_entries
   ADD COLUMN IF NOT EXISTS betaal_datum date;
 
 COMMENT ON COLUMN public.setter_ledger_entries.betaal_datum IS
-  'Betaaldatum van de factuur waarop deze commissie is berekend (invoices.paid_date); '
-  'bij een negatieve correctie de datum van de correctie. Bepaalt de maand in het '
-  'maandoverzicht en het setter-maandrapport.';
+  'Betaaldatum van de factuur waarop deze commissie is berekend (invoices.paid_date). '
+  'Bepaalt de maand in het maandoverzicht en het setter-maandrapport.';
 
 -- 2) Indexen voor de reconcile per (setter, factuur) en het maandoverzicht.
 CREATE INDEX IF NOT EXISTS idx_setter_ledger_setter_invoice
