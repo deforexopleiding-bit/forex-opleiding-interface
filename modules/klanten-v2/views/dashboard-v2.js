@@ -1303,6 +1303,7 @@
         + _spTile('Nog te verwachten',       eur(d.commissie_forecast || 0),   'Geaccepteerde sales',      'var(--text-1)')
       + '</div>'
       + '<div style="font-size:12px;color:var(--text-3)">Gedetailleerd overzicht + regels → <a href="#setter-payout" style="color:var(--brand)">Commissie</a></div>'
+      + '<div style="font-size:12px;color:var(--text-3);margin-top:4px">Wat er van je geboekte calls geworden is → <a href="#setter-payout" onclick="event.preventDefault();DFO.goMod(\'setter-payout\');DFO.goTab(\'Mijn calls\')" style="color:var(--brand)">Mijn calls</a></div>'
       + '</div>';
   }
 
