@@ -9,9 +9,13 @@
 //      nog niet aan een ander rapport gekoppeld, en betaal_datum < de 1e van
 //      M+1. Dus maand M zelf PLUS achterblijvers uit eerdere maanden die pas
 //      na het afsluiten van dat rapport geboekt werden (late sync,
-//      terug-gedateerde betaling). Negatieve correcties (creditnota) tellen
-//      gewoon mee.
+//      terug-gedateerde betaling). De commissie is forward-only (PR B): er
+//      bestaan geen negatieve regels; een regel <= 0 wordt hier ook nooit
+//      opgenomen (defensief).
 // Alle bedragen incl. btw.
+//
+// Uitbetalen gaat voor setters UITSLUITEND via deze rapporten; de oude
+// uitbetaalronde (api/setter-payout-run.js) weigert met 410.
 //
 // computeAndUpsertSetterReport({ db, setterId, monthStart, actorId }):
 //   - bestaand rapport goedgekeurd/uitbetaald → skipped (nooit overschrijven);
@@ -71,6 +75,7 @@ export function selecteerRegels(entries, { monthStart, reportId = null }) {
   const grens = nextMonthStart(monthStart);
   return (entries || []).filter((e) => {
     if (e.status !== 'vrijgegeven') return false;
+    if (!(n(e.amount) > 0)) return false; // forward-only: nooit <= 0
     if (e.monthly_report_id && e.monthly_report_id !== reportId) return false;
     const d = String(e.betaal_datum || e.created_at || '').slice(0, 10);
     return !!d && d < grens;
@@ -100,7 +105,7 @@ export function bouwRapport({ cfg, monthStart, entries, reportId = null, labels 
     const klant = e.customer_id ? labels[e.customer_id] : null;
     const eerder = d && d < monthStart ? ` (betaald ${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)})` : '';
     lines.push({
-      kind: n(e.amount) < 0 ? 'correctie' : 'commissie',
+      kind: 'commissie',
       label: [klant, e.note].filter(Boolean).join(' · ') + eerder || 'Commissie',
       ledger_entry_id: e.id,
       invoice_id: e.invoice_id || null,

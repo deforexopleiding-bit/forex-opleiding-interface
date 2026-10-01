@@ -16,9 +16,10 @@
 --     setter_ledger_entries.monthly_report_id.
 --   - Zonder deze migratie: de tab Rapporten toont "migratie nog niet
 --     gedraaid", de cron antwoordt 200 { skipped: 'migratie_ontbreekt' },
---     genereren/goedkeuren geeft 503. De rest van de Commissie-module en de
---     uitbetaalronde (setter-payout-run, fail-soft op monthly_report_id)
---     blijven werken.
+--     genereren/goedkeuren geeft 503. De rest van de Commissie-module blijft
+--     werken. LET OP: de oude uitbetaalronde (setter-payout-run) is in deze PR
+--     uitgeschakeld (410) — tot deze migratie draait is er voor setters dus
+--     GEEN uitbetaalpad (er staat nu ook niets uit: grootboek leeg, dry-run aan).
 --
 -- Zelf-voorzienend: CREATE TABLE IF NOT EXISTS, CHECKs, UNIQUE, RLS. Elk
 -- statement staat los (SQL-editor knipt op statement-grenzen): geen
@@ -70,7 +71,7 @@ COMMENT ON TABLE public.setter_monthly_reports IS
 CREATE TABLE IF NOT EXISTS public.setter_monthly_report_lines (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   report_id        uuid NOT NULL REFERENCES public.setter_monthly_reports(id) ON DELETE CASCADE,
-  kind             text NOT NULL CHECK (kind IN ('vaste_vergoeding', 'commissie', 'correctie')),
+  kind             text NOT NULL CHECK (kind IN ('vaste_vergoeding', 'commissie')),
   label            text NOT NULL,
   ledger_entry_id  uuid REFERENCES public.setter_ledger_entries(id) ON DELETE SET NULL,
   invoice_id       uuid REFERENCES public.invoices(id) ON DELETE SET NULL,
@@ -87,8 +88,8 @@ CREATE TABLE IF NOT EXISTS public.setter_monthly_report_lines (
 CREATE INDEX IF NOT EXISTS idx_setter_monthly_report_lines_report
   ON public.setter_monthly_report_lines (report_id);
 
--- 4) Koppeling grootboek → rapport (voorkomt dubbel uitbetalen: een regel in
---    een rapport wordt door de oude uitbetaalronde overgeslagen).
+-- 4) Koppeling grootboek → rapport (een regel hoort bij precies één rapport;
+--    bij "uitbetaald" gaan de gekoppelde regels op status 'uitbetaald').
 ALTER TABLE public.setter_ledger_entries
   ADD COLUMN IF NOT EXISTS monthly_report_id uuid
   REFERENCES public.setter_monthly_reports(id) ON DELETE SET NULL;

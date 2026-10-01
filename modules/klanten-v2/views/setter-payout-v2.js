@@ -21,7 +21,8 @@
 //                + sales + ledger-regels.
 //   /Rapporten — setter-maandrapporten (vaste vergoeding + commissie);
 //                setter.payout.manage: genereren / goedkeuren / uitbetaald.
-//   /Uitbetalen — manager-only: bundelen (setter + periode → run).
+//                Dit is het ENIGE uitbetaalpad voor setters (de oude
+//                uitbetaalronde is uitgeschakeld).
 
 (function () {
   'use strict';
@@ -112,30 +113,8 @@
   window.__spSetCustomFrom = (v) => { _sp.from = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
   window.__spSetCustomTo   = (v) => { _sp.to   = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
 
-  window.__spRunPayout = async () => {
-    // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
-    // gebruik canSync (super_admin-wildcard zit al in de helper).
-    const canPayout = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('setter.payout.manage'));
-    if (!canPayout) {
-      window.KV?.toast?.('Geen rechten (setter.payout.manage)', 'warn'); return;
-    }
-    const setterId = _sp.selectedSetter || (_sp.data && _sp.data.setter_user_id);
-    if (!setterId) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const first = today.slice(0, 8) + '01';
-    const start = prompt('Periode start (YYYY-MM-DD)', first); if (!start) return;
-    const end   = prompt('Periode einde (YYYY-MM-DD)', today); if (!end) return;
-    try {
-      const r = await window.KV.authedJson('/api/setter-payout-run', {
-        method: 'POST',
-        body: JSON.stringify({ setter_user_id: setterId, period_start: start, period_end: end }),
-      });
-      window.KV?.toast?.(r?.entry_count ? `Payout aangemaakt: ${r.entry_count} regels, ${eur(r.total_amount || 0)}` : 'Geen vrijgegeven regels in deze periode', 'ok');
-      loadOverview(setterId);
-    } catch (e) {
-      window.KV?.toast?.('Payout mislukt: ' + (e?.message || 'onbekend'), 'warn');
-    }
-  };
+  // De oude uitbetaalronde-knop is verwijderd (het endpoint weigert met 410):
+  // setter-commissie wordt alleen nog uitbetaald via de tab Rapporten.
 
   function _kpi(label, val, color) {
     return `<div style="flex:1;min-width:180px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
@@ -443,7 +422,8 @@
     if (!_sp.monthly && !_sp.monthlyLoading && !_sp.monthlyError) { _sp.monthlyLoading = true; queueMicrotask(() => loadMonthly(_sp.selectedSetter)); }
     // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
     // gebruik canSync + ensurePermissionsLoaded. Zonder deze fix zag zelfs
-    // super_admin geen staff-picker of "Uitbetaalronde draaien"-knop.
+    // super_admin geen staff-picker. (De "Uitbetaalronde draaien"-knop is
+    // weg sinds het maandrapport — uitbetalen gaat via tab Rapporten.)
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
       _sp._permsWarmed = true;
       window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
@@ -493,10 +473,7 @@
       ${_timelineChart()}
       ${_monthlySection()}
       ${_salesTable(d.sales)}
-      ${canPayout ? `<div style="margin-bottom:14px">
-        <button class="btn btn-primary" style="font-size:12.5px;padding:6px 12px" onclick="window.__spRunPayout()">Uitbetaalronde draaien</button>
-        <span style="margin-left:10px;font-size:11.5px;color:var(--text-3)">Bundelt alle vrijgegeven regels in de gekozen periode.</span>
-      </div>` : ''}
+      ${canPayout ? `<div style="margin-bottom:14px;font-size:11.5px;color:var(--text-3)">Uitbetalen gaat via het maandrapport: tab <b>Rapporten</b> (bovenaan deze module) → goedkeuren → uitbetaald.</div>` : ''}
       <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Uitbetaalregels (in periode)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="tbl-wrap">

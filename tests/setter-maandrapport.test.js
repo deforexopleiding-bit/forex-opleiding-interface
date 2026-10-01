@@ -37,23 +37,69 @@ test('regelselectie: maand M + achterblijvers, niet later, niet van een ander ra
   assert.deepEqual(ids, ['aug-laat', 'eigen', 'sep', 'zonder-datum']);
 });
 
-test('rapport: 750 vast + commissie − correctie; regels in volgorde, totaal klopt', () => {
+test('rapport: 750 vast + commissie (incl. achterblijver); regels in volgorde, totaal klopt', () => {
   const r = bouwRapport({
     cfg: CFG, monthStart: '2026-11-01',
     entries: [
       { id: 'a', status: 'vrijgegeven', amount: 18, basis: 600, pct: 3, betaal_datum: '2026-11-02', customer_id: 'c1', note: 'Factuur 2026 / 2001' },
       { id: 'b', status: 'vrijgegeven', amount: 3, basis: 100, pct: 3, betaal_datum: '2026-10-28', customer_id: 'c2', note: 'Factuur 2026 / 1990 · reserveringsfee' },
-      { id: 'c', status: 'vrijgegeven', amount: -3, basis: -100, pct: 3, betaal_datum: '2026-11-20', customer_id: 'c2', note: 'Factuur 2026 / 1990 · correctie' },
     ],
     labels: { c1: 'John Vliet', c2: 'Salih Polat' },
   });
   assert.equal(r.fee_total, 750);
-  assert.equal(r.commission_total, 18);
-  assert.equal(r.total, 768);
-  assert.deepEqual(r.lines.map((l) => l.kind), ['vaste_vergoeding', 'commissie', 'commissie', 'correctie']);
+  assert.equal(r.commission_total, 21);
+  assert.equal(r.total, 771);
+  assert.deepEqual(r.lines.map((l) => l.kind), ['vaste_vergoeding', 'commissie', 'commissie']);
   assert.match(r.lines[1].label, /^Salih Polat · .* \(betaald 28-10-2026\)$/, 'achterblijver uit oktober krijgt zijn betaaldatum');
   assert.equal(r.lines[0].label, 'Vaste maandvergoeding november 2026');
-  assert.deepEqual(r.entry_ids.sort(), ['a', 'b', 'c']);
+  assert.deepEqual(r.entry_ids.sort(), ['a', 'b']);
+});
+
+test('rapport: forward-only — een (legacy) regel <= 0 wordt nooit opgenomen', () => {
+  const r = bouwRapport({
+    cfg: { ...CFG, monthly_fee: 0 }, monthStart: '2026-11-01',
+    entries: [
+      { id: 'a', status: 'vrijgegeven', amount: 18, basis: 600, betaal_datum: '2026-11-02' },
+      { id: 'neg', status: 'vrijgegeven', amount: -18, basis: -600, betaal_datum: '2026-11-05' },
+      { id: 'nul', status: 'vrijgegeven', amount: 0, basis: 0.01, betaal_datum: '2026-11-06' },
+    ],
+  });
+  assert.deepEqual(r.entry_ids, ['a']);
+  assert.equal(r.total, 18);
+  assert.ok(r.lines.every((l) => l.amount > 0));
+});
+
+test('setter-payout-run is uitgeschakeld: 410 + verwijzing naar Rapporten, geen DB', async () => {
+  const { default: handler, UITBETAALRONDE_UIT_MELDING } = await import('../api/setter-payout-run.js');
+  const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  await handler({ method: 'POST', headers: {}, body: { setter_user_id: ROMY, period_start: '2026-09-01', period_end: '2026-09-30' } }, res);
+  assert.equal(res.code, 410);
+  assert.equal(res.body.code, 'SETTER_UITBETAALRONDE_UIT');
+  assert.match(res.body.error, /Rapporten/);
+  assert.equal(res.body.error, UITBETAALRONDE_UIT_MELDING);
+  const fs = await import('node:fs');
+  const bron = fs.readFileSync(new URL('../api/setter-payout-run.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(bron, /supabase|from\(/, 'raakt de database niet aan');
+  const view = fs.readFileSync(new URL('../modules/klanten-v2/views/setter-payout-v2.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(view, /setter-payout-run|__spRunPayout|Uitbetaalronde draaien<\/button>/, 'knop + aanroep weg uit de setter-UI');
+});
+
+test('mentoren-uitbetaling onveranderd: mentor-endpoints/core noemen niets van de setter-wijzigingen', async () => {
+  const fs = await import('node:fs');
+  const lees = (p) => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+  const mentorBestanden = [
+    'api/mentor-payout-run.js', 'api/mentor-payout-generate.js', 'api/mentor-payout-approve.js',
+    'api/mentor-payout-mark-paid.js', 'api/mentor-payout-revert.js', 'api/mentor-payout-reopen.js',
+    'api/_lib/payout-generate-core.js', 'api/cron/generate-monthly-concepts.js',
+  ];
+  for (const p of mentorBestanden) {
+    const bron = lees(p);
+    assert.doesNotMatch(bron, /setter_monthly_report|setter-report-core|setter-payout-run|setter_ledger_entries|UITBETAALRONDE_UIT/, p);
+  }
+  // De mentor-module blijft z'n eigen uitbetaal-endpoints aanroepen.
+  const mentorView = lees('modules/klanten-v2/views/mentoren-v2.js');
+  assert.match(mentorView, /mentor-payout-/);
+  assert.doesNotMatch(mentorView, /setter-reports|setter-payout-run/);
 });
 
 test('datum-guard + maandhelpers', () => {
