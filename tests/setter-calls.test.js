@@ -207,10 +207,10 @@ test('leesCallRapportageStart: rij, geen rij, fout en exception', async () => {
 });
 
 test('het helperbestand is byte voor byte de gedeelde versie (eindigt op één newline)', () => {
-  const src = readFileSync(new URL('../api/_lib/call-rapportage-start.js', import.meta.url), 'utf8');
+  // CRLF → LF: een Windows-checkout met autocrlf mag de test niet laten vallen.
+  const src = readFileSync(new URL('../api/_lib/call-rapportage-start.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(src.startsWith('// api/_lib/call-rapportage-start.js\n//\n// Vanaf welke Amsterdam-dag'));
   assert.ok(src.endsWith('}\n') && !src.endsWith('\n\n'));
-  assert.doesNotMatch(src, /\r/);
 });
 
 test('startdatum is een Amsterdam-dag, geen UTC-dag', () => {
