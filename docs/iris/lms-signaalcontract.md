@@ -1,14 +1,23 @@
 # Wat Iris van een mentorsignaal verwacht
 
 **Voor:** wie de mentormodule in het LMS onderhoudt
-**Gemeten:** 1 oktober 2026, op de echte databank (`dfo-lms`)
-**Status:** vastgesteld — dit zijn de kolommen zoals ze bestaan
+**Gemeten:** 1 oktober 2026, op `pg_attribute` van `public.hlms_signaal` in `dfo-lms`
+**Status:** vastgesteld — dit zijn de kolommen zoals ze in de **databank** staan
 
-> **Dit document is op 1 oktober 2026 herschreven.** De vorige versie was een
-> *voorstel*: de mentormodule bestond nog niet, dus stonden er veldnamen in die
-> we hoopten. Iris vroeg om `created_at` en `type`, en die kolommen bestaan niet.
-> Gevolg: elke vijf minuten een 400 in de LMS-logs, en **Iris heeft nooit één
-> mentorsignaal binnengekregen**. Wat hieronder staat is gemeten, niet gehoopt.
+> **Dit document is op 1 oktober 2026 twee keer herschreven, en dat is het
+> leerzame deel.**
+>
+> De eerste versie was een *voorstel*: de mentormodule bestond nog niet, dus
+> stonden er veldnamen in die we hoopten. Iris vroeg om `created_at` en `type`.
+> Die bestaan niet → elke vijf minuten een 400 in de LMS-logs, en **Iris heeft
+> nooit één mentorsignaal binnengekregen.**
+>
+> De tweede versie zette `aangemaakt_op` neer, gelezen uit de
+> **migratiebestanden** van de LMS-repo. Ook fout: die migraties zijn niet
+> gedraaid. **Een repo is geen schema.** Dezelfde 400 zou blijven bestaan.
+>
+> Deze versie staat op een meting van `pg_attribute`. Dat is de enige bron die
+> telt.
 >
 > **Vanuit deze sessie is er niets aan het LMS gewijzigd.**
 
@@ -23,23 +32,53 @@ Iris leest die met de sleutel die er al is (`DFO_LMS_SUPABASE_*`, via
 
 ## De kolommen, zoals ze zijn
 
+De tabel heeft **zeventien** kolommen. Dit is de volledige lijst:
+
+`id`, `onderwerp`, `student_id`, `mentor_id`, `soort`, `zwaarte`, `status`,
+`bron`, `bewijs`, `eerste_op`, `laatst_gezien_op`, `mentor_deadline`,
+`gesloten_op`, `gesloten_reden`, `oorzaak_weg_op`, `afgehandeld_door`,
+`uitkomst`.
+
 | Kolom | Wat Iris ermee doet |
 |---|---|
 | `id` | uuid. Wordt de bron-sleutel (`lms:<id>`, UNIQUE aan onze kant). |
 | `soort` | → `iris_signalen.type`. Vrije tekst, geen enum. |
 | `bron` | **filter.** Alleen `handmatig` wordt overgenomen. Zie hieronder. |
 | `status` | **filter.** Alleen wat nog open staat. Zie hieronder. |
-| `aangemaakt_op` | → `iris_signalen.signaal_op`. Ook het filter en de sortering. |
+| `eerste_op` | → `iris_signalen.signaal_op`. Ook het filter en de sortering. |
 | `student_id` | → `hlms_student.email` → `iris_contacten` → `contact_id`. |
 | `mentor_id` | auth-uid van de melder → `hlms_personeel.naam` → `mentor_naam`. |
-| `onderwerp` · `zwaarte` · `bak` · `bewijs` · `eerste_op` · `laatst_gezien_op` | meegelezen, nog niet gebruikt. |
+| de overige zeven | meegelezen, nog niet gebruikt. |
 
-Volledige lijst in de databank: `id`, `onderwerp`, `student_id`, `mentor_id`,
-`soort`, `zwaarte`, `status`, `bron`, `bewijs`, `eerste_op`, `laatst_gezien_op`,
-`mentor_deadline`, `gesloten_op`, `gesloten_reden`, `oorzaak_weg_op`,
-`afgehandeld_door`, `uitkomst`, `aangemaakt_op`, `wacht_tot`, `wacht_reden`,
-`bak`, `in_behandeling_door`, `in_behandeling_sinds`, `controle_op`,
-`voorstel_datum`.
+### ⚠ De migratiebestanden lopen vóór op de databank
+
+Deze kolommen staan **wel** in de LMS-repo maar **niet** in de databank — die
+migraties zijn niet gedraaid:
+
+`aangemaakt_op`, `bak`, `wacht_tot`, `wacht_reden`, `controle_op`,
+`voorstel_datum`, `in_behandeling_door`, `in_behandeling_sinds`.
+
+Daar gleed de tweede reparatiepoging op uit. Wie hier een kolom bij wil, meet
+eerst; een migratiebestand in de repo zien staan is géén bewijs dat de kolom er is.
+
+**En het gaat verder dan niet-gedraaide migraties.** `aangemaakt_op` staat in de
+repo niet in een losse `alter table`, maar in het `create table` blok van
+`hlms_signaal.sql` zelf — en dat blok begint met `create table if not exists`. Op
+een databank waar de tabel al bestond, doet dat **niets**. Een kolom die later aan
+dat blok is toegevoegd, landt dus nooit, en de migratie meldt geen fout. Daarom is
+een vergelijking met de repo geen controle:
+
+```sql
+-- Wat staat er ECHT? Dit is de enige bron die telt.
+select column_name
+from information_schema.columns
+where table_schema = 'public' and table_name = 'hlms_signaal'
+order by ordinal_position;
+```
+
+Gevolg voor het tijdstempel: **`eerste_op`** is het enige veld dat zegt wanneer
+het signaal ontstond, en dat is precies de vraag die `signaal_op` aan onze kant
+stelt.
 
 ### Wat er NIET op staat
 
@@ -89,8 +128,14 @@ motor zo'n kaart niet opruimt — zie de toelichting bij
 ## Alleen wat open staat
 
 Het LMS houdt die lijst op **één** plek: `hlms_signaal_open_statussen()`. Die
-geeft vandaag `nieuw`, `opgepakt`, `wacht_op_mentor`, `on_hold`, `wacht`, en de
-CHECK laat daarnaast alleen `afgehandeld` en `auto_gesloten` toe.
+geeft volgens de repo `nieuw`, `opgepakt`, `wacht_op_mentor`, `on_hold`, `wacht`,
+en de CHECK laat daarnaast alleen `afgehandeld` en `auto_gesloten` toe.
+
+Let op: `wacht` komt uit `hlms_signaal_wacht.sql` — dezelfde migratie die
+`wacht_tot` zou toevoegen, en die kolom bestaat niet. Of `wacht` als status
+bestaat, is dus **niet gemeten**. Dat maakt voor ons filter niets uit, en dat is
+precies de winst van de keuze hieronder: `afgehandeld` en `auto_gesloten` komen
+allebei uit de basismigratie en zijn er zeker.
 
 Iris filtert op de **gesloten** kant: `status not in ('afgehandeld',
 'auto_gesloten')`. Dat is een keuze over de richting van het falen:

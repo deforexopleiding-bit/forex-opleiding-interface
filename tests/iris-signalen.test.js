@@ -87,6 +87,33 @@ test('uitstel noemt de regel over de einddatum', () => {
 
 // ── de vorm ─────────────────────────────────────────────────────────────────
 
+/**
+ * De ZEVENTIEN kolommen die hlms_signaal echt heeft.
+ *
+ * Nagemeten op pg_attribute, 1 oktober 2026. Deze lijst is de waarheid in dit
+ * bestand; staat een kolomnaam er niet in, dan bestaat hij niet.
+ */
+const ECHTE_KOLOMMEN = Object.freeze([
+  'id', 'onderwerp', 'student_id', 'mentor_id', 'soort', 'zwaarte', 'status',
+  'bron', 'bewijs', 'eerste_op', 'laatst_gezien_op', 'mentor_deadline',
+  'gesloten_op', 'gesloten_reden', 'oorzaak_weg_op', 'afgehandeld_door', 'uitkomst',
+]);
+
+/**
+ * Kolommen die in de MIGRATIEBESTANDEN van de LMS-repo staan maar niet in de
+ * databank. Die migraties zijn niet gedraaid.
+ *
+ * Deze lijst bestaat omdat de eerste reparatie van deze bug er precies op
+ * uitgleed: `aangemaakt_op` komt uit een migratiebestand, las als een echte
+ * kolom, en gaf dezelfde 400 als `created_at`.
+ */
+const NIET_IN_DE_DATABANK = Object.freeze([
+  'created_at', 'aangemaakt_op', 'bak', 'wacht_tot', 'wacht_reden',
+  'controle_op', 'voorstel_datum', 'in_behandeling_door', 'in_behandeling_sinds',
+  'type', 'signaal_type', 'toelichting', 'omschrijving', 'notitie', 'mentor_naam',
+  'gevraagde_actie',
+]);
+
 // Een rij zoals hlms_signaal hem echt teruggeeft. Gemeten 1 oktober 2026.
 const ECHTE_RIJ = Object.freeze({
   id: 's1',
@@ -97,11 +124,21 @@ const ECHTE_RIJ = Object.freeze({
   zwaarte: 'rood',
   status: 'nieuw',
   bron: 'handmatig',
-  bak: 'hoofdmentor',
   bewijs: { gemeld_door: 'uid-seppe' },
   eerste_op: '2026-09-20T10:00:00Z',
   laatst_gezien_op: '2026-09-20T10:00:00Z',
-  aangemaakt_op: '2026-09-20T10:00:00Z',
+  mentor_deadline: null,
+  gesloten_op: null,
+  gesloten_reden: null,
+  oorzaak_weg_op: null,
+  afgehandeld_door: null,
+  uitkomst: null,
+});
+
+test('de proefrij gebruikt precies de kolommen die bestaan', () => {
+  // Anders test dit bestand tegen een rij die de databank nooit zo teruggeeft,
+  // en dan bewijst groen niets.
+  assert.deepEqual(Object.keys(ECHTE_RIJ).sort(), [...ECHTE_KOLOMMEN].sort());
 });
 
 test('HET TYPE KOMT UIT `soort`, niet uit `type`', () => {
@@ -111,16 +148,24 @@ test('HET TYPE KOMT UIT `soort`, niet uit `type`', () => {
   assert.equal(vormSignaal(ECHTE_RIJ).type, 'start_niet_op');
 });
 
-test('HET TIJDSTIP KOMT UIT `aangemaakt_op`, niet uit `created_at`', () => {
+test('HET TIJDSTIP KOMT UIT `eerste_op`', () => {
+  // Wanneer het signaal ontstond -- precies de vraag die signaal_op stelt.
   assert.equal(vormSignaal(ECHTE_RIJ).signaal_op, '2026-09-20T10:00:00Z');
 });
 
-test('een rij met de OUDE veldnamen levert niets op', () => {
-  // Dit is de test die op de oude code zou slagen en nu hoort te falen. Zou
-  // `type` of `created_at` nog gelezen worden, dan staat hier wel iets.
+test('`created_at` levert niets op', () => {
   const s = vormSignaal({ id: 's1', type: 'uitstel', created_at: '2026-09-20T10:00:00Z' });
   assert.equal(s.type, 'onbekend', '`type` hoort niet meer gelezen te worden');
-  assert.equal(s.signaal_op, null, '`created_at` hoort niet meer gelezen te worden');
+  assert.equal(s.signaal_op, null, '`created_at` bestaat niet');
+});
+
+test('`aangemaakt_op` LEVERT OOK NIETS OP', () => {
+  // Hier ging de eerste reparatie de mist in. `aangemaakt_op` staat wel in de
+  // migratiebestanden van de LMS-repo, maar niet in de databank -- die migraties
+  // zijn niet gedraaid. Een rij met alleen aangemaakt_op erin hoort dus geen
+  // tijdstempel op te leveren.
+  const s = vormSignaal({ id: 's1', soort: 'uitstel', aangemaakt_op: '2026-09-20T10:00:00Z' });
+  assert.equal(s.signaal_op, null, '`aangemaakt_op` bestaat niet op hlms_signaal');
 });
 
 test('de rest van de vorm blijft wat iris_signalen verwacht', () => {
@@ -249,34 +294,41 @@ async function vraagOp(rijen = []) {
   return { lms, crm, vraag: lms.gelogd.find((v) => v.tabel === 'hlms_signaal') };
 }
 
-test('DE OPVRAGING NOEMT `created_at` NERGENS MEER', async () => {
-  // Dit is de bug. `.gte('created_at', ...)` gaf elke vijf minuten een 400 in de
-  // LMS-logs, en Iris heeft daardoor nooit een mentorsignaal binnengekregen.
+test('DE OPVRAGING NOEMT GEEN ENKELE KOLOM DIE NIET BESTAAT', async () => {
+  // Dit is de bug, twee keer. Eerst `created_at` (verzonnen), daarna
+  // `aangemaakt_op` (uit een migratiebestand dat niet gedraaid is). Allebei
+  // leverden ze elke vijf minuten een 400 in de LMS-logs.
   const { vraag } = await vraagOp();
   const alles = JSON.stringify(vraag);
-  assert.ok(!alles.includes('created_at'), 'created_at bestaat niet op hlms_signaal');
+  for (const k of NIET_IN_DE_DATABANK) {
+    assert.ok(!alles.includes(k), `${k} bestaat niet op hlms_signaal en hoort niet in de opvraging`);
+  }
 });
 
-test('er wordt gefilterd EN gesorteerd op `aangemaakt_op`', async () => {
+test('er wordt gefilterd EN gesorteerd op `eerste_op`', async () => {
   const { vraag } = await vraagOp();
-  assert.ok(vraag.filters.some((f) => f[0] === 'gte' && f[1] === 'aangemaakt_op'), 'het filter');
-  assert.equal(vraag.order[0], 'aangemaakt_op', 'de sortering');
+  assert.ok(vraag.filters.some((f) => f[0] === 'gte' && f[1] === 'eerste_op'), 'het filter');
+  assert.equal(vraag.order[0], 'eerste_op', 'de sortering');
   assert.equal(vraag.order[1].ascending, false, 'nieuwste eerst');
 });
 
-test('de kolomlijst is uitgeschreven en bestaat uit echte kolommen', async () => {
-  // Geen select('*') meer: dan merk je een kolom die verdwijnt pas als er iets
-  // anders stukgaat. Deze lijst is gemeten op 1 oktober 2026.
+test('de kolomlijst is EXACT de zeventien kolommen die bestaan', async () => {
+  // Geen select('*'): dan merk je een kolom die verdwijnt pas als er iets anders
+  // stukgaat. En geen kolom erbij die alleen in een migratiebestand staat -- dat
+  // is precies hoe `aangemaakt_op` erin kwam.
   const { vraag } = await vraagOp();
   assert.equal(vraag.select, SIGNAAL_KOLOMMEN);
   assert.ok(!vraag.select.includes('*'));
-  const ECHT = new Set(['id', 'onderwerp', 'student_id', 'mentor_id', 'soort', 'zwaarte',
-    'status', 'bron', 'bewijs', 'eerste_op', 'laatst_gezien_op', 'mentor_deadline',
-    'gesloten_op', 'gesloten_reden', 'oorzaak_weg_op', 'afgehandeld_door', 'uitkomst',
-    'aangemaakt_op', 'wacht_tot', 'wacht_reden', 'bak', 'in_behandeling_door',
-    'in_behandeling_sinds', 'controle_op', 'voorstel_datum']);
-  for (const k of vraag.select.split(',').map((x) => x.trim()).filter(Boolean)) {
-    assert.ok(ECHT.has(k), `${k} staat niet op hlms_signaal`);
+  const gevraagd = vraag.select.split(',').map((x) => x.trim()).filter(Boolean);
+  assert.deepEqual([...gevraagd].sort(), [...ECHTE_KOLOMMEN].sort(),
+    'de kolomlijst hoort gelijk te zijn aan wat pg_attribute teruggaf');
+});
+
+test('de niet-bestaande en de echte kolommen overlappen niet', () => {
+  // Zou een naam in allebei de lijsten staan, dan zegt dit bestand twee dingen
+  // tegelijk en is geen enkele test erop nog betrouwbaar.
+  for (const k of NIET_IN_DE_DATABANK) {
+    assert.ok(!ECHTE_KOLOMMEN.includes(k), `${k} staat in beide lijsten`);
   }
 });
 
@@ -456,10 +508,20 @@ test('het contractdocument noemt de echte kolommen en niet de verzonnen', () => 
   // Het document was een VOORSTEL met gehoopte veldnamen erin. Dat is precies
   // hoe `created_at` in de code belandde.
   const doc = readFileSync(new URL('../docs/iris/lms-signaalcontract.md', import.meta.url), 'utf8');
-  for (const echt of ['aangemaakt_op', 'soort', 'bron', 'handmatig', 'hlms_signaal_gebeurtenis', 'hlms_personeel']) {
+  for (const echt of ['eerste_op', 'soort', 'bron', 'handmatig', 'hlms_signaal_gebeurtenis', 'hlms_personeel']) {
     assert.ok(doc.includes(echt), `${echt} hoort in het contract te staan`);
   }
-  // En het mag de oude namen alleen nog noemen als FOUT, niet als veld dat er is.
-  assert.ok(!/\| `created_at` \|/.test(doc), 'created_at hoort niet meer in de kolomtabel');
-  assert.ok(!/\| `mentor_naam` \| ja/.test(doc), 'mentor_naam staat niet op hlms_signaal');
+  // De volledige kolomlijst hoort erin te staan, zodat de volgende lezer niet
+  // alsnog in de migratiebestanden gaat kijken.
+  for (const k of ECHTE_KOLOMMEN) {
+    assert.ok(doc.includes('`' + k + '`'), `${k} ontbreekt in de kolomlijst van het contract`);
+  }
+  // En de oude namen mogen alleen nog als FOUT genoemd worden, niet in de tabel
+  // van kolommen die Iris gebruikt.
+  for (const k of ['created_at', 'aangemaakt_op']) {
+    assert.ok(!new RegExp('\\| `' + k + '` \\|').test(doc), `${k} hoort niet in de kolomtabel`);
+  }
+  assert.ok(/pg_attribute/.test(doc), 'het contract hoort te zeggen waarop gemeten is');
+  assert.ok(/repo is geen schema|repo is dus geen schema/i.test(doc),
+    'de les waarop de tweede poging uitgleed hoort erin te staan');
 });
