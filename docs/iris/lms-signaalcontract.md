@@ -1,12 +1,25 @@
 # Wat Iris van een mentorsignaal verwacht
 
-**Voor:** wie de mentormodule in het LMS bouwt
-**Datum:** 21 september 2026
-**Status:** voorstel — Iris leest deze velden zodra ze bestaan
+**Voor:** wie de mentormodule in het LMS onderhoudt
+**Gemeten:** 1 oktober 2026, op `pg_attribute` van `public.hlms_signaal` in `dfo-lms`
+**Status:** vastgesteld — dit zijn de kolommen zoals ze in de **databank** staan
 
-De mentormodule wordt in een andere sessie gebouwd. Dit document zegt wat Iris
-aan de CRM-kant verwacht, zodat de twee kanten niet langs elkaar heen werken.
-**Vanuit deze sessie is er niets aan het LMS gewijzigd.**
+> **Dit document is op 1 oktober 2026 twee keer herschreven, en dat is het
+> leerzame deel.**
+>
+> De eerste versie was een *voorstel*: de mentormodule bestond nog niet, dus
+> stonden er veldnamen in die we hoopten. Iris vroeg om `created_at` en `type`.
+> Die bestaan niet → elke vijf minuten een 400 in de LMS-logs, en **Iris heeft
+> nooit één mentorsignaal binnengekregen.**
+>
+> De tweede versie zette `aangemaakt_op` neer, gelezen uit de
+> **migratiebestanden** van de LMS-repo. Ook fout: die migraties zijn niet
+> gedraaid. **Een repo is geen schema.** Dezelfde 400 zou blijven bestaan.
+>
+> Deze versie staat op een meting van `pg_attribute`. Dat is de enige bron die
+> telt.
+>
+> **Vanuit deze sessie is er niets aan het LMS gewijzigd.**
 
 ---
 
@@ -17,25 +30,141 @@ aan de CRM-kant verwacht, zodat de twee kanten niet langs elkaar heen werken.
 Iris leest die met de sleutel die er al is (`DFO_LMS_SUPABASE_*`, via
 `api/_lib/dfo-lms-db.js`) en **schrijft er nooit in**.
 
-## De velden
+## De kolommen, zoals ze zijn
 
-| Veld | Nodig | Wat erin hoort |
+De tabel heeft **zeventien** kolommen. Dit is de volledige lijst:
+
+`id`, `onderwerp`, `student_id`, `mentor_id`, `soort`, `zwaarte`, `status`,
+`bron`, `bewijs`, `eerste_op`, `laatst_gezien_op`, `mentor_deadline`,
+`gesloten_op`, `gesloten_reden`, `oorzaak_weg_op`, `afgehandeld_door`,
+`uitkomst`.
+
+| Kolom | Wat Iris ermee doet |
+|---|---|
+| `id` | uuid. Wordt de bron-sleutel (`lms:<id>`, UNIQUE aan onze kant). |
+| `soort` | → `iris_signalen.type`. Vrije tekst, geen enum. |
+| `bron` | **filter.** Alleen `handmatig` wordt overgenomen. Zie hieronder. |
+| `status` | **filter.** Alleen wat nog open staat. Zie hieronder. |
+| `eerste_op` | → `iris_signalen.signaal_op`. Ook het filter en de sortering. |
+| `student_id` | → `hlms_student.email` → `iris_contacten` → `contact_id`. |
+| `mentor_id` | auth-uid van de melder → `hlms_personeel.naam` → `mentor_naam`. |
+| de overige zeven | meegelezen, nog niet gebruikt. |
+
+### ⚠ De migratiebestanden lopen vóór op de databank
+
+Deze kolommen staan **wel** in de LMS-repo maar **niet** in de databank — die
+migraties zijn niet gedraaid:
+
+`aangemaakt_op`, `bak`, `wacht_tot`, `wacht_reden`, `controle_op`,
+`voorstel_datum`, `in_behandeling_door`, `in_behandeling_sinds`.
+
+Daar gleed de tweede reparatiepoging op uit. Wie hier een kolom bij wil, meet
+eerst; een migratiebestand in de repo zien staan is géén bewijs dat de kolom er is.
+
+**En het gaat verder dan niet-gedraaide migraties.** `aangemaakt_op` staat in de
+repo niet in een losse `alter table`, maar in het `create table` blok van
+`hlms_signaal.sql` zelf — en dat blok begint met `create table if not exists`. Op
+een databank waar de tabel al bestond, doet dat **niets**. Een kolom die later aan
+dat blok is toegevoegd, landt dus nooit, en de migratie meldt geen fout. Daarom is
+een vergelijking met de repo geen controle:
+
+```sql
+-- Wat staat er ECHT? Dit is de enige bron die telt.
+select column_name
+from information_schema.columns
+where table_schema = 'public' and table_name = 'hlms_signaal'
+order by ordinal_position;
+```
+
+Gevolg voor het tijdstempel: **`eerste_op`** is het enige veld dat zegt wanneer
+het signaal ontstond, en dat is precies de vraag die `signaal_op` aan onze kant
+stelt.
+
+### Wat er NIET op staat
+
+Er is **geen** `toelichting`, `omschrijving` of `notitie`, en **geen**
+`mentor_naam`. Iris haalt die ergens anders:
+
+| Wat | Waar het echt staat |
+|---|---|
+| de tekst van de melder | `hlms_signaal_gebeurtenis` waar `soort = 'geopend'` → `tekst` (oudste regel; die tabel is alleen-toevoegen) |
+| de naam van de mentor | `hlms_personeel.naam` op `id = hlms_signaal.mentor_id` |
+
+Allebei fail-zacht: lukt de opzoeking niet, dan is het veld leeg en komt de
+kaart er gewoon. Een kaart zonder naam is bruikbaar; een kaart die er niet is
+niet.
+
+Er wordt ook **geen `gevraagde_actie`** op de rij gelezen. Die kwam uit de
+voorstel-tabel hieronder en kwam er in de vorige versie van dit document ook uit;
+de kolom bestond nooit.
+
+---
+
+## Alleen `bron = handmatig`
+
+`hlms_signaal_bron_check` laat drie bronnen toe:
+
+| bron | Wat het is | Komt in de Post? |
 |---|---|---|
-| `id` | ja | uuid. Wordt de bron-sleutel (`lms:<id>`, UNIQUE aan onze kant). |
-| `type` | ja | zie hieronder. **Vrije tekst, geen enum.** |
-| `student_id` | ja | `hlms_student.id`, zodat we de persoon kunnen vinden. |
-| `mentor_naam` | graag | de naam van de mentor, voor op de kaart. Ook `mentor` wordt gelezen. |
-| `toelichting` | graag | de zin die een mens leest. Ook `omschrijving` en `notitie` worden gelezen. |
-| `gevraagde_actie` | nee | wat de mentor wil dat er gebeurt. Staat dit er, dan wint het van ons eigen voorstel — het LMS weet meer van de situatie dan onze vertaaltabel. |
-| `created_at` | ja | wanneer het signaal ontstond. Ook `aangemaakt_op` en `signaal_op` worden gelezen. |
+| `lms_regel` | wat de nachtelijke LMS-motor zelf opmerkt | **nee** |
+| `crm_cron` | wat ons eigen systeem erin zette | **nee** |
+| `handmatig` | wat een mens zelf meldde | **ja** |
 
-Dat er drie namen per veld gelezen worden is geen slordigheid maar een
-inschatting: de module bestaat nog niet, dus we weten niet hoe de kolommen
-gaan heten. Meerdere namen proberen is goedkoper dan breken.
+Op 1 oktober stonden er ~450 rijen in de tabel, bijna alles `lms_regel` — 59
+open `geen_volgende_sessie`, 12 open `factuur_vervallen`. Die horen op het
+**hoofdmentorbord in het LMS**, want daar worden ze afgehandeld. Zou Iris ze
+overnemen, dan stonden er in één keer ruim honderd kaarten in de Post, en hielden
+twee borden hetzelfde werk bij — dat is precies hoe je werk dubbel doet en
+tegelijk kwijtraakt.
 
-## De types
+`crm_cron` terugslepen zou een kringetje zijn: wij schrijven het, wij lezen het.
 
-| Type | Wat Iris voorstelt |
+`handmatig` is de uitzondering die het LMS zelf aanbracht zodat de nachtelijke
+motor zo'n kaart niet opruimt — zie de toelichting bij
+`hlms_kaart_start_niet_op()`. Dat is dezelfde grens die wij hier gebruiken.
+
+---
+
+## Alleen wat open staat
+
+Het LMS houdt die lijst op **één** plek: `hlms_signaal_open_statussen()`. Die
+geeft volgens de repo `nieuw`, `opgepakt`, `wacht_op_mentor`, `on_hold`, `wacht`,
+en de CHECK laat daarnaast alleen `afgehandeld` en `auto_gesloten` toe.
+
+Let op: `wacht` komt uit `hlms_signaal_wacht.sql` — dezelfde migratie die
+`wacht_tot` zou toevoegen, en die kolom bestaat niet. Of `wacht` als status
+bestaat, is dus **niet gemeten**. Dat maakt voor ons filter niets uit, en dat is
+precies de winst van de keuze hieronder: `afgehandeld` en `auto_gesloten` komen
+allebei uit de basismigratie en zijn er zeker.
+
+Iris filtert op de **gesloten** kant: `status not in ('afgehandeld',
+'auto_gesloten')`. Dat is een keuze over de richting van het falen:
+
+- Zouden wij de **open** lijst hier overschrijven en zet het LMS er een nieuwe
+  open status bij, dan valt die stil weg → **een mentorkaart die nooit
+  aankomt.** Dat is de bug die hiervoor al een keer gebeurde.
+- Zet het LMS er een nieuwe **gesloten** status bij, dan komt er een kaart binnen
+  die al afgehandeld is → zichtbaar, hinderlijk, in één klik weg.
+
+De tweede fout is de goedkope.
+
+**Komt er een gesloten status bij, laat het weten** — dan zetten we hem in
+`LMS_GESLOTEN_STATUSSEN` in `api/_lib/iris/signalen.js`. Er staat een test op
+dat die lijst er is; er kan geen test op staan dat hij volledig is.
+
+---
+
+## De soorten
+
+`soort` is vrije tekst. Wat we vandaag zien bij `bron = handmatig`:
+
+| soort | Wat Iris voorstelt |
+|---|---|
+| `start_niet_op` | nog geen eigen voorstel → *"laat een mens kijken"* |
+
+En de zes die al een voorstel hebben, voor als het LMS ze gaat melden:
+
+| soort | Wat Iris voorstelt |
 |---|---|
 | `uitstel` | on hold met reden, einddatum schuift mee |
 | `reageert_niet` | op de belrij bij Dave |
@@ -44,43 +173,63 @@ gaan heten. Meerdere namen proberen is goedkoper dan breken.
 | `factuur` | dossier nakijken in de Post |
 | `taken_niet_gedaan` | op de belrij |
 
-### Een type dat er niet bij staat, is geen fout
+### Een soort die er niet bij staat, is geen fout
 
 Dit is de belangrijkste afspraak in dit document.
 
-Er staat **geen CHECK-constraint** op `iris_signalen.type`. Een onbekend type
+Er staat **geen CHECK-constraint** op `iris_signalen.type`. Een onbekende soort
 komt gewoon in de lijst, met het voorstel "laat een mens kijken". De
 synchronisatie valt er niet over.
 
-De reden: de mentormodule wordt parallel gebouwd. Zou er een enum staan, dan
-breekt de synchronisatie op de dag dat het LMS een zevende type toevoegt — en
-een synchronisatie die stilvalt, merkt niemand. Dan blijven signalen liggen
-terwijl iedereen denkt dat de koppeling werkt.
+De reden: de mentormodule wordt doorontwikkeld. Zou er een enum staan, dan breekt
+de synchronisatie op de dag dat het LMS een zevende soort toevoegt — en een
+synchronisatie die stilvalt, merkt niemand. Dan blijven signalen liggen terwijl
+iedereen denkt dat de koppeling werkt.
 
-Dus: **voeg gerust types toe.** Laat het weten, dan krijgen ze een passend
+Dus: **voeg gerust soorten toe.** Laat het weten, dan krijgen ze een passend
 voorstel in plaats van het neutrale.
+
+---
 
 ## Wat er aan onze kant gebeurt
 
-1. `cron-iris-werk` haalt elke vijf minuten de signalen van de laatste dertig
-   dagen op.
-2. Wat nog niet in `iris_signalen` staat, wordt toegevoegd. `bron_id` is
-   UNIQUE, dus de cron mag zo vaak draaien als hij wil.
-3. Het signaal verschijnt op de dossierkaart van die persoon, met het voorstel
+1. `cron-iris-werk` haalt elke vijf minuten de **handmatige, open** signalen van
+   de laatste dertig dagen op (hoogstens 100 per ronde).
+2. Per groep worden drie dingen opgezocht, alle drie fail-zacht: de mentornaam,
+   de openingsnotitie, en het Iris-contact.
+3. Wat nog niet in `iris_signalen` staat, wordt toegevoegd. `bron_id` is UNIQUE,
+   dus de cron mag zo vaak draaien als hij wil.
+4. Het signaal verschijnt op de dossierkaart van die persoon, met het voorstel
    erbij.
-4. Bij `reageert_niet`, `no_show` en `taken_niet_gedaan` kan er met één klik
-   een belrij-regel van gemaakt worden.
 
-Een LMS dat even niet bereikbaar is, legt de rest van Iris niet stil. Dat is
-een waarschuwing in het logboek, geen fout.
+### De koppeling naar een dossier
+
+`hlms_signaal.student_id` → `hlms_student.email` → `iris_contacten.emails`.
+
+**Bij 0 of meer dan 1 treffer blijft `contact_id` leeg.** Ambiguïteit is geen
+"kies de eerste": een kaart aan de verkeerde persoon hangen is erger dan een
+kaart zonder dossier. Er wordt ook **geen contact aangemaakt** — een student die
+ons nooit geschreven heeft, hoort geen gespreksdossier te krijgen omdat zijn
+mentor iets meldde.
+
+Let op het gevolg: een signaal met een leeg `contact_id` staat wél in
+`iris_signalen` maar is **nergens zichtbaar**, want de dossierkaart is de enige
+plek die deze tabel leest en die filtert op `contact_id`. Dat is bewust — maar het
+betekent dat "de kaart komt niet" twee oorzaken kan hebben, en de tweede is een
+student die bij ons geen contact heeft.
+
+Een LMS dat even niet bereikbaar is, legt de rest van Iris niet stil. Dat is een
+waarschuwing in het logboek, geen fout.
 
 ## Wat Iris NIET doet
 
-- Niet schrijven in `hlms_signaal` of welke `hlms_*`-tabel dan ook, met één
-  uitzondering die de opdracht uitdrukkelijk toestaat: `hlms_student.eind_datum`
-  bij een goedgekeurde verlenging, via `iris_acties`.
+- Niet schrijven in `hlms_signaal`, `hlms_signaal_gebeurtenis`, `hlms_personeel`
+  of welke `hlms_*`-tabel dan ook, met één uitzondering die de opdracht
+  uitdrukkelijk toestaat: `hlms_student.eind_datum` bij een goedgekeurde
+  verlenging, via `iris_acties`.
 - Niet zelf een student op hold zetten. Dat is een voorstel dat een mens
   goedkeurt.
 - Geen signaal als "afgehandeld" markeren in het LMS. Wij zetten
   `iris_signalen.verwerkt_op` aan onze kant; het LMS houdt zijn eigen
   boekhouding.
+- Geen `lms_regel`- of `crm_cron`-signalen overnemen.
