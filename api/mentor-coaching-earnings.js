@@ -2,7 +2,8 @@
 //
 // GET → coaching-verdiensten v1: telt 1-op-1 sessies + team-trainingen +
 // no-shows binnen een periode en rekent ze om naar bedragen (incl. btw).
-// Read-only proxy op bubble.io.
+// Read-only: sessies uit het LMS (dfo-lms) + Bubble voor de periode vóór
+// oktober 2026. Een onbereikbare bron geeft een fout, nooit stil 0.
 //
 // Dual-gate (consistent met andere mentor-endpoints):
 //   - ?mentor_user_id=… → admin (mentor.admin.view, die id).
@@ -18,7 +19,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { computeCoachingEarnings, emptyBreakdown } from './_lib/coaching-earnings.js';
+import { computeCoachingEarnings } from './_lib/coaching-earnings.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -89,16 +90,9 @@ export default async function handler(req, res) {
       .eq('is_active', true)
       .maybeSingle();
     if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
-      return res.status(200).json({
-        ok: true, scope, linked: false, from, to,
-        breakdown: emptyBreakdown(),
-        grand_total: 0,
-      });
-    }
-
+    // Bubble-koppeling is optioneel: zonder bubble_user_id telt alleen het LMS.
     const result = await computeCoachingEarnings({
-      bubbleUserId: tm.bubble_user_id,
+      bubbleUserId: tm?.bubble_user_id || null,
       mentorUserId: effectiveUserId,
       from,
       to,
@@ -112,6 +106,7 @@ export default async function handler(req, res) {
       to,
       breakdown : result.breakdown,
       grand_total: result.grand_total,
+      bronnen   : result._meta?.bronnen || null,
     };
 
     if (debugOn) {
@@ -119,16 +114,20 @@ export default async function handler(req, res) {
         students_count   : result.students_count,
         sessions_fetched : result.sessions_fetched,
         teamCountRaw     : result.team_count_raw,
+        meta             : result._meta,
       };
     }
 
     return res.status(200).json(payload);
   } catch (e) {
     console.error('[mentor-coaching-earnings]', e?.message || e);
+    if (e?.code === 'LMS_NIET_GECONFIGUREERD' || e?.code === 'LMS_ONBEREIKBAAR') {
+      return res.status(502).json({ error: 'Sessies uit het LMS konden niet gelezen worden — ' + e.message });
+    }
     if (e?.code === 'BUBBLE_CONFIG_MISSING') {
       return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
     }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
+    if (e?.code === 'BUBBLE_NETWORK' || e?.code === 'BUBBLE_ONBEREIKBAAR' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
       return res.status(502).json({ error: e.message });
     }
     return res.status(500).json({ error: e?.message || 'Interne fout' });
