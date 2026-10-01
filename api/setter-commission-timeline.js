@@ -14,9 +14,11 @@
 //
 // Verleden buckets: som(setter_ledger_entries.amount) waar
 //   status ∈ ('vrijgegeven','uitbetaald') EN created_at in de maand.
-// Toekomst buckets: voor elke ACTIEVE subscription van setter-deals,
-//   verdeel resterende termijnen × pct/100 over de toekomstige maanden
-//   volgens `billing_cycle_in_months` (default 1 = per maand).
+// Toekomst buckets: het betaalplan van elke GEACCEPTEERDE sale (deals.
+//   total_amount incl. BTW: reserveringsfee/aanbetaling/termijnen met
+//   datums, zie _lib/setter-sale-plan.js), minus wat al ontvangen is,
+//   × pct/100 in de maand van het geplande moment (achterstand → volgende
+//   maand).
 // Huidige maand mag beide bevatten (mix: al gerealiseerd + nog verwacht).
 //
 // Gate: setter.ledger.view. setter.ledger.admin mag ?setter_user_id=X.
@@ -26,16 +28,12 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { betaaldBedrag } from './_lib/factuur-betaald.js';
+import {
+  SETTER_DEAL_COLS, isUitgeslotenDeal, quotationStatus, bouwBetaalplan, forecastUitPlan,
+} from './_lib/setter-sale-plan.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
-function cycleMonths(label) {
-  if (!label) return 1;
-  if (CYCLE_M[label] != null) return CYCLE_M[label];
-  const m = String(label).match(/per_(\d+)_months/);
-  return m ? Number(m[1]) : 1;
-}
 
 function round2(v) { return Math.round((Number(v) || 0) * 100) / 100; }
 
@@ -118,68 +116,36 @@ export default async function handler(req, res) {
       .select('pct').eq('user_id', targetSetter).maybeSingle();
     const pct = cfg?.pct ? Number(cfg.pct) : 0;
 
-    // ── Toekomst: uit haar actieve subscriptions ─────────────────────────
-    const { data: deals } = await supabaseAdmin
-      .from('deals').select('id').eq('setter_user_id', targetSetter);
-    const dealIds = (deals || []).map((d) => d.id);
+    // ── Toekomst: uit het betaalplan van haar geaccepteerde sales ────────
+    // Zelfde bron als de saleslijst in setter-overview: deals.total_amount
+    // (incl. BTW) + aanbetaling/reserveringsfee/termijnen met datums.
+    // Ontvangen geld (credit-veilig) wordt van voren af aan afgeboekt.
+    // Niet-geaccepteerde offertes en sales waarvan alle abonnementen zijn
+    // geannuleerd tellen niet mee.
+    const { data: dealsRaw } = await supabaseAdmin
+      .from('deals').select(SETTER_DEAL_COLS).eq('setter_user_id', targetSetter);
+    const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d) && !quotationStatus(d).pending);
+    const dealIds = deals.map((d) => d.id);
     if (dealIds.length && pct > 0) {
       const [subsRes, invsRes] = await Promise.all([
-        supabaseAdmin.from('subscriptions')
-          .select('id, deal_id, amount, term_count, status, billing_cycle, start_date')
-          .in('deal_id', dealIds),
+        supabaseAdmin.from('subscriptions').select('deal_id, status').in('deal_id', dealIds),
         supabaseAdmin.from('invoices')
-          .select('deal_id, amount_paid').in('deal_id', dealIds),
+          .select('deal_id, amount_paid, amount_total, credited_amount').in('deal_id', dealIds),
       ]);
       const paidByDeal = {};
       for (const i of (invsRes.data || [])) {
-        paidByDeal[i.deal_id] = (paidByDeal[i.deal_id] || 0) + (Number(i.amount_paid) || 0);
+        paidByDeal[i.deal_id] = (paidByDeal[i.deal_id] || 0) + betaaldBedrag(i);
       }
-      const currentMonthStart = new Date(Date.UTC(currentY, currentM, 1)).getTime();
+      const subsByDeal = {};
+      for (const s of (subsRes.data || [])) (subsByDeal[s.deal_id] ||= []).push(s);
 
-      for (const s of (subsRes.data || [])) {
-        if (CANCELLED.has(String(s.status || '').toLowerCase())) continue;
-        const amount    = Number(s.amount) || 0;
-        const termCount = Number(s.term_count) || 0;
-        if (amount <= 0 || termCount <= 0) continue;
-        const cycleMo = cycleMonths(s.billing_cycle) || 1;
-
-        const totaal    = amount * termCount;
-        const alBetaald = paidByDeal[s.deal_id] || 0;
-        const resterend = Math.max(0, totaal - alBetaald);
-        if (resterend <= 0) continue;
-        const resterendeTermijnen = Math.ceil(resterend / amount);
-
-        // Bepaal start-maand van de eerste toekomstige termijn. Als
-        // start_date bekend is, gebruik die + (aantal reeds betaalde termijnen)
-        // * cycleMo. Anders: eerstvolgende maand.
-        let firstMonth;
-        if (s.start_date) {
-          const sd = new Date(s.start_date);
-          if (!isNaN(sd.getTime())) {
-            const betaaldeTermijnen = alBetaald > 0 ? Math.floor(alBetaald / amount) : 0;
-            const y = sd.getUTCFullYear();
-            const m = sd.getUTCMonth();
-            firstMonth = new Date(Date.UTC(y, m + betaaldeTermijnen * cycleMo, 1)).getTime();
-          }
-        }
-        if (!firstMonth) {
-          firstMonth = new Date(Date.UTC(currentY, currentM + 1, 1)).getTime();
-        }
-        // Als firstMonth in het verleden ligt (achterstallige betalingen),
-        // schuif door naar volgende maand vanaf nu.
-        if (firstMonth < currentMonthStart) {
-          firstMonth = new Date(Date.UTC(currentY, currentM + 1, 1)).getTime();
-        }
-
-        const commissiePerTermijn = amount * pct / 100;
-        for (let k = 0; k < resterendeTermijnen; k++) {
-          const start = firstMonth;
-          const bucketDate = new Date(start);
-          bucketDate.setUTCMonth(bucketDate.getUTCMonth() + k * cycleMo);
-          const ym = ymOf(bucketDate);
-          const idx = ymIndex.get(ym);
-          if (idx == null) break; // buiten window (verder dan 18 mnd)
-          months[idx].forecast += commissiePerTermijn;
+      for (const d of deals) {
+        const subs = subsByDeal[d.id] || [];
+        if (subs.length && subs.every((s) => CANCELLED.has(String(s.status || '').toLowerCase()))) continue;
+        const plan = bouwBetaalplan(d, { pct });
+        for (const b of forecastUitPlan(plan, { ontvangen: paidByDeal[d.id] || 0, now })) {
+          const idx = ymIndex.get(b.ym);
+          if (idx != null) months[idx].forecast += b.commissie;
         }
       }
     }
