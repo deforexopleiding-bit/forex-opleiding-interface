@@ -12,8 +12,13 @@
 // ── DE KOLOMNAMEN ZIJN GEMETEN, NIET BEDACHT (1 oktober 2026) ────────────────
 // Deze module vroeg `hlms_signaal` om `created_at`. Die kolom bestaat niet. Het
 // gevolg: elke vijf minuten een 400 in de LMS-logs, en Iris heeft NOOIT een
-// mentorsignaal binnengekregen. Het heet `aangemaakt_op`, en het type heet
-// `soort`.
+// mentorsignaal binnengekregen. Het tijdstempel heet `eerste_op`, en het type
+// heet `soort`.
+//
+// EN DE EERSTE REPARATIE ZAT ER OOK NAAST. Die zette `aangemaakt_op` neer -- een
+// kolom die wel in de migratiebestanden van de LMS-repo staat maar niet in de
+// databank. Een repo is geen schema: die migraties zijn niet gedraaid. Alleen een
+// meting op `pg_attribute` telt, en die is op 1 oktober 2026 gedaan.
 //
 // Er stonden ook drie veldnamen per veld te raden (`type` / `signaal_type`,
 // `created_at` / `aangemaakt_op` / `signaal_op`). Dat was verdedigbaar toen de
@@ -87,10 +92,30 @@ export const LMS_BRON = 'handmatig';
  */
 export const LMS_GESLOTEN_STATUSSEN = Object.freeze(['afgehandeld', 'auto_gesloten']);
 
-/** De kolommen die we op hlms_signaal lezen. Alle gemeten op 1 oktober 2026. */
+/**
+ * De kolommen die hlms_signaal ECHT heeft.
+ *
+ * Nagemeten op `pg_attribute` van `public.hlms_signaal`, 1 oktober 2026. Dit is
+ * de volledige lijst — zeventien kolommen, niet meer.
+ *
+ * ── WAT ER NIET IN STAAT, EN WAAROM DAT ZO VERRADERLIJK IS ──────────────────
+ * De migratiebestanden in de LMS-repo voegen kolommen toe die in de DATABANK
+ * niet bestaan: `aangemaakt_op`, `bak`, `wacht_tot`, `wacht_reden`,
+ * `controle_op`, `voorstel_datum`, `in_behandeling_door`,
+ * `in_behandeling_sinds`. Die migraties zijn (nog) niet gedraaid.
+ *
+ * Een repo is dus geen schema. Dat is precies hoe deze bug twee keer gemaakt is:
+ * eerst met `created_at` (verzonnen), daarna met `aangemaakt_op` (uit de
+ * migratiebestanden gelezen, en nog steeds fout). Alleen een meting op de
+ * databank zelf telt.
+ *
+ * Gevolg voor het tijdstempel: `eerste_op` is het enige veld dat zegt wanneer
+ * het signaal ontstond, en dat is ook wat we willen weten.
+ */
 export const SIGNAAL_KOLOMMEN =
-  'id, onderwerp, student_id, mentor_id, soort, zwaarte, status, bron, bak, ' +
-  'bewijs, eerste_op, laatst_gezien_op, aangemaakt_op';
+  'id, onderwerp, student_id, mentor_id, soort, zwaarte, status, bron, bewijs, ' +
+  'eerste_op, laatst_gezien_op, mentor_deadline, gesloten_op, gesloten_reden, ' +
+  'oorzaak_weg_op, afgehandeld_door, uitkomst';
 
 /** Bouw de bron-sleutel. Eén plek, zodat de twee kanten niet uit elkaar lopen. */
 export function bronSleutel(systeem, id) {
@@ -151,8 +176,12 @@ export function voorstelVoor(type) {
  * Maak van een LMS-rij de vorm die iris_signalen verwacht.
  *
  * ── WAT ER UIT WELKE KOLOM KOMT ─────────────────────────────────────────────
- *   type       ← `soort`          (niet `type`; die kolom bestaat niet)
- *   signaal_op ← `aangemaakt_op`  (niet `created_at`; idem)
+ *   type       ← `soort`       (niet `type`; die kolom bestaat niet)
+ *   signaal_op ← `eerste_op`   (niet `created_at` en ook niet `aangemaakt_op`;
+ *                               die bestaan allebei niet — zie SIGNAAL_KOLOMMEN)
+ *
+ * `eerste_op` is wanneer het signaal ontstond. Dat is precies de vraag die
+ * `signaal_op` aan onze kant stelt.
  *
  * ── EN WAT ER NIET OP DE RIJ STAAT ──────────────────────────────────────────
  * `hlms_signaal` heeft GEEN toelichting, omschrijving of notitie, en geen
@@ -180,9 +209,9 @@ export function vormSignaal(rij, { systeem = 'dfo_lms', mentorNaam = null, toeli
     toelichting: toelichting || null,
     gevraagde_actie: voorstelVoor(type).voorstel,
     // Geen terugval op `new Date()`. Een signaal zonder tijdstempel bestaat niet
-    // -- `aangemaakt_op` is NOT NULL in het LMS -- en "nu" invullen zou een
-    // kaart van drie weken oud als verse melding tonen.
-    signaal_op: rij.aangemaakt_op || null,
+    // -- `eerste_op` is NOT NULL in het LMS -- en "nu" invullen zou een kaart
+    // van drie weken oud als verse melding tonen.
+    signaal_op: rij.eerste_op || null,
   };
 }
 
@@ -337,8 +366,8 @@ export async function haalSignalen({ crmDb, lmsClient, nu = new Date() } = {}) {
       // kale `not.in` kan hier geen rijen laten wegvallen; bij een kolom die
       // NULL mag zijn zou dat wel gebeuren (NOT (NULL IN (...)) is NULL).
       .not('status', 'in', `(${LMS_GESLOTEN_STATUSSEN.join(',')})`)
-      .gte('aangemaakt_op', sinds)
-      .order('aangemaakt_op', { ascending: false })
+      .gte('eerste_op', sinds)
+      .order('eerste_op', { ascending: false })
       .limit(MAX_PER_RONDE);
     if (error) throw new Error(error.message);
 
