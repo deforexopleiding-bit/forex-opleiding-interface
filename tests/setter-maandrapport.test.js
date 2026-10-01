@@ -12,11 +12,11 @@ import {
 } from '../api/_lib/setter-report-core.js';
 
 const ROMY = 'e5006a5f-463a-46c8-ba04-467503ab8cc7';
-const CFG = { user_id: ROMY, pct: 3, is_active: true, effective_from: '2026-08-31', monthly_fee: 750 };
+const CFG = { user_id: ROMY, pct: 3, is_active: true, effective_from: '2026-08-31', monthly_fee: 650 }; // EXCL. btw
 
 test('vaste vergoeding: alleen actief en effective_from <= de 1e van de maand', () => {
   assert.equal(vasteVergoeding(CFG, '2026-08-01'), 0, 'start 31 aug → augustus geen vergoeding');
-  assert.equal(vasteVergoeding(CFG, '2026-09-01'), 750);
+  assert.equal(vasteVergoeding(CFG, '2026-09-01'), 650, 'excl. btw');
   assert.equal(vasteVergoeding({ ...CFG, is_active: false }, '2026-09-01'), 0);
   assert.equal(vasteVergoeding({ ...CFG, monthly_fee: 0 }, '2026-09-01'), 0);
   assert.equal(vasteVergoeding(null, '2026-09-01'), 0);
@@ -37,7 +37,7 @@ test('regelselectie: maand M + achterblijvers, niet later, niet van een ander ra
   assert.deepEqual(ids, ['aug-laat', 'eigen', 'sep', 'zonder-datum']);
 });
 
-test('rapport: 750 vast + commissie (incl. achterblijver); regels in volgorde, totaal klopt', () => {
+test('rapport: 650 excl. vast + commissie (incl. achterblijver); regels in volgorde, totaal klopt', () => {
   const r = bouwRapport({
     cfg: CFG, monthStart: '2026-11-01',
     entries: [
@@ -46,9 +46,9 @@ test('rapport: 750 vast + commissie (incl. achterblijver); regels in volgorde, t
     ],
     labels: { c1: 'John Vliet', c2: 'Salih Polat' },
   });
-  assert.equal(r.fee_total, 750);
+  assert.equal(r.fee_total, 786.5, 'alias = fee_incl');
   assert.equal(r.commission_total, 21);
-  assert.equal(r.total, 771);
+  assert.equal(r.total, 807.5, 'alias = total_incl');
   assert.deepEqual(r.lines.map((l) => l.kind), ['vaste_vergoeding', 'commissie', 'commissie']);
   assert.match(r.lines[1].label, /^Salih Polat · .* \(betaald 28-10-2026\)$/, 'achterblijver uit oktober krijgt zijn betaaldatum');
   assert.equal(r.lines[0].label, 'Vaste maandvergoeding november 2026');
@@ -176,7 +176,7 @@ test('upsert: concept aanmaken, regels + koppeling; herberekenen dubbelt niets',
   const db = memDb({ setter_config: [CFG], setter_monthly_reports: [], setter_monthly_report_lines: [], setter_ledger_entries: ledger(), customers: [] });
   const r1 = await computeAndUpsertSetterReport({ db, setterId: ROMY, monthStart: '2026-11' });
   assert.equal(r1.skipped, false);
-  assert.equal(r1.total, 768);
+  assert.equal(r1.total, 804.5);
   assert.equal(db.tables.setter_monthly_reports.length, 1);
   assert.equal(db.tables.setter_monthly_report_lines.length, 2);
   assert.equal(db.tables.setter_ledger_entries.find((e) => e.id === 'L1').monthly_report_id, r1.report_id);
@@ -184,7 +184,7 @@ test('upsert: concept aanmaken, regels + koppeling; herberekenen dubbelt niets',
 
   const r2 = await computeAndUpsertSetterReport({ db, setterId: ROMY, monthStart: '2026-11-01' });
   assert.equal(r2.report_id, r1.report_id);
-  assert.equal(r2.total, 768);
+  assert.equal(r2.total, 804.5);
   assert.equal(db.tables.setter_monthly_reports.length, 1);
   assert.equal(db.tables.setter_monthly_report_lines.length, 2, 'regels herbouwd, niet verdubbeld');
 });
@@ -247,11 +247,11 @@ test('cron: op de 1e → rapport vorige maand; force + month; zonder migratie 20
   assert.equal(res.code, 200);
   assert.equal(res.body.month, '2026-11-01');
   assert.equal(res.body.generated.length, 1);
-  assert.equal(res.body.generated[0].total, 768);
+  assert.equal(res.body.generated[0].total, 804.5);
 
   const forced = await draaiCron({ force: 'true', month: '2026-10' }, db);
   assert.equal(forced.body.month, '2026-10-01');
-  assert.equal(forced.body.generated[0].total, 750, 'oktober: alleen de vaste vergoeding');
+  assert.equal(forced.body.generated[0].total, 786.5, 'oktober: alleen de vaste vergoeding (650 excl. → 786,50 incl.)');
 
   const zonder = await draaiCron({ force: 'true' }, memDb({ setter_config: [CFG] }, { missingCols: ['monthly_fee'] }));
   assert.equal(zonder.code, 200);

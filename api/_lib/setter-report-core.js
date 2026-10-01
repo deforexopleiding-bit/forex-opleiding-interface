@@ -2,17 +2,32 @@
 //
 // Setter-maandrapport — spiegel van _lib/payout-generate-core.js (mentoren),
 // maar met twee bronnen:
-//   1. VASTE VERGOEDING — setter_config.monthly_fee (incl. btw). Telt voor
-//      maand M als de regeling actief is en effective_from <= de 1e van M
-//      (een start halverwege de maand krijgt die maand geen vergoeding).
+//   1. VASTE VERGOEDING — setter_config.monthly_fee = bedrag EXCL. btw.
+//      Telt voor maand M als de regeling actief is en effective_from <= de 1e
+//      van M (een start halverwege de maand krijgt die maand geen vergoeding).
 //   2. COMMISSIE — setter_ledger_entries (PR B) met status 'vrijgegeven',
 //      nog niet aan een ander rapport gekoppeld, en betaal_datum < de 1e van
 //      M+1. Dus maand M zelf PLUS achterblijvers uit eerdere maanden die pas
 //      na het afsluiten van dat rapport geboekt werden (late sync,
 //      terug-gedateerde betaling). De commissie is forward-only (PR B): er
 //      bestaan geen negatieve regels; een regel <= 0 wordt hier ook nooit
-//      opgenomen (defensief).
-// Alle bedragen incl. btw.
+//      opgenomen (defensief). setter_ledger_entries.amount is INCL. btw
+//      (pct van de klantbetaling incl. btw) — dat blijft zo; de commissie-
+//      motor wordt hier niet aangeraakt.
+//
+// ── BTW (2026-10, migratie 2026-10-01-setter-rapport-btw.sql) ─────────────
+// Eén tarief: SETTER_BTW_PCT (21). Per regel drie bedragen, afgerond op
+// centen; totalen = som van de afgeronde regels.
+//   - Vaste vergoeding: EXCL is de bron.  btw = round2(excl × pct/100),
+//     incl = excl + btw.            (650,00 → 136,50 → 786,50)
+//   - Commissie: INCL is de bron (precies wat het grootboek boekte).
+//     excl = round2(incl / (1 + pct/100)), btw = incl − excl.
+//                                   (30,00 → 24,79 + 5,21)
+// Opslag: *_excl / *_btw / *_incl + btw_pct op rapport en regel. De oude
+// kolommen blijven als INCL-alias: fee_total = fee_incl, commission_total =
+// commission_incl, total = total_incl, regel.amount = amount_incl.
+// btw_pct IS NULL = rapport van vóór deze wijziging (bedragen toen als incl.
+// opgeslagen); zie legacyBtw().
 //
 // Uitbetalen gaat voor setters UITSLUITEND via deze rapporten; de oude
 // uitbetaalronde (api/setter-payout-run.js) weigert met 410.
@@ -26,13 +41,61 @@
 //   - Niet atomair (PostgREST): faalt het halverwege, dan herstelt de
 //     volgende herberekening het.
 //
-// Migratie: docs/sql-migrations/2026-10-01-setter-maandrapport.sql. Ontbreekt
-// die, dan gooit dit een Error met code 'MIGRATIE_ONTBREEKT'.
+// Migraties: docs/sql-migrations/2026-10-01-setter-maandrapport.sql +
+// 2026-10-01-setter-rapport-btw.sql. Ontbreekt een kolom/tabel, dan gooit dit
+// een Error met code 'MIGRATIE_ONTBREEKT' (er wordt dan niets geschreven).
 
 import { round2 } from './setter-sale-plan.js';
 
 const MONTH_RE = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/;
 const n = (v) => Number(v) || 0;
+
+/** Het btw-tarief voor setter-rapporten (procent). Eén plek; de UI krijgt 'm via de API. */
+export const SETTER_BTW_PCT = 21;
+
+/** Bron EXCL (vaste vergoeding): btw = round2(excl × pct), incl = excl + btw. */
+export function btwUitExcl(excl, pct = SETTER_BTW_PCT) {
+  const e = round2(excl);
+  const btw = round2(e * n(pct) / 100);
+  return { excl: e, btw, incl: round2(e + btw) };
+}
+
+/** Bron INCL (commissie): excl = round2(incl / (1 + pct)), btw = incl − excl. */
+export function btwUitIncl(incl, pct = SETTER_BTW_PCT) {
+  const i = round2(incl);
+  const excl = round2(i / (1 + n(pct) / 100));
+  return { excl, btw: round2(i - excl), incl: i };
+}
+
+const som = (rows, k) => round2(rows.reduce((s, r) => s + n(r[k]), 0));
+
+/**
+ * Rapport van vóór de btw-kolommen (btw_pct NULL): de bedragen zijn toen als
+ * incl. btw opgeslagen. Voor weergave splitsen we die zoals commissie
+ * (bron incl.) — er wordt niets teruggeschreven; goedgekeurde/uitbetaalde
+ * rapporten blijven bevroren.
+ */
+export function legacyBtw(report, lines = []) {
+  const pct = SETTER_BTW_PCT;
+  const ls = lines.map((l) => {
+    const b = btwUitIncl(l.amount, pct);
+    return { ...l, btw_pct: pct, amount_excl: b.excl, amount_btw: b.btw, amount_incl: b.incl };
+  });
+  const deel = (kinds) => ls.filter((l) => kinds.includes(l.kind));
+  const fee = deel(['vaste_vergoeding']);
+  const com = deel(['commissie']);
+  return {
+    report: {
+      ...report,
+      legacy_btw: true,
+      btw_pct: pct,
+      fee_excl: som(fee, 'amount_excl'), fee_btw: som(fee, 'amount_btw'), fee_incl: som(fee, 'amount_incl'),
+      commission_excl: som(com, 'amount_excl'), commission_btw: som(com, 'amount_btw'), commission_incl: som(com, 'amount_incl'),
+      total_excl: som(ls, 'amount_excl'), total_btw: som(ls, 'amount_btw'), total_incl: som(ls, 'amount_incl'),
+    },
+    lines: ls,
+  };
+}
 
 /** 'YYYY-MM' of 'YYYY-MM-DD' → 'YYYY-MM-01' (null bij ongeldig). */
 export function normalizeMonthStart(s) {
@@ -60,7 +123,7 @@ export function isEersteVanDeMaandUTC(d = new Date()) {
   return d.getUTCDate() === 1;
 }
 
-/** Vaste vergoeding voor maand M. */
+/** Vaste vergoeding voor maand M — EXCL. btw (setter_config.monthly_fee). */
 export function vasteVergoeding(cfg, monthStart) {
   if (!cfg || !cfg.is_active) return 0;
   const fee = round2(cfg.monthly_fee);
@@ -90,20 +153,30 @@ export function maandNaam(monthStart) {
 
 /**
  * Pure opbouw van het rapport: totalen + regels (zonder report_id).
- * @returns {{ fee_total, commission_total, total, lines: Array, entry_ids: string[] }}
+ * Elke regel heeft amount_excl / amount_btw / amount_incl + btw_pct
+ * (amount = amount_incl, backward-compat). Totalen = som van de afgeronde
+ * regels.
+ * @returns {{ btw_pct, fee_excl, fee_btw, fee_incl, commission_excl, commission_btw,
+ *   commission_incl, total_excl, total_btw, total_incl, fee_total, commission_total,
+ *   total, lines: Array, entry_ids: string[] }}
  */
-export function bouwRapport({ cfg, monthStart, entries, reportId = null, labels = {} }) {
-  const fee = vasteVergoeding(cfg, monthStart);
+export function bouwRapport({ cfg, monthStart, entries, reportId = null, labels = {}, btwPct = SETTER_BTW_PCT }) {
+  const feeExcl = vasteVergoeding(cfg, monthStart);
   const gekozen = selecteerRegels(entries, { monthStart, reportId })
     .sort((a, b) => String(a.betaal_datum || a.created_at).localeCompare(String(b.betaal_datum || b.created_at)));
   const lines = [];
-  if (fee > 0) {
-    lines.push({ kind: 'vaste_vergoeding', label: `Vaste maandvergoeding ${maandNaam(monthStart)}`, amount: fee, position: 0 });
+  if (feeExcl > 0) {
+    const b = btwUitExcl(feeExcl, btwPct);
+    lines.push({
+      kind: 'vaste_vergoeding', label: `Vaste maandvergoeding ${maandNaam(monthStart)}`, position: 0,
+      btw_pct: btwPct, amount_excl: b.excl, amount_btw: b.btw, amount_incl: b.incl, amount: b.incl,
+    });
   }
   gekozen.forEach((e, i) => {
     const d = String(e.betaal_datum || e.created_at || '').slice(0, 10) || null;
     const klant = e.customer_id ? labels[e.customer_id] : null;
     const eerder = d && d < monthStart ? ` (betaald ${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)})` : '';
+    const b = btwUitIncl(e.amount, btwPct);
     lines.push({
       kind: 'commissie',
       label: [klant, e.note].filter(Boolean).join(' · ') + eerder || 'Commissie',
@@ -114,18 +187,56 @@ export function bouwRapport({ cfg, monthStart, entries, reportId = null, labels 
       betaal_datum: d,
       basis: e.basis == null ? null : round2(e.basis),
       pct: e.pct == null ? null : n(e.pct),
-      amount: round2(e.amount),
+      btw_pct: btwPct, amount_excl: b.excl, amount_btw: b.btw, amount_incl: b.incl, amount: b.incl,
       position: i + 1,
     });
   });
-  const commission = round2(gekozen.reduce((s, e) => s + n(e.amount), 0));
+  const fee = lines.filter((l) => l.kind === 'vaste_vergoeding');
+  const com = lines.filter((l) => l.kind === 'commissie');
+  const t = {
+    btw_pct: btwPct,
+    fee_excl: som(fee, 'amount_excl'), fee_btw: som(fee, 'amount_btw'), fee_incl: som(fee, 'amount_incl'),
+    commission_excl: som(com, 'amount_excl'), commission_btw: som(com, 'amount_btw'), commission_incl: som(com, 'amount_incl'),
+    total_excl: som(lines, 'amount_excl'), total_btw: som(lines, 'amount_btw'), total_incl: som(lines, 'amount_incl'),
+  };
   return {
-    fee_total: fee,
-    commission_total: commission,
-    total: round2(fee + commission),
+    ...t,
+    // Backward-compat-aliassen (INCL. btw).
+    fee_total: t.fee_incl,
+    commission_total: t.commission_incl,
+    total: t.total_incl,
     lines,
     entry_ids: gekozen.map((e) => e.id),
   };
+}
+
+const REPORT_NUM = ['btw_pct', 'fee_excl', 'fee_btw', 'fee_incl', 'commission_excl', 'commission_btw', 'commission_incl',
+  'total_excl', 'total_btw', 'total_incl', 'fee_total', 'commission_total', 'total'];
+const LINE_NUM = ['btw_pct', 'amount_excl', 'amount_btw', 'amount_incl', 'amount'];
+
+/**
+ * Rapport + regels zoals de API ze teruggeeft: getallen als number, altijd
+ * de drie btw-kolommen. Rapporten van vóór de btw-migratie (btw_pct NULL)
+ * worden voor weergave gesplitst via legacyBtw() (legacy_btw: true).
+ */
+export function normaliseerRapport(report, lines = []) {
+  const numify = (o, keys) => {
+    const x = { ...o };
+    for (const k of keys) if (x[k] !== undefined && x[k] !== null) x[k] = n(x[k]);
+    if (x.basis !== undefined && x.basis !== null) x.basis = n(x.basis);
+    return x;
+  };
+  const r = numify(report, REPORT_NUM);
+  const ls = lines.map((l) => numify(l, LINE_NUM));
+  if (r.btw_pct == null) return legacyBtw(r, ls);
+  return { report: { ...r, legacy_btw: false }, lines: ls };
+}
+
+/** De rapportkolommen die de upsert schrijft (nieuw + aliassen). */
+export function rapportKolommen(r) {
+  const keys = ['btw_pct', 'fee_excl', 'fee_btw', 'fee_incl', 'commission_excl', 'commission_btw', 'commission_incl',
+    'total_excl', 'total_btw', 'total_incl', 'fee_total', 'commission_total', 'total'];
+  return Object.fromEntries(keys.map((k) => [k, r[k]]));
 }
 
 // Ontbrekende tabel/kolom: Postgres 42P01/42703, PostgREST schema-cache
@@ -133,7 +244,7 @@ export function bouwRapport({ cfg, monthStart, entries, reportId = null, labels 
 const MIGRATIE_CODES = new Set(['42P01', '42703', 'PGRST204', 'PGRST205']);
 export function migratieFout(error) {
   if (MIGRATIE_CODES.has(error?.code)) {
-    const e = new Error('Migratie 2026-10-01-setter-maandrapport.sql is nog niet gedraaid');
+    const e = new Error('Migratie ontbreekt: draai 2026-10-01-setter-maandrapport.sql en 2026-10-01-setter-rapport-btw.sql');
     e.code = 'MIGRATIE_ONTBREEKT';
     return e;
   }
@@ -178,7 +289,10 @@ export async function computeAndUpsertSetterReport({ db, setterId, monthStart, a
   }
 
   const nowIso = new Date().toISOString();
-  const kolommen = { fee_total: r.fee_total, commission_total: r.commission_total, total: r.total, generated_at: nowIso, updated_at: nowIso };
+  // ⚠ Noemt de btw-kolommen bij naam → migratie 2026-10-01-setter-rapport-btw is blokkerend.
+  // Ontbreken ze, dan faalt de update/insert (PGRST204/42703) vóórdat er
+  // regels verwijderd worden → MIGRATIE_ONTBREEKT, er verandert niets.
+  const kolommen = { ...rapportKolommen(r), generated_at: nowIso, updated_at: nowIso };
   let reportId;
   if (existing) {
     // Status-guard in de WHERE: een parallelle goedkeuring wint.
@@ -213,7 +327,7 @@ export async function computeAndUpsertSetterReport({ db, setterId, monthStart, a
 
   return {
     skipped: false, setter_user_id: setterId, report_id: reportId, status: 'concept', period_month: month,
-    fee_total: r.fee_total, commission_total: r.commission_total, total: r.total, lines: r.lines.length,
+    ...rapportKolommen(r), lines: r.lines.length,
   };
 }
 
