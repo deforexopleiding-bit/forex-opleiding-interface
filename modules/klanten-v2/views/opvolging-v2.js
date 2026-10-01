@@ -4699,6 +4699,13 @@
         // waarom.
         ...(notitie ? { note: notitie } : {}),
       });
+      // De closer-topbar (closer-topbar.js) telt de beoordeelde calls; laat
+      // hem meteen opnieuw tellen in plaats van pas bij de volgende poll.
+      try {
+        window.dispatchEvent(new CustomEvent('kv:call-uitkomst-vastgelegd', {
+          detail: { appointment_id: apptId, outcome },
+        }));
+      } catch (_) { /* puur een seintje; de poll vangt het ook op */ }
       return { ok: true, outcome };
     } catch (e) {
       return { ok: false, reden: 'motor', uitleg: (e && e.message) || 'onbekende fout' };
