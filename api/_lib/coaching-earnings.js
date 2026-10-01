@@ -12,8 +12,10 @@
 //
 // Output (incl btw — tarieven 35/50/25/100):
 //   { breakdown:  { one_on_one, team, no_show, funded }, grand_total,
+//       elke cel: { count (= eenheden), rate, total, afspraken, meervoudig,
+//                   meervoudig_per_eenheden },
 //     students_count, sessions_fetched, team_count_raw,
-//     _meta: { bronnen: { lms, bubble }, lms_exacte_dubbels,
+//     _meta: { bronnen: { lms, bubble }, lms_zelfde_moment,
 //              bubble_overgeslagen_dubbel_met_lms, lms_teamtraining, ... } }
 //
 // Zie docs/mentorrapport-bron-lms.md voor de volledige uitleg.
@@ -22,16 +24,19 @@
 // 1) LMS (dfo-lms, ALTIJD): hlms_sessie met mentor_id = mentorUserId en
 //    status afgerond (€35) / no_show (€25), start_tijd in het venster.
 //    Attributie op de mentor_id van de SESSIE (wie de call deed). Geen
-//    leertype-filter. Exacte dubbels (zelfde student + start_tijd + mentor)
-//    tellen één keer; opeenvolgende sessies met een andere starttijd tellen
-//    wél (bewuste businessregel). Teamtraining (€50): hlms_teamtraining met
+//    leertype-filter. Eén afspraak = eenhedenVan(duur_minuten) sessies van
+//    45 min (90 min = 2), exact zoals de studentteller in het LMS; de mentor
+//    krijgt €35/€25 per eenheid. Elke rij telt — ook rijen met dezelfde
+//    student + start_tijd + mentor; die worden alleen gesignaleerd in
+//    _meta.lms_zelfde_moment. Teamtraining (€50): hlms_teamtraining met
 //    trainer personeel_id = mentorUserId en status 'gegeven'.
 // 2) Bubble (ALLEEN vóór BUBBLE_EINDE): de oude regels, ongewijzigd —
 //    1-1-session op Created By + Alpha Program + isdone, call vereist
 //    member_user; team-training via tutor_user op completeddate. Een
 //    Bubble-sessie telt NIET als dezelfde student (member_user ↔
 //    hlms_student.bubble_user_id) die Brusselse kalenderdag een afgeronde of
-//    no-show sessie in het LMS heeft (bij welke mentor ook).
+//    no-show sessie in het LMS heeft (bij welke mentor ook). Bubble kent
+//    geen duur: elke Bubble-sessie = 1 eenheid.
 //
 // ─── Venster ─────────────────────────────────────────────────────────────
 // [from 00:00 Europe/Brussels, (to+1) 00:00 Europe/Brussels) — DST-correct.
@@ -177,6 +182,47 @@ export function emptyBreakdown() {
   };
 }
 
+// ─── Sessie-eenheden ─────────────────────────────────────────────────────
+
+export const EENHEID_MINUTEN = 45;
+
+/**
+ * Aantal sessie-eenheden van 45 min voor een afspraak — identiek aan de
+ * studentteller in het LMS: max(1, round(duur / 45)); duur null/0 → 45.
+ * 30 → 1, 45 → 1, 60 → 1, 90 → 2, 135 → 3, 180 → 4.
+ */
+export function eenhedenVan(duurMinuten) {
+  let d = Number(duurMinuten);
+  if (!Number.isFinite(d) || d <= 0) d = EENHEID_MINUTEN;
+  return Math.max(1, Math.round(d / EENHEID_MINUTEN));
+}
+
+// Telling per categorie: eenheden (= wat betaald wordt), afspraken (rijen) en
+// per_eenheden { aantalEenheden: aantalAfspraken } voor de meervoudige.
+function nieuweTelling() { return { eenheden: 0, afspraken: 0, per_eenheden: {} }; }
+function telAfspraak(t, eenheden, n = 1) {
+  t.eenheden  += eenheden * n;
+  t.afspraken += n;
+  if (eenheden > 1) t.per_eenheden[eenheden] = (t.per_eenheden[eenheden] || 0) + n;
+}
+function meervoudigVan(t) {
+  return Object.values(t.per_eenheden).reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Label voor een payoutregel. Zonder meervoudige afspraken het gewone label;
+ * mét bv. "1-op-1 sessies à 45 min (86 afspraken, waarvan 5 van 90 min)".
+ */
+export function coachingRegelLabel(basis, cel) {
+  const per = cel?.meervoudig_per_eenheden || {};
+  const delen = Object.keys(per).map(Number).sort((a, b) => a - b)
+    .map((e) => `${per[e]} van ${e * EENHEID_MINUTEN} min`);
+  if (!delen.length) return basis;
+  const lijst = delen.length > 1 ? `${delen.slice(0, -1).join(', ')} en ${delen[delen.length - 1]}` : delen[0];
+  const n = Number(cel.afspraken) || 0;
+  return `${basis} à ${EENHEID_MINUTEN} min (${n} ${n === 1 ? 'afspraak' : 'afspraken'}, waarvan ${lijst})`;
+}
+
 // ─── LMS-tak ─────────────────────────────────────────────────────────────
 
 // Gepagineerde select: bouwQuery() levert een verse keten zonder range.
@@ -196,7 +242,7 @@ async function lmsAlles(bouwQuery, label) {
 async function lmsSessiesVanMentor(lms, mentorUserId, vanIso, totIso) {
   const rijen = await lmsAlles(() => lms
     .from('hlms_sessie')
-    .select('id, student_id, mentor_id, start_tijd, status')
+    .select('id, student_id, mentor_id, start_tijd, status, duur_minuten')
     .eq('mentor_id', mentorUserId)
     .in('status', ['afgerond', 'no_show'])
     .gte('start_tijd', vanIso)
@@ -204,34 +250,26 @@ async function lmsSessiesVanMentor(lms, mentorUserId, vanIso, totIso) {
     .order('start_tijd', { ascending: true })
     .order('id', { ascending: true }), 'hlms_sessie');
 
-  // Exacte dubbels: zelfde student + zelfde moment + zelfde mentor = één call.
-  // Is één van de dubbels afgerond, dan telt de groep als afgerond.
-  const groepen = new Map();
+  // Elke rij telt, met eenhedenVan(duur_minuten) eenheden — exact zoals de
+  // studentteller in het LMS. Geen ontdubbeling meer: rijen met dezelfde
+  // student + start_tijd + mentor worden alleen gesignaleerd (lms_zelfde_moment).
+  const afgerond = nieuweTelling();
+  const noShow   = nieuweTelling();
+  const momenten = new Map();
   let zonderStudent = 0;
   for (const r of rijen) {
     const status = String(r?.status || '').trim().toLowerCase();
     if (status !== 'afgerond' && status !== 'no_show') continue;
+    telAfspraak(status === 'afgerond' ? afgerond : noShow, eenhedenVan(r.duur_minuten));
     const t = new Date(String(r.start_tijd)).getTime();
-    let sleutel;
-    if (r.student_id && Number.isFinite(t)) {
-      sleutel = `${r.student_id}|${t}|${r.mentor_id || mentorUserId}`;
-    } else {
-      zonderStudent += 1;
-      sleutel = `id|${r.id}`;
-    }
-    const bestaand = groepen.get(sleutel);
-    if (!bestaand) groepen.set(sleutel, { status, n: 1 });
-    else {
-      bestaand.n += 1;
-      if (status === 'afgerond') bestaand.status = 'afgerond';
-    }
+    if (!r.student_id || !Number.isFinite(t)) { zonderStudent += 1; continue; }
+    const sleutel = `${r.student_id}|${t}|${r.mentor_id || mentorUserId}`;
+    const m = momenten.get(sleutel);
+    if (m) m.rijen += 1;
+    else momenten.set(sleutel, { student_id: r.student_id, start_tijd: new Date(t).toISOString(), rijen: 1 });
   }
-  let afgerond = 0, noShow = 0, dubbels = 0;
-  for (const g of groepen.values()) {
-    if (g.status === 'afgerond') afgerond += 1; else noShow += 1;
-    dubbels += g.n - 1;
-  }
-  return { rijen: rijen.length, afgerond, no_show: noShow, exacte_dubbels: dubbels, zonder_student: zonderStudent };
+  const zelfdeMoment = [...momenten.values()].filter((m) => m.rijen > 1);
+  return { rijen: rijen.length, afgerond, no_show: noShow, zelfde_moment: zelfdeMoment, zonder_student: zonderStudent };
 }
 
 async function lmsTeamtrainingen(lms, mentorUserId, vanIso, totIso) {
@@ -457,15 +495,27 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
   if (fundedErr) throw new Error('funded-certificaten lezen mislukt: ' + fundedErr.message);
   const funded = Number(count) || 0;
 
-  const oneOnOne = lmsSessies.afgerond + (bubble?.calls   || 0);
-  const noShow   = lmsSessies.no_show  + (bubble?.no_show || 0);
-  const team     = lmsTeam.team        + (bubble?.team    || 0);
+  // Eenheden per categorie. Bubble kent geen duur: elke Bubble-sessie = 1.
+  const t1 = { ...lmsSessies.afgerond, per_eenheden: { ...lmsSessies.afgerond.per_eenheden } };
+  const tn = { ...lmsSessies.no_show,  per_eenheden: { ...lmsSessies.no_show.per_eenheden } };
+  telAfspraak(t1, 1, bubble?.calls   || 0);
+  telAfspraak(tn, 1, bubble?.no_show || 0);
+  const team = lmsTeam.team + (bubble?.team || 0);
 
+  const cel = (count, rate, extra = {}) => ({
+    count, rate, total: count * rate,
+    afspraken: count, meervoudig: 0, meervoudig_per_eenheden: {}, ...extra,
+  });
+  const celVan = (t, rate) => cel(t.eenheden, rate, {
+    afspraken: t.afspraken, meervoudig: meervoudigVan(t), meervoudig_per_eenheden: t.per_eenheden,
+  });
+  // count = eenheden (wat betaald wordt); afspraken = rijen; meervoudig =
+  // afspraken van meer dan één eenheid.
   const breakdown = {
-    one_on_one : { count: oneOnOne, rate: RATE_1ON1,   total: oneOnOne * RATE_1ON1   },
-    team       : { count: team,     rate: RATE_TEAM,   total: team     * RATE_TEAM   },
-    no_show    : { count: noShow,   rate: RATE_NOSHOW, total: noShow   * RATE_NOSHOW },
-    funded     : { count: funded,   rate: RATE_FUNDED, total: funded   * RATE_FUNDED },
+    one_on_one : celVan(t1, RATE_1ON1),
+    team       : cel(team,   RATE_TEAM),
+    no_show    : celVan(tn, RATE_NOSHOW),
+    funded     : cel(funded, RATE_FUNDED),
   };
   const grand_total = breakdown.one_on_one.total
                     + breakdown.team.total
@@ -483,9 +533,17 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
       bronnen: {
         lms: {
           status  : 'gelezen',
-          afgerond: lmsSessies.afgerond,
-          no_show : lmsSessies.no_show,
+          afgerond: lmsSessies.afgerond.eenheden,
+          no_show : lmsSessies.no_show.eenheden,
           team    : lmsTeam.team,
+          afspraken: {
+            afgerond: lmsSessies.afgerond.afspraken,
+            no_show : lmsSessies.no_show.afspraken,
+          },
+          meervoudig: {
+            afgerond: lmsSessies.afgerond.per_eenheden,
+            no_show : lmsSessies.no_show.per_eenheden,
+          },
         },
         bubble: {
           status : bubbleStatus,
@@ -495,7 +553,7 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
         },
       },
       lms_sessies_gelezen               : lmsSessies.rijen,
-      lms_exacte_dubbels                : lmsSessies.exacte_dubbels,
+      lms_zelfde_moment                 : lmsSessies.zelfde_moment,
       lms_zonder_student                : lmsSessies.zonder_student,
       lms_teamtraining                  : lmsTeam.status,
       bubble_overgeslagen_dubbel_met_lms: bubble?.overgeslagen || 0,

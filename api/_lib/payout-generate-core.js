@@ -32,7 +32,7 @@
 //     total, total_excl, btw_amount, lines:[...] }
 
 import { supabaseAdmin } from '../supabase.js';
-import { computeCoachingEarnings } from './coaching-earnings.js';
+import { computeCoachingEarnings, coachingRegelLabel } from './coaching-earnings.js';
 import { computeBonusOverview } from '../mentor-bonus-overview.js';
 
 export const BTW_RATE = 1.21;
@@ -326,7 +326,9 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       lineInserts.push({
         payout_id   : payoutId,
         kind        : def.kind,
-        label       : def.label,
+        // qty = sessie-eenheden van 45 min; het label noemt de meervoudige
+        // afspraken (bv. "waarvan 5 van 90 min") zodat qty ≠ afspraken uitlegbaar is.
+        label       : coachingRegelLabel(def.label, cell),
         qty,
         unit_incl   : unitIncl,
         amount_incl : amtIncl,

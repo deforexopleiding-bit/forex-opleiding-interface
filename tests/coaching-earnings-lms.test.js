@@ -1,7 +1,9 @@
 // tests/coaching-earnings-lms.test.js
 //
 // Mentorrapporten (coaching) lezen uit het LMS (hlms_sessie) i.p.v. Bubble.
-// Borgt: Brusselse maandgrenzen, exacte dubbels 1×, opeenvolgende sessies 2×,
+// Borgt: Brusselse maandgrenzen, sessie-eenheden van 45 min (90 min = 2, zoals
+// de studentteller in het LMS), zelfde-moment-rijen tellen elk + signaal,
+// opeenvolgende sessies 2×,
 // Bubble-ontdubbeling tegen het LMS, geen Bubble vanaf oktober 2026, en
 // vooral: een onbereikbare bron wordt NOOIT stil 0.
 
@@ -12,6 +14,8 @@ import {
   computeCoachingEarnings,
   brusselsMiddernachtMs,
   brusselsDag,
+  eenhedenVan,
+  coachingRegelLabel,
   LMS_TEAMTRAINING_KOLOM_ONTBREEKT,
 } from '../api/_lib/coaching-earnings.js';
 
@@ -102,16 +106,58 @@ test('maandgrens: 30/9 23:30 Brussel hoort bij september, 1/10 00:30 bij oktober
 
 // ── Telregels LMS ──────────────────────────────────────────────────────
 
-test('exacte dubbel (zelfde student + start_tijd + mentor) telt één keer', async () => {
-  const t = '2026-10-15T13:00:00.000Z';
+test('eenhedenVan: max(1, round(duur / 45)), null/0 → 45', () => {
+  const gevallen = [[45, 1], [60, 1], [30, 1], [90, 2], [135, 3], [180, 4], [null, 1], [0, 1]];
+  for (const [duur, verwacht] of gevallen) assert.equal(eenhedenVan(duur), verwacht, `duur ${duur}`);
+  assert.equal(eenhedenVan(undefined), 1);
+});
+
+test('90 min afgerond = 2 × €35, 90 min no-show = 2 × €25, 60 min = 1', async () => {
   const lms = nepDb({
-    hlms_sessie: [sessie({ start_tijd: t }), sessie({ start_tijd: t })],
+    hlms_sessie: [
+      sessie({ start_tijd: '2026-10-02T10:00:00.000Z', duur_minuten: 90 }),
+      sessie({ start_tijd: '2026-10-03T10:00:00.000Z', duur_minuten: 90, status: 'no_show' }),
+      sessie({ start_tijd: '2026-10-04T10:00:00.000Z', duur_minuten: 60 }),
+      sessie({ start_tijd: '2026-10-05T10:00:00.000Z', duur_minuten: 45 }),
+      sessie({ start_tijd: '2026-10-06T10:00:00.000Z', duur_minuten: null }),
+    ],
     hlms_teamtraining_trainer: [],
   });
   const r = await reken({ lms });
-  assert.equal(r.breakdown.one_on_one.count, 1);
-  assert.equal(r.breakdown.one_on_one.total, 35);
-  assert.equal(r._meta.lms_exacte_dubbels, 1);
+  assert.deepEqual(r.breakdown.one_on_one, {
+    count: 5, rate: 35, total: 5 * 35, afspraken: 4, meervoudig: 1, meervoudig_per_eenheden: { 2: 1 },
+  });
+  assert.deepEqual(r.breakdown.no_show, {
+    count: 2, rate: 25, total: 2 * 25, afspraken: 1, meervoudig: 1, meervoudig_per_eenheden: { 2: 1 },
+  });
+  assert.equal(r.grand_total, 5 * 35 + 2 * 25);
+  assert.equal(r._meta.bronnen.lms.afgerond, 5, 'bronnen telt eenheden');
+  assert.deepEqual(r._meta.bronnen.lms.afspraken, { afgerond: 4, no_show: 1 });
+});
+
+test('payoutregel-label noemt meervoudige afspraken, anders het gewone label', () => {
+  assert.equal(coachingRegelLabel('1-op-1 sessies', { afspraken: 28, meervoudig_per_eenheden: {} }), '1-op-1 sessies');
+  assert.equal(
+    coachingRegelLabel('1-op-1 sessies', { afspraken: 86, meervoudig_per_eenheden: { 2: 5 } }),
+    '1-op-1 sessies à 45 min (86 afspraken, waarvan 5 van 90 min)',
+  );
+  assert.equal(
+    coachingRegelLabel('No-shows', { afspraken: 4, meervoudig_per_eenheden: { 3: 1, 2: 2 } }),
+    'No-shows à 45 min (4 afspraken, waarvan 2 van 90 min en 1 van 135 min)',
+  );
+});
+
+test('zelfde student + start_tijd + mentor telt twee keer, met signaal', async () => {
+  const t = '2026-10-15T13:00:00.000Z';
+  const lms = nepDb({
+    hlms_sessie: [sessie({ start_tijd: t }), sessie({ start_tijd: t, status: 'no_show' }), sessie({ start_tijd: t })],
+    hlms_teamtraining_trainer: [],
+  });
+  const r = await reken({ lms });
+  assert.equal(r.breakdown.one_on_one.count, 2);
+  assert.equal(r.breakdown.no_show.count, 1);
+  assert.equal(r.grand_total, 2 * 35 + 25);
+  assert.deepEqual(r._meta.lms_zelfde_moment, [{ student_id: 'stu-1', start_tijd: t, rijen: 3 }]);
 });
 
 test('opeenvolgende sessies op dezelfde dag (andere starttijd) tellen allebei', async () => {
@@ -124,7 +170,7 @@ test('opeenvolgende sessies op dezelfde dag (andere starttijd) tellen allebei', 
   });
   const r = await reken({ lms });
   assert.equal(r.breakdown.one_on_one.count, 2);
-  assert.equal(r._meta.lms_exacte_dubbels, 0);
+  assert.deepEqual(r._meta.lms_zelfde_moment, []);
 });
 
 test('alleen afgerond/no_show van DEZE mentor tellen; gepland/geannuleerd en andere mentor niet', async () => {
@@ -142,7 +188,8 @@ test('alleen afgerond/no_show van DEZE mentor tellen; gepland/geannuleerd en and
   assert.equal(r.breakdown.one_on_one.count, 1);
   assert.equal(r.breakdown.no_show.count, 1);
   assert.equal(r.grand_total, 35 + 25);
-  assert.deepEqual(r._meta.bronnen.lms, { status: 'gelezen', afgerond: 1, no_show: 1, team: 0 });
+  const { status, afgerond, no_show, team } = r._meta.bronnen.lms;
+  assert.deepEqual({ status, afgerond, no_show, team }, { status: 'gelezen', afgerond: 1, no_show: 1, team: 0 });
 });
 
 test('LMS-paginatie: meer dan 1000 sessies worden allemaal geteld', async () => {
@@ -275,7 +322,9 @@ test('september: Bubble telt mee, maar niet als dezelfde student die dag in het 
   const r = await reken({ lms, bubbleList, bubbleUserId: BUBBLE_MENTOR, from: '2026-09-01', to: '2026-09-30' });
   assert.equal(r._meta.bubble_overgeslagen_dubbel_met_lms, 1);
   assert.deepEqual(r._meta.bronnen.bubble, { status: 'gelezen', calls: 1, no_show: 1, team: 1 });
-  assert.deepEqual(r._meta.bronnen.lms, { status: 'gelezen', afgerond: 1, no_show: 0, team: 0 });
+  const l = r._meta.bronnen.lms;
+  assert.deepEqual([l.status, l.afgerond, l.no_show, l.team], ['gelezen', 1, 0, 0]);
+  assert.equal(r.breakdown.one_on_one.afspraken, 2, 'Bubble-sessie = 1 afspraak = 1 eenheid');
   assert.equal(r.breakdown.one_on_one.count, 2);
   assert.equal(r.breakdown.no_show.count, 1);
   assert.equal(r.breakdown.team.count, 1);

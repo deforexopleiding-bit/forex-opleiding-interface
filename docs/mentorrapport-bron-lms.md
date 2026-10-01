@@ -25,13 +25,44 @@ DST-correct. Een sessie op 30/9 23:30 lokale tijd hoort bij september, 1/10
 
 **LMS 1-op-1** — `hlms_sessie` met `mentor_id = mentorUserId` (= `profiles.id`
 = `team_members.user_id` = `mentor_payouts.mentor_user_id`):
-- `afgerond` → €35, `no_show` → €25. `gepland` / `geannuleerd` tellen niet.
+- `afgerond` → €35, `no_show` → €25 **per sessie-eenheid**. `gepland` /
+  `geannuleerd` tellen niet.
 - Attributie op de mentor van de **sessie** (wie de call deed), niet de huidige
   mentor van de student. Geen leertype-filter.
 - Een gekoppeld duo is één sessierij = één vergoeding.
-- **Exacte dubbels** (zelfde `student_id` + `start_tijd` + mentor) tellen één
-  keer → `_meta.lms_exacte_dubbels`. Opeenvolgende sessies op dezelfde dag met
-  een andere starttijd tellen wél (bewuste businessregel).
+- **Elke rij telt.** Rijen met dezelfde `student_id` + `start_tijd` + mentor
+  worden niet meer ontdubbeld (zo telt ook de studentteller in het LMS; het LMS
+  krijgt een guard die zulke dubbels voortaan weigert). Ze worden gesignaleerd
+  in `_meta.lms_zelfde_moment = [{ student_id, start_tijd, rijen }]` en
+  getoond door de debugknop.
+
+**Sessie-eenheden (beslissing 1 okt 2026)** — één sessie = 45 min. Dezelfde
+eenheden gaan van de teller van de student af én worden aan de mentor
+uitbetaald:
+
+```
+eenheden = max(1, round(duur_minuten / 45))      duur_minuten null of 0 → 45
+```
+
+| duur | 30 | 45 | 60 | 90 | 135 | 180 |
+|---|---|---|---|---|---|---|
+| eenheden | 1 | 1 | 1 | 2 | 3 | 4 |
+
+- `eenhedenVan()` in `api/_lib/coaching-earnings.js` — identiek aan de formule
+  in het LMS. De kolom `hlms_sessie.eenheden` wordt (nog) **niet** gelezen; het
+  CRM rekent zelf uit `duur_minuten`.
+- Bubble kent geen duur: elke Bubble-sessie = 1 eenheid.
+- `breakdown.one_on_one` / `.no_show`: `count` = eenheden (wat betaald wordt),
+  `afspraken` = rijen, `meervoudig` = afspraken van meer dan één eenheid,
+  `meervoudig_per_eenheden` = `{ "2": 5 }`. `team` / `funded` hebben dezelfde
+  velden (afspraken = count, meervoudig = 0). Bestaande lezers van
+  `count/rate/total` werken ongewijzigd.
+- Payoutregel: `qty` = eenheden. Bij meervoudige afspraken maakt het label het
+  verschil zichtbaar, bv. `1-op-1 sessies à 45 min (86 afspraken, waarvan 5
+  van 90 min)`; zonder meervoudige afspraken blijft het label `1-op-1 sessies` /
+  `No-shows`.
+- `_meta.bronnen.lms.afgerond` / `.no_show` zijn eenheden; `.afspraken` en
+  `.meervoudig` geven de rijen en de verdeling.
 
 **LMS teamtraining** — `hlms_teamtraining_trainer.personeel_id = mentorUserId`,
 start in venster, `status = 'gegeven'` → €50. Bestaat de kolom `status` nog niet
@@ -58,7 +89,9 @@ Mentoren schakelden in de loop van september over (eerste LMS-sessie: Chesney
 aantallen:
 
 ```json
-{ "lms":    { "status": "gelezen", "afgerond": 71, "no_show": 15, "team": 0 },
+{ "lms":    { "status": "gelezen", "afgerond": 71, "no_show": 15, "team": 0,
+              "afspraken": { "afgerond": 71, "no_show": 15 },
+              "meervoudig": { "afgerond": {}, "no_show": {} } },
   "bubble": { "status": "gelezen", "calls": 8, "no_show": 1, "team": 0 } }
 ```
 
