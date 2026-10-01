@@ -42,6 +42,7 @@
     from: '', to: '',                  // custom dates YYYY-MM-DD
     timeline: null, timelineLoading: false, timelineError: null,
     openSale: null,                    // deal_id van het opengeklapte sale-detail
+    monthly: null, monthlyLoading: false, monthlyError: null,
   };
   const _spStaff = { items: null, loading: false };
 
@@ -73,6 +74,14 @@
     _sp.timeline = j;
     if (window.DFO?.render) window.DFO.render();
   }
+  async function loadMonthly(setterId) {
+    _sp.monthlyLoading = true; _sp.monthlyError = null;
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('monthly', '/api/setter-commission-monthly' + q);
+    _sp.monthlyLoading = false;
+    if (!j) _sp.monthlyError = 'Kon maandoverzicht niet laden'; else _sp.monthly = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
   async function loadStaff() {
     if (_spStaff.items || _spStaff.loading) return;
     _spStaff.loading = true;
@@ -86,8 +95,10 @@
     _sp.selectedSetter = id || null;
     _sp.timeline = null;
     _sp.openSale = null;
+    _sp.monthly = null;
     loadOverview(id).catch(() => {});
     loadTimeline(id).catch(() => {});
+    loadMonthly(id).catch(() => {});
   };
   window.__spSetPeriod = (p) => {
     if (p === _sp.period) return;
@@ -344,6 +355,42 @@
         </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
+  // ── Commissie per maand (maand = betaaldatum van de factuur) ──────────
+  const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  const maandLabel = (ym) => { const m = /^(\d{4})-(\d{2})/.exec(String(ym || '')); return m ? `${MAANDEN[Number(m[2]) - 1]} ${m[1]}` : String(ym || ''); };
+  function _monthlySection() {
+    if (_sp.monthlyError) return `<div style="margin-bottom:20px;color:var(--rose);font-size:12px">⚠ ${esc(_sp.monthlyError)}</div>`;
+    const m = _sp.monthly;
+    if (!m) return _sp.monthlyLoading ? `<div style="margin-bottom:20px;color:var(--text-3);font-size:12px">Maandoverzicht laden…</div>` : '';
+    const banner = m.dry_run
+      ? `<div style="margin-bottom:8px;padding:8px 12px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--r-sm);font-size:12px;color:var(--text-2)">Proefmodus: de commissie wordt berekend uit de facturen maar nog <b>niet geboekt</b>. "Berekend" laat zien wat er geboekt gaat worden.</div>`
+      : '';
+    const rows = (m.maanden || []).map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:12px">${esc(maandLabel(r.maand))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num}">${esc(eur(r.ontvangen))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num};color:var(--brand);font-weight:600">${esc(eur(r.berekend))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num}">${esc(eur(r.geboekt))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num};color:var(--emerald)">${esc(eur(r.uitbetaald))}</td>
+      </tr>`).join('');
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:4px">Commissie per maand</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">Op de maand waarin de klant betaalde · ${esc(Number(m.pct || 0).toFixed(2).replace('.', ','))}% van elk ontvangen bedrag incl. btw · creditnota's tellen niet als betaling.</div>
+      ${banner}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden"><div class="tbl-wrap">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+            <th style="padding:8px 10px">Maand</th>
+            <th style="padding:8px 10px;text-align:right">Ontvangen</th>
+            <th style="padding:8px 10px;text-align:right">Commissie berekend</th>
+            <th style="padding:8px 10px;text-align:right">Geboekt</th>
+            <th style="padding:8px 10px;text-align:right">Uitbetaald</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--text-3)">Nog geen ontvangen betalingen op jouw sales.</td></tr>`}</tbody>
+        </table>
+      </div></div>
+    </div>`;
+  }
+
   function _salesTable(sales) {
     if (!Array.isArray(sales) || !sales.length) {
       return `<div style="padding:28px;text-align:center;color:var(--text-3);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px">Nog geen geattribueerde sales.</div>`;
@@ -390,6 +437,7 @@
   function overzichtView() {
     if (!_sp.data && !_sp.loading && !_sp.error) queueMicrotask(() => loadOverview(_sp.selectedSetter));
     if (!_sp.timeline && !_sp.timelineLoading && !_sp.timelineError) queueMicrotask(() => loadTimeline(_sp.selectedSetter));
+    if (!_sp.monthly && !_sp.monthlyLoading && !_sp.monthlyError) { _sp.monthlyLoading = true; queueMicrotask(() => loadMonthly(_sp.selectedSetter)); }
     // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
     // gebruik canSync + ensurePermissionsLoaded. Zonder deze fix zag zelfs
     // super_admin geen staff-picker of "Uitbetaalronde draaien"-knop.
@@ -440,6 +488,7 @@
       </div>
       ${Number(t.in_afwachting_offerte) > 0 ? `<div style="margin:-12px 0 20px;font-size:12px;color:var(--text-3)">Daarnaast <b>${esc(eur(t.in_afwachting_offerte))}</b> commissie op offertes die nog niet geaccepteerd zijn (niet in de forecast).</div>` : ''}
       ${_timelineChart()}
+      ${_monthlySection()}
       ${_salesTable(d.sales)}
       ${canPayout ? `<div style="margin-bottom:14px">
         <button class="btn btn-primary" style="font-size:12.5px;padding:6px 12px" onclick="window.__spRunPayout()">Uitbetaalronde draaien</button>

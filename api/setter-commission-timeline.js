@@ -13,7 +13,8 @@
 //   }
 //
 // Verleden buckets: som(setter_ledger_entries.amount) waar
-//   status ∈ ('vrijgegeven','uitbetaald') EN created_at in de maand.
+//   status ∈ ('vrijgegeven','uitbetaald') EN betaal_datum (betaaldatum van
+//   de factuur; vóór de migratie: created_at) in de maand.
 // Toekomst buckets: het betaalplan van elke GEACCEPTEERDE sale (deals.
 //   total_amount incl. BTW: reserveringsfee/aanbetaling/termijnen met
 //   datums, zie _lib/setter-sale-plan.js), minus wat al ontvangen is,
@@ -32,6 +33,9 @@ import { betaaldBedrag } from './_lib/factuur-betaald.js';
 import {
   SETTER_DEAL_COLS, isUitgeslotenDeal, quotationStatus, bouwBetaalplan, forecastUitPlan,
 } from './_lib/setter-sale-plan.js';
+import {
+  laadLedgerRegels, maandVanRegel, laadCommissieData, koppelFacturenAanDeals,
+} from './_lib/setter-commissie-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,19 +97,14 @@ export default async function handler(req, res) {
     const ymIndex = new Map(months.map((m, i) => [m.ym, i]));
 
     // ── Verleden + huidige maand: setter_ledger_entries ──────────────────
-    const rangeFrom = new Date(months[0]._startUtc).toISOString();
-    const rangeTo   = new Date(Date.UTC(currentY, currentM + 1, 1)).toISOString(); // t/m einde huidige maand
-    const { data: entries } = await supabaseAdmin
-      .from('setter_ledger_entries')
-      .select('amount, status, created_at')
-      .eq('setter_user_id', targetSetter)
-      .gte('created_at', rangeFrom)
-      .lt('created_at', rangeTo)
-      .limit(5000);
-    for (const e of (entries || [])) {
+    // Maand = betaaldatum van de factuur (betaal_datum); vóór de migratie
+    // valt laadLedgerRegels terug op created_at. Alleen t/m huidige maand.
+    const currentYm = ymOf(new Date(Date.UTC(currentY, currentM, 1)));
+    const entries = await laadLedgerRegels(supabaseAdmin, targetSetter);
+    for (const e of entries) {
       if (e.status !== 'vrijgegeven' && e.status !== 'uitbetaald') continue;
-      const t = new Date(e.created_at);
-      const ym = ymOf(t);
+      const ym = maandVanRegel(e);
+      if (!ym || ym > currentYm) continue;
       const idx = ymIndex.get(ym);
       if (idx != null) months[idx].realized += Number(e.amount) || 0;
     }
@@ -127,17 +126,17 @@ export default async function handler(req, res) {
     const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d) && !quotationStatus(d).pending);
     const dealIds = deals.map((d) => d.id);
     if (dealIds.length && pct > 0) {
-      const [subsRes, invsRes] = await Promise.all([
-        supabaseAdmin.from('subscriptions').select('deal_id, status').in('deal_id', dealIds),
-        supabaseAdmin.from('invoices')
-          .select('deal_id, amount_paid, amount_total, credited_amount').in('deal_id', dealIds),
-      ]);
+      // Ontvangen via dezelfde factuurkoppeling als de commissie (deal_id /
+      // abonnement / reserveringsfee-factuur).
+      const commData = await laadCommissieData(supabaseAdmin, { setterIds: [targetSetter] });
+      const koppeling = koppelFacturenAanDeals(commData);
       const paidByDeal = {};
-      for (const i of (invsRes.data || [])) {
-        paidByDeal[i.deal_id] = (paidByDeal[i.deal_id] || 0) + betaaldBedrag(i);
+      for (const i of commData.invoices) {
+        const k = koppeling.get(i.id);
+        if (k) paidByDeal[k.deal.id] = (paidByDeal[k.deal.id] || 0) + betaaldBedrag(i);
       }
       const subsByDeal = {};
-      for (const s of (subsRes.data || [])) (subsByDeal[s.deal_id] ||= []).push(s);
+      for (const s of commData.subs) (subsByDeal[s.deal_id] ||= []).push(s);
 
       for (const d of deals) {
         const subs = subsByDeal[d.id] || [];

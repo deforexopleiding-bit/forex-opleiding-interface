@@ -26,6 +26,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { parseSetterPeriod } from './_lib/setter-period.js';
 import { betaaldBedrag } from './_lib/factuur-betaald.js';
 import { isUitgeslotenDeal, bouwSaleRegel, klantNaam, SETTER_DEAL_COLS } from './_lib/setter-sale-plan.js';
+import { laadCommissieData, koppelFacturenAanDeals } from './_lib/setter-commissie-core.js';
+
+const BRON_LABEL = { deal: 'factuur', abonnement: 'termijn (abonnement)', reserveringsfee: 'reserveringsfee' };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -108,28 +111,46 @@ export default async function handler(req, res) {
     const dealIds = deals.map((d) => d.id);
 
     const ontvangenByDeal = {};
+    const ontvangenRegelsByDeal = {};
     const subsByDeal = new Map();
     const trajectNaam = {};
     if (dealIds.length) {
       const variantIds = [...new Set(deals.map((d) => d.traject_variant_id).filter(Boolean))];
-      const [subsRes, invsRes, tvRes] = await Promise.all([
-        supabaseAdmin.from('subscriptions').select('id, deal_id, status').in('deal_id', dealIds),
-        // Ontvangen per deal: credit-veilig via betaaldBedrag (een volledig
-        // gecrediteerde factuur telt als 0).
-        supabaseAdmin.from('invoices')
-          .select('id, deal_id, amount_paid, amount_total, credited_amount, status')
-          .in('deal_id', dealIds),
+      // Ontvangen per deal via dezelfde factuurkoppeling als de commissie
+      // (deal_id ÓF abonnement ÓF reserveringsfee-factuur), credit-veilig
+      // via betaaldBedrag (een volledig gecrediteerde factuur telt als 0).
+      const [commData, tvRes] = await Promise.all([
+        laadCommissieData(supabaseAdmin, { setterIds: [targetSetter] }),
         variantIds.length
           ? supabaseAdmin.from('traject_variants').select('id, name').in('id', variantIds)
           : Promise.resolve({ data: [] }),
       ]);
-      for (const s of (subsRes.data || [])) {
+      for (const s of commData.subs) {
         if (!subsByDeal.has(s.deal_id)) subsByDeal.set(s.deal_id, []);
         subsByDeal.get(s.deal_id).push(s);
       }
-      for (const i of (invsRes.data || [])) {
-        if (!i.deal_id) continue;
-        ontvangenByDeal[i.deal_id] = (ontvangenByDeal[i.deal_id] || 0) + betaaldBedrag(i);
+      const koppeling = koppelFacturenAanDeals(commData);
+      for (const inv of commData.invoices) {
+        const k = koppeling.get(inv.id);
+        if (!k) continue;
+        const ontvangen = round2(betaaldBedrag(inv));
+        const did = k.deal.id;
+        ontvangenByDeal[did] = (ontvangenByDeal[did] || 0) + ontvangen;
+        (ontvangenRegelsByDeal[did] ||= []).push({
+          invoice_id:    inv.id,
+          factuurnummer: inv.invoice_number || null,
+          soort:         BRON_LABEL[k.bron] || k.bron,
+          factuurdatum:  inv.issue_date || null,
+          betaald_op:    inv.paid_date || null,
+          totaal:        round2(inv.amount_total),
+          gecrediteerd:  round2(inv.credited_amount),
+          ontvangen,
+          commissie:     round2(ontvangen * pct / 100),
+          status:        inv.status || null,
+        });
+      }
+      for (const lijst of Object.values(ontvangenRegelsByDeal)) {
+        lijst.sort((a, b) => String(a.factuurdatum || '').localeCompare(String(b.factuurdatum || '')));
       }
       for (const t of (tvRes.data || [])) trajectNaam[t.id] = t.name || null;
     }
@@ -180,6 +201,7 @@ export default async function handler(req, res) {
       traject: d.traject_variant_id ? (trajectNaam[d.traject_variant_id] || null) : null,
       pct,
       ontvangen: ontvangenByDeal[d.id] || 0,
+      ontvangenRegels: ontvangenRegelsByDeal[d.id] || [],
     }));
 
     // ── Forecast / vervallen / in afwachting ─────────────────────────────
