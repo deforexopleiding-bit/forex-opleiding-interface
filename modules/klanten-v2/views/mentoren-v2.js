@@ -606,6 +606,16 @@
       true,
     );
   };
+  // { "2": 5 } → "5× 90 min"; leeg → "geen".
+  function fmtMeervoudig(per) {
+    const ks = Object.keys(per || {}).map(Number).sort((a, b) => a - b);
+    return ks.length ? ks.map((e) => `${per[e]}× ${e * 45} min`).join(', ') : 'geen';
+  }
+  function fmtZelfdeMoment(lijst) {
+    const a = Array.isArray(lijst) ? lijst : [];
+    if (!a.length) return 'geen';
+    return a.length + '\n' + a.map((m) => `  · student ${m.student_id} op ${fmtDateTime(m.start_tijd)}: ${m.rijen} rijen`).join('\n');
+  }
   // MEDIUM: coaching-debug (informational, geen mutation)
   window.__mentCoachingDebug = async (mentorId) => {
     if (!isAdminRole()) return;
@@ -618,8 +628,9 @@
     const summary = l.error
       ? `Bronfout: ${l.error}`
       : [
-          `LMS (${b.lms?.status || '?'}): ${b.lms?.afgerond ?? 0} afgerond · ${b.lms?.no_show ?? 0} no-show · ${b.lms?.team ?? 0} teamtraining${l.lms_teamtraining && l.lms_teamtraining !== 'gelezen' ? ' (' + l.lms_teamtraining + ')' : ''}`,
-          `Exacte dubbels LMS (1× geteld): ${l.lms_exacte_dubbels ?? 0}`,
+          `LMS (${b.lms?.status || '?'}): ${b.lms?.afgerond ?? 0} eenheden afgerond (${b.lms?.afspraken?.afgerond ?? '?'} afspraken) · ${b.lms?.no_show ?? 0} eenheden no-show (${b.lms?.afspraken?.no_show ?? '?'} afspraken) · ${b.lms?.team ?? 0} teamtraining${l.lms_teamtraining && l.lms_teamtraining !== 'gelezen' ? ' (' + l.lms_teamtraining + ')' : ''}`,
+          `Meervoudige afspraken (1 eenheid = 45 min): afgerond ${fmtMeervoudig(b.lms?.meervoudig?.afgerond)} · no-show ${fmtMeervoudig(b.lms?.meervoudig?.no_show)}`,
+          `Zelfde student + zelfde moment (elk geteld): ${fmtZelfdeMoment(l.lms_zelfde_moment)}`,
           `Bubble (${b.bubble?.status || '?'}): ${b.bubble?.calls ?? 0} calls · ${b.bubble?.no_show ?? 0} no-show · ${b.bubble?.team ?? 0} team`,
           `Bubble overgeslagen (zelfde student+dag in LMS): ${l.bubble_overgeslagen_dubbel_met_lms ?? 0}`,
           `Funded: ${l.breakdown?.funded?.count ?? 0} · Totaal coaching: ${eur(l.grand_total || 0)}`,

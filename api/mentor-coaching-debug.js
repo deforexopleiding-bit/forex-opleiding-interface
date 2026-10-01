@@ -145,7 +145,7 @@ export default async function handler(req, res) {
         bronnen                           : m.bronnen,
         venster                           : m.venster,
         lms_sessies_gelezen               : m.lms_sessies_gelezen,
-        lms_exacte_dubbels                : m.lms_exacte_dubbels,
+        lms_zelfde_moment                 : m.lms_zelfde_moment,
         lms_zonder_student                : m.lms_zonder_student,
         lms_teamtraining                  : m.lms_teamtraining,
         bubble_overgeslagen_dubbel_met_lms: m.bubble_overgeslagen_dubbel_met_lms,
