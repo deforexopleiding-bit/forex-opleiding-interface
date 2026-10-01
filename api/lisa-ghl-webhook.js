@@ -7,6 +7,11 @@
 //
 // Flow: secret → parse → settings → (live? kantooruren?) → conversatie → generateLisaResponse
 //       → in kantooruren: direct sturen; daarbuiten: pre-genereren + plannen in lisa_followups.
+//
+// Deze webhook is het ENIGE pad dat lisa_conversations aanmaakt voor nieuwe
+// Instagram-contacten (de poll-cron kent alleen bestaande gesprekken). Daarom
+// mag niets vóór "ensure conversation" een geldig IG-inbound-bericht laten
+// vallen — ook niet een ontbrekende GHL messageId (zie 2026-10-01 hieronder).
 
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
@@ -14,6 +19,7 @@ import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from '
 import { generateLisaResponse } from './lisa-respond.js';
 import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups, autoQualifyIfTriggered, pauseFollowupsForDisqualified } from './_lib/lisa-followup.js';
 import { isInstagram, resolveContent } from './_lib/lisa-message-type.js';
+import { ingestLisaMessage } from './_lib/lisa-message-ingest.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -31,6 +37,22 @@ function computeNextOfficeStart(startTime, tz) {
 
 async function logWebhookError(message) {
   try { await supabaseAdmin.from('lisa_settings').update({ ghl_webhook_last_error: String(message).slice(0, 500) }).eq('id', 1); } catch (_) {}
+}
+
+// 2026-10-01 — laatste skip-reden vastleggen, zodat "de webhook is stil" te
+// onderscheiden is van "de webhook komt binnen maar wordt weggefilterd".
+// Bewust NIET in ghl_webhook_last_error (dat is een foutsignaal en wordt bij
+// elke geslaagde ingest op null gezet) en geen nieuwe kolom (zou een
+// blokkerende migratie zijn). Eén upsert per skip; faalzacht.
+const WEBHOOK_SKIP_KEY = 'lisa_webhook_laatste_skip';
+async function logWebhookSkip(reason, details) {
+  try {
+    const { error } = await supabaseAdmin.from('app_settings').upsert({
+      key: WEBHOOK_SKIP_KEY,
+      value: { reason, at: new Date().toISOString(), ...(details || {}) },
+    }, { onConflict: 'key' });
+    if (error) console.warn('[lisa-ghl-webhook] skip-log:', error.message);
+  } catch (e) { console.warn('[lisa-ghl-webhook] skip-log exception:', e?.message || e); }
 }
 
 export default async function handler(req, res) {
@@ -99,27 +121,25 @@ export default async function handler(req, res) {
     // 'IG' / 'Instagram' / 'instagram_dm' / numeriek '8' / 'TYPE_IG', etc.
     // Voorheen: strikte type !== 'IG' skipte legitieme varianten.
     if (!isInstagram(payload) || direction !== 'inbound') {
+      await logWebhookSkip('not_ig_inbound', { type: type ?? null, direction: direction ?? null });
       return res.status(200).json({ skipped: 'not_ig_inbound' });
     }
     // BP3 (2026-09-01) fix #1 — een bericht ZONDER body is nog steeds een
     // bericht (foto, reel, sticker, story-reply, voice). Alleen skippen als
     // er GEEN contactId is (dan kunnen we het bericht nergens aan hangen).
-    if (!contactId) return res.status(200).json({ skipped: 'missing_contact_id' });
-
-    // 2026-09-07: dedup-anker verplicht. Zonder ghl_message_id kunnen webhook
-    // en poll niet dedupereren — een tweede fire van dezelfde message zou
-    // een duplicaat opleveren (bewezen: conv 7611d2b7, "Ik ben zelf PAS
-    // actief.", 2 rijen 3s uit elkaar, één met id, één met NULL).
-    // Beter een gemiste dan een duplicaat: de poll-cron (elke 15 min) haalt
-    // het bericht alsnog uit /conversations/{id}/messages met de correcte id
-    // en insert 'em daar; dedup werkt dan wél via de partial UNIQUE index.
-    if (!messageId) {
-      await logWebhookError('missing_message_id — poll pakt op');
-      return res.status(200).json({
-        ok: true, skipped: 'no_message_id',
-        note: 'poll-cron ingest deze inbound alsnog met correcte ghl_message_id',
-      });
+    if (!contactId) {
+      await logWebhookSkip('missing_contact_id', { type: type ?? null, direction: direction ?? null });
+      return res.status(200).json({ skipped: 'missing_contact_id' });
     }
+
+    // 2026-10-01: GEEN messageId-guard meer. De guard uit #1523 (8 sep) stond
+    // vóór "ensure conversation" en liet daardoor élke id-loze webhook vallen —
+    // inclusief de allereerste DM van nieuwe contacten, die de poll-cron niet
+    // kent. Gevolg: 0 nieuwe gesprekken sinds 8 sep. Nu: gesprek wordt ALTIJD
+    // aangemaakt/bijgewerkt op contactId; alleen de bericht-insert hangt van
+    // de id af, en die loopt via ingestLisaMessage() met de tweeling-regel
+    // (synthetische id + upgrade naar de echte id). Zie
+    // api/_lib/lisa-message-ingest.js voor waarom dat niet dubbelt.
     // resolveContent() geeft altijd { message_type <whitelist>, content <niet-leeg>,
     // attachment_url <string|null> }. Attachments-input komt uit customData
     // (Message Attachments) én de standaard-body-paden als fallback.
@@ -210,26 +230,30 @@ export default async function handler(req, res) {
       conv.contact_name = computedName;
     }
 
-    // Persist inbound message met HARDE error-check.
-    const { error: msgInsErr } = await supabaseAdmin.from('lisa_messages').insert({
-      conversation_id: conv.id,
-      direction:       'in',
-      content:         msgContent,
-      message_type:    msgType,
-      attachment_url:  msgAttachmentUrl,
-      ai_generated:    false,
-      ghl_message_id:  messageId || null,
+    // Persist inbound message met HARDE error-check. Dedup (ook tussen de
+    // variant mét en zonder messageId) zit in ingestLisaMessage():
+    //   inserted  → nieuw bericht (evt. met synthetische 'syn:'-id)
+    //   upgraded  → er stond al een id-loze tweeling; die kreeg nu de echte id
+    //   duplicate → bericht stond er al
+    // 'upgraded' en 'duplicate' zijn allebei een herhaalde levering → geen AI.
+    const ingest = await ingestLisaMessage(supabaseAdmin, {
+      conversationId: conv.id,
+      direction:      'in',
+      content:        msgContent,
+      messageType:    msgType,
+      attachmentUrl:  msgAttachmentUrl,
+      ghlMessageId:   messageId || null,
     });
-    const wasDuplicate = !!(msgInsErr && msgInsErr.code === '23505');
-    if (msgInsErr && !wasDuplicate) {
-      console.error('[lisa-ghl-webhook] persist inbound faalde:',
-        msgInsErr.code, msgInsErr.message, msgInsErr.details || '', msgInsErr.hint || '');
-      await logWebhookError('persist_inbound[' + msgInsErr.code + ']: ' + msgInsErr.message);
+    if (ingest.status === 'error') {
+      const code = ingest.error?.code || '';
+      console.error('[lisa-ghl-webhook] persist inbound faalde:', code, ingest.error?.message);
+      await logWebhookError('persist_inbound[' + code + ']: ' + ingest.error?.message);
       return res.status(200).json({
-        ok: false, ingest_error: msgInsErr.message, code: msgInsErr.code,
+        ok: false, ingest_error: ingest.error?.message, code,
         conv_id: conv.id, message_type: msgType,
       });
     }
+    const wasDuplicate = ingest.status === 'duplicate' || ingest.status === 'upgraded';
 
     // Counter tikken (ook bij duplicate — GHL heeft ons alsnog benaderd).
     await supabaseAdmin.from('lisa_settings').update({
@@ -246,9 +270,10 @@ export default async function handler(req, res) {
 
     // Duplicate → skip AI (voorkomt burst bij GHL-retry).
     if (wasDuplicate) {
-      console.log('[lisa-ghl-webhook] duplicate delivery — insert skipped', { messageId });
+      console.log('[lisa-ghl-webhook] duplicate delivery — insert skipped', { messageId, status: ingest.status });
       return res.status(200).json({
-        ok: true, skipped: 'duplicate_delivery', ghl_message_id: messageId, conv_id: conv.id,
+        ok: true, skipped: 'duplicate_delivery', ingest: ingest.status,
+        ghl_message_id: ingest.ghl_message_id || messageId || null, conv_id: conv.id,
       });
     }
 
@@ -257,6 +282,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true, skipped: 'live_mode_off', ingested: true,
         conv_id: conv.id, message_type: msgType, attachment_url: msgAttachmentUrl,
+        synthetic_id: !!ingest.synthetic,
       });
     }
 
