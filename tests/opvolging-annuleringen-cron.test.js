@@ -498,6 +498,14 @@ test('de woordenlijst is uit de twee outcome-motoren overgenomen, niet verzonnen
   }
 });
 
+test('geen_geld is een eindpunt; onbereikbaar en no_show bewust niet', () => {
+  // Geen geld = gesproken en afgesloten: geen "plan opnieuw in"-kaart na een
+  // latere annulering. Onbereikbaar is net als no-show nog niet afgerond.
+  assert.ok(EINDPUNT_UITKOMSTEN.has('geen_geld'));
+  assert.ok(!EINDPUNT_UITKOMSTEN.has('onbereikbaar'));
+  assert.ok(!EINDPUNT_UITKOMSTEN.has('no_show'));
+});
+
 // ── DE CRON GEBRUIKT DE REGEL OOK ECHT ─────────────────────────────────────
 
 test('de cron slaat een afgesloten lead over, vóór de kaart-controles', () => {
