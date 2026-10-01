@@ -88,7 +88,9 @@ test('de motor schrijft geen uitkomst bij verzetten of annuleren', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('de shell kent een vierde tab Rapport', () => {
-  assert.match(SHELL, /tabs: \['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'\]/);
+  // Sinds 1 oktober 2026 staat Call-rapport er als vijfde achter (eigen view,
+  // eigen sleutel — zie tests/call-rapport.test.js). Rapport blijft de vierde.
+  assert.match(SHELL, /tabs: \['Vandaag', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'\]/);
 });
 
 test('de tab hangt aan een eigen rechtensleutel', () => {

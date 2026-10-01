@@ -31,7 +31,7 @@
 
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
-  <script src="../shared/rbac/registry.js?v=4"></script>
+  <script src="../shared/rbac/registry.js?v=5"></script>
   <!-- v=1f2 (2026-08-26): permissions.js hydrateert window.RBAC met
        role_permissions + user_permissions union. Nodig zodat de sidebar-
        filter in app-shell.js een permKey-check kan doen (voor user_permission-
@@ -166,7 +166,7 @@
 
   <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
   <script src="../shared/design-system/icons.js?v=1b1"></script>
-  <script src="../shared/design-system/app-shell.js?v=1da"></script>
+  <script src="../shared/design-system/app-shell.js?v=1db"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
   <!-- belvenster-kern VOOR de softphone: die leest window.BelvensterKern. -->
   <script src="../shared/belvenster-kern.js?v=2"></script>
@@ -223,6 +223,10 @@
   <script src="views/wanbetalers-v2.js?v=63"></script>
   <script src="views/setter-payout-v2.js?v=9"></script>
   <script src="views/opvolging-v2.js?v=72"></script>
+  <!-- Opvolging → tab Call-rapport (per closer en per setter, per dag). Eigen
+       bestand naast opvolging-v2.js; leest labels en kleuren uit
+       window.CallUitkomstCategorie hierboven. Na opvolging-v2.js. -->
+  <script src="views/call-rapport-v2.js?v=1"></script>
   <script src="views/support-v2.js?v=5"></script>
   <!-- Iris. Eigen map (modules/iris/) zoals afgesproken, maar geregistreerd als
        schil-weergave zodat navigatie, rechten en uiterlijk uit de schil komen.
