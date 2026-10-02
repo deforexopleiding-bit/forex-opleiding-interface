@@ -149,6 +149,7 @@ export default async function handler(req, res) {
     const { data: taken, error: tErr } = await supabaseAdmin
       .from('opvolging_taken')
       .select('id, status, due, bron_ref, notitie')
+      .eq('lijst', 'dag')
       .eq('bron', 'event')
       .limit(5000);
     if (tErr) throw new Error('taken lezen: ' + tErr.message);

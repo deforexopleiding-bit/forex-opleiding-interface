@@ -35,6 +35,7 @@ import {
   bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 import { MAX_ACHTERSTAND_PER_DAG, dagInZone as opwarmDag } from './_lib/opvolging-zoom-opwarm.js';
+import { alleenDaglijst } from './_lib/opvolging-lijst.js';
 
 const ZONE = 'Europe/Amsterdam';
 const MAIL_VAN = 'leads@deforexopleiding.nl';
@@ -59,9 +60,9 @@ export default async function handler(req, res) {
 
   // ── 1 · Instroom ─────────────────────────────────────────────────────────
   try {
-    const { data: taken, error } = await supabaseAdmin
+    const { data: taken, error } = await alleenDaglijst(supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, due, created_at, opvolging_pogingen(id)')
+      .select('id, naam, due, created_at, opvolging_pogingen(id)'))
       .eq('status', 'open').eq('bron', 'event').eq('reden', 'aanmelding');
     if (error) throw error;
     const zonderPoging = (taken || [])
@@ -145,9 +146,12 @@ const kort = (e) => String(e?.message || e).slice(0, 200);
  */
 async function meetDagritme(vandaag) {
   try {
+    // Beide lijsten: de doorrol rolt ook leadkaarten door, dus een leadkaart
+    // die blijft hangen is evengoed een gat in het dagritme. De controle telt
+    // ze apart — zie controleerDagritme.
     const { data, error } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('due')
+      .select('due, lijst')
       .eq('status', 'open')
       .limit(5000);
     if (error) throw new Error(error.message);
@@ -184,9 +188,11 @@ async function meetOpwarmronde(vandaag) {
       .limit(1000);
     if (aErr) throw new Error('afspraken: ' + aErr.message);
 
+    // Beide lijsten, met opzet: een lead die als leadkaart al ingepland staat
+    // is net zo goed gedekt — zijn call staat in de agenda.
     const { data: taken, error: tErr } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('id, status, due, reden, telefoon, bron_ref, created_at')
+      .select('id, status, due, reden, telefoon, bron_ref, created_at, lijst')
       .limit(5000);
     if (tErr) throw new Error('taken: ' + tErr.message);
 

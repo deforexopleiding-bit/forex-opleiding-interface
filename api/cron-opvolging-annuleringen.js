@@ -180,6 +180,7 @@ async function leesKaarten() {
     // archief_reden hoort erbij: leadAlAfgesloten() leest hem om een
     // gearchiveerde 'geen interesse'-kaart te herkennen.
     .select('id, naam, telefoon, status, reden, reden_code, archief_reden, notitie, bron_ref')
+    .eq('lijst', 'dag')
     .order('updated_at', { ascending: false })
     .limit(2000);
   if (error) throw new Error('taken lezen: ' + error.message);

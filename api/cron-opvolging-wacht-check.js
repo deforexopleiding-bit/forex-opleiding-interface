@@ -23,7 +23,7 @@
 // afspraakrecords zelf worden alleen gelezen.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { beslisWachtInplanning, beslisWachtVerplaatsing, WACHT_UREN } from './_lib/opvolging-doorrol.js';
+import { beslisWachtInplanning, beslisWachtVerplaatsing, terugNaWachtPatch, WACHT_UREN } from './_lib/opvolging-doorrol.js';
 
 const ABORT_MS = 25_000;
 const ZONE     = 'Europe/Amsterdam';
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   try {
     const { data: taken, error: leesErr } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, email, telefoon, status, agenda_doorgestuurd_at, badge_label, notitie')
+      .select('id, naam, email, telefoon, status, agenda_doorgestuurd_at, badge_label, notitie, lijst')
       .eq('status', 'wacht_inplanning')
       .order('agenda_doorgestuurd_at', { ascending: true })
       .limit(500);
@@ -130,19 +130,15 @@ export default async function handler(req, res) {
           continue;
         }
 
-        // 'terug' — 48 uur voorbij en niets geboekt.
+        // 'terug' — 48 uur voorbij en niets geboekt. Daglijst en leadkaart
+        // krijgen elk hun eigen vorm — zie terugNaWachtPatch().
         const nu = new Date().toISOString();
-        const notitie = notitieMetRegel(
-          taak.notitie,
-          `${dagInZone(Date.now())} · Agenda ${WACHT_UREN} uur geleden doorgestuurd, maar er is zelf niets ingepland. Terug in de lijst.`,
-        );
+        const patch = terugNaWachtPatch({
+          taak, vandaag,
+          regel: `${dagInZone(Date.now())} · Agenda ${WACHT_UREN} uur geleden doorgestuurd, maar er is zelf niets ingepland. Terug in de lijst.`,
+        });
         const { error } = await supabaseAdmin.from('opvolging_taken').update({
-          status      : 'open',
-          due         : vandaag,
-          later       : false,
-          reden       : 'niet_ingepland',
-          badge_label : 'Agenda doorgestuurd',
-          notitie,
+          ...patch,
           updated_at  : nu,
         }).eq('id', taak.id).eq('status', 'wacht_inplanning');
         if (error) throw new Error('terugzetten: ' + error.message);

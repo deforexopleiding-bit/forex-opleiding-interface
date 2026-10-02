@@ -456,6 +456,7 @@ async function hangAfrondUitTaak(dagen) {
     const { data, error } = await supabaseAdmin
       .from('opvolging_taken')
       .select('id, reden, reden_code, bron_ref, created_at')
+      .eq('lijst', 'dag')
       .filter('bron_ref->>appointment_id', 'in', inLijst(ids))
       .order('created_at', { ascending: false })
       .limit(1000);
@@ -601,6 +602,7 @@ async function leesAchterstand() {
     const { data, error } = await supabaseAdmin
       .from('opvolging_taken')
       .select('bron_ref')
+      .eq('lijst', 'dag')
       .filter('bron_ref->>appointment_id', 'in', inLijst(ids))
       .limit(1000);
     if (error) throw new Error(error.message);
