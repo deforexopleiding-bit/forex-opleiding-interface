@@ -229,7 +229,7 @@ test('potVoorKaart: elke status naar zijn pot', () => {
   assert.equal(k({ status: 'gearchiveerd', gearchiveerd_at: dagenTerug(61) }), null);
 });
 
-test('terugbellen en verlopen staan apart van nieuw, en de badge telt ze plus nieuw-heet', () => {
+test('terugbellen en verlopen staan apart van nieuw, en de badge telt ze plus nieuw heet/warm', () => {
   const a = lead(), b = lead(), c = lead({ aangemaakt: dagenTerug(0), kwalificatie: 'toegang' });
   const o = stelPottenSamen({
     leads: [a, b, c], nuMs: NU,
@@ -335,4 +335,16 @@ test('een kaart van een lead die intussen zelf een call boekte krijgt een waarsc
     afspraken: [{ id: 'a', lead_phone: l.telefoon_e164, status: 'scheduled', scheduled_at: new Date(NU + 86400000).toISOString() }],
   });
   assert.equal(o.potten.bezig[0].chips[0].tekst, 'heeft al een call gepland');
+});
+
+test('badge telt ook warme nieuwe leads (geen enkele hete mag de knop niet doven)', () => {
+  const warm = lead({ aangemaakt: dagenTerug(0) });             // +30
+  const koud = lead({ aangemaakt: dagenTerug(40) });            // 0
+  const o = stelPottenSamen({
+    leads: [warm, koud], nuMs: NU,
+    trialPerLead: new Map([[warm.id, normaliseerTrial({ score: 4 })]]),  // +6 → 36 warm
+  });
+  assert.equal(o.potten.nieuw.find((r) => r.lead_id === warm.id).label.code, 'warm');
+  assert.equal(o.nieuw_heet, 0);
+  assert.equal(o.badge, 1);
 });

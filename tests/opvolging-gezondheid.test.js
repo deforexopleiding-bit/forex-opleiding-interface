@@ -510,3 +510,16 @@ test('de lege vorm draagt dezelfde begrippen als het echte rapport', () => {
     assert.match(leeg, new RegExp('(^|[^\\w])' + veld + '\\s*:'), 'de lege vorm mist ' + veld);
   }
 });
+
+// ── Controle 8 · Leads bellen: wachtende leadkaarten ─────────────────────
+import { controleerLeadsWacht } from '../api/_lib/opvolging-gezondheid.js';
+
+test('leads_wacht: leeg = niet gemeten, leesfout = fout, > 49 uur = fout', () => {
+  const nu = Date.parse('2026-10-02T12:00:00Z');
+  assert.equal(controleerLeadsWacht({ taken: [], nuMs: nu }).staat, 'niet_gemeten');
+  assert.equal(controleerLeadsWacht({ taken: [], leesfout: 'boem', nuMs: nu }).staat, 'fout');
+  const t = (uur) => ({ id: 'x', naam: 'X', status: 'wacht_inplanning', agenda_doorgestuurd_at: new Date(nu - uur * 3600000).toISOString() });
+  assert.equal(controleerLeadsWacht({ taken: [t(48)], nuMs: nu }).staat, 'ok');
+  assert.equal(controleerLeadsWacht({ taken: [t(50)], nuMs: nu }).staat, 'fout');
+  assert.equal(controleerLeadsWacht({ taken: [{ id: 'y', status: 'wacht_inplanning' }], nuMs: nu }).staat, 'fout');
+});

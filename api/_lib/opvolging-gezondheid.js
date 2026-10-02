@@ -558,3 +558,43 @@ export function bouwMail({ uitkomsten, dag }) {
 
   return { subject: kop, text: tekst };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTROLE 8 · LEADKAARTEN DIE TE LANG WACHTEN (Leads bellen)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Een leadkaart op wacht_inplanning hoort na 48 uur terug te komen (de
+// wacht-check draait elk uur). Staat er één langer dan 49 uur, dan is die
+// cron stilgevallen of slaat hij leadkaarten over — en dan verdwijnt een lead
+// die de agenda kreeg stil uit beeld. Precies wat de 48-uurcontrole moet
+// voorkomen.
+//
+// Nooit stil slagen: een leesfout is FOUT; geen enkele wachtende leadkaart
+// is NIET_GEMETEN (er was niets om te controleren), geen 'ok'.
+
+export const LEADS_WACHT_MAX_UUR = 49;
+
+export function controleerLeadsWacht({ taken, nuMs = Date.now(), leesfout }) {
+  if (leesfout) {
+    return uit('leads_wacht', FOUT, { fout: String(leesfout).slice(0, 200) },
+      'De wachtende leadkaarten waren niet te lezen: ' + String(leesfout).slice(0, 200) + '.');
+  }
+  const rijen = (Array.isArray(taken) ? taken : []).filter((t) => t && t.status === 'wacht_inplanning');
+  if (rijen.length === 0) {
+    return uit('leads_wacht', NIET_GEMETEN, { wachtend: 0 },
+      'Er wacht geen enkele leadkaart op inplanning, dus er viel niets te controleren.');
+  }
+  const grens = nuMs - LEADS_WACHT_MAX_UUR * 3600000;
+  const te_lang = rijen.filter((t) => {
+    const s = Date.parse(t.agenda_doorgestuurd_at || '');
+    return !Number.isFinite(s) || s < grens;
+  });
+  if (te_lang.length) {
+    return uit('leads_wacht', FOUT, { wachtend: rijen.length, te_lang: te_lang.length },
+      te_lang.length + ' leadkaart(en) staan langer dan ' + LEADS_WACHT_MAX_UUR + ' uur op wacht op inplanning (of zonder '
+      + 'doorstuurmoment): ' + te_lang.slice(0, 5).map((t) => t.naam || t.id).join(', ')
+      + '. De wacht-check had ze terug moeten zetten — kijk of cron-opvolging-wacht-check draait.');
+  }
+  return uit('leads_wacht', OK, { wachtend: rijen.length, te_lang: 0 },
+    rijen.length + ' leadkaart(en) wachten, allemaal binnen ' + LEADS_WACHT_MAX_UUR + ' uur.');
+}

@@ -596,13 +596,18 @@ export function stelPottenSamen({
 
   const aantallen = Object.fromEntries(POTTEN.map((p) => [p, potten[p].length]));
   const heet = potten.nieuw.filter((r) => r.label.code === 'heet').length;
+  // De badge op de knop in Vandaag: terugbellen + termijn verlopen + nieuwe
+  // leads die heet ÉN warm zijn. Alleen heet telde eerst — op 2 okt waren er
+  // nul hete leads, en dan licht de knop nooit op terwijl er 20 warme wachten.
+  const warmOfHeet = potten.nieuw.filter((r) => r.label.code === 'heet' || r.label.code === 'warm').length;
 
   return {
     vandaag,
     potten,
     aantallen,
-    badge: aantallen.terugbellen + aantallen.verlopen + heet,
+    badge: aantallen.terugbellen + aantallen.verlopen + warmOfHeet,
     nieuw_heet: heet,
+    nieuw_warm_of_heet: warmOfHeet,
     niet_getoond: uitsluitRegels(telling),
     dag: dagstatistiek(kaarten, telPerKaart, vandaag),
     week: weekstatistiek(kaarten, telPerKaart, nuMs),

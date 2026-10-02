@@ -144,13 +144,13 @@
   };
   window.__opvLeadsVerander = () => leegCache();
 
-  /** De knop rechtsboven in Vandaag, met badge = terugbellen + verlopen + nieuw-heet. */
+  /** De knop rechtsboven in Vandaag, met badge = terugbellen + verlopen + nieuw heet/warm. */
   window.__opvLeadsKnop = () => {
     const R = window.RBAC;
     if (R && typeof R.canSync === 'function' && R.canSync('opvolging.leads.view') === false) return '';
     if (!_ld.telling.data && !_ld.telling.laden && !_ld.telling.fout) straks(laadTelling);
     const n = _ld.telling.data ? _ld.telling.data.badge : null;
-    return '<button class="obtn leadsknop" onclick="window.__opvLb.naarTab()" title="Terugbellen + termijn verlopen + nieuwe hete leads">' +
+    return '<button class="obtn leadsknop" onclick="window.__opvLb.naarTab()" title="Terugbellen + termijn verlopen + nieuwe hete en warme leads">' +
       '&#128222; Leads bellen' + (n ? ' <span class="lb-badge">' + esc(n) + '</span>' : '') + '</button>';
   };
 

@@ -46,6 +46,7 @@ export default async function handler(req, res) {
       aantallen: o.aantallen,
       badge: o.badge,
       nieuw_heet: o.nieuw_heet,
+      nieuw_warm_of_heet: o.nieuw_warm_of_heet,
       niet_getoond: o.niet_getoond,
       kandidaten: o.kandidaten,
       dag: o.dag,
