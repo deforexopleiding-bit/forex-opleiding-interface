@@ -679,9 +679,20 @@ export function kaartSamenvatting(k, tel, nuMs, wachtUren = 48) {
     laatste_poging: t.laatste_poging || null,
     eerste_poging: eerste ? eerste.tijdstip : null,
     contact,
+    // Een Meta-bericht dat niet aankwam (failed-status). Alleen tonen als er
+    // daarna niets meer verstuurd is: dan is het de laatste stand.
+    wa_mislukt: waMislukt(pogingen),
     pogingen,
     archief,
   };
+}
+
+/** De melding van het laatste uitgaande WhatsApp-bericht als dat niet afgeleverd werd. */
+export function waMislukt(pogingen) {
+  const uit = (Array.isArray(pogingen) ? pogingen : [])
+    .filter((p) => p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht') && p.richting !== 'in');
+  const laatste = uit[uit.length - 1];
+  return laatste && /^WhatsApp niet afgeleverd/i.test(String(laatste.resultaat || '')) ? String(laatste.resultaat) : null;
 }
 
 /** Was er via deze rij echt contact? Gesproken aan de lijn, of een antwoord. */

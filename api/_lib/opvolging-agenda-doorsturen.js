@@ -32,6 +32,11 @@ export function leesInstelling(value) {
     agenda_link: link,
     bericht    : typeof v.bericht === 'string' && v.bericht.trim() ? v.bericht : STANDAARD_BERICHT,
     herinnering: typeof v.herinnering === 'string' && v.herinnering.trim() ? v.herinnering : STANDAARD_HERINNERING,
+    // Sinds PR 6: standaard via een goedgekeurde Meta-template op de lijn van
+    // de afspraakberichten. 'brug' = de vrije tekst via whatsapp-web.js.
+    kanaal     : v.kanaal === 'brug' ? 'brug' : 'meta',
+    module     : typeof v.module === 'string' && v.module.trim() ? v.module.trim() : 'leadsonderhoud',
+    phone_number_id: typeof v.phone_number_id === 'string' && /^\d{5,30}$/.test(v.phone_number_id.trim()) ? v.phone_number_id.trim() : null,
   };
 }
 
@@ -39,7 +44,10 @@ export function leesInstelling(value) {
  * Valideer een nieuwe instelling (het beheerblok). Geeft een foutzin of null.
  * Regels: link begint met https://, en {link} staat in elke tekst.
  */
-export function valideerInstelling({ agenda_link, bericht, herinnering }) {
+export function valideerInstelling({ agenda_link, bericht, herinnering, kanaal, module, phone_number_id }) {
+  if (kanaal != null && kanaal !== 'meta' && kanaal !== 'brug') return 'Kanaal moet meta of brug zijn.';
+  if (module != null && !/^[a-z0-9_-]{1,60}$/.test(String(module))) return 'Onbekende module.';
+  if (phone_number_id && !/^\d{5,30}$/.test(String(phone_number_id).trim())) return 'phone_number_id bestaat alleen uit cijfers.';
   const link = String(agenda_link || '').trim();
   if (link && !/^https:\/\/\S+$/.test(link)) return 'De agendalink moet met https:// beginnen (en geen spaties bevatten).';
   for (const [naam, tekst] of [['Het bericht', bericht], ['De herinnering', herinnering]]) {

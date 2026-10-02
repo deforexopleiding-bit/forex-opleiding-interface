@@ -4,7 +4,9 @@
 //
 //   GET  → { instelling: { agenda_link, bericht, herinnering }, mag_bewerken }
 //          Voor iedereen met de module: het venster toont de tekst vooraf.
-//   POST { agenda_link, bericht, herinnering } → alleen manager / super_admin.
+//   POST { agenda_link, bericht, herinnering, kanaal, module, phone_number_id }
+//        → alleen manager / super_admin. kanaal 'meta' (standaard) of 'brug';
+//        module = whatsapp_module_config.module van de Meta-lijn.
 //          Regels: link begint met https://, {link} staat in elke tekst.
 //
 // Leest en schrijft app_settings 'opvolging_agenda_doorsturen'.
@@ -12,6 +14,23 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { INSTELLING_KEY, leesInstelling, valideerInstelling } from './_lib/opvolging-agenda-doorsturen.js';
+import { actieveLijnen, leesTemplate, resolveAgendaLijn, templateGoedgekeurd, TEMPLATE_NAMEN } from './_lib/opvolging-meta.js';
+
+/** Lijnen + templatestatus voor het scherm. Fail-soft: een leesfout is een melding, geen 500. */
+async function metaStand(instelling) {
+  const uit = { lijnen: [], lijn_actief: null, templates: {}, meta_fout: null };
+  try {
+    uit.lijnen = await actieveLijnen(supabaseAdmin);
+    uit.lijn_actief = await resolveAgendaLijn(supabaseAdmin, instelling);
+    for (const [soort, naam] of Object.entries(TEMPLATE_NAMEN)) {
+      const t = await leesTemplate(supabaseAdmin, naam);
+      uit.templates[soort] = { naam, status: t ? t.status : 'ONTBREEKT', goedgekeurd: templateGoedgekeurd(t) };
+    }
+  } catch (e) {
+    uit.meta_fout = String(e?.message || e).slice(0, 160);
+  }
+  return uit;
+}
 
 export const BEWERK_ROLLEN = ['super_admin', 'manager'];
 
@@ -44,7 +63,10 @@ export default async function handler(req, res) {
         .from('app_settings').select('value, updated_at').eq('key', INSTELLING_KEY).maybeSingle();
       if (error) throw new Error(error.message);
       const v = leesInstelling(data && data.value);
-      return res.status(200).json({ instelling: v, mag_bewerken: magBewerken, updated_at: data ? data.updated_at : null });
+      return res.status(200).json({
+        instelling: v, mag_bewerken: magBewerken, updated_at: data ? data.updated_at : null,
+        ...(await metaStand(v)),
+      });
     }
 
     if (!magBewerken) return res.status(403).json({ error: 'Alleen een manager of super_admin kan de agendalink aanpassen.' });
@@ -55,6 +77,9 @@ export default async function handler(req, res) {
       agenda_link: String(b.agenda_link || '').trim() || null,
       bericht: String(b.bericht),
       herinnering: String(b.herinnering),
+      kanaal: b.kanaal === 'brug' ? 'brug' : 'meta',
+      module: String(b.module || 'leadsonderhoud').trim(),
+      phone_number_id: b.phone_number_id ? String(b.phone_number_id).trim() : null,
     };
     const nu = new Date().toISOString();
     const { data: bestaand, error: lErr } = await supabaseAdmin
@@ -64,7 +89,8 @@ export default async function handler(req, res) {
       ? await supabaseAdmin.from('app_settings').update({ value, updated_at: nu }).eq('key', INSTELLING_KEY)
       : await supabaseAdmin.from('app_settings').insert({ key: INSTELLING_KEY, value, updated_at: nu });
     if (error) throw new Error(error.message);
-    return res.status(200).json({ ok: true, instelling: leesInstelling(value) });
+    const v = leesInstelling(value);
+    return res.status(200).json({ ok: true, instelling: v, ...(await metaStand(v)) });
   } catch (e) {
     console.error('[opvolging-agenda-instelling]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
