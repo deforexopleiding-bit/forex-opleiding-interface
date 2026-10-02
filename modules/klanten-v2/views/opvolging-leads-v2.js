@@ -246,6 +246,7 @@
     const pil = k ? ('<span class="lb-pil">&#9742; ' + esc(k.bel_totaal) + ' op ' + esc(k.bel_dagen) + ' d</span>' +
       '<span class="lb-pil ' + (k.wa_totaal ? 'groen' : '') + '">WhatsApp ' + esc(k.wa_totaal) + '</span>') : '';
     let extra = '';
+    if (k && k.wa_mislukt) extra += '<div class="lb-noot" style="color:var(--o-red)">&#9888; ' + esc(k.wa_mislukt) + '</div>';
     if (k && pot === 'terugbellen' && k.terugbel_notitie) extra += '<div class="lb-noot">&#128221; ' + esc(k.terugbel_notitie) + '</div>';
     if (k && pot === 'later') extra += '<div class="lb-noot">Terug op ' + esc(k.due) + (k.terugbel_notitie ? ' &middot; ' + esc(k.terugbel_notitie) : '') + '</div>';
     if (k && pot === 'wacht') {
@@ -321,11 +322,35 @@
       '<div class="ronde">Gebruikt door <b>Agenda doorsturen</b> (daglijst én Leads bellen). Zonder link wordt er niets verstuurd. ' +
       '<code>{voornaam}</code> en <code>{link}</code> worden ingevuld; <code>{link}</code> moet in elke tekst staan.</div>' +
       (i.agenda_link ? '' : '<div class="warn"><b>Agendalink nog niet ingesteld</b> &mdash; de knoppen versturen niets tot hij hier staat.</div>') +
+      kanaalVelden(st.data, i) +
       '<label>Agendalink (https://…)</label><input id="lb-link" type="url" value="' + esc(i.agenda_link || '') + '" placeholder="https://">' +
+      '<div class="ronde zacht">De twee teksten hieronder gelden alleen voor het brug-kanaal (en als terugval zolang de templates niet goedgekeurd zijn). ' +
+      'De Meta-templates hebben hun eigen, door Meta goedgekeurde tekst.</div>' +
       '<label>Bericht bij doorsturen</label><textarea id="lb-bericht" rows="6">' + esc(i.bericht || '') + '</textarea>' +
       '<label>Herinnering</label><textarea id="lb-herinnering" rows="4">' + esc(i.herinnering || '') + '</textarea>' +
       (st.melding ? '<div class="' + (st.melding.ok ? 'ronde' : 'warn') + '">' + esc(st.melding.tekst) + '</div>' : '') +
       '<button class="obtn p" ' + (st.bezig ? 'disabled' : '') + ' onclick="window.__opvLb.bewaarInst()">' + (st.bezig ? 'Bewaren&hellip;' : 'Bewaren') + '</button></div>';
+  }
+
+  /** Kanaal (Meta-template of brug), de Meta-lijn en de stand van de templates. */
+  function kanaalVelden(d, i) {
+    const lijnen = (d && d.lijnen) || [];
+    const t = (d && d.templates) || {};
+    const tStand = (x) => !x ? '—' : x.goedgekeurd ? '&#9989; goedgekeurd' : esc(String(x.status || '').toLowerCase() === 'ontbreekt' ? 'nog niet ingediend' : 'status ' + x.status);
+    const huidigeModule = i.module || 'leadsonderhoud';
+    const opties = lijnen.length
+      ? lijnen.map((l) => '<option value="' + esc(l.module) + '"' + (l.module === huidigeModule ? ' selected' : '') + '>' +
+          esc(l.label) + ' (' + esc(l.module) + ')</option>').join('')
+      : '<option value="' + esc(huidigeModule) + '" selected>' + esc(huidigeModule) + '</option>';
+    return '<label>Kanaal</label><select id="lb-kanaal">' +
+      '<option value="meta"' + (i.kanaal !== 'brug' ? ' selected' : '') + '>Meta-template (aanbevolen)</option>' +
+      '<option value="brug"' + (i.kanaal === 'brug' ? ' selected' : '') + '>WhatsApp-lijn van het CRM (brug, vrije tekst)</option></select>' +
+      '<label>Meta-lijn (standaard: de lijn van de afspraakberichten)</label><select id="lb-module">' + opties + '</select>' +
+      '<div class="ronde zacht">Templates: <b>' + esc((t.eerste && t.eerste.naam) || 'agenda_doorsturen_v1') + '</b> ' + tStand(t.eerste) +
+      ' &middot; <b>' + esc((t.herinnering && t.herinnering.naam) || 'agenda_herinnering_v1') + '</b> ' + tStand(t.herinnering) +
+      (d && d.lijn_actief ? '' : ' &middot; <span style="color:var(--o-red)">geen actieve Meta-lijn gevonden</span>') +
+      '. Zolang een template niet goedgekeurd is, gaat het via de brug.' +
+      (d && d.meta_fout ? ' <span style="color:var(--o-red)">(' + esc(d.meta_fout) + ')</span>' : '') + '</div>';
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -569,11 +594,14 @@
     bewaarInst: async () => {
       const st = _ld.inst; if (st.bezig) return;
       const v = (id) => { const el = document.getElementById(id); return el ? el.value : ''; };
-      const body = { agenda_link: v('lb-link').trim(), bericht: v('lb-bericht'), herinnering: v('lb-herinnering') };
+      const body = {
+        agenda_link: v('lb-link').trim(), bericht: v('lb-bericht'), herinnering: v('lb-herinnering'),
+        kanaal: v('lb-kanaal') || 'meta', module: v('lb-module') || 'leadsonderhoud',
+      };
       st.bezig = true; st.melding = null; teken();
       try {
         const j = await post('/api/opvolging-agenda-instelling', body);
-        st.data = { ...(st.data || {}), instelling: j.instelling, mag_bewerken: true };
+        st.data = { ...(st.data || {}), ...j, instelling: j.instelling, mag_bewerken: true };
         st.melding = { ok: true, tekst: 'Bewaard.' };
       } catch (e) { st.melding = { ok: false, tekst: e.message || 'Niet bewaard' }; } finally { st.bezig = false; teken(); }
     },

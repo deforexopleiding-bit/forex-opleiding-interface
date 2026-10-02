@@ -36,6 +36,7 @@ const BEIDE_LIJSTEN = Object.freeze({
   'api/opvolging-taak-update.js'     : 'werkt op één kaart (op id), beide lijsten',
   'api/opvolging-agenda.js'          : 'boeken werkt op één kaart (op id); de afrond-lezingen filteren zelf op dag',
   'api/opvolging-poging.js'          : 'een poging hoort bij één kaart (op id)',
+  'api/_lib/opvolging-meta.js'       : 'een Meta-antwoord telt als contact op de lopende kaart van dat nummer, op welke lijst ook',
 });
 
 function alleJsBestanden(map) {

@@ -2705,6 +2705,7 @@
     else {
       _gesprek.error = null; _gesprek.code = null;
       _gesprek.berichten = j.berichten || [];
+      _gesprek.meta = j.meta || null;
       if (j.nummer) _gesprek.nummer = j.nummer;
       if (j.naam && !_gesprek.naam) _gesprek.naam = j.naam;
       // Wat de server nu ook kent, hoeft hier niet meer los te staan. Matchen
@@ -2725,6 +2726,9 @@
    */
   function gesprekKanVersturen() {
     if (!_gesprek.nummer) return { mag: false, reden: 'Bij deze lead staat geen telefoonnummer.' };
+    // Het 24u-venster op de Meta-lijn staat open: dan gaat het antwoord daar,
+    // op dezelfde lijn als de template — ongeacht de stand van de brug.
+    if (_gesprek.meta && _gesprek.meta.venster_open) return { mag: true, reden: null, via: 'meta' };
     if (_wa.error) return { mag: false, reden: 'De WhatsApp-brug is nu niet bereikbaar, dus er kan niets verstuurd worden.' };
     if (!_wa.data) return { mag: false, reden: 'De status van de WhatsApp-brug is nog niet bekend.' };
     if (!_wa.data.verbonden) return { mag: false, reden: 'De WhatsApp-brug is niet gekoppeld. Koppel hem via het lampje rechtsboven.' };
@@ -2745,7 +2749,9 @@
     return '<div class="wbrij ' + (uit ? 'uit' : 'in') + '">' +
       '<div class="wbub' + (bezig ? ' bezig' : '') + '">' +
       (isSpraak && b.tekst ? '<span class="wsp">&#127908;</span> ' : '') + inhoud +
-      '<span class="wtijd">' + (bezig ? 'versturen&hellip;' : esc(uur(b.tijdstip))) + '</span>' +
+      '<span class="wtijd">' + (bezig ? 'versturen&hellip;' : esc(uur(b.tijdstip))) +
+      (b.bron === 'meta' ? ' &middot; Meta' : '') + '</span>' +
+      (b.status === 'failed' ? '<div class="wreden">&#9888; niet afgeleverd' + (b.failed_reason ? ': ' + esc(b.failed_reason) : '') + '</div>' : '') +
       '</div></div>';
   }
 
@@ -2821,7 +2827,16 @@
             'dus wat terugkomt kan minder zijn dan wat op Daves telefoon staat.</div></div>'));
     }
 
-    const invoer = kan.mag
+    // Welke lijn een antwoord neemt, in één regel. Zonder die zin is het niet
+    // te zien dat een bericht binnen het 24u-venster via Meta gaat en daarna
+    // weer via de brug.
+    const m = _gesprek.meta;
+    const lijnRegel = !m ? ''
+      : m.venster_open
+        ? '<div class="ronde zacht" style="margin:0 0 6px">Antwoord gaat via de <b>Meta-lijn</b> (24u-venster open tot ' + esc(uur(m.venster_tot)) + ').</div>'
+        : '<div class="ronde zacht" style="margin:0 0 6px">Het 24u-venster op de Meta-lijn is dicht: daar kan alleen de herinnering-template. ' +
+          'Hieronder typen gaat via de WhatsApp-lijn van het CRM.</div>';
+    const invoer = lijnRegel + (kan.mag
       ? '<div class="winvoer">' +
         // Geen waarde in de HTML: het concept wordt na het tekenen in de
         // textarea gezet (zie herstelConcept). Zo verandert typen de
@@ -2835,7 +2850,7 @@
         (_gesprek.verzendt ? 'Bezig&hellip;' : 'Versturen') + '</button></div>'
       : '<div class="winvoer uit">' +
         '<textarea rows="2" disabled placeholder="Versturen kan nu niet"></textarea>' +
-        '<div class="wreden">' + esc(kan.reden) + '</div></div>';
+        '<div class="wreden">' + esc(kan.reden) + '</div></div>');
 
     // 'on' is verplicht: de globale .scrim staat op opacity:0 met
     // pointer-events:none, en alleen .scrim.on is zichtbaar. Die les kostte
@@ -4551,9 +4566,15 @@
     _gesprek.optimistisch.push({ richting: 'uit', tekst, media_type: 'chat', tijdstip: new Date().toISOString() });
     render();
     try {
-      await post('/api/opvolging-whatsapp-send', {
-        nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
-      });
+      if (_gesprek.meta && _gesprek.meta.venster_open) {
+        await post('/api/opvolging-meta-send', {
+          nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
+        });
+      } else {
+        await post('/api/opvolging-whatsapp-send', {
+          nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
+        });
+      }
       _gesprek.verzendt = false;
       // Weg met het concept: dit bericht is verstuurd. Pas hierna, zodat een
       // mislukte verzending hem laat staan.
@@ -5193,6 +5214,7 @@
     const j = await haal('/api/opvolging-agenda-instelling');
     if (j.__error) { _door.instFout = j.__error; render(); return; }
     _doorInstelling = j.instelling || null;
+    _door.meta = { templates: j.templates || {}, lijn: j.lijn_actief || null, fout: j.meta_fout || null };
     if (_door.open && _door.tekst == null && _doorInstelling) {
       const sj = _door.soort === 'herinnering' ? _doorInstelling.herinnering : _doorInstelling.bericht;
       _door.tekst = vulDoorTekst(sj, _door.naam, _doorInstelling.agenda_link);
@@ -5265,16 +5287,33 @@
     if (j.__fout || !j.ok) {
       _door.fase = 'fout'; _door.foutCode = j.code || null;
       _door.fout = j.code === 'GEEN_AGENDALINK' ? 'Agendalink nog niet ingesteld — er is niets verstuurd.' : (j.error || 'Versturen mislukt.');
+      _door.kanaalMelding = j.melding || null;
       _door.waMe = j.code === 'GEEN_AGENDALINK' ? null : (j.wa_me || waMeTerugval());
       render(); return;
     }
     _door.verstuurdOp = j.verstuurd_op || new Date().toISOString();
+    _door.kanaal = j.kanaal || null;
+    _door.kanaalMelding = j.melding || null;
     _door.fase = 'wachten';
     _door.wachtenSinds = Date.now();
     leegTakenCache();
     render();
     planDoorPoll();
   };
+
+  /**
+   * Gaat dit via de Meta-template? Geeft de templatenaam terug, of null als
+   * het de brug wordt. Tweeling van kiesPad() in api/_lib/opvolging-meta.js;
+   * de server beslist, dit is alleen wat het venster vooraf belooft.
+   */
+  function doorViaMeta() {
+    const inst = _doorInstelling;
+    if (!inst || inst.kanaal === 'brug') return null;
+    const m = _door.meta || {};
+    if (!m.lijn) return null;
+    const t = (m.templates || {})[_door.soort === 'herinnering' ? 'herinnering' : 'eerste'];
+    return t && t.goedgekeurd ? t.naam : null;
+  }
 
   function waMeTerugval() {
     const c = String(_door.telefoon || '').replace(/\D/g, '').replace(/^00/, '');
@@ -5320,10 +5359,22 @@
           'Een manager stelt hem in onderaan de tab <b>Leads bellen</b>.</div>';
       }
       if (inst) {
-        body += '<div class="ronde">Dit bericht gaat <b>nu</b> via de gekoppelde WhatsApp-lijn. De link staat er altijd in &mdash; ' +
-          'haal je hem weg, dan komt hij onderaan.</div>' +
-          '<textarea id="opv-door-tekst" rows="8" oninput="window.__opvDoorTyp(this.value)"' + (f === 'versturen' ? ' disabled' : '') + '>' +
-          esc(_door.tekst || '') + '</textarea>';
+        const viaMeta = doorViaMeta();
+        if (viaMeta) {
+          // De template heeft een vaste, door Meta goedgekeurde tekst: geen
+          // tekstveld, wel zeggen wat er gaat.
+          body += '<div class="ronde">Dit gaat <b>nu</b> als goedgekeurde WhatsApp-template <b>' + esc(viaMeta) + '</b> ' +
+            'met de knop <b>Kies een moment</b> naar de agenda, via de lijn van de afspraakberichten. ' +
+            'Antwoordt de lead, dan kun je 24 uur lang vrij terugschrijven in het gesprek.</div>';
+        } else {
+          if (inst.kanaal !== 'brug') {
+            body += '<div class="warn2">Template wacht op goedkeuring door Meta &mdash; dit bericht gaat via de WhatsApp-lijn van het CRM.</div>';
+          }
+          body += '<div class="ronde">Dit bericht gaat <b>nu</b> via de gekoppelde WhatsApp-lijn. De link staat er altijd in &mdash; ' +
+            'haal je hem weg, dan komt hij onderaan.</div>' +
+            '<textarea id="opv-door-tekst" rows="8" oninput="window.__opvDoorTyp(this.value)"' + (f === 'versturen' ? ' disabled' : '') + '>' +
+            esc(_door.tekst || '') + '</textarea>';
+        }
       }
       if (f === 'fout') {
         body += '<div class="warn" style="margin-top:10px"><b>Niet verstuurd.</b> ' + esc(_door.fout || '') +
@@ -5344,8 +5395,9 @@
         (_door.waMe ? '<a class="obtn" style="width:100%;display:block;text-align:center" target="_blank" rel="noopener" href="' + esc(_door.waMe) + '">Open in WhatsApp</a>' : '');
     } else if (f === 'wachten' || f === 'gestopt') {
       body = '<div class="door-live">' + (f === 'wachten' ? '<span class="puls"></span>' : '') +
-        '<b>&#10003; Verstuurd om ' + esc(uur(_door.verstuurdOp)) + '</b>' +
+        '<b>&#10003; Verstuurd' + (_door.kanaal === 'meta' ? ' via de Meta-template' : '') + ' om ' + esc(uur(_door.verstuurdOp)) + '</b>' +
         (f === 'wachten' ? ' &mdash; wacht op inplanning&hellip;' : '') + '</div>' +
+        (_door.kanaalMelding ? '<div class="warn2">' + esc(_door.kanaalMelding) + '</div>' : '') +
         '<div class="ronde">' + (f === 'wachten'
           ? 'Vraag of hij de link ziet. Plant hij nu in, dan zie je het hier binnen 15 seconden.'
           : 'Na 20 minuten kijkt dit venster niet meer mee. De 48-uurcontrole loopt gewoon verder: plant hij later in, dan gaat de kaart vanzelf op ingepland.') + '</div>';

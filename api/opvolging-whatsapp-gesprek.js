@@ -19,6 +19,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { normaliseerNummer } from './_lib/whatsapp-brug-nummers.js';
+import { leesMetaGesprek } from './_lib/opvolging-meta.js';
 
 const MAX = 50;
 
@@ -86,15 +87,21 @@ export default async function handler(req, res) {
       throw new Error('berichten lezen: ' + error.message);
     }
 
-    // De nieuwste vijftig, daarna omgedraaid zodat het van boven naar beneden
-    // leest zoals een chat hoort te doen.
-    const berichten = (data || []).slice().reverse();
+    // SINDS PR 6: ook de Meta-berichten van dit nummer (de template 'Agenda
+    // doorsturen', het antwoord van de lead, Daves antwoord binnen het
+    // 24u-venster). Twee bronnen, één draad op tijd gesorteerd. Fail-soft:
+    // lukt die lezing niet, dan het brug-gesprek alleen, met een melding.
+    const meta = await leesMetaGesprek(supabaseAdmin, nummer);
+    const berichten = [...(data || []).slice().reverse(), ...meta.regels]
+      .sort((a, b) => (Date.parse(a.tijdstip) || 0) - (Date.parse(b.tijdstip) || 0))
+      .slice(-MAX);
 
     return res.status(200).json({
       nummer,
       taak_id  : taakId,
       naam     : taak ? taak.naam : null,
       berichten,
+      meta: meta.stand,
       // Geen historiek van vóór het gesprekspaneel: de tekst van uitgaande
       // berichten verliet de telefoon toen niet, en van inkomende staat alleen
       // een afgekapte kopie in opvolging_pogingen.resultaat. Het paneel zegt
