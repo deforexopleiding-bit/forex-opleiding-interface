@@ -4273,13 +4273,18 @@
       } catch (e) { console.warn('[metaEd] folder-move soft-fail:', e?.message || e); }
     }
     showToast(_metaEd.mode === 'edit' ? 'Template bijgewerkt' : 'Template aangemaakt', 'ok');
+    // ── OPSLAAN + SUBMIT DIENT ECHT IN ────────────────────────────────────
+    // Hier stond een tweede bevestiging:
+    //   new Promise((res) => openConfirm(…, () => res(true)) || res(false))
+    // openConfirm() geeft undefined terug, dus `|| res(false)` resolvede METEEN
+    // met false — vóór iemand kon klikken. De template bleef op LOCAL staan
+    // en alleen de losse Submit-knop op de rij diende echt in. De bevestiging
+    // is al gegeven in __setMetaEdSaveSubmit ("opslaan én DIRECT indienen"),
+    // dus er komt geen tweede vraag: na het opslaan volgt de submit.
     if (alsoSubmit && savedId) {
-      const ok = await new Promise((res) => openConfirm(`Template "${f.name}" direct indienen bij Meta ter goedkeuring? Kan niet worden teruggedraaid.`, () => res(true), 'warn') || res(false));
-      if (ok) {
-        const sj = await tryFetch('meta-submit', '/api/admin-meta-templates-submit?template_id=' + encodeURIComponent(savedId), { method: 'POST' });
-        if (sj?.__error || sj?.error) showToast('Submit mislukt: ' + (sj?.__error || sj?.error), 'warn');
-        else showToast('Ingediend bij Meta', 'ok');
-      }
+      const sj = await tryFetch('meta-submit', '/api/admin-meta-templates-submit?template_id=' + encodeURIComponent(savedId), { method: 'POST' });
+      if (sj?.__error || sj?.error) showToast('Opgeslagen, maar indienen bij Meta mislukte: ' + (sj?.__error || sj?.error) + ' — probeer Submit op de rij.', 'warn');
+      else showToast('Opgeslagen en ingediend bij Meta', 'ok');
     }
     _metaEd.busy = false; _metaEd.open = false;
     _wa.fetched = false; fetchWaTemplates(); // 1x refetch — binnen fetched-guard
@@ -4287,13 +4292,22 @@
   }
   // Ronde-31 FIX 2: "Opslaan als concept" achter custom confirm (was direct upsert
   // zonder bevestiging — inconsistent met rest en kostte eerder een test-template).
+  // ── EERST HET DOM LEZEN, DAN PAS HET BEVESTIGINGSVENSTER ──────────────
+  // De knopvelden (url, telefoon) en voorbeelden zijn uncontrolled: ze komen
+  // pas via _metaSyncFieldsFromDom() in _metaEd.fields. openConfirm() én
+  // __setConfirmOk() roepen render() aan vóór onOk → _metaEdSave → sync. Die
+  // render bouwt de modal opnieuw op uit de state (url ''), en de sync in
+  // _metaEdSave leest daarna een leeg veld: "buttons[0].url: string vereist
+  // bij type URL [HTTP 400]". Daarom hier syncen, vóór openConfirm.
   window.__setMetaEdSave       = () => {
+    _metaSyncFieldsFromDom();
     const err = _metaEdValidate();
     if (err) { _metaEd.error = err; if (render) render(); return; }
     const nm = String(_metaEd.fields.name || '').trim();
     openConfirm(`Concept-template "${esc(nm) || '(zonder naam)'}" opslaan? Wordt niet naar Meta gestuurd — blijft lokaal totdat je Submit → Meta klikt.`, () => _metaEdSave(false));
   };
   window.__setMetaEdSaveSubmit = () => {
+    _metaSyncFieldsFromDom();
     openConfirm(`Concept opslaan én DIRECT indienen bij Meta? Meta beoordeelt de template; kan uren duren en niet ongedaan gemaakt worden.`, () => _metaEdSave(true), 'warn');
   };
   /* Ronde-31 BLOK A · com-wa dynamische sub-editors (media/buttons/examples).
