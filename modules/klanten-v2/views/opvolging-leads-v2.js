@@ -177,6 +177,7 @@
 
     let h = '<div class="opv lb">';
     h += '<div class="kop"><div class="info"><b>Trage momenten?</b> Bel warme proefleads en laat ze een call inplannen.</div>' +
+      '<button class="obtn" onclick="window.__opvLb.import()">&#8679; Lijst opladen</button>' +
       g.waLamp() + '</div>';
     h += dagstrip(t.data);
     if (t.fout) h += '<div class="warn">De potten konden niet geladen worden: ' + esc(t.fout) + '</div>';
@@ -350,6 +351,7 @@
   function leadsModalHtml() {
     const m = _ld.modal;
     if (!m) return '';
+    if (m.soort === 'import') return importVenster(m);
     const r = _ld.rijen.get(m.sleutel);
     if (!r) return '';
     const k = r.kaart || {};
@@ -396,6 +398,57 @@
       return venster(esc(r.naam) + ' afronden', 'Hij komt niet terug in Leads bellen.', body);
     }
     return '';
+  }
+
+  // ── Lijst opladen ────────────────────────────────────────────────────────
+  // CSV met naam, telefoon, email (opt.), notitie (opt.) + één label voor de
+  // hele lijst. Eerst een voorvertoning (er wordt niets geschreven), dan
+  // bevestigen. Gedoseerd: max N per werkdag (standaard 10).
+  function importVenster(m) {
+    const vv = m.vv;
+    let body =
+      '<div class="ronde">Kopregel met <code>naam</code> en <code>telefoon</code> (verplicht), <code>email</code> en <code>notitie</code> (mag). ' +
+      'Scheiding met ; of ,. Plak de lijst of kies een bestand.</div>' +
+      '<label class="lb-l">Label voor deze lijst (verplicht)</label>' +
+      '<input id="lb-imp-label" maxlength="60" placeholder="bv. Geannuleerd voorjaar" value="' + esc(m.label || '') + '" oninput="window.__opvLb.impVeld(\'label\', this.value)">' +
+      '<label class="lb-l">Maximaal per werkdag</label>' +
+      '<input id="lb-imp-dag" type="number" min="1" max="100" value="' + esc(m.perDag || 10) + '" oninput="window.__opvLb.impVeld(\'perDag\', this.value)">' +
+      '<label class="lb-l">CSV</label>' +
+      '<input type="file" accept=".csv,text/csv,text/plain" onchange="window.__opvLb.impBestand(this)">' +
+      '<textarea id="lb-imp-csv" rows="6" style="margin-top:6px" oninput="window.__opvLb.impVeld(\'csv\', this.value)" placeholder="naam;telefoon;email;notitie">' + esc(m.csv || '') + '</textarea>';
+    if (m.fout) body += '<div class="warn">' + esc(m.fout) + '</div>';
+    if (m.klaar) body += '<div class="ronde"><b>&#10003; ' + esc(m.klaar) + '</b></div>';
+    if (vv) {
+      body += '<div class="lb-som"><span><b>' + esc(vv.aantallen.geldig) + '</b> geldig</span><span><b>' + esc(vv.aantallen.dubbel) +
+        '</b> dubbel</span><span><b>' + esc(vv.aantallen.ongeldig) + '</b> ongeldig nummer of naam</span></div>' +
+        '<div class="ronde">' + esc(vv.samenvatting) + ' (max ' + esc(vv.per_dag) + ' per werkdag).</div>' +
+        '<div class="lb-tabel" style="max-height:240px;overflow:auto"><table><thead><tr><th>Regel</th><th>Naam</th><th>Telefoon</th><th>Status</th><th>Dag</th></tr></thead><tbody>' +
+        vv.rijen.slice(0, 200).map((r) => '<tr><td>' + esc(r.regel) + '</td><td>' + esc(r.naam) + '</td><td>' + esc(r.telefoon || r.telefoon_ruw) +
+          '</td><td>' + (r.status === 'geldig' ? '&#10003; geldig' : esc(r.status + (r.reden ? ' — ' + r.reden : ''))) + '</td><td>' + esc(r.due || '') + '</td></tr>').join('') +
+        '</tbody></table></div>';
+    }
+    const kan = !_ld.bezig;
+    body += '<div style="display:flex;gap:8px;margin-top:12px">' +
+      '<button class="obtn" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impVoor()">Voorvertoning</button>' +
+      (vv && vv.aantallen.geldig && !m.klaar ? '<button class="obtn p" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impBevestig()">Bevestigen: ' +
+        esc(vv.aantallen.geldig) + ' kaart' + (vv.aantallen.geldig === 1 ? '' : 'en') + ' maken</button>' : '') + '</div>';
+    return venster('Lijst opladen', 'Oude leads in Leads bellen, gedoseerd.', body);
+  }
+
+  async function impPost(bevestig) {
+    const m = _ld.modal; if (!m || m.soort !== 'import' || _ld.bezig) return;
+    if (!String(m.label || '').trim()) { m.fout = 'Geef de lijst een label.'; teken(); return; }
+    if (!String(m.csv || '').trim()) { m.fout = 'Plak een lijst of kies een bestand.'; teken(); return; }
+    _ld.bezig = true; m.fout = null; teken();
+    try {
+      const j = await post('/api/opvolging-leads-import', { csv: m.csv, label: m.label, per_dag: Number(m.perDag) || 10, bevestig });
+      m.vv = j;
+      if (bevestig) {
+        m.klaar = j.gemaakt + ' kaart' + (j.gemaakt === 1 ? '' : 'en') + ' gemaakt — ' + j.samenvatting + '.' +
+          ((j.fouten || []).length ? ' ' + j.fouten.length + ' rij(en) mislukt.' : '');
+        _ld.vuil = true;
+      }
+    } catch (e) { m.fout = e.message || 'Niet gelukt'; } finally { _ld.bezig = false; teken(); }
   }
 
   /** Tweeling van beoordeelAfronden() in api/_lib/opvolging-leads-pot.js. */
@@ -448,6 +501,17 @@
   function herlaadAlles() { leegCache(); _ld.vuil = false; teken(); }
 
   window.__opvLb = {
+    import: () => { _ld.modal = { soort: 'import', label: '', perDag: 10, csv: '', vv: null, fout: null, klaar: null }; teken(); },
+    impVeld: (veld, v) => { const m = _ld.modal; if (!m || m.soort !== 'import') return; m[veld] = v; m.vv = null; m.klaar = null; },
+    impBestand: (el) => {
+      const f = el && el.files && el.files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => { const m = _ld.modal; if (!m || m.soort !== 'import') return; m.csv = String(rd.result || ''); m.vv = null; m.klaar = null; teken(); };
+      rd.readAsText(f);
+    },
+    impVoor: () => impPost(false),
+    // Iets aangepast na de voorvertoning? Dan eerst opnieuw kijken.
+    impBevestig: () => impPost(!!(_ld.modal && _ld.modal.vv)),
     naarTab: () => { if (window.DFO && typeof window.DFO.goTab === 'function') window.DFO.goTab('Leads bellen'); },
     kiesPot: (code) => { _ld.pot = code; if (_ld.vuil) { leegCache(); _ld.vuil = false; } teken(); },
     herlaad: () => herlaadAlles(),
