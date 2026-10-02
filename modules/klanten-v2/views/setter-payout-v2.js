@@ -19,6 +19,9 @@
 // Structuur:
 //   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + commissie per maand
 //                + sales + ledger-regels.
+//   /Mijn calls — geboekte calls: tellingen per uitkomst-categorie (vanaf de
+//                call-rapportage-startdatum), komende en afgelopen calls, bij
+//                een sale het offertebedrag. API: /api/setter-calls.
 //   /Rapporten — setter-maandrapporten (vaste vergoeding + commissie);
 //                setter.payout.manage: genereren / goedkeuren / uitbetaald.
 //                Dit is het ENIGE uitbetaalpad voor setters (de oude
@@ -651,9 +654,122 @@
     </div>`;
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // Tab Mijn calls — wat er van de geboekte calls geworden is.
+  // Bron: /api/setter-calls. Categorie-namen en -kleuren komen uit de
+  // centrale mapping (window.CallUitkomstCategorie, met de server-waarde als
+  // terugval) — hier staat bewust geen eigen lijstje labels.
+  // ══════════════════════════════════════════════════════════════════════
+  const _spC = { data: null, loading: false, error: null, forSetter: undefined, eerderOpen: false };
+
+  async function loadCalls(setterId) {
+    _spC.loading = true; _spC.error = null; _spC.forSetter = setterId || null;
+    if (window.DFO?.render) window.DFO.render();
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('calls', '/api/setter-calls' + q);
+    _spC.loading = false;
+    if (!j) _spC.error = 'Kon calls niet laden'; else _spC.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__spCToggleEerder = () => { _spC.eerderOpen = !_spC.eerderOpen; if (window.DFO?.render) window.DFO.render(); };
+
+  /** Label + kleur voor een categorie-key: eerst de gedeelde mapping, dan wat de server meestuurde. */
+  function _catInfo(key, server) {
+    const M = window.CallUitkomstCategorie;
+    const info = (M && typeof M.categorieInfo === 'function' && key) ? M.categorieInfo(key) : null;
+    const label = (info && info.key === key) ? info.label : (server && server.label) || key || '';
+    const kleurRaw = (info && info.key === key) ? info.kleur : (server && server.kleur);
+    const kleur = /^#[0-9a-f]{6}$/i.test(String(kleurRaw || '')) ? kleurRaw : '#6b7280';
+    return { label, kleur };
+  }
+  function _catChip(key, server, extra) {
+    const { label, kleur } = _catInfo(key, server);
+    return `<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;color:${kleur};background:${kleur}14;border:1px solid ${kleur}40">${esc(label)}${extra ? ` <b>${esc(extra)}</b>` : ''}</span>`;
+  }
+
+  function _callRegel(c) {
+    const wanneer = `${esc(fmtDate(c.datum_nl))}${c.tijd_nl ? ' · ' + esc(c.tijd_nl) : ''}`;
+    const chip = c.categorie
+      ? _catChip(c.categorie.key, c.categorie)
+      : `<span style="font-size:11.5px;color:var(--text-3)">—</span>`;
+    let sale = '';
+    if (c.sale && c.sale.gekoppeld) {
+      sale = `<span style="font-size:12px;font-weight:600;color:var(--text-1);${_num}">${esc(eur(c.sale.bedrag))} <span style="font-weight:400;color:var(--text-3)">incl. btw</span></span>`
+        + (c.sale.in_afwachting ? ` <span style="font-size:11.5px;color:var(--amber)">offerte ${esc(c.sale.offerte_status_label || 'in afwachting')}</span>` : '');
+    } else if (c.sale) {
+      sale = `<span style="font-size:11.5px;color:var(--text-3)">bedrag onbekend (geen deal gevonden)</span>`;
+    }
+    const toel = c.toelichting ? `<div style="flex-basis:100%;font-size:11.5px;color:${c.categorie ? 'var(--rose)' : 'var(--text-3)'}">${esc(c.toelichting)}</div>` : '';
+    return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <div style="min-width:118px;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums">${wanneer}</div>
+        <div style="flex:1;min-width:140px;font-size:13px;color:var(--text-1);overflow-wrap:anywhere">${esc(c.lead_name || '—')}</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px">${chip}${sale}</div>
+        ${toel}
+      </div>`;
+  }
+
+  function _callLijst(titel, sub, lijst, leeg) {
+    const body = (lijst || []).length
+      ? lijst.map(_callRegel).join('')
+      : `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(leeg)}</div>`;
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:2px">${esc(titel)} <span style="font-weight:400;color:var(--text-3)">(${(lijst || []).length})</span></div>
+      ${sub ? `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">${esc(sub)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">${body}</div>
+    </div>`;
+  }
+
+  function callsView() {
+    const _canSync = (k) => !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(k));
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
+      _sp._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const isAdmin = _canSync('setter.ledger.admin');
+    if (isAdmin && !_spStaff.items && !_spStaff.loading) queueMicrotask(() => loadStaff());
+    if (!_spC.loading && _spC.forSetter !== (_sp.selectedSetter || null)) {
+      _spC.loading = true; _spC.data = null; _spC.error = null;
+      queueMicrotask(() => loadCalls(_sp.selectedSetter));
+    }
+    const staff = _spStaff.items || [];
+    const picker = isAdmin ? `<div style="margin-bottom:14px">
+        <label style="font-size:11.5px;color:var(--text-3);margin-right:8px">Bekijk setter:</label>
+        <select onchange="window.__spSelectSetter(this.value)" style="padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px;max-width:100%">
+          <option value="">— Ikzelf —</option>
+          ${staff.map((s) => `<option value="${esc(s.id)}" ${_sp.selectedSetter === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    if (_spC.loading && !_spC.data) return `<div class="pad" style="padding:20px">${picker}<div>Laden…</div></div>`;
+    if (_spC.error) return `<div class="pad" style="padding:20px">${picker}<div style="color:var(--rose)">⚠ ${esc(_spC.error)}</div></div>`;
+    const d = _spC.data || {};
+    const telling = d.telling || { totaal: 0, per_categorie: [] };
+    const tellers = (telling.per_categorie || []).filter((c) => Number(c.aantal) > 0)
+      .map((c) => _catChip(c.key, c, String(c.aantal))).join(' ');
+    const start = d.startdatum ? fmtDate(d.startdatum) : '—';
+    const eerder = d.eerder || [];
+    const eerderBlok = eerder.length ? `<div style="margin-bottom:20px">
+        <button class="chip" style="font-size:12px;padding:5px 12px" onclick="window.__spCToggleEerder()">${_spC.eerderOpen ? '▾' : '▸'} Eerdere calls van vóór ${esc(start)} (${eerder.length})</button>
+        ${_spC.eerderOpen ? `<div style="margin-top:8px;font-size:11.5px;color:var(--text-3);margin-bottom:8px">Deze calls tellen niet mee: de uitkomsten werden toen nog niet vastgelegd.</div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">${eerder.map(_callRegel).join('')}</div>` : ''}
+      </div>` : '';
+    return `<div class="pad" style="padding:20px">
+      ${picker}
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Wat er van je geboekte calls geworden is, zoals de closer het vastlegde. De tellingen lopen vanaf ${esc(start)}.</div>
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Calls vanaf ${esc(start)}: <b style="color:var(--text-1)">${esc(String(telling.totaal || 0))}</b></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${tellers || `<span style="font-size:12px;color:var(--text-3)">Nog geen calls in deze periode.</span>`}</div>
+      </div>
+      ${d.sale_koppeling_fout ? `<div style="margin-bottom:14px;font-size:12px;color:var(--amber)">Sale-bedragen konden niet geladen worden; de uitkomsten kloppen wel.</div>` : ''}
+      ${_callLijst('Komende calls', 'Eerstvolgende bovenaan.', d.komend, 'Geen komende calls.')}
+      ${_callLijst('Afgelopen calls', 'Meest recente bovenaan.', d.gedaan, 'Nog geen afgelopen calls sinds de startdatum.')}
+      ${eerderBlok}
+    </div>`;
+  }
+
   window.DFO = window.DFO || { VIEWS: {} };
   window.DFO.VIEWS = window.DFO.VIEWS || {};
   window.DFO.VIEWS['setter-payout/Overzicht'] = overzichtView;
+  window.DFO.VIEWS['setter-payout/Mijn calls'] = callsView;
   window.DFO.VIEWS['setter-payout/Rapporten'] = rapportenView;
 
   // Registreer als v2-native module bij de klanten-v2 shell zodat de
