@@ -131,3 +131,20 @@ test('wiring: tab, recht, registry, scriptvolgorde', () => {
   assert.match(opv, /'Agenda doorsturen'/);
   assert.doesNotMatch(opv, /'Agenda doorgestuurd', 'Hij plant zelf in/);
 });
+
+test('lijst opladen: venster met voorvertoning, bevestigen pas na een geldige voorvertoning', () => {
+  const { window } = laad();
+  window.__opvLb.import();
+  const st = window.__opvLeadsState;
+  st.telling.data = { aantallen: {} };
+  let html = window.DFO.VIEWS['opvolging/Leads bellen']();
+  assert.match(html, /Lijst opladen/);
+  assert.doesNotMatch(html, /Bevestigen:/);
+  st.modal.vv = {
+    aantallen: { geldig: 2, dubbel: 1, ongeldig: 0 }, per_dag: 10, samenvatting: '2 vandaag',
+    rijen: [{ regel: 2, naam: '<x>', telefoon: '+32471', status: 'geldig', due: '2026-10-02' }],
+  };
+  html = window.DFO.VIEWS['opvolging/Leads bellen']();
+  assert.match(html, /Bevestigen: 2 kaarten maken/);
+  assert.match(html, /&lt;x&gt;/);
+});
