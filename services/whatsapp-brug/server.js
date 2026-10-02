@@ -13,6 +13,7 @@
 //   GET  /qr      — de actuele QR als dataURL, zolang er nog niet gekoppeld is
 //   POST /herkoppel — client afbreken en opnieuw starten; { wis_sessie } dwingt een nieuwe QR af
 //   POST /send    — { nummer, tekst }
+//   POST /leadlijst/ververs — de leadlijst NU ophalen (geeft alleen aantallen)
 //
 // En de brug duwt zelf gebeurtenissen naar het CRM: verzonden, afgeleverd,
 // gelezen, antwoord ontvangen.
@@ -208,6 +209,29 @@ app.get('/historiek', auth, async (req, res) => {
     }
     console.error('[brug] historiek ophalen faalde:', e?.message || e);
     res.status(500).json({ error: 'Ophalen mislukt' });
+  }
+});
+
+// De leadlijst NU verversen, in plaats van op de volgende ronde van vijf
+// minuten te wachten. Het CRM roept dit aan vlak nadat er een kaart bijkwam
+// (Leads bellen, Agenda doorsturen): zonder dit weigert /send dat nummer nog
+// tot vijf minuten lang. Daarna de LID-kaart, zodat ook een nummer dat alleen
+// onder een LID bekend is meteen herkend wordt.
+//
+// Geeft alleen aantallen terug — nooit een nummer. Een fout bij het ophalen
+// laat de vorige lijst staan (zie lib/leadlijst.js); dat staat dan in
+// laatste_fout.
+app.post('/leadlijst/ververs', auth, async (_req, res) => {
+  try {
+    await leadlijst.ververs();
+    try { await wa.herbouwLidkaart(); } catch (e) {
+      console.warn('[brug] lidkaart na verversen (soft):', e?.message || e);
+    }
+    const st = leadlijst.status();
+    res.json({ ok: !st.laatste_fout, aantal: st.aantal, laatste_ophaal: st.laatste_ophaal, laatste_fout: st.laatste_fout });
+  } catch (e) {
+    console.error('[brug] leadlijst verversen faalde:', e?.message || e);
+    res.status(500).json({ error: 'Verversen mislukt' });
   }
 });
 
