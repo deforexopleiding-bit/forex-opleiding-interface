@@ -4344,7 +4344,9 @@
     { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
     { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
     { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
-    { bron: 'website',                naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
+    { bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v3', status: 'actief' },
+    { bron: 'kennismakingscursus-v4', naam: 'Mini-cursus (v4)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v4', status: 'actief' },
+    { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {
     const st = _live.funnels;
@@ -4396,7 +4398,13 @@
     const overigRows = overigKeys
       .map((b) => _lsFunnelRowHtml(b || '(leeg)', '—', null, '<span style="color:var(--text-3);font-size:11px">niet-funnel</span>', by[b], null)).join('');
     const periodeLabel = { today: 'vandaag', week: 'deze week', month: 'deze maand', all: 'alle tijd' }[st.periode] || st.periode;
-    return `<div style="max-width:900px">
+    // Funnel-dashboard (first-party tracking, /api/funnel-stats) bovenaan;
+    // de bestaande leadtelling per bron blijft eronder staan.
+    const dashboard = (window.DFOFunnelDashboard && typeof window.DFOFunnelDashboard.render === 'function')
+      ? window.DFOFunnelDashboard.render(FUNNEL_REGISTRY)
+      : '';
+    return `<div>${dashboard}<div style="max-width:900px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:8px">Leads per bron</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
         ${chips}
@@ -4413,7 +4421,7 @@
         </table></div>
       </div>
       <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Tellingen op basis van <code>leads.bron</code> (test-emails + afwijzers eruit). De funnellijst wordt beheerd in de code-registry; bron van waarheid voor de routes is dfo-website (BRON_TOEGESTAAN).</div>
-    </div>`;
+    </div></div>`;
   }
 
   // ── E-mails-tab (overzicht van alle mail-templates/verzenders) ──────────────
