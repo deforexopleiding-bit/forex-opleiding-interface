@@ -132,6 +132,7 @@ const FEATURE_REGISTRY = [
     { key:'opvolging.taak.archiveren', label:'Taak archiveren' },
     { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },
     { key:'opvolging.whatsapp.sturen', label:'WhatsApp sturen' },
+    { key:'calls.closer', label:'Closer: dagrapportage-topbar (eigen calls beoordelen)' },
   ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },
