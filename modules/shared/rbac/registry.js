@@ -127,10 +127,12 @@ const FEATURE_REGISTRY = [
     { key:'opvolging.dashboard.view', label:'Tab: Dashboard' },
     { key:'opvolging.archief.view', label:'Tab: Afgerond' },
     { key:'opvolging.rapport.view', label:'Tab: Rapport' },
+    { key:'calls.rapport.view', label:'Tab: Call-rapport (alle closers en setters)' },
     { key:'opvolging.taak.afronden', label:'Taak afronden' },
     { key:'opvolging.taak.archiveren', label:'Taak archiveren' },
     { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },
     { key:'opvolging.whatsapp.sturen', label:'WhatsApp sturen' },
+    { key:'calls.closer', label:'Closer: dagrapportage-topbar (eigen calls beoordelen)' },
   ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },

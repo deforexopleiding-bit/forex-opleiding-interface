@@ -92,7 +92,7 @@
     // niet in de rollijst valt (administratie), ziet het item dan toch.
     { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld', 'Instellingen'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
-    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
+    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -176,6 +176,11 @@
     // hierboven); /api/opvolging-rapport doet zijn eigen strikte check en valt
     // daar NIET terug op een andere sleutel.
     'opvolging/Rapport' : 'opvolging.rapport.view',
+    // Het call-rapport zet ALLE closers en de setters naast elkaar. Daarom een
+    // eigen sleutel en niet opvolging.rapport.view, dat ook voor sales op true
+    // staat. Ook hier: navigatie, fail-open; /api/call-rapport controleert
+    // strikt op dezelfde sleutel.
+    'opvolging/Call-rapport': 'calls.rapport.view',
   };
 
   const TAB_RESTRICT = {

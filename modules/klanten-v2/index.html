@@ -31,7 +31,7 @@
 
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
-  <script src="../shared/rbac/registry.js?v=4"></script>
+  <script src="../shared/rbac/registry.js?v=6"></script>
   <!-- v=1f2 (2026-08-26): permissions.js hydrateert window.RBAC met
        role_permissions + user_permissions union. Nodig zodat de sidebar-
        filter in app-shell.js een permKey-check kan doen (voor user_permission-
@@ -222,7 +222,11 @@
   <script src="../shared/gesprekken-v2.js?v=6"></script>
   <script src="views/wanbetalers-v2.js?v=63"></script>
   <script src="views/setter-payout-v2.js?v=10"></script>
-  <script src="views/opvolging-v2.js?v=72"></script>
+  <script src="views/opvolging-v2.js?v=73"></script>
+  <!-- Opvolging → tab Call-rapport (per closer en per setter, per dag). Eigen
+       bestand naast opvolging-v2.js; leest labels en kleuren uit
+       window.CallUitkomstCategorie hierboven. Na opvolging-v2.js. -->
+  <script src="views/call-rapport-v2.js?v=1"></script>
   <script src="views/support-v2.js?v=5"></script>
   <!-- Iris. Eigen map (modules/iris/) zoals afgesproken, maar geregistreerd als
        schil-weergave zodat navigatie, rechten en uiterlijk uit de schil komen.
@@ -238,8 +242,13 @@
   <script src="../iris/spraak.js?v=1"></script>
   <script src="../iris/iris.js?v=11"></script>
 
+  <!-- Bannerstapel (impersonatie + closer-topbar delen de bovenmarge) en de
+       closer-topbar. Klassieke scripts, dus vóór klanten-v2.js (type=module). -->
+  <script src="banner-stapel.js?v=1"></script>
+  <script src="closer-topbar.js?v=1"></script>
+
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
-  <script type="module" src="klanten-v2.js?v=1f3"></script>
+  <script type="module" src="klanten-v2.js?v=1f4"></script>
 
   <!-- #snapshot-B — Logboek auto-snapshots. Self-hosted html2canvas 1.4.1
        (geen CDN — supply-chain-veiligheid). Hook patcht window.fetch en
