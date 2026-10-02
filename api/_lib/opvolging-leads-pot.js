@@ -575,6 +575,11 @@ export function stelPottenSamen({
     if (!pot) continue;
     const lead = k.lead_id ? leadOpId.get(k.lead_id) : null;
     const basis = lead ? leadRij(lead) : kaartAlsLead(k, vandaag);
+    // Boekte hij intussen langs een andere weg een call, dan hoort Dave dat te
+    // zien vóór hij belt — de kaart sluit dan niet vanzelf.
+    if (basis._calls && basis._calls.komend && k.status !== 'ingepland') {
+      basis.chips = [{ tekst: 'heeft al een call gepland', soort: 'let' }, ...basis.chips];
+    }
     delete basis._calls;
     const tel = telPerKaart.get(k.id) || null;
     potten[pot].push({ ...basis, kaart: kaartSamenvatting(k, tel, nuMs, wachtUren) });
@@ -647,6 +652,7 @@ export function kaartSamenvatting(k, tel, nuMs, wachtUren = 48) {
   return {
     taak_id: k.id,
     status: k.status,
+    telefoon: k.telefoon || null,
     due: k.due || null,
     later: !!k.later,
     reden_code: k.reden_code || null,

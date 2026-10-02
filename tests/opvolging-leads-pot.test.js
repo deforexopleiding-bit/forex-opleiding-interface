@@ -326,3 +326,13 @@ test('doorsturen + het WA-bericht van de webhook = één WhatsApp in telPogingen
   assert.equal(tel.wa_totaal, 1);
   assert.equal(tel.wa_vandaag, 1);
 });
+
+test('een kaart van een lead die intussen zelf een call boekte krijgt een waarschuwing', () => {
+  const l = lead();
+  const o = stelPottenSamen({
+    leads: [l], nuMs: NU,
+    kaarten: [{ id: 'k', lead_id: l.id, status: 'open', due: VANDAAG, created_at: dagenTerug(1) }],
+    afspraken: [{ id: 'a', lead_phone: l.telefoon_e164, status: 'scheduled', scheduled_at: new Date(NU + 86400000).toISOString() }],
+  });
+  assert.equal(o.potten.bezig[0].chips[0].tekst, 'heeft al een call gepland');
+});
