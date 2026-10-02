@@ -96,7 +96,7 @@
     // bereikbaar via #followup, deep links en goMod('followup'). Terugzetten =
     // `nav: false` weghalen. Opvolging (hieronder) is de opvolger en blijft staan.
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', nav: false, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
-    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
+    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Leads bellen', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -171,6 +171,9 @@
      er op te halen valt — en zo staan ze ook in het register. */
   const TAB_PERM = {
     'opvolging/Vandaag' : 'opvolging.dag.view',
+    // Leads bellen: proefleads van minicursus en 7-daagse bellen in trage
+    // momenten. Eigen sleutel; /api/opvolging-leads controleert strikt dezelfde.
+    'opvolging/Leads bellen': 'opvolging.leads.view',
     'opvolging/Dashboard': 'opvolging.dashboard.view',
     'opvolging/Afgerond': 'opvolging.archief.view',
     // Eigen sleutel, niet meeliftend op opvolging.dashboard.view: Maxim wil

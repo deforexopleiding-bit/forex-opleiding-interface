@@ -162,7 +162,7 @@ test('een setter krijgt geen setterkeuze', async () => {
 test('versies opgehoogd en het dashboard verwijst naar de tab', () => {
   assert.match(INDEX, /views\/setter-payout-v2\.js\?v=10"/);
   assert.match(INDEX, /views\/dashboard-v2\.js\?v=35"/);
-  assert.match(INDEX, /app-shell\.js\?v=1dd"/);
+  assert.match(INDEX, /app-shell\.js\?v=1de"/);
   // De mapping staat vóór de view in index.html.
   assert.ok(INDEX.indexOf('call-uitkomst-categorie.js') < INDEX.indexOf('views/setter-payout-v2.js'));
   assert.match(DASH, /DFO\.goTab\(\\'Mijn calls\\'\)/);

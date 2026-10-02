@@ -124,6 +124,7 @@ const FEATURE_REGISTRY = [
   { moduleKey:'opvolging', moduleLabel:'Opvolging', moduleIcon:'ti-phone', features:[
     { key:'opvolging.module.access', label:'Module zichtbaar' },
     { key:'opvolging.dag.view', label:'Tab: Vandaag' },
+    { key:'opvolging.leads.view', label:'Tab: Leads bellen (proefleads minicursus / 7-daagse)' },
     { key:'opvolging.dashboard.view', label:'Tab: Dashboard' },
     { key:'opvolging.archief.view', label:'Tab: Afgerond' },
     { key:'opvolging.rapport.view', label:'Tab: Rapport' },
