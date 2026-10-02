@@ -122,12 +122,34 @@ test('telefoonNlBe logt bij twijfel en NIET bij een geldige omzetting', () => {
 // 3 · LANDVELD VAN DE BRON GAAT VOOR
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('een landveld beslist boven de regel', () => {
-  // Met landveld NL is 0475… een Roermonds vastnummer, geen Belgisch gsm.
-  assert.equal(normaliseerNlBe('0475123456', { land: 'NL' }).telefoon, '+31475123456');
-  assert.equal(normaliseerNlBe('0475123456', { land: 'Nederland' }).zeker, true);
+test('een landveld beslist alleen bij een niet-eenduidig nummer (vast nummer)', () => {
+  // 2 okt (akkoord Maxim): een eenduidig gsm-nummer wint van het landveld.
   assert.equal(normaliseerNlBe('093123456', { land: 'België' }).telefoon, '+3293123456');
+  assert.equal(normaliseerNlBe('093123456', { land: 'België' }).zeker, true);
+  assert.equal(normaliseerNlBe('0201234567', { land: 'NL' }).telefoon, '+31201234567');
   assert.equal(normaliseerNlBe('0471644261', { land: 'be' }).telefoon, '+32471644261');
+});
+
+test('eenduidige nummers winnen van het landveld (tweeling dfo-website PR #88)', () => {
+  // Maxims testboeking: formulier stond op NL, nummer is een Belgisch gsm.
+  assert.equal(normaliseerNlBe('0472223752', { land: 'NL' }).telefoon, '+32472223752');
+  assert.equal(normaliseerNlBe('0475123456', { land: 'Nederland' }).telefoon, '+32475123456');
+  assert.equal(normaliseerNlBe('0612345678', { land: 'BE' }).telefoon, '+31612345678');
+  assert.equal(normaliseerNlBe('0612345678', { land: 'België' }).telefoon, '+31612345678');
+  // Zonder landveld, en met een landcode erin: zoals altijd.
+  assert.equal(normaliseerNlBe('0475716706').telefoon, '+32475716706');
+  assert.equal(normaliseerNlBe('0612345678').telefoon, '+31612345678');
+  assert.equal(normaliseerNlBe('0032471134787').telefoon, '+32471134787');
+  assert.equal(normaliseerNlBe('0032471134787', { land: 'NL' }).telefoon, '+32471134787');
+  assert.equal(normaliseerNlBe('+31612345678', { land: 'BE' }).telefoon, '+31612345678');
+  // 040-044 is geen Belgisch gsm: het landveld beslist dan gewoon.
+  assert.equal(normaliseerNlBe('0401234567', { land: 'NL' }).telefoon, '+31401234567');
+});
+
+test('landveld BE met 9 cijfers die geen gsm zijn: rauw laten, niet gokken', () => {
+  const r = normaliseerNlBe('0201234567', { land: 'BE' });
+  assert.equal(r.e164, null);
+  assert.equal(r.telefoon, '0201234567');
 });
 
 test('landveld met fout aantal cijfers: rauw laten', () => {
