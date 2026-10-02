@@ -91,7 +91,11 @@
     // permKey staat er als vangnet naast `roles`: wie de rechten heeft maar
     // niet in de rollijst valt (administratie), ziet het item dan toch.
     { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld', 'Instellingen'] },
-    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
+    // Follow-up (2026-10-02) — UIT HET MENU, voor iedereen. `nav: false` haalt
+    // alleen het sidebar-item weg (renderNav); de module zelf blijft bestaan en
+    // bereikbaar via #followup, deep links en goMod('followup'). Terugzetten =
+    // `nav: false` weghalen. Opvolging (hieronder) is de opvolger en blijft staan.
+    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', nav: false, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
     { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
@@ -364,7 +368,10 @@
   }
 
   function renderNav() {
-    const mods = visMods();
+    // `nav: false` = wel een module (bereikbaar), geen sidebar-item. Bewust
+    // alleen hier gefilterd en niet in visMods(): die bepaalt ook of een
+    // module te openen is, en dat moet blijven werken.
+    const mods = visMods().filter(m => m.nav !== false);
     const groups = [...new Set(mods.map(m => m.g))];
     const el = document.getElementById('nav');
     if (!el) return;

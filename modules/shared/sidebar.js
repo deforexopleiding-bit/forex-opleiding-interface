@@ -16,6 +16,9 @@
 
   var ADMIN_ROLES = ['super_admin', 'admin', 'manager'];
 
+  // Follow-up uit het menu (2026-10-02) — zie de nav-opbouw. true = terug.
+  var TOON_FOLLOWUP_IN_MENU = false;
+
   // Canonieke nav-items. href's zijn ABSOLUUT zodat ze vanaf elke locatie
   // werken (index.html in root én modules/*.html).
   var ICON = {
@@ -277,10 +280,16 @@
           navLink('agent-center', '/modules/agent-center.html', 'Agent center') +
           navLink('meetings', '/modules/meetings.html', 'Vergaderruimte') +
           navLink('control-center', '/modules/control-center.html', 'Control Center') +
-          '<a class="nav-item" data-module="follow-up" href="/modules/follow-up.html">' +
-            svg('follow-up') + 'Follow-up' +
-            '<span class="nav-badge" id="navFollowupBadge" title="Follow-up leads"></span>' +
-          '</a>' +
+          // Follow-up (2026-10-02) uit het menu, voor iedereen — Opvolging is de
+          // opvolger. De pagina /modules/follow-up.html blijft bestaan. Terugzetten
+          // = TOON_FOLLOWUP_IN_MENU op true. Zonder link vindt updateFollowupBadge()
+          // geen element en doet dan niets (ook geen API-call).
+          (TOON_FOLLOWUP_IN_MENU
+            ? '<a class="nav-item" data-module="follow-up" href="/modules/follow-up.html">' +
+                svg('follow-up') + 'Follow-up' +
+                '<span class="nav-badge" id="navFollowupBadge" title="Follow-up leads"></span>' +
+              '</a>'
+            : '') +
           navLink('sales', '/modules/sales.html', 'Sales') +
           navLink('events', '/modules/events.html', 'Events') +
           // Meta Ads dashboard (fase 2) — leest sync-tabellen uit fase 1.
