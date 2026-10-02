@@ -18,6 +18,16 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { terugInLijstPatch } from './_lib/opvolging-terug-in-lijst.js';
+import { isLeadkaart } from './_lib/opvolging-lijst.js';
+import {
+  REDEN_CODE_TERUGBELLEN, valideerAfronden, AFROND_CATEGORIEEN,
+} from './_lib/opvolging-leads-pot.js';
+
+/** Een dag na `dag` (YYYY-MM-DD). */
+const dagNa = (dag) => {
+  const d = new Date(dag + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
 
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -78,6 +88,17 @@ export default async function handler(req, res) {
 
     } else if (b.actie === 'verplaats') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(b.due || '')) return res.status(400).json({ error: 'due ontbreekt' });
+      // LEADKAART: 'moet later terugkomen' is een afspraak MET de lead. Wat hij
+      // zei is verplicht, en de dag ligt minstens morgen — 'later vandaag' is
+      // een andere knop. Op de afgesproken dag staat hij bovenaan in de pot
+      // Terugbellen (reden_code), los van de volle pot Nieuw.
+      if (isLeadkaart(taak)) {
+        const wat = String(b.terugbel_notitie || '').trim();
+        if (!wat) return res.status(400).json({ error: 'Schrijf op wat de lead zei — anders weet je op die dag niet waarom je belt.' });
+        if (b.due < dagNa(dagInZone(Date.now()))) return res.status(400).json({ error: 'Kies een dag vanaf morgen.' });
+        patch.terugbel_notitie = wat.slice(0, 1000);
+        patch.reden_code = REDEN_CODE_TERUGBELLEN;
+      }
       // Geteld worden alleen echte pogingen van vandaag; het doorschuiven zelf telt niet mee.
       const { count } = await supabaseAdmin
         .from('opvolging_pogingen')
@@ -113,6 +134,14 @@ export default async function handler(req, res) {
       // de lijst, en dat is een zwaardere beslissing dan hem verzetten.
       if (!(await requirePermission(req, 'opvolging.taak.archiveren'))) {
         return res.status(403).json({ error: 'Geen rechten (opvolging.taak.archiveren)' });
+      }
+      // LEADKAART: afronden = weggooien, en Maxim moet achteraf kunnen nagaan of
+      // er genoeg moeite gedaan is. Categorie en uitleg zijn dus allebei
+      // verplicht; de uitleg wordt de archief_reden.
+      if (isLeadkaart(taak)) {
+        const fout = valideerAfronden({ categorie: b.archief_categorie, notitie: b.archief_reden });
+        if (fout) return res.status(400).json({ error: fout, categorieen: Object.keys(AFROND_CATEGORIEEN) });
+        patch.archief_categorie = String(b.archief_categorie);
       }
       const reden = (b.archief_reden || '').trim();
       if (!reden) return res.status(400).json({ error: 'archief_reden is verplicht' });

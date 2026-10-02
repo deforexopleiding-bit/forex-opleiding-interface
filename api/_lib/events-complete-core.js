@@ -739,6 +739,7 @@ export async function runEventsCompleteCore({ userId, body }) {
         const { data: bestaand, error: zoekErr } = await supabaseAdmin
           .from('opvolging_taken')
           .select('id')
+          .eq('lijst', 'dag')
           .neq('status', 'gearchiveerd')
           .filter('bron_ref->>attendee_id', 'eq', att.id)
           .order('created_at', { ascending: false })

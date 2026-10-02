@@ -24,6 +24,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { telPogingen } from './_lib/opvolging-poging-telling.js';
 import { haalWaRegelsVanaf, volledigeHistorie } from './_lib/opvolging-call-wa.js';
+import { alleenDaglijst } from './_lib/opvolging-lijst.js';
 
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -52,8 +53,10 @@ export default async function handler(req, res) {
 
   try {
     if (q.view === 'archief') {
-      const { data: arch, error: archErr } = await supabaseAdmin
-        .from('opvolging_taken').select('*')
+      // Alleen de daglijst — de afgeronde leadkaarten staan in de eigen pot
+      // Afgerond van 'Leads bellen'. Zie api/_lib/opvolging-lijst.js.
+      const { data: arch, error: archErr } = await alleenDaglijst(supabaseAdmin
+        .from('opvolging_taken').select('*'))
         .eq('status', 'gearchiveerd')
         .order('gearchiveerd_at', { ascending: false })
         .limit(200);
@@ -90,13 +93,13 @@ export default async function handler(req, res) {
     }
 
     // Vandaag toont ook wat is blijven liggen; een andere dag toont enkel die dag.
-    let sel = supabaseAdmin.from('opvolging_taken').select('*').eq('status', 'open');
+    let sel = alleenDaglijst(supabaseAdmin.from('opvolging_taken').select('*')).eq('status', 'open');
     sel = dag === vandaag ? sel.lte('due', vandaag) : sel.eq('due', dag);
     const { data: taken, error: takenErr } = await sel.order('due', { ascending: true });
     if (takenErr) throw takenErr;
 
-    const { data: wacht, error: wachtErr } = await supabaseAdmin
-      .from('opvolging_taken').select('*')
+    const { data: wacht, error: wachtErr } = await alleenDaglijst(supabaseAdmin
+      .from('opvolging_taken').select('*'))
       .eq('status', 'wacht_inplanning')
       .order('agenda_doorgestuurd_at', { ascending: true });
     if (wachtErr) throw wachtErr;
@@ -132,8 +135,8 @@ export default async function handler(req, res) {
     const includeIngepland = String(q.include_ingepland || '') === '1';
     let ingepland = [];
     if (includeIngepland) {
-      const { data: ing, error: ingErr } = await supabaseAdmin
-        .from('opvolging_taken').select('*')
+      const { data: ing, error: ingErr } = await alleenDaglijst(supabaseAdmin
+        .from('opvolging_taken').select('*'))
         .eq('status', 'ingepland')
         .order('updated_at', { ascending: false })
         .limit(50);

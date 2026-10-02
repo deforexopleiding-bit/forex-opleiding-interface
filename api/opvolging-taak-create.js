@@ -125,6 +125,7 @@ export default async function handler(req, res) {
       const { data, error } = await supabaseAdmin
         .from('opvolging_taken')
         .select('id')
+        .eq('lijst', 'dag')
         .neq('status', 'gearchiveerd')
         .filter('bron_ref->>appointment_id', 'eq', appointmentId)
         .order('created_at', { ascending: false })
@@ -212,6 +213,7 @@ export default async function handler(req, res) {
           const { data, error } = await supabaseAdmin
             .from('opvolging_taken')
             .select('id,naam,due,telefoon')
+            .eq('lijst', 'dag')
             .neq('status', 'gearchiveerd')
             .neq('id', taakId)
             .not('telefoon', 'is', null)

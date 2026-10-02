@@ -50,7 +50,7 @@ export function brugGeheimKlopt(req) {
 }
 
 /** Eén aanvraag naar de brug. Gooit met .code zodat de caller kan vertalen. */
-export async function brugFetch(pad, { method = 'GET', body = null } = {}) {
+export async function brugFetch(pad, { method = 'GET', body = null, timeoutMs = TIMEOUT_MS } = {}) {
   const cfg = brugConfig();
   if (!cfg.ok) { const e = new Error(cfg.melding); e.code = 'GEEN_CONFIG'; throw e; }
 
@@ -61,7 +61,7 @@ export async function brugFetch(pad, { method = 'GET', body = null } = {}) {
       headers: { 'X-Brug-Secret': cfg.secret, Accept: 'application/json',
                  ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal : AbortSignal.timeout(TIMEOUT_MS),
+      signal : AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     // Netwerk of time-out: de VPS staat uit, is onbereikbaar of antwoordt niet.

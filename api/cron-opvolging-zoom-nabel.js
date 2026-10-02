@@ -287,7 +287,8 @@ async function leesAfspraken(vanIso, totIso, dag) {
 async function leesLopendeTaken() {
   const { data, error } = await supabaseAdmin
     .from('opvolging_taken')
-    .select('id, telefoon, bron_ref')
+    .select('id, telefoon, bron_ref, lijst')
+    .eq('lijst', 'dag')
     .in('status', LOPEND)
     .order('updated_at', { ascending: false })
     .limit(1000);
