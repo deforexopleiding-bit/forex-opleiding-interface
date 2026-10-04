@@ -22,6 +22,9 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { parseSetterPeriod } from './_lib/setter-period.js';
+import { betaaldBedrag } from './_lib/factuur-betaald.js';
+import { isUitgeslotenDeal, quotationStatus } from './_lib/setter-sale-plan.js';
+import { laadLedgerRegels, laadCommissieData, koppelFacturenAanDeals } from './_lib/setter-commissie-core.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -59,19 +62,26 @@ export default async function handler(req, res) {
     const period = parseSetterPeriod(req.query || {});
 
     // ── Boekingen in de periode + (voor UX-continuïteit) week+maand ────
+    // Een BOEKING is de oorspronkelijke rij: parent_appointment_id IS NULL.
+    // Sinds 1 okt 2026 erven verzette opvolgers de setter (api/_lib/setter-
+    // keten.js); zonder dit filter telde één verzette boeking twee keer. De
+    // statussen hieronder tellen de opvolgers wél mee — daar staat de afloop.
     const [appPeriodeRes, appWeekRes, appMaandRes, allApptsRes] = await Promise.all([
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', period.from)
         .lt('scheduled_at', period.to),
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', windowStart(7)),
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
+        .is('parent_appointment_id', null)
         .gte('scheduled_at', windowStart(30)),
       // Statussen voor opkomst/no-show — begrensd door de gekozen periode.
       supabaseAdmin.from('follow_up_appointments')
@@ -99,68 +109,57 @@ export default async function handler(req, res) {
     const noShowPct  = resolvedTotal > 0 ? Math.round((noShow    / resolvedTotal) * 100) : null;
 
     // ── Sales uit haar deals in de periode (created_at binnen periode) ──
-    const { data: deals } = await supabaseAdmin
+    // Bruto = deals.total_amount (incl. BTW), zoals de saleslijst op de
+    // Commissie-pagina. Gearchiveerde deals/afgewezen offertes tellen niet.
+    const { data: dealsRaw } = await supabaseAdmin
       .from('deals')
-      .select('id, created_at')
+      .select('id, created_at, total_amount, archived_at, tl_quotation_status')
       .eq('setter_user_id', targetSetter);
-    const dealsInPeriode = (deals || []).filter((d) => {
+    const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d));
+    const dealsInPeriode = deals.filter((d) => {
       if (!d.created_at) return false;
       const t = new Date(d.created_at).getTime();
       return t >= new Date(period.from).getTime() && t < new Date(period.to).getTime();
     });
-    const dealIdsAll     = (deals || []).map((d) => d.id);
-    const dealIdsPeriode = dealsInPeriode.map((d) => d.id);
-    let salesCount = 0;
-    let salesBruto = 0;
-    if (dealIdsPeriode.length) {
-      const { data: invs } = await supabaseAdmin
-        .from('invoices')
-        .select('id, amount_total, status')
-        .in('deal_id', dealIdsPeriode);
-      salesCount = dealIdsPeriode.length;
-      salesBruto = round2((invs || []).reduce((s, i) => s + (Number(i.amount_total) || 0), 0));
-    }
+    const salesCount = dealsInPeriode.length;
+    const salesBruto = round2(dealsInPeriode.reduce((s, d) => s + (Number(d.total_amount) || 0), 0));
 
     // ── Commissie in de periode (vrijgegeven+uitbetaald) ────────────────
-    const { data: entries } = await supabaseAdmin
-      .from('setter_ledger_entries')
-      .select('amount, status, created_at')
-      .eq('setter_user_id', targetSetter)
-      .gte('created_at', period.from)
-      .lt('created_at', period.to);
+    // Periode op BETAALdatum (betaal_datum; vóór de migratie created_at).
+    const entries = await laadLedgerRegels(supabaseAdmin, targetSetter);
+    const fromMs = new Date(period.from).getTime();
+    const toMs = new Date(period.to).getTime();
     let commissiePeriode = 0;
-    for (const e of (entries || [])) {
-      if (e.status === 'vrijgegeven' || e.status === 'uitbetaald') {
-        commissiePeriode += Number(e.amount) || 0;
-      }
+    for (const e of entries) {
+      if (e.status !== 'vrijgegeven' && e.status !== 'uitbetaald') continue;
+      const t = new Date(e.betaal_datum || e.created_at).getTime();
+      if (t >= fromMs && t < toMs) commissiePeriode += Number(e.amount) || 0;
     }
     commissiePeriode = round2(commissiePeriode);
     // Forecast leest ALLE deals (niet begrensd door periode — is vooruitkijkend).
-    const dealIds = dealIdsAll;
-
-    // Forecast = (sub.amount × term_count - reeds_betaald) × pct
-    // over ACTIEVE subs van haar deals. Hergebruikt setter-overview-logica.
+    // Zelfde regel als setter-overview: geaccepteerde sales, (totaal −
+    // ontvangen) × pct, niet als alle abonnementen geannuleerd zijn.
+    const forecastDeals = deals.filter((d) => !quotationStatus(d).pending);
+    const dealIds = forecastDeals.map((d) => d.id);
     let commissieForecast = 0;
     if (dealIds.length) {
-      const [subsRes, cfgRes, invsForPaidRes] = await Promise.all([
-        supabaseAdmin.from('subscriptions')
-          .select('deal_id, amount, term_count, status').in('deal_id', dealIds),
-        supabaseAdmin.from('setter_config')
-          .select('pct').eq('user_id', targetSetter).maybeSingle(),
-        supabaseAdmin.from('invoices')
-          .select('deal_id, amount_paid').in('deal_id', dealIds),
-      ]);
-      const pct = cfgRes?.data?.pct ? Number(cfgRes.data.pct) : 0;
+      // Ontvangen via dezelfde factuurkoppeling als de commissie.
+      const commData = await laadCommissieData(supabaseAdmin, { setterIds: [targetSetter] });
+      const pct = Number(commData.configs[0]?.pct) || 0;
+      const koppeling = koppelFacturenAanDeals(commData);
       const paidByDeal = {};
-      for (const i of (invsForPaidRes.data || [])) {
-        paidByDeal[i.deal_id] = (paidByDeal[i.deal_id] || 0) + (Number(i.amount_paid) || 0);
+      for (const i of commData.invoices) {
+        const k = koppeling.get(i.id);
+        if (k) paidByDeal[k.deal.id] = (paidByDeal[k.deal.id] || 0) + betaaldBedrag(i);
       }
-      for (const s of (subsRes.data || [])) {
-        const st = String(s.status || '').toLowerCase();
-        if (st === 'cancelled' || st === 'deactivated' || st === 'geannuleerd') continue;
-        const totaal = (Number(s.amount) || 0) * (Number(s.term_count) || 0);
-        const al     = paidByDeal[s.deal_id] || 0;
-        commissieForecast += round2(Math.max(0, totaal - al) * pct / 100);
+      const CANCELLED = new Set(['cancelled', 'deactivated', 'geannuleerd']);
+      const subsByDeal = {};
+      for (const s of commData.subs) (subsByDeal[s.deal_id] ||= []).push(s);
+      for (const d of forecastDeals) {
+        const subs = subsByDeal[d.id] || [];
+        if (subs.length && subs.every((s) => CANCELLED.has(String(s.status || '').toLowerCase()))) continue;
+        const al = paidByDeal[d.id] || 0;
+        commissieForecast += round2(Math.max(0, (Number(d.total_amount) || 0) - al) * pct / 100);
       }
       commissieForecast = round2(commissieForecast);
     }

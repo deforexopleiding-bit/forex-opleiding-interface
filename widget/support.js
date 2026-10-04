@@ -53,6 +53,25 @@
   if (window.__dfoSupportGeladen) return;
   window.__dfoSupportGeladen = true;
 
+  // ── PAGINA'S ZONDER ZWEVENDE KNOP ──────────────────────────────────────────
+  // Op deze pagina's staan de zwevende knop en de teaser NIET: ze zitten er in
+  // de weg (op mobiel op de agenda-/boekpagina's: knop over de tijdsloten).
+  // Een pad telt als het gelijk is aan een voorvoegsel of daaronder valt
+  // ('/agenda', '/agenda/planning', '/agenda/romy' — niet '/agendapunt').
+  // Expliciet geplaatste kaarten (data-dfo-support-kaart) blijven werken, en
+  // DFOSupport.open() / #support openen het paneel gewoon.
+  // Uitbreiden = een voorvoegsel toevoegen aan deze lijst.
+  var GEEN_KNOP_OP = ['/agenda'];
+
+  function knopVerborgenOp(pad) {
+    var p = String(pad || '/').toLowerCase();
+    for (var i = 0; i < GEEN_KNOP_OP.length; i++) {
+      var v = GEEN_KNOP_OP[i].toLowerCase().replace(/\/+$/, '');
+      if (p === v || p.indexOf(v + '/') === 0) return true;
+    }
+    return false;
+  }
+
   // De herkomst van dit script is ook de herkomst van de API. Zo hoeft de
   // URL nergens hardcoded en werkt een preview-deploy vanzelf.
   var BASIS = (function () {
@@ -219,6 +238,8 @@
     'background:transparent;color:var(--mut);font-size:16px;cursor:pointer;line-height:1}',
     '.teaser .x:hover{background:var(--paper)}',
     '.teaser[hidden]{display:none}',
+    /* Pagina's uit GEEN_KNOP_OP: geen zwevende knop, geen teaser. */
+    '.wrap.zonder-knop .knop,.wrap.zonder-knop .teaser{display:none!important}',
     '@keyframes omhoog{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}',
 
     /* ── paneel ── */
@@ -608,6 +629,38 @@
       toon(el.stapvak, true);
       tekenStap();
     }
+  }
+
+  /** Knop + teaser aan of uit voor het huidige pad. Zonder knop ook geen teaser. */
+  function volgPadVoorKnop() {
+    var weg = knopVerborgenOp(location.pathname);
+    wrap.classList.toggle('zonder-knop', weg);
+    if (weg) {
+      if (teaserTimer) { clearTimeout(teaserTimer); teaserTimer = null; }
+      toon(el.teaser, false);
+    }
+    return weg;
+  }
+
+  // De website wisselt pagina's zonder volledige reload (Next.js:
+  // history.pushState/replaceState). Die geven geen event, dus haken we erin;
+  // terug/vooruit geeft popstate. Fail-soft: lukt het haken niet, dan volgt de
+  // MutationObserver van de kaarten het pad alsnog (zie volgPagina).
+  function volgNavigatie() {
+    try {
+      ['pushState', 'replaceState'].forEach(function (naam) {
+        var orig = history[naam];
+        if (typeof orig !== 'function' || orig.__dfoSupport) return;
+        var nieuw = function () {
+          var r = orig.apply(this, arguments);
+          try { volgPadVoorKnop(); } catch (_) {}
+          return r;
+        };
+        nieuw.__dfoSupport = true;
+        history[naam] = nieuw;
+      });
+      window.addEventListener('popstate', function () { volgPadVoorKnop(); });
+    } catch (_) {}
   }
 
   function tekenKnop() {
@@ -1359,6 +1412,7 @@
   // weg: het is een wegwijzer, geen pop-up.
   var teaserTimer = null;
   function planTeaser() {
+    if (knopVerborgenOp(location.pathname)) return;
     try {
       var t = Number(localStorage.getItem(TEASER_OPSLAG) || 0);
       if (Date.now() - t < TEASER_PAUZE_MS) return;
@@ -1453,7 +1507,7 @@
     try {
       var mo = new MutationObserver(function () {
         if (kaartTimer) return;
-        kaartTimer = setTimeout(function () { kaartTimer = null; plaatsKaarten(); }, 400);
+        kaartTimer = setTimeout(function () { kaartTimer = null; volgPadVoorKnop(); plaatsKaarten(); }, 400);
       });
       mo.observe(document.body, { childList: true, subtree: true });
     } catch (_) {}
@@ -1461,6 +1515,10 @@
 
   /* ── start ────────────────────────────────────────────────────────────── */
   function startWidget() {
+    // Vóór de knop in de pagina komt: op een pad zonder knop verschijnt hij
+    // ook geen frame lang.
+    volgPadVoorKnop();
+    volgNavigatie();
     document.body.appendChild(host);
     teken();
     try { document.addEventListener('click', openVanPagina, true); } catch (_) {}

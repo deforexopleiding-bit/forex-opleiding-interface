@@ -520,6 +520,14 @@
     }
   }
 
+  // Naam bij een mentor_user_id voor resultaatmeldingen (payout-rij of mentorlijst).
+  function mentorLabel(mid) {
+    const p = asArr(_live.payouts.data?.payouts).find((x) => x && x.mentor_user_id === mid);
+    if (p) return p.mentor_name || p.mentor_email || mid;
+    const m = asArr(_live.mentors.data?.mentors).find((x) => x && (x.user_id === mid || x.mentor_user_id === mid || x.id === mid));
+    return (m && (m.name || m.full_name || m.email)) || mid;
+  }
+
   /* ── BROK 2 — Write-acties (getrapte confirms) ───────────────────────── */
   // MEDIUM: generate
   window.__mentGenerate = (mentorId) => {
@@ -530,7 +538,21 @@
         : { all: true, period_month: _ui.selectedMonth };
       const resp = await tryPost('generate', '/api/mentor-payout-generate', body);
       if (!resp || resp.__error) { toast('Genereren mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
-      toast('Concept gegenereerd', 'success');
+      // HTTP 200 kan per-mentor-fouten bevatten (bv. LMS onbereikbaar). Dan is
+      // voor die mentor NIETS gewijzigd — het bestaande concept staat er nog.
+      // Resultaat blijft in het bulk-paneel staan (toast is vluchtig).
+      const ms = asArr(resp.mentors);
+      const fouten = ms.filter((m) => m && m.error);
+      _ui.bulkResults = {
+        ok  : ms.filter((m) => m && !m.error && !m.skipped).map((m) => ({ id: m.mentor_user_id, label: mentorLabel(m.mentor_user_id) })),
+        skip: ms.filter((m) => m && m.skipped).map((m) => ({ id: m.mentor_user_id, label: mentorLabel(m.mentor_user_id), msg: m.reason || 'al definitief' })),
+        err : fouten.map((m) => ({ id: m.mentor_user_id, label: mentorLabel(m.mentor_user_id), msg: m.error + ' (concept ongewijzigd)' })),
+      };
+      if (fouten.length) {
+        toast(`${fouten.length} mentor(s) NIET gegenereerd — bestaand concept ongewijzigd. Zie resultaat bovenaan de lijst.`, 'error');
+      } else {
+        toast('Concept gegenereerd', 'success');
+      }
       refetchAfterWrite();
     }, 'warn');
   };
@@ -584,13 +606,35 @@
       true,
     );
   };
+  // { "2": 5 } → "5× 90 min"; leeg → "geen".
+  function fmtMeervoudig(per) {
+    const ks = Object.keys(per || {}).map(Number).sort((a, b) => a - b);
+    return ks.length ? ks.map((e) => `${per[e]}× ${e * 45} min`).join(', ') : 'geen';
+  }
+  function fmtZelfdeMoment(lijst) {
+    const a = Array.isArray(lijst) ? lijst : [];
+    if (!a.length) return 'geen';
+    return a.length + '\n' + a.map((m) => `  · student ${m.student_id} op ${fmtDateTime(m.start_tijd)}: ${m.rijen} rijen`).join('\n');
+  }
   // MEDIUM: coaching-debug (informational, geen mutation)
   window.__mentCoachingDebug = async (mentorId) => {
     if (!isAdminRole()) return;
     const month = _ui.selectedMonth;
     const j = await tryFetch('coaching-debug', `/api/mentor-coaching-debug?mentor_user_id=${encodeURIComponent(mentorId)}&period_month=${encodeURIComponent(month)}`);
     if (!j || j.__error) { toast('Coaching-debug fout: ' + (j?.__error || 'onbekend'), 'error'); return; }
-    const summary = `1-op-1 keys: ${asArr(j.one_on_one_keys).length} · Team: ${asArr(j.team_keys).length} · No-show: ${asArr(j.no_show_keys).length} · Funded: ${asArr(j.funded_keys).length}`;
+    // `lms` = exact wat het rapport rekent, per bron (zie api/_lib/coaching-earnings.js).
+    const l = j.lms || {};
+    const b = l.bronnen || {};
+    const summary = l.error
+      ? `Bronfout: ${l.error}`
+      : [
+          `LMS (${b.lms?.status || '?'}): ${b.lms?.afgerond ?? 0} eenheden afgerond (${b.lms?.afspraken?.afgerond ?? '?'} afspraken) · ${b.lms?.no_show ?? 0} eenheden no-show (${b.lms?.afspraken?.no_show ?? '?'} afspraken) · ${b.lms?.team ?? 0} teamtraining${l.lms_teamtraining && l.lms_teamtraining !== 'gelezen' ? ' (' + l.lms_teamtraining + ')' : ''}`,
+          `Meervoudige afspraken (1 eenheid = 45 min): afgerond ${fmtMeervoudig(b.lms?.meervoudig?.afgerond)} · no-show ${fmtMeervoudig(b.lms?.meervoudig?.no_show)}`,
+          `Zelfde student + zelfde moment (elk geteld): ${fmtZelfdeMoment(l.lms_zelfde_moment)}`,
+          `Bubble (${b.bubble?.status || '?'}): ${b.bubble?.calls ?? 0} calls · ${b.bubble?.no_show ?? 0} no-show · ${b.bubble?.team ?? 0} team`,
+          `Bubble overgeslagen (zelfde student+dag in LMS): ${l.bubble_overgeslagen_dubbel_met_lms ?? 0}`,
+          `Funded: ${l.breakdown?.funded?.count ?? 0} · Totaal coaching: ${eur(l.grand_total || 0)}`,
+        ].join('\n');
     openConfirm(`Coaching-debug voor ${fmtMonth(month + '-01')}:\n\n${summary}\n\nZie console.log voor volledige dump.`, () => {
       console.log('[mentoren-v2] coaching-debug', j);
     }, 'warn');
@@ -621,7 +665,10 @@
         if (row.status !== 'goedgekeurd') { _ui.bulkResults.skip.push({ id, label, msg: 'status ≠ goedgekeurd' }); render(); continue; }
         resp = await tryPost('bulk-mp', '/api/mentor-payout-mark-paid', { payout_id: id });
       }
+      const mentorFout = (kind === 'generate' && resp && !resp.__error)
+        ? (asArr(resp.mentors).find((m) => m && m.error) || null) : null;
       if (!resp || resp.__error) _ui.bulkResults.err.push({ id, label, msg: resp?.__error || 'fout' });
+      else if (mentorFout) _ui.bulkResults.err.push({ id, label, msg: mentorFout.error + ' (concept ongewijzigd)' });
       else _ui.bulkResults.ok.push({ id, label });
       render();
     }

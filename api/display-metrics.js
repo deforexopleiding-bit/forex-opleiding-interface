@@ -347,10 +347,10 @@ export default async function handler(req, res) {
       /*26 */ // Open taken (nog te bellen): status=open EN due <= vandaag (NL).
               //   due is een date-kolom → vergelijk op de NL-datumstring.
               supabaseAdmin.from('opvolging_taken').select('id', { count: 'exact', head: true })
-                .eq('status', 'open').lte('due', sinceStr),
+                .eq('lijst', 'dag').eq('status', 'open').lte('due', sinceStr),
       /*27 */ // Taken afgerond vandaag: gearchiveerd_at in NL-vandaag.
               supabaseAdmin.from('opvolging_taken').select('id', { count: 'exact', head: true })
-                .gte('gearchiveerd_at', dayStartIso).lt('gearchiveerd_at', dayEndIso),
+                .eq('lijst', 'dag').gte('gearchiveerd_at', dayStartIso).lt('gearchiveerd_at', dayEndIso),
       /*28 */ // Feed "Nieuwe call gepland" — follow_up_appointments met created_at
               //   in NL-vandaag. Echte nieuwe boekingen: reschedule-kinderen
               //   (parent_appointment_id) eruit; test-afspraken JS-side gefilterd.

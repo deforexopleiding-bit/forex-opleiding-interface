@@ -1298,11 +1298,12 @@
         + _spTile('No-show %',               nos,                  periodLabel,         'var(--rose)')
       + '</div>'
       + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-        + _spTile('Sales uit jouw calls (' + periodLabel + ')', String(s.count || 0),  eur(s.bruto_eur || 0) + ' bruto', 'var(--text-1)')
+        + _spTile('Sales uit jouw calls (' + periodLabel + ')', String(s.count || 0),  eur(s.bruto_eur || 0) + ' incl. btw', 'var(--text-1)')
         + _spTile('Commissie (' + periodLabel + ')', eur(d.commissie_periode ?? d.commissie_deze_maand ?? 0), 'Vrijgegeven + uitbetaald', 'var(--emerald)')
-        + _spTile('Nog te verwachten',       eur(d.commissie_forecast || 0),   'Actieve subscriptions',    'var(--text-1)')
+        + _spTile('Nog te verwachten',       eur(d.commissie_forecast || 0),   'Geaccepteerde sales',      'var(--text-1)')
       + '</div>'
       + '<div style="font-size:12px;color:var(--text-3)">Gedetailleerd overzicht + regels → <a href="#setter-payout" style="color:var(--brand)">Commissie</a></div>'
+      + '<div style="font-size:12px;color:var(--text-3);margin-top:4px">Wat er van je geboekte calls geworden is → <a href="#setter-payout" onclick="event.preventDefault();DFO.goMod(\'setter-payout\');DFO.goTab(\'Mijn calls\')" style="color:var(--brand)">Mijn calls</a></div>'
       + '</div>';
   }
 

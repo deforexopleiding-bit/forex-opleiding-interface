@@ -78,6 +78,7 @@
     window.DFO.VIEWS['opvolging/Dashboard'] = scherm;
     window.DFO.VIEWS['opvolging/Afgerond'] = scherm;
     window.DFO.VIEWS['opvolging/Rapport'] = scherm;
+    window.DFO.VIEWS['opvolging/Leads bellen'] = scherm;
     if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
     else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
   }
@@ -1234,6 +1235,12 @@
     // De calls hangen aan dezelfde dag; een nieuwe taak verandert welke
     // belknop een taak-koppeling krijgt.
     _calls.data = null; _calls.key = null; _calls.error = null; _calls.achterstand = [];
+    // De tab Leads bellen (eigen bestand) houdt zijn eigen cache. Een actie
+    // vanuit een gedeeld venster (boeken, doorsturen) moet die ook legen —
+    // alleen legen, niet tekenen; dat doet de aanroeper.
+    if (typeof window.__opvLeadsVerander === 'function') {
+      try { window.__opvLeadsVerander(); } catch (_) { /* tab niet geladen */ }
+    }
   };
 
   /**
@@ -2698,6 +2705,7 @@
     else {
       _gesprek.error = null; _gesprek.code = null;
       _gesprek.berichten = j.berichten || [];
+      _gesprek.meta = j.meta || null;
       if (j.nummer) _gesprek.nummer = j.nummer;
       if (j.naam && !_gesprek.naam) _gesprek.naam = j.naam;
       // Wat de server nu ook kent, hoeft hier niet meer los te staan. Matchen
@@ -2718,6 +2726,9 @@
    */
   function gesprekKanVersturen() {
     if (!_gesprek.nummer) return { mag: false, reden: 'Bij deze lead staat geen telefoonnummer.' };
+    // Het 24u-venster op de Meta-lijn staat open: dan gaat het antwoord daar,
+    // op dezelfde lijn als de template — ongeacht de stand van de brug.
+    if (_gesprek.meta && _gesprek.meta.venster_open) return { mag: true, reden: null, via: 'meta' };
     if (_wa.error) return { mag: false, reden: 'De WhatsApp-brug is nu niet bereikbaar, dus er kan niets verstuurd worden.' };
     if (!_wa.data) return { mag: false, reden: 'De status van de WhatsApp-brug is nog niet bekend.' };
     if (!_wa.data.verbonden) return { mag: false, reden: 'De WhatsApp-brug is niet gekoppeld. Koppel hem via het lampje rechtsboven.' };
@@ -2738,7 +2749,9 @@
     return '<div class="wbrij ' + (uit ? 'uit' : 'in') + '">' +
       '<div class="wbub' + (bezig ? ' bezig' : '') + '">' +
       (isSpraak && b.tekst ? '<span class="wsp">&#127908;</span> ' : '') + inhoud +
-      '<span class="wtijd">' + (bezig ? 'versturen&hellip;' : esc(uur(b.tijdstip))) + '</span>' +
+      '<span class="wtijd">' + (bezig ? 'versturen&hellip;' : esc(uur(b.tijdstip))) +
+      (b.bron === 'meta' ? ' &middot; Meta' : '') + '</span>' +
+      (b.status === 'failed' ? '<div class="wreden">&#9888; niet afgeleverd' + (b.failed_reason ? ': ' + esc(b.failed_reason) : '') + '</div>' : '') +
       '</div></div>';
   }
 
@@ -2814,7 +2827,16 @@
             'dus wat terugkomt kan minder zijn dan wat op Daves telefoon staat.</div></div>'));
     }
 
-    const invoer = kan.mag
+    // Welke lijn een antwoord neemt, in één regel. Zonder die zin is het niet
+    // te zien dat een bericht binnen het 24u-venster via Meta gaat en daarna
+    // weer via de brug.
+    const m = _gesprek.meta;
+    const lijnRegel = !m ? ''
+      : m.venster_open
+        ? '<div class="ronde zacht" style="margin:0 0 6px">Antwoord gaat via de <b>Meta-lijn</b> (24u-venster open tot ' + esc(uur(m.venster_tot)) + ').</div>'
+        : '<div class="ronde zacht" style="margin:0 0 6px">Het 24u-venster op de Meta-lijn is dicht: daar kan alleen de herinnering-template. ' +
+          'Hieronder typen gaat via de WhatsApp-lijn van het CRM.</div>';
+    const invoer = lijnRegel + (kan.mag
       ? '<div class="winvoer">' +
         // Geen waarde in de HTML: het concept wordt na het tekenen in de
         // textarea gezet (zie herstelConcept). Zo verandert typen de
@@ -2828,7 +2850,7 @@
         (_gesprek.verzendt ? 'Bezig&hellip;' : 'Versturen') + '</button></div>'
       : '<div class="winvoer uit">' +
         '<textarea rows="2" disabled placeholder="Versturen kan nu niet"></textarea>' +
-        '<div class="wreden">' + esc(kan.reden) + '</div></div>';
+        '<div class="wreden">' + esc(kan.reden) + '</div></div>');
 
     // 'on' is verplicht: de globale .scrim staat op opacity:0 met
     // pointer-events:none, en alleen .scrim.on is zichtbaar. Die les kostte
@@ -3259,6 +3281,7 @@
       'Ziet die brug nog geen uitgaande berichten, dan blijven die blokken leeg met uitleg &mdash; ' +
       'nooit met een nul die eruitziet alsof er gemeten is.</div>' +
       '<button class="obtn p leadknop" onclick="window.__opvLeadNieuw()">+ Lead toevoegen</button>' +
+      (typeof window.__opvLeadsKnop === 'function' ? window.__opvLeadsKnop() : '') +
       waLamp() + '</div>';
     // De balk staat boven de weekbalk: wat er nú aan de beurt is hoort het
     // eerste te zijn wat je ziet, niet iets waar je langs moet scrollen.
@@ -3271,8 +3294,8 @@
     h += achterstandBlok();
     h += callsBlok(dag);
 
-    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
-    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
+    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml() + doorstuurPaneelHtml();
+    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml() + doorstuurPaneelHtml();
 
     const alles = st.data.taken || [];
     // Aanmeldingen krijgen hun eigen blok, gegroepeerd per event. Wat vandaag
@@ -3313,7 +3336,8 @@
           ' <span class="tag ' + (rest ? 't-blue' : 't-red') + '">' + (rest ? 'nog ' + rest + 'u' : 'termijn voorbij') + '</span>' +
           (badgeTekst(w) ? ' <span class="tag t-grey">' + esc(badgeTekst(w)) + '</span>' : '') + '</div>' +
           '<div class="mt"><span style="color:#6b7280;font-size:12.5px">' + esc(w.telefoon || '') + ' &middot; agenda ' + uren + 'u geleden doorgestuurd</span></div></div>' +
-          '<div class="act"><button class="obtn wa" onclick="window.__opvWa(\'' + w.id + '\')">&#128172; Herinneren</button>' +
+          '<div class="act"><button class="obtn wa" onclick="window.__opvDoorsturen(\'' + w.id + '\', \'herinnering\')">&#128233; Herinnering sturen</button>' +
+          '<button class="obtn" onclick="window.__opvWa(\'' + w.id + '\')">&#128172; Gesprek</button>' +
           '<button class="obtn" onclick="window.__opvTerug(\'' + w.id + '\')">Terug in de lijst</button></div></div>';
       }).join('');
     }
@@ -3330,7 +3354,7 @@
         ).join('') + '</div>';
     }
 
-    return h + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
+    return h + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml() + doorstuurPaneelHtml();
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -3662,7 +3686,9 @@
         opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
         opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
         opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')") +
-        // DE VIJFDE IS GEEN UITKOMST. De andere vier zeggen iets over een
+        opt('&#128184;', 'var(--o-ambs)', 'Geen geld', 'Wel gesproken, maar hij kan het nu niet betalen. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_geld')") +
+        opt('&#128245;', 'var(--o-reds)', 'Onbereikbaar', 'Je kreeg hem niet te pakken. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('onbereikbaar')") +
+        // DE LAATSTE IS GEEN UITKOMST. De andere zeggen iets over een
         // gesprek dat geweest is; deze zegt dat het gesprek nog moet komen.
         // Daarom een eigen venster en geen __opvCallUitkomst: er wordt niets
         // beoordeeld, er wordt verplaatst.
@@ -3708,9 +3734,24 @@
         '<textarea id="opv-cn" rows="3" placeholder="Waarom haakt hij af?"></textarea>' +
         '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_interesse\')">Vastleggen</button>');
     }
+    if (u === 'geen_geld') {
+      return scrim('Geen geld', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Er is gesproken, maar hij kan het nu niet betalen. Er komt <b>geen taak</b> bij.<br><br>' +
+        'De afspraak wordt vastgelegd als <b>geen geld</b>, zodat het rapport het onderscheid ziet met geen interesse.</div>' +
+        '<textarea id="opv-cn" rows="2" placeholder="Wat zei hij over het geld? (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_geld\')">Vastleggen</button>');
+    }
+    if (u === 'onbereikbaar') {
+      return scrim('Onbereikbaar', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call. ' +
+        'De afspraak wordt vastgelegd als <b>onbereikbaar</b>; er komt geen tweede terugbelactie in het oude systeem bij.</div>' +
+        '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'onbereikbaar\')">Zet terug in de lijst</button>');
+    }
     if (u === 'no_show') {
       return scrim('No-show', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call.</div>' +
+        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call. ' +
+        'De afspraak wordt vastgelegd als <b>no-show</b>; er komt geen tweede terugbelactie in het oude systeem bij.</div>' +
         '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
         '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'no_show\')">Zet terug in de lijst</button>');
     }
@@ -3983,7 +4024,7 @@
       body =
         (gp ? '' : '<div class="warn"><b>Nog geen poging vandaag.</b> Je moet niets doorschuiven — wat blijft liggen staat morgen vanzelf terug. Kies je toch een latere dag, dan telt dat als <b>uitgesteld zonder poging</b>.</div>') +
         opt('&#128197;', 'var(--o-grns)', 'Opnieuw inplannen', 'Kies samen een moment terwijl je hem aan de lijn hebt.', "window.__opvActie('inplannen')") +
-        opt('&#128233;', 'var(--o-accs)', 'Agenda doorgestuurd', 'Hij plant zelf in. Na 48 uur zonder afspraak komt hij terug.', "window.__opvActie('agenda_gestuurd')") +
+        opt('&#128233;', 'var(--o-accs)', 'Agenda doorsturen', 'Verstuurt nu de agendalink via WhatsApp. Na 48 uur zonder afspraak komt hij terug.', "window.__opvDoorsturen('" + t.id + "')") +
         opt('&#8595;', 'var(--o-ambs)', 'Later vandaag nog eens', 'Zakt naar de tweede ronde, blijft vandaag staan.', "window.__opvActie('later_vandaag')") +
         opt('&#9200;', 'var(--o-purs)', 'De lead vroeg een later moment', 'Alleen als hij zelf een datum noemde.', "window.__opvActie('kiesdag')") +
         opt('&#128451;', 'var(--o-reds)', 'Archiveren — geen nut meer', 'Alleen na echte moeite. Maxim ziet je historiek.', "window.__opvActie('archiveer')");
@@ -4025,6 +4066,12 @@
         '<div class="ronde">Of zet hem zelf op een dag, zonder de agenda.</div>' +
         '<input type="date" id="opv-dt" value="' + dagPlus(vandaag(), 1) + '">' +
         '<button class="obtn" style="width:100%;margin-top:10px" onclick="window.__opvVerplaats()">Zet op deze dag</button></div>';
+      // Een leadkaart heeft geen 'zet hem zelf op een dag': dat is daar de
+      // knop 'Moet later terugkomen', mét verplichte notitie.
+      if (t.lijst === 'leads') {
+        return scrim('Zoomcall inplannen met ' + esc(t.naam), 'Kies samen een moment terwijl je hem aan de lijn hebt.',
+          agendaBlok({ handmatig: false }));
+      }
       return scrim('Call inplannen met ' + esc(t.naam),
         'Kies een moment in de agenda, of zet hem zelf op een dag.',
         agendaBlok() + handmatig);
@@ -4135,7 +4182,15 @@
       const t = (d.taken || []).find((x) => x.id === id) || (d.wacht || []).find((x) => x.id === id);
       if (t) return t;
     }
-    if (_live.archief.data) return _live.archief.data.find((x) => x.id === id);
+    if (_live.archief.data) {
+      const a = _live.archief.data.find((x) => x.id === id);
+      if (a) return a;
+    }
+    // Leadkaarten van de tab Leads bellen. Zo werken bellen, WhatsApp,
+    // historiek en inplannen er zonder tweede implementatie.
+    if (typeof window.__opvLeadsZoek === 'function') {
+      try { const l = window.__opvLeadsZoek(id); if (l) return l; } catch (_) { /* tab niet geladen */ }
+    }
     return null;
   }
 
@@ -4511,9 +4566,15 @@
     _gesprek.optimistisch.push({ richting: 'uit', tekst, media_type: 'chat', tijdstip: new Date().toISOString() });
     render();
     try {
-      await post('/api/opvolging-whatsapp-send', {
-        nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
-      });
+      if (_gesprek.meta && _gesprek.meta.venster_open) {
+        await post('/api/opvolging-meta-send', {
+          nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
+        });
+      } else {
+        await post('/api/opvolging-whatsapp-send', {
+          nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
+        });
+      }
       _gesprek.verzendt = false;
       // Weg met het concept: dit bericht is verstuurd. Pas hierna, zodat een
       // mislukte verzending hem laat staan.
@@ -4624,14 +4685,24 @@
   // erger dan wat we repareren. 'gesprek_gehad' zet alleen de status en schrijft
   // een notitie, en dat is precies wat we willen.
   //
-  // NO-SHOW STAAT ER MET OPZET NIET IN. Het outcome 'no_show' maakt óók een
-  // follow_up_lead (terugbel over twee uur), en Opvolging zet die persoon
-  // vandaag al terug in de lijst. Diezelfde dubbeling. Die vraag ligt bij Maxim;
-  // tot hij beslist doet no-show wat hij deed.
+  // NO-SHOW WORDT SINDS 1 OKTOBER WÉL VASTGELEGD (besluit Jeffrey), maar ZONDER
+  // de terugbel-lead. Het outcome 'no_show' maakte altijd óók een
+  // follow_up_lead (terugbel over twee uur), terwijl Opvolging die persoon
+  // vandaag al terug in de lijst zet — dezelfde dubbeling als hierboven. De
+  // motor kent daarvoor de vlag `zonder_terugbel_lead: true`; schrijfCallUitkomst
+  // stuurt hem bij ELKE uitkomst mee, want Opvolging wil nooit een lead in het
+  // oude systeem. De motor negeert hem bij alles behalve no_show.
+  //
+  // geen_geld en onbereikbaar zijn nieuwe motor-woorden die zelf nooit een lead
+  // maken. Wat ze in rapporten betekenen staat in
+  // api/_lib/call-uitkomst-categorie.js (window.CallUitkomstCategorie).
   const CALL_UITKOMST = {
     klant_geworden   : 'sale',
     geen_interesse   : 'wilt_niet_meer',
     wil_nog_beslissen: 'gesprek_gehad',
+    no_show          : 'no_show',
+    geen_geld        : 'geen_geld',
+    onbereikbaar     : 'onbereikbaar',
   };
 
   /** Welk outcome hoort bij deze knop? null = niet doorschrijven. */
@@ -4664,11 +4735,21 @@
       await post('/api/follow-up-appointment-outcome', {
         appointment_id: apptId,
         outcome,
+        // Nooit een terugbel-lead in het oude systeem: Opvolging zet de persoon
+        // zelf terug in de lijst. Zie het blok boven CALL_UITKOMST.
+        zonder_terugbel_lead: true,
         // Daves eigen woorden gaan mee ACHTER de vaste zin van de motor. Zonder
         // deze regel ziet wie de afspraakkaart opent 'geen interesse' zonder
         // waarom.
         ...(notitie ? { note: notitie } : {}),
       });
+      // De closer-topbar (closer-topbar.js) telt de beoordeelde calls; laat
+      // hem meteen opnieuw tellen in plaats van pas bij de volgende poll.
+      try {
+        window.dispatchEvent(new CustomEvent('kv:call-uitkomst-vastgelegd', {
+          detail: { appointment_id: apptId, outcome },
+        }));
+      } catch (_) { /* puur een seintje; de poll vangt het ook op */ }
       return { ok: true, outcome };
     } catch (e) {
       return { ok: false, reden: 'motor', uitleg: (e && e.message) || 'onbekende fout' };
@@ -4712,6 +4793,15 @@
       return;
     }
 
+    // Geen geld: er is gesproken, er komt geen taak bij — net als bij een sale
+    // alleen de uitkomst. Een eventuele notitie reist mee naar de motor.
+    if (uitkomst === 'geen_geld') {
+      const res = await schrijfCallUitkomst(uitkomst, c, notitie);
+      _ui.modal = null; leegTakenCache(); render();
+      meldUitkomst(res, { bewaardHier: false, notitie });
+      return;
+    }
+
     // Geen interesse levert bewust GEEN OPEN taak op — net als bij een event dat
     // zo eindigt. Een kaart die meteen dicht is komt met nul belpogingen in
     // Afgerond terecht en krijgt daar het oordeel 'te weinig moeite', terwijl
@@ -4751,14 +4841,22 @@
 
     const uitkomstRes = await schrijfCallUitkomst(uitkomst, c, notitie);
 
+    // Onbereikbaar loopt hier precies als no-show: vandaag terug in de lijst,
+    // geen belpoging. De kaart krijgt reden no_show_call (de server kent geen
+    // aparte reden), dus zet de notitie erbij wat er echt gebeurde.
+    const nietGesproken = uitkomst === 'no_show' || uitkomst === 'onbereikbaar';
+    const kaartNotitie = uitkomst === 'onbereikbaar'
+      ? 'Onbereikbaar bij de call' + (notitie ? ' — ' + notitie : '')
+      : (notitie || null);
+
     try {
       await post('/api/opvolging-taak-create', {
         naam       : c.naam,
         email      : c.email || null,
         telefoon   : c.telefoon || null,
-        reden      : uitkomst === 'no_show' ? 'no_show_call' : 'wil_nog_beslissen',
-        due        : uitkomst === 'no_show' ? vandaag() : due,
-        notitie    : notitie || null,
+        reden      : nietGesproken ? 'no_show_call' : 'wil_nog_beslissen',
+        due        : nietGesproken ? vandaag() : due,
+        notitie    : kaartNotitie,
         badge_label: 'Call ' + nl(callBadgeDag(c)),
         bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
         // Alleen bij 'wil nog beslissen' een poging: dat gesprek is echt
@@ -4766,7 +4864,7 @@
         // alleen niemand opdagen. Zou hij hier toch meetellen, dan staat de
         // verse kaart vandaag op 1 van 2 terwijl Dave die persoon nog nooit aan
         // de lijn heeft gehad, en klopt de dekking op het dashboard niet meer.
-        ...(uitkomst === 'no_show' ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
+        ...(nietGesproken ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
       });
       _ui.modal = null; leegTakenCache(); render();
       meldUitkomst(uitkomstRes, { bewaardHier: true, notitie });
@@ -5071,6 +5169,262 @@
       render();
     }
   };
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // AGENDA DOORSTUREN — VERSTUURT ECHT, EN WACHT LIVE MEE
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Eén klik verstuurt via de gekoppelde WhatsApp-lijn (de brug) een bericht
+  // MÉT de agendalink. Dave kan aan de telefoon zeggen "ik heb je net de link
+  // gestuurd, zie je hem?" en het venster blijft daarna live meekijken of de
+  // lead inplant (elke 15 s, max 20 min). De 48-uurcontrole loopt daarna
+  // gewoon verder.
+  //
+  // Eigen staat, los van _ui.modal: de tab Leads bellen (eigen bestand) opent
+  // hetzelfde venster via window.__opvDoorsturen(id, soort, { naam, telefoon }).
+  //
+  // HUISREGEL: dit venster sluit ALLEEN via het kruisje. Een klik ernaast
+  // midden in 'wacht op inplanning' zou het live meekijken stil afbreken.
+  const DOOR_POLL_MS = 15000;
+  const DOOR_POLL_MAX_MS = 20 * 60000;
+  const DOOR_LEER_MAX_MS = 6 * 60000;
+  const _door = { open: false };
+  let _doorTimer = null;
+  let _doorInstelling = null;
+
+  function stopDoorTimer() { if (_doorTimer) clearTimeout(_doorTimer); _doorTimer = null; }
+
+  /** De tekst zoals hij straks vertrekt: {voornaam} en (als die er is) {link} ingevuld. */
+  function vulDoorTekst(sjabloon, naam, link) {
+    const voornaam = String(naam || '').trim().split(/\s+/)[0] || '';
+    let t = String(sjabloon || '').replace(/\{voornaam\}/g, voornaam).replace(/^(Hey|Hoi|Hallo|Dag)\s+,/i, '$1,');
+    if (link) t = t.replace(/\{link\}/g, link);
+    return t;
+  }
+
+  const momentNl = (isoTs) => {
+    if (!isoTs) return '';
+    try {
+      return new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+        .format(new Date(isoTs)).replace(/\./g, '');
+    } catch (_) { return String(isoTs); }
+  };
+
+  async function laadDoorInstelling() {
+    const j = await haal('/api/opvolging-agenda-instelling');
+    if (j.__error) { _door.instFout = j.__error; render(); return; }
+    _doorInstelling = j.instelling || null;
+    _door.meta = { templates: j.templates || {}, lijn: j.lijn_actief || null, fout: j.meta_fout || null };
+    if (_door.open && _door.tekst == null && _doorInstelling) {
+      const sj = _door.soort === 'herinnering' ? _doorInstelling.herinnering : _doorInstelling.bericht;
+      _door.tekst = vulDoorTekst(sj, _door.naam, _doorInstelling.agenda_link);
+    }
+    render();
+  }
+
+  window.__opvDoorsturen = (id, soort, info) => {
+    const t = zoekTaak(id) || info || {};
+    stopDoorTimer();
+    Object.assign(_door, {
+      open: true, taakId: id, soort: soort === 'herinnering' ? 'herinnering' : 'eerste',
+      naam: t.naam || '', telefoon: t.telefoon || '', fase: 'opstellen', tekst: null,
+      fout: null, foutCode: null, waMe: null, verstuurdOp: null, afspraak: null,
+      lerenSinds: null, wachtenSinds: null, instFout: null,
+    });
+    // Een open 'Wat nu?' gaat dicht: dit venster neemt het over.
+    _ui.modal = null;
+    _doorInstelling = null;
+    render();
+    straks(laadDoorInstelling);
+  };
+
+  /** Wat er getypt wordt hoort in de staat (zie de uitleg bij _gesprek.concept). */
+  window.__opvDoorTyp = (v) => { _door.tekst = String(v == null ? '' : v); };
+
+  window.__opvDoorSluit = () => {
+    stopDoorTimer();
+    const wasVerstuurd = !!_door.verstuurdOp;
+    _door.open = false;
+    if (wasVerstuurd) leegTakenCache();
+    if (typeof window.__opvLeadsVerander === 'function') { try { window.__opvLeadsVerander(); } catch (_) { /* tab niet geladen */ } }
+    render();
+  };
+
+  async function doorPost(body) {
+    try {
+      const j = await window.KV.authedJson('/api/opvolging-agenda-doorsturen', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      return j || {};
+    } catch (e) {
+      const b = (e && e.body) || {};
+      return { __fout: true, code: b.code || null, error: b.error || (e && e.message) || 'Versturen mislukt', wa_me: b.wa_me || null };
+    }
+  }
+
+  window.__opvDoorVerstuur = async () => {
+    if (!_door.open || _door.fase === 'versturen') return;
+    _door.fase = 'versturen'; _door.fout = null; _door.foutCode = null;
+    render();
+    const j = await doorPost({ taak_id: _door.taakId, soort: _door.soort, tekst: _door.tekst || undefined });
+    if (!_door.open) return;
+    if (j.code === 'BRUG_KENT_NUMMER_NOG_NIET') {
+      // De brug ververst zijn leadlijst; nog even. Zichtbaar, met een terugval.
+      if (!_door.lerenSinds) _door.lerenSinds = Date.now();
+      _door.waMe = j.wa_me || waMeTerugval();
+      if (Date.now() - _door.lerenSinds > DOOR_LEER_MAX_MS) {
+        _door.fase = 'fout'; _door.foutCode = 'NIET_TOEGESTAAN';
+        _door.fout = 'De WhatsApp-lijn kent dit nummer na 6 minuten nog niet. Stuur hem via de knop hieronder vanaf je eigen WhatsApp.';
+        render(); return;
+      }
+      _door.fase = 'leren';
+      render();
+      stopDoorTimer();
+      _doorTimer = setTimeout(() => { if (_door.open && _door.fase === 'leren') { _door.fase = 'opnieuw'; window.__opvDoorVerstuur(); } },
+        ((j.opnieuw_over_sec || 20) * 1000));
+      return;
+    }
+    if (j.__fout || !j.ok) {
+      _door.fase = 'fout'; _door.foutCode = j.code || null;
+      _door.fout = j.code === 'GEEN_AGENDALINK' ? 'Agendalink nog niet ingesteld — er is niets verstuurd.' : (j.error || 'Versturen mislukt.');
+      _door.kanaalMelding = j.melding || null;
+      _door.waMe = j.code === 'GEEN_AGENDALINK' ? null : (j.wa_me || waMeTerugval());
+      render(); return;
+    }
+    _door.verstuurdOp = j.verstuurd_op || new Date().toISOString();
+    _door.kanaal = j.kanaal || null;
+    _door.kanaalMelding = j.melding || null;
+    _door.fase = 'wachten';
+    _door.wachtenSinds = Date.now();
+    leegTakenCache();
+    render();
+    planDoorPoll();
+  };
+
+  /**
+   * Gaat dit via de Meta-template? Geeft de templatenaam terug, of null als
+   * het de brug wordt. Tweeling van kiesPad() in api/_lib/opvolging-meta.js;
+   * de server beslist, dit is alleen wat het venster vooraf belooft.
+   */
+  function doorViaMeta() {
+    const inst = _doorInstelling;
+    if (!inst || inst.kanaal === 'brug') return null;
+    const m = _door.meta || {};
+    if (!m.lijn) return null;
+    const t = (m.templates || {})[_door.soort === 'herinnering' ? 'herinnering' : 'eerste'];
+    return t && t.goedgekeurd ? t.naam : null;
+  }
+
+  function waMeTerugval() {
+    const c = String(_door.telefoon || '').replace(/\D/g, '').replace(/^00/, '');
+    return c ? 'https://wa.me/' + c + '?text=' + encodeURIComponent(_door.tekst || '') : null;
+  }
+
+  function planDoorPoll() {
+    stopDoorTimer();
+    if (!_door.open || _door.fase !== 'wachten') return;
+    if (Date.now() - _door.wachtenSinds > DOOR_POLL_MAX_MS) { _door.fase = 'gestopt'; render(); return; }
+    _doorTimer = setTimeout(doorPoll, DOOR_POLL_MS);
+  }
+
+  async function doorPoll() {
+    if (!_door.open || _door.fase !== 'wachten') return;
+    const j = await haal('/api/opvolging-wacht-check-nu?taak_id=' + encodeURIComponent(_door.taakId));
+    if (!_door.open) return;
+    if (!j.__error && j.status === 'ingepland') {
+      _door.fase = 'ingepland';
+      _door.afspraak = j.afspraak || null;
+      stopDoorTimer();
+      leegTakenCache();
+      render();
+      return;
+    }
+    planDoorPoll();
+  }
+
+  /** Het venster. Geen sluiten bij klik ernaast — alleen het kruisje. */
+  function doorstuurPaneelHtml() {
+    if (!_door.open) return '';
+    const inst = _doorInstelling;
+    const geenLink = inst && !inst.agenda_link;
+    const titel = _door.soort === 'herinnering' ? 'Herinnering sturen' : 'Agenda doorsturen';
+    const sub = esc(_door.naam || '') + (_door.telefoon ? ' &middot; ' + esc(_door.telefoon) : '');
+    let body = '';
+    const f = _door.fase;
+    if (f === 'opstellen' || f === 'versturen' || f === 'fout') {
+      if (_door.instFout) body += '<div class="warn2">De berichttekst kon niet geladen worden: ' + esc(_door.instFout) + '</div>';
+      if (!inst && !_door.instFout) body += '<div class="agleeg">Bericht laden&hellip;</div>';
+      if (geenLink) {
+        body += '<div class="warn"><b>Agendalink nog niet ingesteld.</b> Zonder link wordt er niets verstuurd. ' +
+          'Een manager stelt hem in onderaan de tab <b>Leads bellen</b>.</div>';
+      }
+      if (inst) {
+        const viaMeta = doorViaMeta();
+        if (viaMeta) {
+          // De template heeft een vaste, door Meta goedgekeurde tekst: geen
+          // tekstveld, wel zeggen wat er gaat.
+          body += '<div class="ronde">Dit gaat <b>nu</b> als goedgekeurde WhatsApp-template <b>' + esc(viaMeta) + '</b> ' +
+            'met de knop <b>Kies een moment</b> naar de agenda, via de lijn van de afspraakberichten. ' +
+            'Antwoordt de lead, dan kun je 24 uur lang vrij terugschrijven in het gesprek.</div>';
+        } else {
+          if (inst.kanaal !== 'brug') {
+            body += '<div class="warn2">Template wacht op goedkeuring door Meta &mdash; dit bericht gaat via de WhatsApp-lijn van het CRM.</div>';
+          }
+          body += '<div class="ronde">Dit bericht gaat <b>nu</b> via de gekoppelde WhatsApp-lijn. De link staat er altijd in &mdash; ' +
+            'haal je hem weg, dan komt hij onderaan.</div>' +
+            '<textarea id="opv-door-tekst" rows="8" oninput="window.__opvDoorTyp(this.value)"' + (f === 'versturen' ? ' disabled' : '') + '>' +
+            esc(_door.tekst || '') + '</textarea>';
+        }
+      }
+      if (f === 'fout') {
+        body += '<div class="warn" style="margin-top:10px"><b>Niet verstuurd.</b> ' + esc(_door.fout || '') +
+          ' De kaart is niet veranderd.</div>';
+      }
+      const uit = !inst || geenLink || f === 'versturen';
+      body += '<button class="obtn p" style="width:100%;margin-top:12px' + (uit ? ';opacity:.5;cursor:default' : '') + '"' +
+        (uit ? ' disabled' : ' onclick="window.__opvDoorVerstuur()"') + '>' +
+        (f === 'versturen' ? 'Versturen&hellip;' : f === 'fout' ? 'Opnieuw proberen' : 'Verstuur nu') + '</button>';
+      if (f === 'fout' && _door.waMe) {
+        body += '<a class="obtn" style="width:100%;margin-top:8px;display:block;text-align:center" target="_blank" rel="noopener" href="' +
+          esc(_door.waMe) + '">Open in WhatsApp (eigen telefoon)</a>';
+      }
+    } else if (f === 'leren' || f === 'opnieuw') {
+      body = '<div class="door-live"><span class="puls"></span><b>De WhatsApp-lijn leert dit nummer kennen&hellip;</b></div>' +
+        '<div class="ronde">Een nieuwe kaart is pas na een paar minuten bekend bij de lijn. We proberen het vanzelf opnieuw ' +
+        '(max 6 minuten). Haast? Stuur hem meteen vanaf je eigen WhatsApp:</div>' +
+        (_door.waMe ? '<a class="obtn" style="width:100%;display:block;text-align:center" target="_blank" rel="noopener" href="' + esc(_door.waMe) + '">Open in WhatsApp</a>' : '');
+    } else if (f === 'wachten' || f === 'gestopt') {
+      body = '<div class="door-live">' + (f === 'wachten' ? '<span class="puls"></span>' : '') +
+        '<b>&#10003; Verstuurd' + (_door.kanaal === 'meta' ? ' via de Meta-template' : '') + ' om ' + esc(uur(_door.verstuurdOp)) + '</b>' +
+        (f === 'wachten' ? ' &mdash; wacht op inplanning&hellip;' : '') + '</div>' +
+        (_door.kanaalMelding ? '<div class="warn2">' + esc(_door.kanaalMelding) + '</div>' : '') +
+        '<div class="ronde">' + (f === 'wachten'
+          ? 'Vraag of hij de link ziet. Plant hij nu in, dan zie je het hier binnen 15 seconden.'
+          : 'Na 20 minuten kijkt dit venster niet meer mee. De 48-uurcontrole loopt gewoon verder: plant hij later in, dan gaat de kaart vanzelf op ingepland.') + '</div>';
+    } else if (f === 'ingepland') {
+      const wanneer = _door.afspraak && _door.afspraak.scheduled_at ? momentNl(_door.afspraak.scheduled_at) : '';
+      body = '<div class="door-klaar">&#9989; Ingepland' + (wanneer ? ' voor ' + esc(wanneer) : '') + '</div>' +
+        '<div class="ronde">Deze kaart is klaar. Je mag het venster sluiten.</div>';
+    }
+    doorStijl();
+    return '<div class="opv"><div class="scrim on"><div class="modal">' +
+      '<div class="mh"><div><h3>' + titel + '</h3><p>' + sub + '</p></div>' +
+      '<button class="x" onclick="window.__opvDoorSluit()">&times;</button></div>' +
+      '<div class="mb">' + body + '</div></div></div></div>';
+  }
+
+  function doorStijl() {
+    if (typeof document === 'undefined' || document.getElementById('opv-door-stijl')) return;
+    const el = document.createElement('style');
+    el.id = 'opv-door-stijl';
+    el.textContent = `
+.opv .door-live{display:flex;align-items:center;gap:10px;font-size:14.5px;margin:4px 0 10px}
+.opv .door-klaar{font-size:20px;font-weight:700;color:var(--o-grn);margin:6px 0 10px}
+.opv .puls{width:11px;height:11px;border-radius:50%;background:var(--o-grn);flex:none;animation:opvPuls 1.4s ease-in-out infinite}
+@keyframes opvPuls{0%{box-shadow:0 0 0 0 rgba(14,169,104,.55)}70%{box-shadow:0 0 0 10px rgba(14,169,104,0)}100%{box-shadow:0 0 0 0 rgba(14,169,104,0)}}
+.opv #opv-door-tekst{width:100%;box-sizing:border-box;font:inherit;font-size:14px;line-height:1.45;padding:10px;border:1px solid var(--o-line);border-radius:10px}`;
+    document.head.appendChild(el);
+  }
 
   window.__opvTerug = async (id) => {
     // NIET 'verplaats'. Die actie verzet alleen de datum, en omdat de due van
@@ -5771,6 +6125,14 @@
   // ═════════════════════════════════════════════════════════════════════════
   // REGISTREREN
   // ═════════════════════════════════════════════════════════════════════════
+  // Voor de tab Leads bellen (views/opvolging-leads-v2.js): de gedeelde
+  // vensters en de render met vingerafdruk, zodat die tab niets hoeft te
+  // kopiëren. Alleen functies — geen staat naar buiten.
+  window.__opvGedeeld = {
+    render, stijl, esc, uur, haal, post, straks, opvToast,
+    modalHtml, waPaneelHtml, gesprekPaneelHtml, doorstuurPaneelHtml, waLamp,
+    openModal: (m) => { _ui.modal = m; render(); },
+  };
   window.DFO.VIEWS['opvolging/Vandaag'] = vandaagView;
   window.DFO.VIEWS['opvolging/Dashboard'] = dashboardView;
   window.DFO.VIEWS['opvolging/Afgerond'] = afgerondView;

@@ -43,6 +43,7 @@ import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
 import { createNotification } from './_lib/notify.js';
 import { waitUntil } from '@vercel/functions';
+import { opvolgingMetaInbound, opvolgingMetaFailed } from './_lib/opvolging-meta.js';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -1446,6 +1447,16 @@ export default async function handler(req, res) {
                   await markeerAfspraakBevestigd(supabaseAdmin, { telefoon: phoneE164Plus, tekst: _bevTekst });
                 } catch (_) { /* mag de webhook nooit breken */ }
 
+                // Additief (opvolging, PR 6): een antwoord op 'Agenda
+                // doorsturen' — of elk ander Meta-bericht van iemand met een
+                // lopende opvolgkaart — telt als contact op die kaart.
+                // Idempotent op wamid, fail-soft (gooit nooit).
+                await opvolgingMetaInbound(supabaseAdmin, {
+                  telefoon: phoneE164Plus, wamid: msg.id,
+                  tekst: insRes.body, mediaType: msg.type,
+                  tijdstipIso: tsDate.toISOString(),
+                });
+
                 const traceBase = {
                   ts: _tsIso,
                   source_endpoint: 'meta-inbox-webhook',
@@ -2026,6 +2037,16 @@ export default async function handler(req, res) {
             try {
               const ok = await applyStatusUpdate(st);
               if (ok) stats.statuses_updated++;
+              // Additief (opvolging, PR 6): een niet-afgeleverd bericht van
+              // 'Agenda doorsturen' wordt zichtbaar op de kaart, en een kaart
+              // die op inplanning wachtte gaat terug open. Fail-soft.
+              if (st && st.status === 'failed') {
+                const reden = Array.isArray(st.errors) && st.errors.length
+                  ? st.errors.map((e) => `[${e.code}] ${e.title || e.message || ''}`).join('; ')
+                  : 'onbekende reden';
+                const vandaagNl = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                await opvolgingMetaFailed(supabaseAdmin, { wamid: st.id, reden, vandaag: vandaagNl });
+              }
             } catch (e) {
               stats.errors++;
               console.error('[inbox-webhook] status processing fail wamid=' + (st.id || '?') + ':', e.message);

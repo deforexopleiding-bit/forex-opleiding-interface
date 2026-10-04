@@ -18,7 +18,9 @@
 //
 // Bronnen (alles incl btw — excl = round2(incl / 1.21)):
 //   1) BONUS    → mentor_ledger_entries (vrijgegeven, niet aan payout gekoppeld).
-//   2) COACHING → coaching-earnings helper (1on1/team/no-show/funded).
+//   2) COACHING → coaching-earnings helper (1on1/team/no-show/funded) —
+//                 LMS (hlms_sessie) + Bubble alleen vóór oktober 2026.
+//                 Een bronfout gooit door: concept blijft ongemoeid.
 //   3) TRAVEL   → mentor_payout_config + mentor_travel_days (alleen als enabled).
 //   4) RECURRING→ mentor_recurring_items (actief).
 //   5) MANUAL   → mentor_payout_adjustments (mag negatief).
@@ -30,7 +32,7 @@
 //     total, total_excl, btw_amount, lines:[...] }
 
 import { supabaseAdmin } from '../supabase.js';
-import { computeCoachingEarnings } from './coaching-earnings.js';
+import { computeCoachingEarnings, coachingRegelLabel } from './coaching-earnings.js';
 import { computeBonusOverview } from '../mentor-bonus-overview.js';
 
 export const BTW_RATE = 1.21;
@@ -86,7 +88,7 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
   const period = periodFromMonthStart(monthStart);
   if (!period) throw new Error('computeAndUpsertConcept: monthStart moet YYYY-MM-DD zijn');
 
-  // 1) Resolve team_member voor bubble_user_id (coaching). Fail-soft.
+  // 1) Resolve team_member voor bubble_user_id (coaching, optioneel).
   const { data: tm, error: tmErr } = await supabaseAdmin
     .from('team_members')
     .select('bubble_user_id')
@@ -113,6 +115,21 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       reason        : 'al definitief',
     };
   }
+
+  // 2a) COACHING — helper (LMS + Bubble vóór oktober 2026). Bewust VÓÓR elke
+  //     schrijfactie (ledger-unlink, payout-update): faalt een bron, dan gooit
+  //     de helper en blijft het bestaande concept volledig ongemoeid. Nooit
+  //     meer afvangen naar 0 — een onbereikbare bron mag niet stil als €0 in
+  //     een rapport belanden. mentor-payout-generate.js meldt de fout per mentor.
+  //     bubbleUserId is optioneel: zonder koppeling telt alleen het LMS.
+  const coaching = await computeCoachingEarnings({
+    bubbleUserId,
+    mentorUserId,
+    from: period.start,
+    to  : period.last,
+  });
+  const coachingBreakdown = coaching.breakdown || null;
+  const coachingTotal     = round2(coaching.grand_total || 0);
 
   // 2b) HERBEREKENING: als er al een concept/open payout bestaat, koppel
   //     eerst DIE payout's eigen entries los. Zonder deze stap zou de
@@ -155,26 +172,6 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
   const bonusEntryIds = (ledgerRows || []).map((r) => r.id);
-
-  // 4) COACHING — helper.
-  let coachingBreakdown = null;
-  let coachingTotal = 0;
-  if (bubbleUserId) {
-    try {
-      const r = await computeCoachingEarnings({
-        bubbleUserId,
-        mentorUserId,
-        from: period.start,
-        to  : period.last,
-      });
-      coachingBreakdown = r.breakdown || null;
-      coachingTotal     = round2(r.grand_total || 0);
-    } catch (e) {
-      console.warn(`[payout-generate-core] coaching faalde voor ${mentorUserId}: ${e?.message || e}`);
-      coachingBreakdown = null;
-      coachingTotal     = 0;
-    }
-  }
 
   // 5) TRAVEL — alleen als config.travel_enabled.
   const { data: cfg, error: cfgErr } = await supabaseAdmin
@@ -329,7 +326,9 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       lineInserts.push({
         payout_id   : payoutId,
         kind        : def.kind,
-        label       : def.label,
+        // qty = sessie-eenheden van 45 min; het label noemt de meervoudige
+        // afspraken (bv. "waarvan 5 van 90 min") zodat qty ≠ afspraken uitlegbaar is.
+        label       : coachingRegelLabel(def.label, cell),
         qty,
         unit_incl   : unitIncl,
         amount_incl : amtIncl,

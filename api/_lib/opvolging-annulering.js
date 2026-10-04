@@ -59,12 +59,15 @@ export const REDEN_AGENDA = 'geannuleerd_in_agenda';
 //     sale            klant geworden
 //     wilt_niet_meer  geen interesse
 //     niet_geschikt   past niet bij ons
+//     geen_geld       gesproken, geen sale wegens geld — de lead is klaar
 //   api/follow-up-lead-outcome.js → OUTCOMES
 //     sale, geen_interesse   (dezelfde twee, andere spelling)
 //
 // NIET in deze lijst, met opzet:
-//   gesprek_gehad, no_show, later_opnieuw, terugbel, verzetten, annuleren,
-//   snooze, whatsapp_gestuurd — daar leeft de lead gewoon door. 'Gesprek
+//   gesprek_gehad, no_show, onbereikbaar, later_opnieuw, terugbel, verzetten,
+//   annuleren, snooze, whatsapp_gestuurd — daar leeft de lead gewoon door.
+//   'onbereikbaar' is net als no_show een niet-afgerond geval: opnieuw
+//   proberen hoort er juist bij. 'Gesprek
 //   gehad' staat wél in AGENDA_REMOVING_OUTCOMES, maar dat gaat over de
 //   Zoom-meeting opruimen, niet over de lead afsluiten.
 export const EINDPUNT_UITKOMSTEN = new Set([
@@ -72,6 +75,7 @@ export const EINDPUNT_UITKOMSTEN = new Set([
   'wilt_niet_meer',
   'geen_interesse',
   'niet_geschikt',
+  'geen_geld',
 ]);
 
 /** reden_code op een gearchiveerde kaart die zegt: deze lead is klaar. */

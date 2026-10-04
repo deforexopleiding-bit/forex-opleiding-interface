@@ -12,6 +12,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { alleenDaglijst, pogingenAlleenDaglijst, POGING_LIJST_EMBED } from './_lib/opvolging-lijst.js';
 
 const DOEL_BELLEN_PER_DAG = 2;
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
@@ -38,17 +39,19 @@ export default async function handler(req, res) {
   const weekStart = minDagen(dag, 6);
 
   try {
-    const { data: open, error: e1 } = await supabaseAdmin
-      .from('opvolging_taken').select('*').eq('status', 'open').lte('due', dag);
+    // Alleen de daglijst: de leadkaarten van 'Leads bellen' horen niet in
+    // Daves dashboard. Zie api/_lib/opvolging-lijst.js.
+    const { data: open, error: e1 } = await alleenDaglijst(supabaseAdmin
+      .from('opvolging_taken').select('*')).eq('status', 'open').lte('due', dag);
     if (e1) throw e1;
 
-    const { data: overig, error: e2 } = await supabaseAdmin
-      .from('opvolging_taken').select('*')
+    const { data: overig, error: e2 } = await alleenDaglijst(supabaseAdmin
+      .from('opvolging_taken').select('*'))
       .in('status', ['wacht_inplanning', 'ingepland', 'gearchiveerd']);
     if (e2) throw e2;
 
-    const { data: pog, error: e3 } = await supabaseAdmin
-      .from('opvolging_pogingen').select('*')
+    const { data: pog, error: e3 } = await pogingenAlleenDaglijst(supabaseAdmin
+      .from('opvolging_pogingen').select('*, ' + POGING_LIJST_EMBED))
       .gte('tijdstip', weekStart + 'T00:00:00Z');
     if (e3) throw e3;
 
@@ -129,9 +132,9 @@ export default async function handler(req, res) {
     const statuses = ['open', 'wacht_inplanning', 'ingepland', 'gearchiveerd'];
     const by_status_pairs = await Promise.all(statuses.map(async (st) => {
       try {
-        const { count, error } = await supabaseAdmin
+        const { count, error } = await alleenDaglijst(supabaseAdmin
           .from('opvolging_taken')
-          .select('id', { count: 'exact', head: true })
+          .select('id', { count: 'exact', head: true }))
           .eq('status', st);
         if (error) return [st, null];
         return [st, Number(count) || 0];

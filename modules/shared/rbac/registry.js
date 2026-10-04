@@ -124,13 +124,16 @@ const FEATURE_REGISTRY = [
   { moduleKey:'opvolging', moduleLabel:'Opvolging', moduleIcon:'ti-phone', features:[
     { key:'opvolging.module.access', label:'Module zichtbaar' },
     { key:'opvolging.dag.view', label:'Tab: Vandaag' },
+    { key:'opvolging.leads.view', label:'Tab: Leads bellen (proefleads minicursus / 7-daagse)' },
     { key:'opvolging.dashboard.view', label:'Tab: Dashboard' },
     { key:'opvolging.archief.view', label:'Tab: Afgerond' },
     { key:'opvolging.rapport.view', label:'Tab: Rapport' },
+    { key:'calls.rapport.view', label:'Tab: Call-rapport (alle closers en setters)' },
     { key:'opvolging.taak.afronden', label:'Taak afronden' },
     { key:'opvolging.taak.archiveren', label:'Taak archiveren' },
     { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },
     { key:'opvolging.whatsapp.sturen', label:'WhatsApp sturen' },
+    { key:'calls.closer', label:'Closer: dagrapportage-topbar (eigen calls beoordelen)' },
   ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },

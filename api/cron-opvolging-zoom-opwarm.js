@@ -199,6 +199,7 @@ async function leesKaarten() {
   const { data, error } = await supabaseAdmin
     .from('opvolging_taken')
     .select('id, status, due, notitie, badge_label, bron_ref, created_at')
+    .eq('lijst', 'dag')
     .eq('reden', REDEN)
     .order('created_at', { ascending: false })
     .limit(5000);

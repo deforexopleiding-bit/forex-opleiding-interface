@@ -80,7 +80,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Sequentieel: Bubble + Supabase niet overbelasten, leesbare logs.
+    // Sequentieel: LMS/Bubble + Supabase niet overbelasten, leesbare logs.
     const results = [];
     for (const mid of mentorUserIds) {
       try {
@@ -92,9 +92,12 @@ export default async function handler(req, res) {
         results.push(r);
       } catch (e) {
         console.error(`[mentor-payout-generate] mentor ${mid}: ${e?.message || e}`);
+        // Bestaand concept blijft ongemoeid (core gooit vóór elke schrijfactie
+        // als een coaching-bron onbereikbaar is). UI toont deze fout per mentor.
         results.push({
           mentor_user_id: mid,
           error         : e?.message || String(e),
+          code          : e?.code || null,
         });
       }
     }

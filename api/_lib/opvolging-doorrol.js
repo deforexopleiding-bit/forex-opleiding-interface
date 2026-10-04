@@ -250,3 +250,28 @@ export function beslisWachtVerplaatsing({ taak, aanmeldingen, nu = Date.now() })
   if (nu - gemeld >= WACHT_UREN * 3600 * 1000) return { actie: 'terug' };
   return { actie: 'wacht' };
 }
+
+/**
+ * De patch voor een kaart die na 48 uur zonder afspraak terugkomt.
+ *
+ * TWEE LIJSTEN, TWEE VORMEN. Een daglijstkaart krijgt reden 'niet_ingepland'
+ * en het etiket 'Agenda doorgestuurd' — ongewijzigd sinds fase 3a. Een
+ * leadkaart (lijst 'leads') houdt reden 'lead_bellen' (anders zou hij in Daves
+ * daglijst-logica als 'niet ingepland' gaan tellen) en krijgt reden_code
+ * 'inplantermijn_verlopen': daarmee staat hij in de eigen pot 'Termijn
+ * verlopen', apart van de volle pot Nieuw.
+ *
+ * @param {object} p
+ * @param {object} p.taak     { lijst, notitie }
+ * @param {string} p.vandaag  YYYY-MM-DD (Amsterdam)
+ * @param {string} p.regel    de notitieregel die bovenaan komt
+ */
+export function terugNaWachtPatch({ taak, vandaag, regel }) {
+  const oud = String((taak && taak.notitie) || '').trim();
+  const notitie = oud ? `${regel}\n\n${oud}` : regel;
+  const basis = { status: 'open', due: vandaag, later: false, notitie };
+  if (String((taak && taak.lijst) || 'dag') === 'leads') {
+    return { ...basis, reden_code: 'inplantermijn_verlopen', badge_label: 'Inplantermijn verlopen' };
+  }
+  return { ...basis, reden: 'niet_ingepland', badge_label: 'Agenda doorgestuurd' };
+}

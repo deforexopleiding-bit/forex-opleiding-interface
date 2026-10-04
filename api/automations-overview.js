@@ -58,7 +58,7 @@ export default async function handler(req, res) {
     belronde,
     onderhoud,
   ] = await Promise.all([
-    safeCount('opvolging_taken',           (q) => q.in('status', ['open', 'wacht_inplanning', 'ingepland'])),
+    safeCount('opvolging_taken',           (q) => q.eq('lijst', 'dag').in('status', ['open', 'wacht_inplanning', 'ingepland'])),
     safeCount('event_automation_runs',     (q) => q.eq('status', 'active')),
     safeCount('onboarding_automation_runs',(q) => q.eq('status', 'active')),
     safeCount('lisa_followups',            (q) => q.eq('status', 'scheduled')),

@@ -65,6 +65,7 @@ import {
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
   ARCHIEF_MIN_DAGEN, ARCHIEF_MIN_WA,
 } from './_lib/opvolging-vensters.js';
+import { alleenDaglijst, pogingenAlleenDaglijst, POGING_LIJST_EMBED } from './_lib/opvolging-lijst.js';
 
 const ZONE     = 'Europe/Amsterdam';
 const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -191,9 +192,12 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ── De pogingen in de periode ────────────────────────────────────────────
   // Dit is de enige bron die per definitie een gebeurtenis is: elke rij heeft
   // een tijdstip en wordt nooit overschreven.
-  const { data: pogRuw, error: e1 } = await supabaseAdmin
+  // Alleen pogingen op daglijstkaarten. De leadkaarten van 'Leads bellen'
+  // hebben hun eigen dagstrip; in dit rapport zouden ze de dekking van Daves
+  // daglijst vertekenen. Zie api/_lib/opvolging-lijst.js.
+  const { data: pogRuw, error: e1 } = await pogingenAlleenDaglijst(supabaseAdmin
     .from('opvolging_pogingen')
-    .select('id, taak_id, soort, tijdstip, resultaat, richting, duur_sec, automatisch')
+    .select('id, taak_id, soort, tijdstip, resultaat, richting, duur_sec, automatisch, ' + POGING_LIJST_EMBED))
     .gte('tijdstip', vanIso).lt('tijdstip', totIso)
     .order('tijdstip', { ascending: true });
   if (e1) throw e1;
@@ -201,9 +205,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
 
   // ── De kaarten die in de periode dicht gingen ────────────────────────────
   // gearchiveerd_at is een echt moment en wordt op alle archiveerpaden gezet.
-  const { data: archRuw, error: e2 } = await supabaseAdmin
+  const { data: archRuw, error: e2 } = await alleenDaglijst(supabaseAdmin
     .from('opvolging_taken')
-    .select('id, naam, telefoon, reden, reden_code, archief_reden, gearchiveerd_at, created_at')
+    .select('id, naam, telefoon, reden, reden_code, archief_reden, gearchiveerd_at, created_at'))
     .eq('status', 'gearchiveerd')
     .gte('gearchiveerd_at', vanIso).lt('gearchiveerd_at', totIso)
     .order('gearchiveerd_at', { ascending: true });
@@ -247,9 +251,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   for (const a of gearchiveerd) taakIds.add(a.id);
 
   const { data: taakRuw, error: e4 } = taakIds.size
-    ? await supabaseAdmin
+    ? await alleenDaglijst(supabaseAdmin
         .from('opvolging_taken')
-        .select('id, naam, telefoon, reden, reden_code, status, due, archief_reden, gearchiveerd_at')
+        .select('id, naam, telefoon, reden, reden_code, status, due, archief_reden, gearchiveerd_at'))
         .in('id', [...taakIds])
     : { data: [], error: null };
   if (e4) throw e4;
@@ -272,9 +276,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   let telefoonTaken = [];
   let telefoonAfgekapt = false;
   if (afspraken.length) {
-    const { data, error: e4b } = await supabaseAdmin
+    const { data, error: e4b } = await alleenDaglijst(supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, telefoon')
+      .select('id, naam, telefoon'))
       .not('telefoon', 'is', null)
       .limit(TAKEN_LIMIET);
     if (e4b) throw e4b;
@@ -351,9 +355,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // de bug die dit blok moet oplossen.
   let bevestigdTaken = [];
   {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await alleenDaglijst(supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, status, due, bevestigd_op, bevestigd_notitie, archief_reden, gearchiveerd_at')
+      .select('id, naam, status, due, bevestigd_op, bevestigd_notitie, archief_reden, gearchiveerd_at'))
       .gte('bevestigd_op', vanIso).lt('bevestigd_op', totIso);
     if (error) {
       blindeVlekken.push({
@@ -665,9 +669,9 @@ async function bouwDekking({ pogingen, taakVan, dagen, vandaag, blindeVlekken })
   let openstaand = null;
 
   if (alleenVandaag) {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await alleenDaglijst(supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, reden, due, later')
+      .select('id, naam, reden, due, later'))
       .eq('status', 'open').lte('due', vandaag);
     if (error) throw error;
     openstaand = (data || []).map((t) => {

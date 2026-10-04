@@ -5,21 +5,30 @@
 // Retourneert Romy's overzicht met de 4 getallen:
 //   - uitbetaald_totaal       — sum(amount) WHERE status='uitbetaald'
 //   - deze_maand_te_ontvangen — sum(amount) WHERE status='vrijgegeven'
-//   - forecast_nog_te_verwachten — (subs.amount * term_count - reeds_betaald) * pct
-//                                  over ACTIEVE subscriptions van setter-deals
-//   - vervallen_door_annulering — idem over CANCELLED subscriptions
-// Plus regels-lijst (per klant/deal).
+//   - forecast_nog_te_verwachten — (deal.total_amount − ontvangen) × pct over
+//                                  GEACCEPTEERDE sales (incl. BTW)
+//   - vervallen_door_annulering — idem, deals waarvan alle abonnementen zijn
+//                                  geannuleerd
+//   (+ in_afwachting_offerte — idem, offerte nog niet geaccepteerd)
+// Plus ledger-regels en de saleslijst met per sale het betaalplan
+// (_lib/setter-sale-plan.js) voor het detail.
 //
 // Gate:
 //   - setter.ledger.view — setter zelf ziet eigen data.
 //   - setter.ledger.admin — manager+ mag andere setters bekijken.
 //
 // INCASSO-VEILIG: leest UITSLUITEND setter_ledger_entries + setter_config
-// + deals + subscriptions + payments + invoices. Schrijft NIETS.
+// + deals + traject_variants + subscriptions + invoices + customers.
+// Schrijft NIETS.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { parseSetterPeriod } from './_lib/setter-period.js';
+import { betaaldBedrag } from './_lib/factuur-betaald.js';
+import { isUitgeslotenDeal, bouwSaleRegel, klantNaam, SETTER_DEAL_COLS } from './_lib/setter-sale-plan.js';
+import { laadCommissieData, koppelFacturenAanDeals } from './_lib/setter-commissie-core.js';
+
+const BRON_LABEL = { deal: 'factuur', abonnement: 'termijn (abonnement)', reserveringsfee: 'reserveringsfee' };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -53,10 +62,13 @@ export default async function handler(req, res) {
     // ── Setter-config voor pct ────────────────────────────────────────────
     const { data: cfg } = await supabaseAdmin
       .from('setter_config')
-      .select('user_id, pct, is_active')
+      .select('user_id, pct, is_active, effective_from')
       .eq('user_id', targetSetter)
       .maybeSingle();
     const pct = cfg?.pct ? Number(cfg.pct) : 0;
+    const config = cfg
+      ? { pct, is_active: !!cfg.is_active, effective_from: cfg.effective_from || null }
+      : null;
 
     // ── Ledger totals + regels ────────────────────────────────────────────
     // Ledger-entries in de periode (bepaalt uitbetaald/vrijgegeven totalen
@@ -79,69 +91,82 @@ export default async function handler(req, res) {
       else if (r.status === 'vrijgegeven') vrijgegeven += a;
     }
 
-    // ── Forecast + vervallen + sales-lijst — via deals + subs + invs ─────
+    // ── Sales + forecast + vervallen — via deals (incl. BTW) ─────────────
     // Deals worden NIET begrensd door de periode: forecast is vooruitkijkend
     // en de sales-lijst laat álle geattribueerde deals zien zodat een sale
     // ook direct zichtbaar is vóór de eerste betaling.
-    const { data: deals } = await supabaseAdmin
+    //
+    // Bedrag = deals.total_amount (INCL. BTW — deal_line_items hebben
+    // price_includes_vat=true). Vroeger: Σ facturen óf Σ abonnement×termijnen
+    // (EXCL. BTW) → een sale zonder abonnement (offerte geaccepteerd, wizard
+    // nog niet gedraaid) stond op € 0. Gearchiveerde deals en afgewezen
+    // offertes vallen eruit (isUitgeslotenDeal).
+    const { data: dealsRaw, error: dealsErr } = await supabaseAdmin
       .from('deals')
-      .select('id, customer_id, status, quote_reference, created_at')
+      .select(SETTER_DEAL_COLS)
       .eq('setter_user_id', targetSetter)
       .order('created_at', { ascending: false });
-    const dealIds = (deals || []).map((d) => d.id);
-    let forecast = 0;
-    let vervallen = 0;
-    let subsByDeal = new Map();
-    let invsByDeal = new Map();
-    let paidByDeal = {};
-    let totalByDeal = {};
+    if (dealsErr) throw new Error('deals: ' + dealsErr.message);
+    const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d));
+    const dealIds = deals.map((d) => d.id);
+
+    const ontvangenByDeal = {};
+    const ontvangenRegelsByDeal = {};
+    const subsByDeal = new Map();
+    const trajectNaam = {};
     if (dealIds.length) {
-      const { data: subs } = await supabaseAdmin
-        .from('subscriptions')
-        .select('id, deal_id, amount, term_count, status')
-        .in('deal_id', dealIds);
-      // Reeds-betaald + verwacht totaal per deal via invoices.
-      const { data: invs } = await supabaseAdmin
-        .from('invoices')
-        .select('id, deal_id, amount_paid, amount_total, status')
-        .in('deal_id', dealIds);
-      for (const i of (invs || [])) {
-        const d = i.deal_id;
-        if (!d) continue;
-        paidByDeal[d]  = (paidByDeal[d]  || 0) + (Number(i.amount_paid)  || 0);
-        totalByDeal[d] = (totalByDeal[d] || 0) + (Number(i.amount_total) || 0);
-        if (!invsByDeal.has(d)) invsByDeal.set(d, []);
-        invsByDeal.get(d).push(i);
-      }
-      for (const s of (subs || [])) {
+      const variantIds = [...new Set(deals.map((d) => d.traject_variant_id).filter(Boolean))];
+      // Ontvangen per deal via dezelfde factuurkoppeling als de commissie
+      // (deal_id ÓF abonnement ÓF reserveringsfee-factuur), credit-veilig
+      // via betaaldBedrag (een volledig gecrediteerde factuur telt als 0).
+      const [commData, tvRes] = await Promise.all([
+        laadCommissieData(supabaseAdmin, { setterIds: [targetSetter] }),
+        variantIds.length
+          ? supabaseAdmin.from('traject_variants').select('id, name').in('id', variantIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+      for (const s of commData.subs) {
         if (!subsByDeal.has(s.deal_id)) subsByDeal.set(s.deal_id, []);
         subsByDeal.get(s.deal_id).push(s);
       }
-      const CANCELLED = new Set(['cancelled', 'deactivated', 'geannuleerd']);
-      for (const s of (subs || [])) {
-        const totaalVerwacht = (Number(s.amount) || 0) * (Number(s.term_count) || 0);
-        const alBetaald = paidByDeal[s.deal_id] || 0;
-        const resterend = Math.max(0, totaalVerwacht - alBetaald);
-        const commissie = round2(resterend * pct / 100);
-        if (CANCELLED.has(String(s.status || '').toLowerCase())) {
-          vervallen += commissie;
-        } else {
-          forecast += commissie;
-        }
+      const koppeling = koppelFacturenAanDeals(commData);
+      for (const inv of commData.invoices) {
+        const k = koppeling.get(inv.id);
+        if (!k) continue;
+        const ontvangen = round2(betaaldBedrag(inv));
+        const did = k.deal.id;
+        ontvangenByDeal[did] = (ontvangenByDeal[did] || 0) + ontvangen;
+        (ontvangenRegelsByDeal[did] ||= []).push({
+          invoice_id:    inv.id,
+          factuurnummer: inv.invoice_number || null,
+          soort:         BRON_LABEL[k.bron] || k.bron,
+          factuurdatum:  inv.issue_date || null,
+          betaald_op:    inv.paid_date || null,
+          totaal:        round2(inv.amount_total),
+          gecrediteerd:  round2(inv.credited_amount),
+          ontvangen,
+          commissie:     round2(ontvangen * pct / 100),
+          status:        inv.status || null,
+        });
       }
+      for (const lijst of Object.values(ontvangenRegelsByDeal)) {
+        lijst.sort((a, b) => String(a.factuurdatum || '').localeCompare(String(b.factuurdatum || '')));
+      }
+      for (const t of (tvRes.data || [])) trajectNaam[t.id] = t.name || null;
     }
 
-    // ── Regels-lijst: ledger-entries in de periode met labels ────────────
+    // ── Labels voor ledger-regels + sales ────────────────────────────────
     const dealIdSet = [...new Set([
       ...rows.map((r) => r.deal_id).filter(Boolean),
-      ...(deals || []).map((d) => d.id),        // ook alle setter-deals voor sales-lijst
+      ...dealIds,
     ])];
     const custIdSet = [...new Set([
       ...rows.map((r) => r.customer_id).filter(Boolean),
-      ...(deals || []).map((d) => d.customer_id).filter(Boolean),
+      ...deals.map((d) => d.customer_id).filter(Boolean),
     ])];
     let dealLabels = {};
     let custLabels = {};
+    let custRows = {};
     if (dealIdSet.length) {
       const { data: d } = await supabaseAdmin.from('deals').select('id, quote_reference').in('id', dealIdSet);
       for (const x of (d || [])) dealLabels[x.id] = x.quote_reference || null;
@@ -150,9 +175,8 @@ export default async function handler(req, res) {
       const { data: c } = await supabaseAdmin
         .from('customers').select('id, first_name, last_name, company_name, is_company').in('id', custIdSet);
       for (const x of (c || [])) {
-        custLabels[x.id] = x.is_company
-          ? (x.company_name || '—')
-          : [x.first_name, x.last_name].filter(Boolean).join(' ') || '—';
+        custRows[x.id] = x;
+        custLabels[x.id] = klantNaam(x);
       }
     }
     const regels = rows.slice(0, 100).map((r) => ({
@@ -168,46 +192,45 @@ export default async function handler(req, res) {
       paid_at:    r.paid_at,
     }));
 
-    // ── Sales-lijst (BP3 v4-extra) — per deal: klant, bedrag, betaal-status,
-    //    verwachte commissie. Toont geattribueerde sales ook vóór betaling.
-    //    Bedrag = som(invoices.amount_total) ∪ (sub.amount * term_count) als
-    //    er nog geen facturen zijn (nieuwe sale — abonnement wel gestempeld).
-    //    Betaal-status: 'geen' / 'gedeeltelijk' / 'volledig' (op factuur-basis).
-    const sales = (deals || []).map((d) => {
-      const invs = invsByDeal.get(d.id) || [];
-      const subsForDeal = subsByDeal.get(d.id) || [];
-      const invTotal = totalByDeal[d.id] || 0;
-      const subTotal = subsForDeal.reduce(
-        (s, sub) => s + (Number(sub.amount) || 0) * (Number(sub.term_count) || 0), 0
-      );
-      const bedrag = invTotal > 0 ? invTotal : subTotal;
-      const betaald = paidByDeal[d.id] || 0;
-      let betaalStatus = 'geen';
-      if (betaald > 0 && betaald + 0.01 < bedrag) betaalStatus = 'gedeeltelijk';
-      else if (betaald > 0 && betaald + 0.01 >= bedrag) betaalStatus = 'volledig';
-      const verwachteCommissie = round2(bedrag * pct / 100);
-      return {
-        deal_id:      d.id,
-        deal_ref:     dealLabels[d.id] || null,
-        customer:     d.customer_id ? (custLabels[d.customer_id] || null) : null,
-        bedrag:       round2(bedrag),
-        betaald:      round2(betaald),
-        betaal_status: betaalStatus,           // 'geen' | 'gedeeltelijk' | 'volledig'
-        verwachte_commissie: verwachteCommissie,
-        deal_status:  d.status || null,
-        created_at:   d.created_at,
-      };
-    });
+    // ── Sales-lijst — per deal: plan (aanbetaling/fee/termijnen), offerte-
+    //    status, ontvangen, verwachte commissie. Het detail (klik op een rij)
+    //    rendert uit sale.plan; ontvangen_regels vult fase B (facturen).
+    const sales = deals.map((d) => bouwSaleRegel({
+      deal: d,
+      klant: d.customer_id ? custRows[d.customer_id] : null,
+      traject: d.traject_variant_id ? (trajectNaam[d.traject_variant_id] || null) : null,
+      pct,
+      ontvangen: ontvangenByDeal[d.id] || 0,
+      ontvangenRegels: ontvangenRegelsByDeal[d.id] || [],
+    }));
+
+    // ── Forecast / vervallen / in afwachting ─────────────────────────────
+    //   forecast  = geaccepteerde sales: (totaal − ontvangen) × pct
+    //   vervallen = idem, maar alle abonnementen van de deal zijn geannuleerd
+    //   in_afwachting = offerte nog niet geaccepteerd (bv. alleen 'verstuurd')
+    const CANCELLED = new Set(['cancelled', 'deactivated', 'geannuleerd']);
+    let forecast = 0;
+    let vervallen = 0;
+    let inAfwachting = 0;
+    for (const s of sales) {
+      const rest = round2(Math.max(0, s.bedrag - s.betaald) * pct / 100);
+      if (s.in_afwachting) { inAfwachting += rest; continue; }
+      const subs = subsByDeal.get(s.deal_id) || [];
+      const alleGeannuleerd = subs.length > 0 && subs.every((x) => CANCELLED.has(String(x.status || '').toLowerCase()));
+      if (alleGeannuleerd) vervallen += rest; else forecast += rest;
+    }
 
     return res.status(200).json({
       setter_user_id: targetSetter,
       pct,
+      config,
       period: { key: period.key, from: period.from, to: period.to },
       totals: {
         uitbetaald_totaal:            round2(uitbetaald),
         deze_maand_te_ontvangen:      round2(vrijgegeven),
         forecast_nog_te_verwachten:   round2(forecast),
         vervallen_door_annulering:    round2(vervallen),
+        in_afwachting_offerte:        round2(inAfwachting),
       },
       regels,
       sales,

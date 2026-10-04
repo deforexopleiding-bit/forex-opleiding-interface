@@ -31,10 +31,11 @@ import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
   beoordeelPrintweergave, controleerBrug, controleerDagritme,
-  controleerOpwarmronde, OPWARM_REDEN,
+  controleerOpwarmronde, controleerLeadsWacht, OPWARM_REDEN,
   bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 import { MAX_ACHTERSTAND_PER_DAG, dagInZone as opwarmDag } from './_lib/opvolging-zoom-opwarm.js';
+import { alleenDaglijst, alleenLeadlijst } from './_lib/opvolging-lijst.js';
 
 const ZONE = 'Europe/Amsterdam';
 const MAIL_VAN = 'leads@deforexopleiding.nl';
@@ -59,9 +60,9 @@ export default async function handler(req, res) {
 
   // ── 1 · Instroom ─────────────────────────────────────────────────────────
   try {
-    const { data: taken, error } = await supabaseAdmin
+    const { data: taken, error } = await alleenDaglijst(supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, due, created_at, opvolging_pogingen(id)')
+      .select('id, naam, due, created_at, opvolging_pogingen(id)'))
       .eq('status', 'open').eq('bron', 'event').eq('reden', 'aanmelding');
     if (error) throw error;
     const zonderPoging = (taken || [])
@@ -113,6 +114,9 @@ export default async function handler(req, res) {
   // niet cosmetisch is: een open opwarmkaart blokkeert de nabelkaart van 12:00.
   uitkomsten.push(await meetOpwarmronde(vandaag));
 
+  // ── 8 · Leads bellen: niets blijft hangen op wacht op inplanning ─────────
+  uitkomsten.push(await meetLeadsWacht());
+
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });
   const ontvanger = process.env.OPVOLGING_GEZONDHEID_MAIL_TO || '';
@@ -145,15 +149,33 @@ const kort = (e) => String(e?.message || e).slice(0, 200);
  */
 async function meetDagritme(vandaag) {
   try {
+    // Beide lijsten: de doorrol rolt ook leadkaarten door, dus een leadkaart
+    // die blijft hangen is evengoed een gat in het dagritme. De controle telt
+    // ze apart — zie controleerDagritme.
     const { data, error } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('due')
+      .select('due, lijst')
       .eq('status', 'open')
       .limit(5000);
     if (error) throw new Error(error.message);
     return controleerDagritme({ taken: data || [], vandaag, leesfout: null });
   } catch (e) {
     return controleerDagritme({ taken: [], vandaag, leesfout: kort(e) });
+  }
+}
+
+/** De wachtende leadkaarten. Een leesfout is FOUT, geen nul. */
+async function meetLeadsWacht() {
+  try {
+    const { data, error } = await alleenLeadlijst(supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, status, agenda_doorgestuurd_at'))
+      .eq('status', 'wacht_inplanning')
+      .limit(2000);
+    if (error) throw new Error(error.message);
+    return controleerLeadsWacht({ taken: data || [], nuMs: Date.now(), leesfout: null });
+  } catch (e) {
+    return controleerLeadsWacht({ taken: [], leesfout: kort(e) });
   }
 }
 
@@ -184,11 +206,17 @@ async function meetOpwarmronde(vandaag) {
       .limit(1000);
     if (aErr) throw new Error('afspraken: ' + aErr.message);
 
-    const { data: taken, error: tErr } = await supabaseAdmin
+    // De lijst wordt meegelezen en hieronder gefilterd: alleen daglijstkaarten
+    // dekken een afspraak. Een open leadkaart (Leads bellen) met hetzelfde
+    // nummer zou anders als 'lead staat al in de lijst' tellen en een
+    // ontbrekende opwarmkaart verbergen — die zoekt de opwarm-cron namelijk
+    // alleen op de daglijst.
+    const { data: takenRuw, error: tErr } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('id, status, due, reden, telefoon, bron_ref, created_at')
+      .select('id, status, due, reden, telefoon, bron_ref, created_at, lijst')
       .limit(5000);
     if (tErr) throw new Error('taken: ' + tErr.message);
+    const taken = (takenRuw || []).filter((t) => String(t.lijst || 'dag') === 'dag');
 
     const afspraken = (appts || [])
       .filter((a) => a && a.is_test !== true && String(a.lead_phone || '').trim())

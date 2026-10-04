@@ -30,6 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { alleenDaglijst, pogingenAlleenDaglijst, POGING_LIJST_EMBED } from './_lib/opvolging-lijst.js';
 
 const DAG = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -87,9 +88,9 @@ export default async function handler(req, res) {
     // waren er tien te zien. De rest was niet weg, alleen onbereikbaar.
     if (view === 'later') {
       const na = DAG.test(q.na || '') ? q.na : dagPlus(vandaag, 6);
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await alleenDaglijst(supabaseAdmin
         .from('opvolging_taken')
-        .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref')
+        .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref'))
         .eq('status', 'open')
         .gt('due', na)
         .order('due', { ascending: true })
@@ -119,9 +120,11 @@ export default async function handler(req, res) {
       // Een halve dag speling aan weerskanten, want de kolom is timestamptz en
       // wij knippen op de Amsterdamse kalenderdag. Het echte filter staat
       // hieronder op dagVan(); dit begrenst alleen wat we ophalen.
-      const { data: pog, error: pogErr } = await supabaseAdmin
+      // Alleen pogingen op daglijstkaarten; die van 'Leads bellen' hebben een
+      // eigen dagstrip in die tab.
+      const { data: pog, error: pogErr } = await pogingenAlleenDaglijst(supabaseAdmin
         .from('opvolging_pogingen')
-        .select('id,taak_id,soort,tijdstip,resultaat,automatisch,duur_sec')
+        .select('id,taak_id,soort,tijdstip,resultaat,automatisch,duur_sec,' + POGING_LIJST_EMBED))
         .gte('tijdstip', dagPlus(dag, -1) + 'T00:00:00Z')
         .lt('tijdstip', dagPlus(dag, 2) + 'T00:00:00Z')
         .order('tijdstip', { ascending: true });
@@ -131,9 +134,9 @@ export default async function handler(req, res) {
       const ids = [...new Set(opDag.map((p) => p.taak_id))];
       let taken = [];
       if (ids.length) {
-        const { data: tk, error: tkErr } = await supabaseAdmin
+        const { data: tk, error: tkErr } = await alleenDaglijst(supabaseAdmin
           .from('opvolging_taken')
-          .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref,status')
+          .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref,status'))
           .in('id', ids);
         if (tkErr) throw tkErr;
         taken = tk || [];
@@ -162,15 +165,15 @@ export default async function handler(req, res) {
 
     // Alle open taken t/m het einde van de balk. Het verleden zit erbij omdat
     // vandaag alles met due <= vandaag toont — die taken tellen dus mee.
-    const { data: open, error: openErr } = await supabaseAdmin
-      .from('opvolging_taken').select('id,due')
+    const { data: open, error: openErr } = await alleenDaglijst(supabaseAdmin
+      .from('opvolging_taken').select('id,due'))
       .eq('status', 'open').lte('due', tot);
     if (openErr) throw openErr;
 
     // De acties binnen het venster van de balk, ruim opgehaald en daarna op de
     // Amsterdamse dag gefilterd.
-    const { data: pog, error: pogErr } = await supabaseAdmin
-      .from('opvolging_pogingen').select('id,tijdstip')
+    const { data: pog, error: pogErr } = await pogingenAlleenDaglijst(supabaseAdmin
+      .from('opvolging_pogingen').select('id,tijdstip,' + POGING_LIJST_EMBED))
       .gte('tijdstip', dagPlus(van, -1) + 'T00:00:00Z')
       .lt('tijdstip', dagPlus(tot, 2) + 'T00:00:00Z');
     if (pogErr) throw pogErr;
@@ -203,8 +206,8 @@ export default async function handler(req, res) {
     }
 
     // En wat er ná de balk ligt: het getal onder de knop 'Later'.
-    const { count: laterCount, error: laterErr } = await supabaseAdmin
-      .from('opvolging_taken').select('id', { count: 'exact', head: true })
+    const { count: laterCount, error: laterErr } = await alleenDaglijst(supabaseAdmin
+      .from('opvolging_taken').select('id', { count: 'exact', head: true }))
       .eq('status', 'open').gt('due', tot);
     if (laterErr) throw laterErr;
 

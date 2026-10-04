@@ -108,7 +108,11 @@ export default async function handler(req, res) {
       let q = supabaseAdmin
         .from('follow_up_appointments')
         .select('booking_source, scheduled_at, created_at')
-        .not('booking_source', 'is', null);
+        .not('booking_source', 'is', null)
+        // Alleen de oorspronkelijke boeking. Verzette opvolgers erven sinds
+        // 1 okt 2026 de bron (api/_lib/setter-keten.js) en zouden anders een
+        // tweede keer meetellen.
+        .is('parent_appointment_id', null);
       if (grens) q = q.gte('created_at', grens);
       const { data: r, error: e2 } = await q.limit(50000);
       if (e2) {

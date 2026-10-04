@@ -302,12 +302,10 @@ function initImpersonationBanner() {
   const bar = document.createElement('div');
   bar.id = 'kv-impersonation-banner';
   bar.setAttribute('role', 'status');
+  // Geen eigen position:fixed meer: de balk staat in de gedeelde bannerstapel
+  // (banner-stapel.js), samen met de closer-topbar. Die stapel is vast en zet
+  // de bovenmarge van .app voor allebei.
   bar.style.cssText = [
-    'position:fixed',
-    'top:0',
-    'left:0',
-    'right:0',
-    'z-index:99999',
     'background:#dc2626',
     'color:#fff',
     'padding:10px 18px',
@@ -332,27 +330,37 @@ function initImpersonationBanner() {
       '&larr; Stop impersonatie' +
     '</button>';
 
-  document.body.insertBefore(bar, document.body.firstChild);
-
-  // Shift de shell zodat sidebar+main niet onder de banner verdwijnen.
-  // .app is `display:flex; height:100vh` — dus banner-height afhalen van hoogte
-  // én margin-top erbij. ResizeObserver zorgt dat re-flow (font-load, mobiel)
-  // de shift bijwerkt.
-  const shell = document.querySelector('.app');
-  const applyShift = () => {
+  // De shell-verschuiving (.app marginTop + height) doet de bannerstapel, voor
+  // alle balken samen. Twee balken die elk zelf marginTop zetten overschrijven
+  // elkaar — dan schuift de ene over de shell heen. Volgorde 0 = bovenaan.
+  if (window.KVBannerStapel) {
+    window.KVBannerStapel.plaats(bar, 0);
+  } else {
+    // Stapel niet geladen (oude cache): oude gedrag, alleen deze balk.
+    bar.style.position = 'fixed'; bar.style.top = '0'; bar.style.left = '0';
+    bar.style.right = '0'; bar.style.zIndex = '99999';
+    document.body.insertBefore(bar, document.body.firstChild);
+    const shell = document.querySelector('.app');
     const h = bar.offsetHeight || 42;
-    if (shell) {
-      shell.style.marginTop = h + 'px';
-      shell.style.height    = 'calc(100vh - ' + h + 'px)';
-    }
-  };
-  applyShift();
-  if (typeof ResizeObserver !== 'undefined') {
-    try { new ResizeObserver(applyShift).observe(bar); } catch (_) {}
+    if (shell) { shell.style.marginTop = h + 'px'; shell.style.height = 'calc(100vh - ' + h + 'px)'; }
   }
 
   const btn = document.getElementById('kv-impersonation-stop');
   if (btn) btn.addEventListener('click', stopImpersonationV2);
+}
+
+// ── Closer-topbar ───────────────────────────────────────────────────────────
+// De logica staat in closer-topbar.js (window.KVCloserTopbar); hier alleen de
+// poort: wie het recht calls.closer niet heeft, vraagt niets op.
+async function startCloserTopbar(profile) {
+  try {
+    if (!window.KVCloserTopbar || !profile || !profile.id) return;
+    if (!window.RBAC || typeof window.RBAC.can !== 'function') return;
+    if (!(await window.RBAC.can('calls.closer'))) return;
+    window.KVCloserTopbar.start({ haal: (url) => authedFetch(url), userId: profile.id });
+  } catch (e) {
+    console.warn('[klanten-v2] closer-topbar init failed:', e && e.message);
+  }
 }
 
 async function stopImpersonationV2() {
@@ -1272,6 +1280,12 @@ function wireTopbarActionsToShell() {
   //    'impersonation_state' aanwezig is; anders no-op. Herstelt bij klik
   //    de origin-sessie via AuthShared.setSession en herlaadt naar v2.
   try { initImpersonationBanner(); } catch (e) { console.warn('[klanten-v2] impersonation banner init failed:', e?.message); }
+
+  // 8) Closer-topbar ("Maak je dagrapportage in orde — X/Y beoordeeld").
+  //    Alleen met het recht calls.closer; of er ook afspraken zijn beslist het
+  //    endpoint (heeft_afspraken). Zie closer-topbar.js. Niet awaited: de boot
+  //    wacht hier niet op, en een fout raakt de rest van de shell niet.
+  startCloserTopbar(profile);
 })().catch((e) => {
   console.error('[klanten-v2] boot fatal:', e);
   const view = document.getElementById('content') || document.getElementById('kv-view');

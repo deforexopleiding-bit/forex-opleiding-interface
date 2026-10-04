@@ -295,16 +295,31 @@ export function normaliseerNlBe(raw, { land = null } = {}) {
   const nationaal = s.slice(1);
   if (nationaal.startsWith('0')) return twijfel('dubbele 0 zonder landcode');
 
-  // 4 · Landveld van de bron gaat voor.
+  // 4 · EENDUIDIGE NUMMERS WINNEN VAN HET LANDVELD (2 okt, akkoord Maxim).
+  //     Een formulier staat vaak standaard op NL; een Vlaamse lead tikt dan
+  //     zijn gsm in zonder het land te wijzigen. Gemeten: Maxims testboeking
+  //     via /agenda/planning kwam binnen als +31472223752 i.p.v. +32472223752.
+  //     Twee vormen zeggen zelf welk land het is, en die winnen:
+  //       0 + 45x-49x + 10 cijfers → Belgisch gsm  → +32
+  //       06 + 10 cijfers          → Nederlands gsm → +31
+  //     Een NL-vastnummer in 045-049 (Heerlen, Roermond, …) wordt daardoor
+  //     ook mét landveld NL als Belgisch gelezen — dezelfde afweging als in
+  //     stap 5 hieronder, nu consequent. Tweeling van dfo-website PR #88.
+  if (nationaal.length === 9 && /^4[5-9]/.test(nationaal)) return klaar('32', nationaal, false, '045-049 + 10 cijfers → Belgisch gsm (wint van landveld)');
+  if (nationaal.length === 9 && nationaal.startsWith('6'))  return klaar('31', nationaal, false, '06 → Nederlands gsm (wint van landveld)');
+
+  // 5 · Niet eenduidig (vast nummer, andere lengte): het landveld beslist.
   const code = _landcode(land);
   if (code) {
-    if (_geldigVoorLand(code, nationaal)) return klaar(code, nationaal, true, 'landveld ' + code);
+    // Een Belgisch nummer van 9 cijfers bestaat alleen als gsm (4x); een
+    // andere 9-cijferige reeks met landveld BE is geen nummer — rauw laten.
+    if (_geldigVoorLand(code, nationaal) && (code === '31' || _beVorm(nationaal))) {
+      return klaar(code, nationaal, true, 'landveld ' + code);
+    }
     return twijfel('landveld +' + code + ' maar fout aantal cijfers');
   }
 
-  // 5 · De regel voor een lokaal 0-nummer.
-  if (nationaal.length === 9 && /^4[5-9]/.test(nationaal)) return klaar('32', nationaal, false, '045-049 + 10 cijfers → Belgisch gsm');
-  if (nationaal.length === 9 && nationaal.startsWith('6'))  return klaar('31', nationaal, false, '06 → Nederlands gsm');
+  // 6 · Zonder landveld: de regel voor een lokaal vast 0-nummer.
   if (nationaal.length === 9) return klaar('31', nationaal, false, '0 + 9 cijfers → Nederlands vast');
   if (nationaal.length === 8) return klaar('32', nationaal, false, '0 + 8 cijfers → Belgisch vast');
   return twijfel('fout aantal cijfers voor NL/BE');

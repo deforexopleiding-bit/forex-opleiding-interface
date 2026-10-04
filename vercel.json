@@ -175,6 +175,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/generate-setter-reports",
+      "schedule": "30 6 * * *"
+    },
+    {
       "path": "/api/cron/archive-completed-onboardings",
       "schedule": "30 3 * * *"
     },

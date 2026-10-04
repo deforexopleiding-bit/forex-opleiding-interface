@@ -1,7 +1,9 @@
 // api/mentor-coaching-debug.js
 //
 // Diagnostic — toont de 1-op-1 sessie-telling voor (mentor, maand) zoals de
-// payout-generate-core die ziet. Helpt te bepalen waarom het maandtotaal van
+// payout-generate-core die ziet. Het blok `lms` bevat de bronnen + tellers van
+// api/_lib/coaching-earnings.js (LMS + Bubble vóór oktober 2026) — dat is
+// wat het rapport rekent. De rest is de oudere Bubble-diagnose. Helpt te bepalen waarom het maandtotaal van
 // een mentor afwijkt: laat keys + datums + booleans zien zonder PII.
 //
 // Permission: mentor.payout.manage (super_admin / admin / manager).
@@ -18,6 +20,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bubbleList } from './_lib/bubble.js';
+import { computeCoachingEarnings } from './_lib/coaching-earnings.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
@@ -115,6 +118,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'period_month moet YYYY-MM zijn' });
   }
 
+  let lms = null;
   try {
     // Resolve bubble_user_id.
     const { data: tm, error: tmErr } = await supabaseAdmin
@@ -125,6 +129,33 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
     const seppeBubbleId = tm?.bubble_user_id || null;
+
+    // ── lms — exact wat het rapport rekent (zelfde helper) ─────────────────
+    // Toont per bron waar elk getal vandaan komt. Een bronfout komt hier als
+    // { error, code } in beeld i.p.v. de hele debug te laten falen.
+    try {
+      const r = await computeCoachingEarnings({
+        bubbleUserId: seppeBubbleId,
+        mentorUserId,
+        from: period.from,
+        to  : period.to,
+      });
+      const m = r._meta || {};
+      lms = {
+        bronnen                           : m.bronnen,
+        venster                           : m.venster,
+        lms_sessies_gelezen               : m.lms_sessies_gelezen,
+        lms_zelfde_moment                 : m.lms_zelfde_moment,
+        lms_zonder_student                : m.lms_zonder_student,
+        lms_teamtraining                  : m.lms_teamtraining,
+        bubble_overgeslagen_dubbel_met_lms: m.bubble_overgeslagen_dubbel_met_lms,
+        breakdown                         : r.breakdown,
+        grand_total                       : r.grand_total,
+      };
+    } catch (e) {
+      lms = { error: e?.message || String(e), code: e?.code || null };
+    }
+
     if (!seppeBubbleId) {
       return res.status(200).json({
         ok                    : true,
@@ -134,6 +165,7 @@ export default async function handler(req, res) {
         from                  : period.from,
         to                    : period.to,
         linked                : false,
+        lms,
         students_count        : 0,
         sessions_fetched      : 0,
         sessionSampleKeys     : [],
@@ -559,6 +591,7 @@ export default async function handler(req, res) {
       from                  : period.from,
       to                    : period.to,
       linked                : true,
+      lms,
       students_count        : studentIds.length,
       sessions_fetched      : sessionRows.length,
       sessionSampleKeys,
@@ -574,6 +607,19 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[mentor-coaching-debug]', e?.message || e);
+    // Bubble-diagnose faalde (Bubble is sinds oktober 2026 geen bron meer)
+    // maar het lms-blok is er al: toon dat, met de Bubble-fout ernaast.
+    if (lms) {
+      return res.status(200).json({
+        ok            : true,
+        mentor_user_id: mentorUserId,
+        period_month  : period.monthStartIso,
+        from          : period.from,
+        to            : period.to,
+        lms,
+        bubble_diagnose_fout: e?.message || String(e),
+      });
+    }
     if (e?.code === 'BUBBLE_CONFIG_MISSING') {
       return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
     }

@@ -91,8 +91,12 @@
     // permKey staat er als vangnet naast `roles`: wie de rechten heeft maar
     // niet in de rollijst valt (administratie), ziet het item dan toch.
     { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld', 'Instellingen'] },
-    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
-    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
+    // Follow-up (2026-10-02) — UIT HET MENU, voor iedereen. `nav: false` haalt
+    // alleen het sidebar-item weg (renderNav); de module zelf blijft bestaan en
+    // bereikbaar via #followup, deep links en goMod('followup'). Terugzetten =
+    // `nav: false` weghalen. Opvolging (hieronder) is de opvolger en blijft staan.
+    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', nav: false, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
+    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Leads bellen', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -101,7 +105,7 @@
     // (admin voor overzicht), appointmentsetter (Romy — eigen data via RLS
     // + setter.ledger.view grant). permKey extra vangnet zodat een user met
     // alleen de grant maar geen role-match het item toch ziet.
-    { g: 'Verkoop & Financiën',    id: 'setter-payout',    naam: 'Commissie',         icon: I.euro,     color: 'emerald', roles: ['super_admin', 'manager', 'appointmentsetter'], permKey: 'setter.ledger.view', tabs: ['Overzicht'] },
+    { g: 'Verkoop & Financiën',    id: 'setter-payout',    naam: 'Commissie',         icon: I.euro,     color: 'emerald', roles: ['super_admin', 'manager', 'appointmentsetter'], permKey: 'setter.ledger.view', tabs: ['Overzicht', 'Mijn calls', 'Rapporten'] },
 
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
     { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
@@ -167,6 +171,9 @@
      er op te halen valt — en zo staan ze ook in het register. */
   const TAB_PERM = {
     'opvolging/Vandaag' : 'opvolging.dag.view',
+    // Leads bellen: proefleads van minicursus en 7-daagse bellen in trage
+    // momenten. Eigen sleutel; /api/opvolging-leads controleert strikt dezelfde.
+    'opvolging/Leads bellen': 'opvolging.leads.view',
     'opvolging/Dashboard': 'opvolging.dashboard.view',
     'opvolging/Afgerond': 'opvolging.archief.view',
     // Eigen sleutel, niet meeliftend op opvolging.dashboard.view: Maxim wil
@@ -176,6 +183,11 @@
     // hierboven); /api/opvolging-rapport doet zijn eigen strikte check en valt
     // daar NIET terug op een andere sleutel.
     'opvolging/Rapport' : 'opvolging.rapport.view',
+    // Het call-rapport zet ALLE closers en de setters naast elkaar. Daarom een
+    // eigen sleutel en niet opvolging.rapport.view, dat ook voor sales op true
+    // staat. Ook hier: navigatie, fail-open; /api/call-rapport controleert
+    // strikt op dezelfde sleutel.
+    'opvolging/Call-rapport': 'calls.rapport.view',
   };
 
   const TAB_RESTRICT = {
@@ -359,7 +371,10 @@
   }
 
   function renderNav() {
-    const mods = visMods();
+    // `nav: false` = wel een module (bereikbaar), geen sidebar-item. Bewust
+    // alleen hier gefilterd en niet in visMods(): die bepaalt ook of een
+    // module te openen is, en dat moet blijven werken.
+    const mods = visMods().filter(m => m.nav !== false);
     const groups = [...new Set(mods.map(m => m.g))];
     const el = document.getElementById('nav');
     if (!el) return;

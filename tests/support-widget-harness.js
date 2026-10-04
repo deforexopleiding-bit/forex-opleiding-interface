@@ -24,10 +24,10 @@ export /**
  * Timers zijn nep: setInterval (de poll) draait alleen via pollRonde(), en
  * setTimeout (teaser, supportkaart) wordt vastgehouden en niet uitgevoerd.
  */
-function laad({ routes = {}, opslag = null, search = '' } = {}) {
+function laad({ routes = {}, opslag = null, search = '', pad = '/cursus' } = {}) {
   const log = { calls: [], volgorde: [] };
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
-    url: 'https://www.deforexopleiding.nl/cursus' + search,
+    url: 'https://www.deforexopleiding.nl' + pad + search,
     runScripts: 'outside-only',
     pretendToBeVisual: true,
   });

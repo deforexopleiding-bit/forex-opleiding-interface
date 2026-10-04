@@ -9,9 +9,23 @@
 //   - Sales-lijst: geattribueerde deals (ook vóór eerste betaling).
 //   - Lijngrafiek 6 mnd verleden + 18 mnd forecast — SVG, theme-aware.
 //
+// Setter-salesoverzicht (2026-10):
+//   - Saleslijst op deals.total_amount (incl. btw): Naam | Bedrag | Traject |
+//     Eerste termijn | Termijnen | Offerte | Ontvangen | Verwachte commissie.
+//   - Klik op een rij → betaalplan (reserveringsfee / aanbetaling / N ×
+//     termijn met datums), commissie per betaling en de aansluiting op het
+//     offertebedrag (afrondingsverschil vs. echte mismatch).
+//
 // Structuur:
-//   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + sales + ledger-regels.
-//   /Uitbetalen — manager-only: bundelen (setter + periode → run).
+//   /Overzicht — periode-chips + 4 KPI's + lijngrafiek + commissie per maand
+//                + sales + ledger-regels.
+//   /Mijn calls — geboekte calls: tellingen per uitkomst-categorie (vanaf de
+//                call-rapportage-startdatum), komende en afgelopen calls, bij
+//                een sale het offertebedrag. API: /api/setter-calls.
+//   /Rapporten — setter-maandrapporten (vaste vergoeding + commissie);
+//                setter.payout.manage: genereren / goedkeuren / uitbetaald.
+//                Dit is het ENIGE uitbetaalpad voor setters (de oude
+//                uitbetaalronde is uitgeschakeld).
 
 (function () {
   'use strict';
@@ -34,6 +48,8 @@
     period: 'maand',                   // 'dag'|'week'|'maand'|'jaar'|'custom'
     from: '', to: '',                  // custom dates YYYY-MM-DD
     timeline: null, timelineLoading: false, timelineError: null,
+    openSale: null,                    // deal_id van het opengeklapte sale-detail
+    monthly: null, monthlyLoading: false, monthlyError: null,
   };
   const _spStaff = { items: null, loading: false };
 
@@ -65,6 +81,14 @@
     _sp.timeline = j;
     if (window.DFO?.render) window.DFO.render();
   }
+  async function loadMonthly(setterId) {
+    _sp.monthlyLoading = true; _sp.monthlyError = null;
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('monthly', '/api/setter-commission-monthly' + q);
+    _sp.monthlyLoading = false;
+    if (!j) _sp.monthlyError = 'Kon maandoverzicht niet laden'; else _sp.monthly = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
   async function loadStaff() {
     if (_spStaff.items || _spStaff.loading) return;
     _spStaff.loading = true;
@@ -77,8 +101,11 @@
   window.__spSelectSetter = (id) => {
     _sp.selectedSetter = id || null;
     _sp.timeline = null;
+    _sp.openSale = null;
+    _sp.monthly = null;
     loadOverview(id).catch(() => {});
     loadTimeline(id).catch(() => {});
+    loadMonthly(id).catch(() => {});
   };
   window.__spSetPeriod = (p) => {
     if (p === _sp.period) return;
@@ -89,30 +116,8 @@
   window.__spSetCustomFrom = (v) => { _sp.from = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
   window.__spSetCustomTo   = (v) => { _sp.to   = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
 
-  window.__spRunPayout = async () => {
-    // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
-    // gebruik canSync (super_admin-wildcard zit al in de helper).
-    const canPayout = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('setter.payout.manage'));
-    if (!canPayout) {
-      window.KV?.toast?.('Geen rechten (setter.payout.manage)', 'warn'); return;
-    }
-    const setterId = _sp.selectedSetter || (_sp.data && _sp.data.setter_user_id);
-    if (!setterId) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const first = today.slice(0, 8) + '01';
-    const start = prompt('Periode start (YYYY-MM-DD)', first); if (!start) return;
-    const end   = prompt('Periode einde (YYYY-MM-DD)', today); if (!end) return;
-    try {
-      const r = await window.KV.authedJson('/api/setter-payout-run', {
-        method: 'POST',
-        body: JSON.stringify({ setter_user_id: setterId, period_start: start, period_end: end }),
-      });
-      window.KV?.toast?.(r?.entry_count ? `Payout aangemaakt: ${r.entry_count} regels, ${eur(r.total_amount || 0)}` : 'Geen vrijgegeven regels in deze periode', 'ok');
-      loadOverview(setterId);
-    } catch (e) {
-      window.KV?.toast?.('Payout mislukt: ' + (e?.message || 'onbekend'), 'warn');
-    }
-  };
+  // De oude uitbetaalronde-knop is verwijderd (het endpoint weigert met 410):
+  // setter-commissie wordt alleen nog uitbetaald via de tab Rapporten.
 
   function _kpi(label, val, color) {
     return `<div style="flex:1;min-width:180px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">
@@ -228,37 +233,184 @@
   }
 
   // ── Sales-lijst (geattribueerde deals, ook vóór betaling) ─────────────
+  // Klik op een rij → detail met het betaalplan (reserveringsfee /
+  // aanbetaling / termijnen), commissie per betaling en de aansluiting op
+  // het offertebedrag. Alle bedragen incl. BTW (deals.total_amount).
+  const fmtDate = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : '—';
+  };
+  const _num = 'text-align:right;font-variant-numeric:tabular-nums';
+  window.__spToggleSale = (id) => {
+    _sp.openSale = (_sp.openSale === id) ? null : id;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  function _offerteChip(s) {
+    if (!s.in_afwachting) return '<span style="color:var(--emerald);font-weight:600">✓ geaccepteerd</span>';
+    return `<span style="color:var(--amber);font-weight:600">◔ ${esc(s.offerte_status_label || 'in afwachting')}</span>`;
+  }
+
+  function _aansluitingBlok(plan) {
+    const a = plan.aansluiting || {};
+    const delen = [];
+    if (plan.reserveringsfee?.van_toepassing) delen.push(`reserveringsfee ${eur(plan.reserveringsfee.bedrag)}`);
+    if (plan.aanbetaling?.bedrag > 0) delen.push(`aanbetaling ${eur(plan.aanbetaling.bedrag)}`);
+    if (plan.termijnen?.aantal > 0) delen.push(`${plan.termijnen.aantal} × ${eur(plan.termijnen.bedrag)}`);
+    const som = `${delen.join(' + ') || '—'} = <b>${esc(eur(a.som))}</b> · offertebedrag <b>${esc(eur(a.totaal))}</b>`;
+    const stijl = {
+      ok:         ['var(--emerald)', '✓ Sluit aan'],
+      afronding:  ['var(--amber)',   '≈ Afrondingsverschil'],
+      mismatch:   ['var(--rose)',    '⚠ Sluit NIET aan'],
+      geen_plan:  ['var(--amber)',   '⚠ Geen betaalplan'],
+    }[a.status] || ['var(--text-3)', ''];
+    return `<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-left:3px solid ${stijl[0]};border-radius:var(--r-sm);font-size:12px;color:var(--text-2)">
+      <div><span style="font-weight:600;color:${stijl[0]}">${esc(stijl[1])}</span> — ${som}</div>
+      ${a.melding ? `<div style="margin-top:4px;color:${stijl[0]}">${esc(a.melding)}</div>` : ''}
+    </div>`;
+  }
+
+  function _saleDetail(s) {
+    const plan = s.plan || {};
+    const pct = Number(plan.pct || 0);
+    const heeftOntvangen = Array.isArray(s.ontvangen_regels);
+    const kv = (k, v) => `<div style="min-width:150px"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">${esc(k)}</div><div style="font-size:12.5px;color:var(--text-1);margin-top:2px">${v}</div></div>`;
+    const fee = plan.reserveringsfee || {};
+    const info = [
+      kv('Bedrag (incl. btw)', `<b>${esc(eur(s.bedrag))}</b>`),
+      kv('Traject', esc(s.traject || '—')),
+      kv('Offerte', _offerteChip(s) + (s.geaccepteerd_op ? ` <span style="color:var(--text-3)">${esc(fmtDate(s.geaccepteerd_op))}</span>` : '')),
+      kv('Deal-datum', esc(fmtDate(s.deal_datum))),
+      kv('Start cursus', esc(fmtDate(s.start_cursus))),
+      kv('Eerste termijn', esc(fmtDate(s.eerste_termijn))),
+      kv('Aantal termijnen', esc(String(plan.termijnen?.aantal || 0))),
+      kv('Bedrag per termijn', esc(eur(plan.termijnen?.bedrag || 0))),
+      kv('Aanbetaling', plan.aanbetaling?.bedrag > 0 ? `${esc(eur(plan.aanbetaling.bedrag))} <span style="color:var(--text-3)">op ${esc(fmtDate(plan.aanbetaling.datum))}</span>` : '—'),
+      kv('Reserveringsfee', fee.van_toepassing
+        ? `${esc(eur(fee.bedrag))} <span style="color:var(--text-3)">${fee.factuur_id ? 'gefactureerd' : 'wordt gefactureerd bij aanmaken abonnement'}</span>`
+        : '—'),
+    ].join('');
+    const soortLabel = (r) => r.soort === 'termijn' ? `Termijn ${r.nr}` : (r.soort === 'aanbetaling' ? 'Aanbetaling' : 'Reserveringsfee');
+    const schemaRows = (plan.schema || []).map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(soortLabel(r))}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${r.datum ? esc(fmtDate(r.datum)) : 'bij aanmaken abonnement'}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num}">${esc(eur(r.bedrag))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--brand)">${esc(eur(r.commissie))}</td>
+      </tr>`).join('');
+    const ontvangenBlok = heeftOntvangen ? _ontvangenTabel(s) : '';
+    return `<div style="padding:14px 16px;background:var(--surface-2, var(--surface));border-top:1px dashed var(--border)">
+      ${s.in_afwachting ? `<div style="margin-bottom:10px;font-size:12px;color:var(--amber)">Offerte is nog niet geaccepteerd — commissie ontstaat pas na acceptatie én betaling.</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:14px 22px;margin-bottom:12px">${info}</div>
+      <div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin:6px 0">Gepland betaalschema · jouw ${esc(pct.toFixed(2).replace('.', ','))}% per betaling</div>
+      <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+          <th style="padding:5px 10px">Moment</th><th style="padding:5px 10px">Gepland</th>
+          <th style="padding:5px 10px;text-align:right">Bedrag</th><th style="padding:5px 10px;text-align:right">Commissie</th>
+        </tr></thead>
+        <tbody>${schemaRows || `<tr><td colspan="4" style="padding:12px;text-align:center;color:var(--text-3)">Geen betaalplan op de deal.</td></tr>`}</tbody>
+        <tfoot><tr>
+          <td colspan="2" style="padding:6px 10px;font-size:12px;font-weight:600">Totaal bij volledige betaling</td>
+          <td style="padding:6px 10px;font-size:12px;${_num};font-weight:600">${esc(eur(plan.aansluiting?.som || 0))}</td>
+          <td style="padding:6px 10px;font-size:12px;${_num};font-weight:700;color:var(--brand)">${esc(eur(plan.commissie_totaal || 0))}</td>
+        </tr></tfoot>
+      </table></div>
+      ${_aansluitingBlok(plan)}
+      ${ontvangenBlok}
+    </div>`;
+  }
+
+  // Fase B vult sale.ontvangen_regels (facturen met wat er echt binnenkwam).
+  function _ontvangenTabel(s) {
+    const regels = s.ontvangen_regels || [];
+    if (!regels.length) {
+      return `<div style="margin-top:12px;font-size:12px;color:var(--text-3)">Nog geen ontvangen betalingen op deze sale.</div>`;
+    }
+    const rows = regels.map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(r.factuurnummer || '—')}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${esc(r.soort || '')}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${esc(fmtDate(r.betaald_op))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num}">${esc(eur(r.ontvangen))}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--brand)">${esc(eur(r.commissie))}</td>
+      </tr>`).join('');
+    return `<div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin:14px 0 6px">Ontvangen</div>
+      <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+          <th style="padding:5px 10px">Factuur</th><th style="padding:5px 10px">Soort</th><th style="padding:5px 10px">Betaald op</th>
+          <th style="padding:5px 10px;text-align:right">Ontvangen</th><th style="padding:5px 10px;text-align:right">Commissie</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  // ── Commissie per maand (maand = betaaldatum van de factuur) ──────────
+  const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  const maandLabel = (ym) => { const m = /^(\d{4})-(\d{2})/.exec(String(ym || '')); return m ? `${MAANDEN[Number(m[2]) - 1]} ${m[1]}` : String(ym || ''); };
+  function _monthlySection() {
+    if (_sp.monthlyError) return `<div style="margin-bottom:20px;color:var(--rose);font-size:12px">⚠ ${esc(_sp.monthlyError)}</div>`;
+    const m = _sp.monthly;
+    if (!m) return _sp.monthlyLoading ? `<div style="margin-bottom:20px;color:var(--text-3);font-size:12px">Maandoverzicht laden…</div>` : '';
+    const banner = m.dry_run
+      ? `<div style="margin-bottom:8px;padding:8px 12px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--r-sm);font-size:12px;color:var(--text-2)">Proefmodus: de commissie wordt berekend uit de facturen maar nog <b>niet geboekt</b>. "Berekend" laat zien wat er geboekt gaat worden.</div>`
+      : '';
+    const rows = (m.maanden || []).map((r) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:12px">${esc(maandLabel(r.maand))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num}">${esc(eur(r.ontvangen))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num};color:var(--brand);font-weight:600">${esc(eur(r.berekend))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num}">${esc(eur(r.geboekt))}</td>
+        <td style="padding:6px 10px;font-size:12px;${_num};color:var(--emerald)">${esc(eur(r.uitbetaald))}</td>
+      </tr>`).join('');
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:4px">Commissie per maand</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">Op de maand waarin de klant betaalde · ${esc(Number(m.pct || 0).toFixed(2).replace('.', ','))}% van elk ontvangen bedrag incl. btw · creditnota's tellen niet als betaling.</div>
+      ${banner}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden"><div class="tbl-wrap">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+            <th style="padding:8px 10px">Maand</th>
+            <th style="padding:8px 10px;text-align:right">Ontvangen</th>
+            <th style="padding:8px 10px;text-align:right">Commissie berekend</th>
+            <th style="padding:8px 10px;text-align:right">Geboekt</th>
+            <th style="padding:8px 10px;text-align:right">Uitbetaald</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:22px;text-align:center;color:var(--text-3)">Nog geen ontvangen betalingen op jouw sales.</td></tr>`}</tbody>
+        </table>
+      </div></div>
+    </div>`;
+  }
+
   function _salesTable(sales) {
     if (!Array.isArray(sales) || !sales.length) {
       return `<div style="padding:28px;text-align:center;color:var(--text-3);background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:20px">Nog geen geattribueerde sales.</div>`;
     }
-    const statusChip = (s) => {
-      if (s === 'volledig')     return '<span style="color:var(--emerald);font-weight:600">✓ betaald</span>';
-      if (s === 'gedeeltelijk') return '<span style="color:var(--amber)">◐ gedeeltelijk</span>';
-      return '<span style="color:var(--text-3)">— geen betaling</span>';
-    };
-    const rows = sales.map((s) => `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:7px 10px;font-size:12px">${esc(s.customer || '—')}</td>
-      <td style="padding:7px 10px;font-size:12px;color:var(--text-3)">${esc(s.deal_ref || '—')}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums">${esc(eur(s.bedrag))}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums">${esc(eur(s.betaald))}</td>
-      <td style="padding:7px 10px;font-size:11.5px">${statusChip(s.betaal_status)}</td>
-      <td style="padding:7px 10px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--brand)">${esc(eur(s.verwachte_commissie))}</td>
-      <td style="padding:7px 10px;font-size:11.5px;color:var(--text-3)">${esc(String(s.created_at || '').slice(0, 10))}</td>
-    </tr>`).join('');
+    const COLS = 8;
+    const rows = sales.map((s) => {
+      const open = _sp.openSale === s.deal_id;
+      const waarschuwing = s.plan?.aansluiting?.status === 'mismatch' || s.plan?.aansluiting?.status === 'geen_plan'
+        ? ' <span title="Betaalplan sluit niet aan op het offertebedrag" style="color:var(--rose)">⚠</span>' : '';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer${open ? ';background:var(--surface-2, transparent)' : ''}" onclick="window.__spToggleSale('${esc(s.deal_id)}')">
+        <td style="padding:7px 10px;font-size:12px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(s.customer || '—')}${waarschuwing}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.bedrag))}</td>
+        <td style="padding:7px 10px;font-size:12px">${esc(s.traject || '—')}</td>
+        <td style="padding:7px 10px;font-size:12px;color:var(--text-2)">${esc(fmtDate(s.eerste_termijn))}</td>
+        <td style="padding:7px 10px;font-size:12px;text-align:center">${esc(String(s.aantal_termijnen || 0))}</td>
+        <td style="padding:7px 10px;font-size:11.5px">${_offerteChip(s)}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.betaald))}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num};font-weight:600;color:var(--brand)">${esc(eur(s.verwachte_commissie))}</td>
+      </tr>${open ? `<tr><td colspan="${COLS}" style="padding:0">${_saleDetail(s)}</td></tr>` : ''}`;
+    }).join('');
     return `<div style="margin-bottom:20px">
-      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Mijn sales (geattribueerd)</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:4px">Mijn sales (geattribueerd)</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">Bedragen incl. btw (offertebedrag). Klik op een sale voor het betaalplan en je commissie per betaling.</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="tbl-wrap">
           <table style="width:100%;border-collapse:collapse;font-size:12.5px">
             <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
-              <th style="padding:8px 10px">Klant</th>
-              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px">Naam</th>
               <th style="padding:8px 10px;text-align:right">Bedrag</th>
-              <th style="padding:8px 10px;text-align:right">Betaald</th>
-              <th style="padding:8px 10px">Betaalstatus</th>
+              <th style="padding:8px 10px">Traject</th>
+              <th style="padding:8px 10px" title="payment_term_start_date — datum van de eerste termijn">Eerste termijn</th>
+              <th style="padding:8px 10px;text-align:center">Termijnen</th>
+              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px;text-align:right">Ontvangen</th>
               <th style="padding:8px 10px;text-align:right">Verwachte commissie</th>
-              <th style="padding:8px 10px">Aangemaakt</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -270,9 +422,11 @@
   function overzichtView() {
     if (!_sp.data && !_sp.loading && !_sp.error) queueMicrotask(() => loadOverview(_sp.selectedSetter));
     if (!_sp.timeline && !_sp.timelineLoading && !_sp.timelineError) queueMicrotask(() => loadTimeline(_sp.selectedSetter));
+    if (!_sp.monthly && !_sp.monthlyLoading && !_sp.monthlyError) { _sp.monthlyLoading = true; queueMicrotask(() => loadMonthly(_sp.selectedSetter)); }
     // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
     // gebruik canSync + ensurePermissionsLoaded. Zonder deze fix zag zelfs
-    // super_admin geen staff-picker of "Uitbetaalronde draaien"-knop.
+    // super_admin geen staff-picker. (De "Uitbetaalronde draaien"-knop is
+    // weg sinds het maandrapport — uitbetalen gaat via tab Rapporten.)
     if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
       _sp._permsWarmed = true;
       window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
@@ -318,12 +472,11 @@
         ${_kpi('Nog te verwachten (forecast)', t.forecast_nog_te_verwachten, 'var(--text-1)')}
         ${_kpi('Vervallen door annulering',   t.vervallen_door_annulering,  'var(--rose)')}
       </div>
+      ${Number(t.in_afwachting_offerte) > 0 ? `<div style="margin:-12px 0 20px;font-size:12px;color:var(--text-3)">Daarnaast <b>${esc(eur(t.in_afwachting_offerte))}</b> commissie op offertes die nog niet geaccepteerd zijn (niet in de forecast).</div>` : ''}
       ${_timelineChart()}
+      ${_monthlySection()}
       ${_salesTable(d.sales)}
-      ${canPayout ? `<div style="margin-bottom:14px">
-        <button class="btn btn-primary" style="font-size:12.5px;padding:6px 12px" onclick="window.__spRunPayout()">Uitbetaalronde draaien</button>
-        <span style="margin-left:10px;font-size:11.5px;color:var(--text-3)">Bundelt alle vrijgegeven regels in de gekozen periode.</span>
-      </div>` : ''}
+      ${canPayout ? `<div style="margin-bottom:14px;font-size:11.5px;color:var(--text-3)">Uitbetalen gaat via het maandrapport: tab <b>Rapporten</b> (bovenaan deze module) → goedkeuren → uitbetaald.</div>` : ''}
       <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Uitbetaalregels (in periode)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div class="tbl-wrap">
@@ -343,9 +496,281 @@
     </div>`;
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // Tab Rapporten — setter-maandrapport (vaste vergoeding + commissie).
+  // Setter ziet eigen rapporten; setter.payout.manage mag genereren,
+  // goedkeuren, uitbetaald zetten en heropenen.
+  // ══════════════════════════════════════════════════════════════════════
+  const _spR = { data: null, loading: false, error: null, open: null, busy: false, forSetter: undefined };
+
+  async function loadReports(setterId) {
+    _spR.loading = true; _spR.error = null; _spR.forSetter = setterId || null;
+    if (window.DFO?.render) window.DFO.render();
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('reports', '/api/setter-reports' + q);
+    _spR.loading = false;
+    if (!j) _spR.error = 'Kon rapporten niet laden'; else _spR.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  window.__spRToggle = (id) => { _spR.open = (_spR.open === id) ? null : id; if (window.DFO?.render) window.DFO.render(); };
+
+  async function _reportAction(body, okMsg) {
+    if (_spR.busy) return;
+    _spR.busy = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/setter-reports', { method: 'POST', body: JSON.stringify(body) });
+      window.KV?.toast?.(okMsg, 'ok');
+    } catch (e) {
+      window.KV?.toast?.('Mislukt: ' + (e?.message || 'onbekend'), 'warn');
+    } finally {
+      _spR.busy = false;
+      loadReports(_spR.forSetter).catch(() => {});
+    }
+  }
+  window.__spRGenerate = () => {
+    const setterId = _sp.selectedSetter || (_spR.data && _spR.data.setter_user_id);
+    if (!setterId) return;
+    const d = new Date();
+    const vorige = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+    const month = prompt('Rapport genereren voor maand (YYYY-MM)', vorige);
+    if (!month) return;
+    _reportAction({ action: 'generate', setter_user_id: setterId, month }, 'Concept-rapport bijgewerkt');
+  };
+  window.__spRAction = (action, id) => {
+    const vragen = {
+      approve:   'Rapport goedkeuren? Het concept wordt eerst herberekend.',
+      mark_paid: 'Rapport markeren als UITBETAALD? De commissieregels in dit rapport worden definitief geboekt als uitbetaald.',
+      reopen:    'Goedgekeurd rapport heropenen (terug naar concept)?',
+    };
+    if (!confirm(vragen[action] || 'Doorgaan?')) return;
+    _reportAction({ action, report_id: id }, { approve: 'Goedgekeurd', mark_paid: 'Uitbetaald', reopen: 'Heropend' }[action] || 'Klaar');
+  };
+
+  function _statusChip(s) {
+    const map = { concept: ['var(--amber)', 'concept'], goedgekeurd: ['var(--brand)', 'goedgekeurd'], uitbetaald: ['var(--emerald)', '✓ uitbetaald'] };
+    const [c, l] = map[s] || ['var(--text-3)', s];
+    return `<span style="color:${c};font-weight:600">${esc(l)}</span>`;
+  }
+
+  // Btw-tarief komt uit de API (rapport/regel btw_pct, anders het huidige
+  // tarief uit setter-reports) — niet hardcoded in de UI.
+  const pctTekst = (p) => String(Number(p || 0)).replace('.', ',');
+  const btwKop = (p) => `Btw ${pctTekst(p)}%`;
+
+  function _reportLines(r) {
+    const td = (v, extra = '') => `<td style="padding:5px 10px;font-size:12px;${_num}${extra}">${esc(eur(v))}</td>`;
+    const rows = (r.lines || []).map((l) => `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:12px">${esc(l.label)}</td>
+        <td style="padding:5px 10px;font-size:12px;color:var(--text-3)">${l.betaal_datum ? esc(fmtDate(l.betaal_datum)) : ''}</td>
+        <td style="padding:5px 10px;font-size:12px;${_num};color:var(--text-3)">${l.basis == null ? '' : esc(eur(l.basis))}</td>
+        ${td(l.amount_excl)}${td(l.amount_btw, ';color:var(--text-3)')}${td(l.amount_incl, ';font-weight:600')}
+      </tr>`).join('');
+    const sub = (label, e, b, i, sterk) => `<tr${sterk ? ' style="border-top:1px solid var(--border)"' : ''}>
+        <td colspan="3" style="padding:5px 10px;font-size:12px;${sterk ? 'font-weight:700' : 'color:var(--text-2)'}">${esc(label)}</td>
+        ${td(e, sterk ? ';font-weight:700' : '')}${td(b, sterk ? ';font-weight:700' : ';color:var(--text-3)')}${td(i, sterk ? ';font-weight:700' : ';font-weight:600')}
+      </tr>`;
+    const legacy = r.legacy_btw
+      ? `<div style="margin-bottom:8px;font-size:11.5px;color:var(--amber)">Dit rapport is gemaakt vóór de btw-uitsplitsing: de bedragen zijn toen als incl. btw opgeslagen en hier alleen voor weergave gesplitst. Heropenen en opnieuw genereren rekent het met de huidige regels.</div>`
+      : '';
+    return `<div style="padding:12px 16px;border-top:1px dashed var(--border)">${legacy}<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
+      <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase">
+        <th style="padding:5px 10px">Omschrijving</th><th style="padding:5px 10px">Betaald op</th>
+        <th style="padding:5px 10px;text-align:right">Ontvangen</th>
+        <th style="padding:5px 10px;text-align:right">Excl. btw</th>
+        <th style="padding:5px 10px;text-align:right">${esc(btwKop(r.btw_pct))}</th>
+        <th style="padding:5px 10px;text-align:right">Incl. btw</th>
+      </tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text-3)">Geen regels.</td></tr>`}</tbody>
+      <tfoot>
+        ${sub('Vaste vergoeding', r.fee_excl, r.fee_btw, r.fee_incl)}
+        ${sub('Commissie', r.commission_excl, r.commission_btw, r.commission_incl)}
+        ${sub('Totaal', r.total_excl, r.total_btw, r.total_incl, true)}
+      </tfoot>
+    </table></div></div>`;
+  }
+
+  function rapportenView() {
+    const _canSync = (k) => !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(k));
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
+      _sp._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const isAdmin = _canSync('setter.ledger.admin');
+    const canManage = _canSync('setter.payout.manage');
+    if (isAdmin && !_spStaff.items && !_spStaff.loading) queueMicrotask(() => loadStaff());
+    if (!_spR.loading && (_spR.forSetter === undefined || _spR.forSetter !== (_sp.selectedSetter || null)) && !_spR.error) {
+      _spR.loading = true;
+      queueMicrotask(() => loadReports(_sp.selectedSetter));
+    }
+    const staff = _spStaff.items || [];
+    const picker = isAdmin ? `<div style="margin-bottom:14px">
+        <label style="font-size:11.5px;color:var(--text-3);margin-right:8px">Bekijk setter:</label>
+        <select onchange="window.__spSelectSetter(this.value)" style="padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px">
+          <option value="">— Ikzelf —</option>
+          ${staff.map((s) => `<option value="${esc(s.id)}" ${_sp.selectedSetter === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    const intro = `<div style="font-size:12px;color:var(--text-3);margin-bottom:14px">Per maand: je vaste vergoeding (excl. btw, btw komt erbij) plus de commissie op betalingen die in die maand binnenkwamen (commissie is incl. btw, hier uitgesplitst). Een concept wordt bijgewerkt tot het is goedgekeurd.</div>`;
+    const genKnop = canManage
+      ? `<div style="margin-bottom:14px"><button class="btn" style="font-size:12.5px;padding:6px 12px" ${_spR.busy ? 'disabled' : ''} onclick="window.__spRGenerate()">Rapport genereren / bijwerken</button></div>`
+      : '';
+    if (_spR.loading && !_spR.data) return `<div class="pad" style="padding:20px">${picker}${intro}<div>Laden…</div></div>`;
+    if (_spR.error) return `<div class="pad" style="padding:20px">${picker}<div style="color:var(--rose)">⚠ ${esc(_spR.error)}</div></div>`;
+    const d = _spR.data || { reports: [] };
+    if (d.migratie_nodig) {
+      return `<div class="pad" style="padding:20px">${picker}${intro}<div style="padding:16px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--r-sm);font-size:12.5px">Maandrapporten zijn nog niet beschikbaar: de database-migratie <code>2026-10-01-setter-maandrapport.sql</code> is nog niet gedraaid.</div></div>`;
+    }
+    const rows = (d.reports || []).map((r) => {
+      const open = _spR.open === r.id;
+      const acties = canManage ? [
+        r.status === 'concept'     ? `<button class="btn btn-primary" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('approve','${esc(r.id)}')">Goedkeuren</button>` : '',
+        r.status === 'goedgekeurd' ? `<button class="btn btn-primary" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('mark_paid','${esc(r.id)}')">Uitbetaald</button>` : '',
+        r.status === 'goedgekeurd' ? `<button class="btn" style="font-size:11.5px;padding:3px 9px" ${_spR.busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__spRAction('reopen','${esc(r.id)}')">Heropenen</button>` : '',
+      ].join(' ') : '';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window.__spRToggle('${esc(r.id)}')">
+          <td style="padding:8px 10px;font-size:12.5px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(maandLabel(r.period_month))}</td>
+          <td style="padding:8px 10px;font-size:12px">${_statusChip(r.status)}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num}">${esc(eur(r.total_excl))}</td>
+          <td style="padding:8px 10px;font-size:12px;${_num};color:var(--text-3)">${esc(eur(r.total_btw))}</td>
+          <td style="padding:8px 10px;font-size:12.5px;${_num};font-weight:700">${esc(eur(r.total_incl))}</td>
+          <td style="padding:8px 10px;text-align:right;white-space:nowrap">${acties}</td>
+        </tr>${open ? `<tr><td colspan="6" style="padding:0">${_reportLines(r)}</td></tr>` : ''}`;
+    }).join('');
+    return `<div class="pad" style="padding:20px">
+      ${picker}${intro}${genKnop}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden"><div class="tbl-wrap">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+            <th style="padding:8px 10px">Maand</th><th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px;text-align:right">Excl. btw</th>
+            <th style="padding:8px 10px;text-align:right">${esc(btwKop(d.btw_pct))}</th>
+            <th style="padding:8px 10px;text-align:right">Incl. btw</th><th style="padding:8px 10px"></th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Nog geen maandrapporten. Op de 1e van elke maand wordt het rapport van de vorige maand klaargezet.</td></tr>`}</tbody>
+        </table>
+      </div></div>
+    </div>`;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // Tab Mijn calls — wat er van de geboekte calls geworden is.
+  // Bron: /api/setter-calls. Categorie-namen en -kleuren komen uit de
+  // centrale mapping (window.CallUitkomstCategorie, met de server-waarde als
+  // terugval) — hier staat bewust geen eigen lijstje labels.
+  // ══════════════════════════════════════════════════════════════════════
+  const _spC = { data: null, loading: false, error: null, forSetter: undefined, eerderOpen: false };
+
+  async function loadCalls(setterId) {
+    _spC.loading = true; _spC.error = null; _spC.forSetter = setterId || null;
+    if (window.DFO?.render) window.DFO.render();
+    const q = setterId ? ('?setter_user_id=' + encodeURIComponent(setterId)) : '';
+    const j = await tryFetch('calls', '/api/setter-calls' + q);
+    _spC.loading = false;
+    if (!j) _spC.error = 'Kon calls niet laden'; else _spC.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window.__spCToggleEerder = () => { _spC.eerderOpen = !_spC.eerderOpen; if (window.DFO?.render) window.DFO.render(); };
+
+  /** Label + kleur voor een categorie-key: eerst de gedeelde mapping, dan wat de server meestuurde. */
+  function _catInfo(key, server) {
+    const M = window.CallUitkomstCategorie;
+    const info = (M && typeof M.categorieInfo === 'function' && key) ? M.categorieInfo(key) : null;
+    const label = (info && info.key === key) ? info.label : (server && server.label) || key || '';
+    const kleurRaw = (info && info.key === key) ? info.kleur : (server && server.kleur);
+    const kleur = /^#[0-9a-f]{6}$/i.test(String(kleurRaw || '')) ? kleurRaw : '#6b7280';
+    return { label, kleur };
+  }
+  function _catChip(key, server, extra) {
+    const { label, kleur } = _catInfo(key, server);
+    return `<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap;color:${kleur};background:${kleur}14;border:1px solid ${kleur}40">${esc(label)}${extra ? ` <b>${esc(extra)}</b>` : ''}</span>`;
+  }
+
+  function _callRegel(c) {
+    const wanneer = `${esc(fmtDate(c.datum_nl))}${c.tijd_nl ? ' · ' + esc(c.tijd_nl) : ''}`;
+    const chip = c.categorie
+      ? _catChip(c.categorie.key, c.categorie)
+      : `<span style="font-size:11.5px;color:var(--text-3)">—</span>`;
+    let sale = '';
+    if (c.sale && c.sale.gekoppeld) {
+      sale = `<span style="font-size:12px;font-weight:600;color:var(--text-1);${_num}">${esc(eur(c.sale.bedrag))} <span style="font-weight:400;color:var(--text-3)">incl. btw</span></span>`
+        + (c.sale.in_afwachting ? ` <span style="font-size:11.5px;color:var(--amber)">offerte ${esc(c.sale.offerte_status_label || 'in afwachting')}</span>` : '');
+    } else if (c.sale) {
+      sale = `<span style="font-size:11.5px;color:var(--text-3)">bedrag onbekend (geen deal gevonden)</span>`;
+    }
+    const toel = c.toelichting ? `<div style="flex-basis:100%;font-size:11.5px;color:${c.categorie ? 'var(--rose)' : 'var(--text-3)'}">${esc(c.toelichting)}</div>` : '';
+    return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <div style="min-width:118px;font-size:12px;color:var(--text-2);font-variant-numeric:tabular-nums">${wanneer}</div>
+        <div style="flex:1;min-width:140px;font-size:13px;color:var(--text-1);overflow-wrap:anywhere">${esc(c.lead_name || '—')}</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px">${chip}${sale}</div>
+        ${toel}
+      </div>`;
+  }
+
+  function _callLijst(titel, sub, lijst, leeg) {
+    const body = (lijst || []).length
+      ? lijst.map(_callRegel).join('')
+      : `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(leeg)}</div>`;
+    return `<div style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:2px">${esc(titel)} <span style="font-weight:400;color:var(--text-3)">(${(lijst || []).length})</span></div>
+      ${sub ? `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">${esc(sub)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">${body}</div>
+    </div>`;
+  }
+
+  function callsView() {
+    const _canSync = (k) => !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(k));
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
+      _sp._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const isAdmin = _canSync('setter.ledger.admin');
+    if (isAdmin && !_spStaff.items && !_spStaff.loading) queueMicrotask(() => loadStaff());
+    if (!_spC.loading && _spC.forSetter !== (_sp.selectedSetter || null)) {
+      _spC.loading = true; _spC.data = null; _spC.error = null;
+      queueMicrotask(() => loadCalls(_sp.selectedSetter));
+    }
+    const staff = _spStaff.items || [];
+    const picker = isAdmin ? `<div style="margin-bottom:14px">
+        <label style="font-size:11.5px;color:var(--text-3);margin-right:8px">Bekijk setter:</label>
+        <select onchange="window.__spSelectSetter(this.value)" style="padding:5px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px;max-width:100%">
+          <option value="">— Ikzelf —</option>
+          ${staff.map((s) => `<option value="${esc(s.id)}" ${_sp.selectedSetter === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
+        </select>
+      </div>` : '';
+    if (_spC.loading && !_spC.data) return `<div class="pad" style="padding:20px">${picker}<div>Laden…</div></div>`;
+    if (_spC.error) return `<div class="pad" style="padding:20px">${picker}<div style="color:var(--rose)">⚠ ${esc(_spC.error)}</div></div>`;
+    const d = _spC.data || {};
+    const telling = d.telling || { totaal: 0, per_categorie: [] };
+    const tellers = (telling.per_categorie || []).filter((c) => Number(c.aantal) > 0)
+      .map((c) => _catChip(c.key, c, String(c.aantal))).join(' ');
+    const start = d.startdatum ? fmtDate(d.startdatum) : '—';
+    const eerder = d.eerder || [];
+    const eerderBlok = eerder.length ? `<div style="margin-bottom:20px">
+        <button class="chip" style="font-size:12px;padding:5px 12px" onclick="window.__spCToggleEerder()">${_spC.eerderOpen ? '▾' : '▸'} Eerdere calls van vóór ${esc(start)} (${eerder.length})</button>
+        ${_spC.eerderOpen ? `<div style="margin-top:8px;font-size:11.5px;color:var(--text-3);margin-bottom:8px">Deze calls tellen niet mee: de uitkomsten werden toen nog niet vastgelegd.</div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">${eerder.map(_callRegel).join('')}</div>` : ''}
+      </div>` : '';
+    return `<div class="pad" style="padding:20px">
+      ${picker}
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Wat er van je geboekte calls geworden is, zoals de closer het vastlegde. De tellingen lopen vanaf ${esc(start)}.</div>
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Calls vanaf ${esc(start)}: <b style="color:var(--text-1)">${esc(String(telling.totaal || 0))}</b></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${tellers || `<span style="font-size:12px;color:var(--text-3)">Nog geen calls in deze periode.</span>`}</div>
+      </div>
+      ${d.sale_koppeling_fout ? `<div style="margin-bottom:14px;font-size:12px;color:var(--amber)">Sale-bedragen konden niet geladen worden; de uitkomsten kloppen wel.</div>` : ''}
+      ${_callLijst('Komende calls', 'Eerstvolgende bovenaan.', d.komend, 'Geen komende calls.')}
+      ${_callLijst('Afgelopen calls', 'Meest recente bovenaan.', d.gedaan, 'Nog geen afgelopen calls sinds de startdatum.')}
+      ${eerderBlok}
+    </div>`;
+  }
+
   window.DFO = window.DFO || { VIEWS: {} };
   window.DFO.VIEWS = window.DFO.VIEWS || {};
   window.DFO.VIEWS['setter-payout/Overzicht'] = overzichtView;
+  window.DFO.VIEWS['setter-payout/Mijn calls'] = callsView;
+  window.DFO.VIEWS['setter-payout/Rapporten'] = rapportenView;
 
   // Registreer als v2-native module bij de klanten-v2 shell zodat de
   // hash-router (#setter-payout) 'em oppikt i.p.v. terug te vallen op
