@@ -27,6 +27,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getSetterScope } from './_lib/setter-scope.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
+import { effectiefMoment, pastBijTijd } from './_lib/opstartsessie-tijd.js';
 
 const PERIODES  = new Set(['week', 'maand', 'alles']);
 const RESULTATEN = new Set(['alle', 'toegelaten', 'afgewezen']);
@@ -139,17 +140,22 @@ export default async function handler(req, res) {
               .order('gekozen_start_at', { ascending: true });
     } else if (tijd === 'aankomend') {
       // Aankomend: gekozen_start_at >= nu OR gekoppelde appointment
-      // scheduled_at >= nu OR gekozen_start_at IS NULL (nog geen moment
-      // gekozen / afgewezen). Verzette calls die op de bevroren
+      // scheduled_at >= nu. Verzette calls die op de bevroren
       // gekozen_start_at verleden zouden zijn, komen zo via de tweede tak
       // alsnog in aankomend terecht.
+      // 2026-10-04 — `gekozen_start_at IS NULL` is hier WEG: die tak liet
+      // elke submission zonder timestamp (afgewezen leads, oude rijen met
+      // alleen gekozen_slot-tekst, ook van weken terug) onder Aankomend
+      // staan. Zonder moment → alleen onder 'Alles'. De SQL is een
+      // voorselectie; de definitieve toets op het effectieve moment staat
+      // na de appointment-lookup (pastBijTijd).
       const upcomingApptIds = await preFetchApptIds('gte');
-      const orClauses = [`gekozen_start_at.gte.${nowIso}`, `gekozen_start_at.is.null`];
+      const orClauses = [`gekozen_start_at.gte.${nowIso}`];
       if (upcomingApptIds.length > 0) {
         orClauses.push(`appointment_id.in.(${upcomingApptIds.join(',')})`);
       }
       qry = qry.or(orClauses.join(','))
-              .order('gekozen_start_at', { ascending: true, nullsFirst: false });
+              .order('gekozen_start_at', { ascending: true });
     } else if (tijd === 'verleden') {
       // Verleden: gekozen_start_at < nu OR gekoppelde appointment
       // scheduled_at < nu. Analoog aan aankomend, spiegel-geval:
@@ -213,6 +219,20 @@ export default async function handler(req, res) {
         if (!r.appointment_id) return true; // nog geen boeking → tonen
         const st = apptStatusById.get(r.appointment_id);
         return !st || !HIDDEN_STATUSES.has(String(st).toLowerCase());
+      });
+    }
+
+    // 2026-10-04 — definitieve tijd-toets (alleen lijst; agenda/range niet).
+    // De SQL-voorselectie kijkt per tak naar óf de bevroren gekozen_start_at
+    // óf de live scheduled_at, en liet zo verleden calls in Aankomend lekken
+    // (bevroren moment in de toekomst, afspraak inmiddels naar eerder
+    // verzet) en verzette calls dubbel in Verleden staan. Hier telt alleen
+    // het effectieve moment — exact wat de kolom GEKOZEN MOMENT toont.
+    if (!useRange) {
+      const nowMs = Date.parse(nowIso);
+      filteredRows = filteredRows.filter((r) => {
+        const apt = r.appointment_id ? apptById.get(r.appointment_id) : null;
+        return pastBijTijd(effectiefMoment(r.gekozen_start_at, apt?.scheduled_at), tijd, nowMs);
       });
     }
 
