@@ -38,9 +38,9 @@
   };
   // Meer-acties modal state (archiveer / herstel / omzetten-klant).
   const _act2 = { open: false, kind: null, submitting: false };
-  // Welkomstmail-resend modal (FEAT-1) — aparte state om conflict met _act2
-  // te vermijden. lead: {id, naam, email}, doelEmail: aanpasbaar veld.
-  const _wr = { open: false, submitting: false, lead: null, doelEmail: '' };
+  // "Inloggegevens opnieuw versturen" woont in de gedeelde popup
+  // views/_inlog-opnieuw.js (window.InlogOpnieuw) — ook gebruikt door
+  // Leadsonderhoud (Contacten + Gesprekken).
 
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
@@ -302,101 +302,26 @@
   // van detail-page). Detail-page blijft bereikbaar via klik op naam.
   window.__leadRowEdit = (id) => { if (id) window.__leadEditOpen(id); };
 
-  // ── FEAT-1: welkomstmail opnieuw versturen (evt. naar alternatief adres) ─
-  // Hergebruikt /api/lead-welkom-resend (thin wrapper rond _lib/welkom.js →
-  // dezelfde flow als lead-handmatig-toevoegen bij aanmaak). Custom confirm-
-  // modal met aanpasbaar e-mailadres.
-  window.__leadWelkomResendOpen = async (id) => {
+  // ── Inloggegevens opnieuw versturen ─────────────────────────────────────
+  // Gedeelde popup (views/_inlog-opnieuw.js): stuurt een verse inloglink naar
+  // het BESTAANDE LMS-account, of verplaatst dat account eerst naar een ander
+  // adres. Maakt nooit een tweede account aan.
+  window.__leadWelkomResendOpen = (id) => {
     if (!id) return;
-    // Bepaal defaults uit de dossier-data als die geladen is; anders fetch.
-    let lead = _det?.data?.lead;
-    if (!lead || String(lead.id) !== String(id)) {
-      try {
-        const j = await tryFetch('leads-detail-wr', '/api/leads-detail?id=' + encodeURIComponent(id));
-        lead = j?.lead || null;
-      } catch (_) { /* fail-soft */ }
-    }
-    if (!lead) { window.KV?.toast?.('Kon lead-data niet laden.', 'error'); return; }
-    _wr.open = true;
-    _wr.submitting = false;
-    _wr.lead = { id: lead.id, naam: lead.naam || [lead.voornaam, lead.achternaam].filter(Boolean).join(' ').trim(), email: lead.email || '', voornaam: lead.voornaam || '' };
-    _wr.doelEmail = _wr.lead.email;
-    window.DFO.render();
-  };
-  window.__leadWelkomResendClose = () => {
-    _wr.open = false; _wr.submitting = false; _wr.lead = null; _wr.doelEmail = '';
-    window.DFO.render();
-  };
-  // FEAT-1 fix-ronde 3b: bij input LIVE de knop-label + waarschuwing +
-  // validatie-status herpainten zodat het GETOONDE doeladres exact het
-  // werkelijke verzend-doel is. Surgical DOM-patch — geen DFO.render (die
-  // zou de input-focus wegblazen).
-  window.__leadWelkomResendInput = (val) => {
-    _wr.doelEmail = String(val || '');
-    _wrRepaintFoot();
-  };
-  function _wrRepaintFoot() {
-    if (!_wr.open || !_wr.lead) return;
-    const email = String(_wr.doelEmail || '').trim();
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-    const different = email.toLowerCase() !== String(_wr.lead.email || '').trim().toLowerCase();
-    const foot = document.querySelector('[data-kv-wr-foot]');
-    if (foot) foot.innerHTML = _wrFootHtml(email, isValid);
-    const warn = document.querySelector('[data-kv-wr-warn]');
-    if (warn) {
-      warn.innerHTML = different
-        ? '<span style="color:var(--amber)">⚠ Afwijkend van lead-e-mail (' + esc(_wr.lead.email || '—') + ')</span>'
-        : 'Standaard: lead-e-mailadres.';
-    }
-    const errBox = document.querySelector('[data-kv-wr-errbox]');
-    if (errBox) {
-      errBox.style.display = (!isValid && email.length > 0) ? 'block' : 'none';
-    }
-  }
-  function _wrFootHtml(email, isValid) {
-    const disabled = _wr.submitting || !isValid;
-    // Ronde 3-polish: expliciete disabled-styling zodat 'uit'-zijn ook
-    // visueel klopt (browser-default op btn-primary is soms alleen een
-    // subtiel greyed-out label — user zag geen verschil). Geen hover-
-    // effect meer bij disabled.
-    const primaryStyle = disabled
-      ? 'opacity:.5;cursor:not-allowed;pointer-events:none'
-      : '';
-    return `<button class="btn" onclick="__leadWelkomResendClose()" ${_wr.submitting ? 'disabled' : ''}>Annuleren</button>
-      <button class="btn btn-primary" onclick="__leadWelkomResendConfirm()" ${disabled ? 'disabled' : ''}${primaryStyle ? ' style="' + primaryStyle + '"' : ''}>
-        ${_wr.submitting ? svg(I.clock || I.settings) + 'Versturen…' : svg(I.mail || I.check) + 'Verstuur naar ' + esc(email || '—')}
-      </button>`;
-  }
-  window.__leadWelkomResendConfirm = async () => {
-    if (!_wr.lead || _wr.submitting) return;
-    const email = String(_wr.doelEmail || '').trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      window.KV?.toast?.('Ongeldig e-mailadres. Corrigeer en probeer opnieuw.', 'warn');
+    if (!window.InlogOpnieuw || typeof window.InlogOpnieuw.open !== 'function') {
+      window.KV?.toast?.('Inlog-popup niet geladen — ververs de pagina.');
       return;
     }
-    _wr.submitting = true; _wrRepaintFoot();
-    try {
-      const resp = await window.KV.authedFetch('/api/lead-welkom-resend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lead_id:  _wr.lead.id,
-          email,
-          voornaam: _wr.lead.voornaam || null,
-        }),
-      });
-      let j = null;
-      try { j = await resp.json(); } catch (_) { /* body-parse-fail */ }
-      if (!resp.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
-      _wr.submitting = false;
-      _wr.open = false;
-      window.DFO.render();
-      if (j?.sent) window.KV?.toast?.('Welkomstmail verstuurd naar ' + email, 'ok');
-      else window.KV?.toast?.('Welkomstmail-verzending mislukt (' + (j?.resultaat?.reden || j?.resultaat?.error || 'onbekend') + ')', 'warn');
-    } catch (e) {
-      _wr.submitting = false; _wrRepaintFoot();
-      window.KV?.toast?.('Verzending mislukt: ' + (e?.message || 'onbekende fout'), 'error');
-    }
+    const lead = (_det?.data?.lead && String(_det.data.lead.id) === String(id)) ? _det.data.lead : null;
+    const naam = lead ? (lead.naam || [lead.voornaam, lead.achternaam].filter(Boolean).join(' ').trim()) : '';
+    window.InlogOpnieuw.open({
+      leadId: id,
+      naam,
+      onKlaar: (res) => {
+        // Adres gewijzigd → dossier opnieuw laden zodat het nieuwe e-mailadres klopt.
+        if (res && res.email_gewijzigd && String(_det.id) === String(id)) { _det.data = null; window.DFO.render(); }
+      },
+    });
   };
   window.__leadRowDelete = async (id, naam) => {
     if (!id) return;
@@ -931,8 +856,7 @@
     const list = actiefListView();
     const modal = urlParam('lead-new') === '1' ? createModal() : '';
     const editM = _edit.open ? editModal() : '';
-    const wrM = _wr.open ? welkomResendModal() : '';
-    return list + modal + editM + wrM;
+    return list + modal + editM;
   }
 
   function archiefParams() {
@@ -1012,45 +936,10 @@
     const list = archiefListView();
     const modal = urlParam('lead-new') === '1' ? createModal() : '';
     const editM = _edit.open ? editModal() : '';
-    const wrM = _wr.open ? welkomResendModal() : '';
-    return list + modal + editM + wrM;
+    return list + modal + editM;
   }
 
-  // ── FEAT-1: welkomstmail-resend modal (aanpasbaar e-mailadres) ─────────
-  function welkomResendModal() {
-    if (!_wr.lead) return '';
-    const l = _wr.lead;
-    const email = _wr.doelEmail;
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim());
-    const different = String(email || '').trim().toLowerCase() !== String(l.email || '').trim().toLowerCase();
-    return `<div class="ld-modal-scrim" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:600;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)__leadWelkomResendClose()">
-      <div class="ld-modal" role="dialog" aria-modal="true" style="background:var(--surface);border-radius:12px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden">
-        <div class="ld-modal-head" style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-          ${svg(I.mail || I.settings, 'width:20px;height:20px;color:var(--m,#6D3FD4)')}
-          <div style="flex:1"><div style="font-weight:600;font-size:15px">Inloggegevens opnieuw versturen</div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:2px">Naar <b>${esc(l.naam) || '—'}</b></div></div>
-          <button class="icon-btn" onclick="__leadWelkomResendClose()" aria-label="Sluiten">${svg(I.x || I.warn)}</button>
-        </div>
-        <div class="ld-modal-body" style="padding:18px 20px;font-size:13px;line-height:1.5">
-          <p style="margin:0 0 12px">Hergebruikt de bestaande welkomstmail-flow (dezelfde als bij aanmaken van een handmatige lead). Er wordt <b>geen nieuwe auth-flow</b> gestart; alleen de mail wordt opnieuw verzonden.</p>
-          <label class="tk-field" style="display:block;margin-bottom:10px">
-            <span class="tk-field-l" style="font-weight:600;font-size:12.5px;color:var(--text-2);display:block;margin-bottom:5px">Doel-e-mailadres <span class="tk-req" style="color:var(--rose)">*</span></span>
-            <input class="ib-input" type="email" value="${esc(email)}"
-              oninput="__leadWelkomResendInput(this.value)"
-              style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"
-              placeholder="lead@voorbeeld.nl" ${_wr.submitting ? 'disabled' : ''}>
-            <div data-kv-wr-warn style="font-size:11.5px;color:var(--text-3);margin-top:5px">
-              ${different ? '<span style="color:var(--amber)">⚠ Afwijkend van lead-e-mail (' + esc(l.email || '—') + ')</span>' : 'Standaard: lead-e-mailadres.'}
-            </div>
-          </label>
-          <div data-kv-wr-errbox style="padding:8px 12px;background:var(--rose-soft,#FDECEE);color:var(--rose,#C22B3E);border-radius:6px;font-size:12px;display:${(!isValid && email.length > 0) ? 'block' : 'none'}">Ongeldig e-mailformaat.</div>
-        </div>
-        <div class="ld-modal-foot" data-kv-wr-foot style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
-          ${_wrFootHtml(email, isValid)}
-        </div>
-      </div>
-    </div>`;
-  }
+
 
   // ── Ronde 10: v2 editModal (1-op-1 pariteit met v1 modules/leads.html:266)
   //  Velden: voornaam / achternaam / e-mail* / telefoon / herkomst-dropdown +
@@ -1328,15 +1217,14 @@
                   : (l.status === 'gewonnen' ? `<div style="font-size:11.5px;color:var(--text-3)">Al omgezet naar klant.</div>` : '')
                 }
                 <button class="btn btn-sm" onclick="__leadEditOpen('${esc(l.id || '')}')" style="margin-top:6px">${svg(I.settings, 'width:14px;height:14px')}Uitgebreid bewerken…</button>
-                <button class="btn btn-sm" onclick="__leadWelkomResendOpen('${esc(l.id || '')}')" title="Verstuur inloggegevens (welkomstmail) opnieuw naar dit lead — optioneel naar een alternatief adres">${svg(I.mail || I.settings, 'width:14px;height:14px')}Inloggegevens opnieuw versturen…</button>
+                <button class="btn btn-sm" onclick="__leadWelkomResendOpen('${esc(l.id || '')}')" title="Verse inloglink naar het bestaande LMS-account — optioneel eerst naar een ander adres verplaatsen">${svg(I.mail || I.settings, 'width:14px;height:14px')}Inloggegevens opnieuw versturen…</button>
               </div>
             </div>
           </div>
         </div>
       </div>
       ${_act2.open ? act2Modal(l) : ''}
-      ${_edit.open ? editModal() : ''}
-      ${_wr.open ? welkomResendModal() : ''}`;
+      ${_edit.open ? editModal() : ''}`;
   }
 
   // Ronde 4: bevestigings-modal voor archiveer / herstel / omzetten-klant.
