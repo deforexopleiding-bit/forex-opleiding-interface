@@ -16,11 +16,15 @@
 //     per_variant:{ [variant]: { variant,label,groep,sessies_totaal,
 //       funnel:[{fase,label,sessions,conversie_vorige,conversie_landing}]|null,
 //       afhaken_per_vraag:[{quiz_versie,sessies_gestart,voltooid,voltooid_pct,
-//         vragen:[{stap_nr,vraag_id,gezien,door,afgehaakt,afhaak_pct}]}]|null,
+//         vragen:[{stap_nr,vraag_id,gezien,door,afgehaakt,afhaak_pct,
+//           gem_tijd_s,mediaan_tijd_s,tijd_n,afhakers_mediaan_s}]}]|null,
+//       gedrag:{beschikbaar,gedrag_events,tijd_per_vraag,formulier_tijd,scroll,
+//         validatie_top,laatste_veld,afhaak_fases,afhaak_quiz_stappen,afhakers,
+//         rage_hotspots}|null   (api/_lib/funnel-gedrag-compute.js),
 //       lead_resultaat:{leads,toegang,geen_toegang,kwalificatie_onbekend,
 //         toegang_pct,geboekt,leads_met_afspraak,leads_met_sessie,dekking_pct} } },
 //     meta:{ tracking_actief, tabel_bestaat, eerste_event_ts, events_gelezen,
-//       events_genegeerd, afgekapt, max_events_per_variant, fase_telling,
+//       events_genegeerd, gedrag_events_gelezen, afgekapt, max_events_per_variant, fase_telling,
 //       geboekt_bron, blinde_vlekken:[...] } }
 //
 // FAIL-SOFT: bestaat funnel_events nog niet (migratie niet gedraaid) of is de
@@ -36,12 +40,16 @@ import {
   FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES,
   aggregeerFunnelStats, bepaalBlindeVlekken,
 } from './_lib/funnel-stats-compute.js';
+import { GEDRAG_LEES_TYPES } from './_lib/funnel-gedrag-compute.js';
 
 export const PAGINA = 1000;
 export const MAX_EVENTS_PER_VARIANT = 25000;
 export const TIJDBUDGET_MS = 20000;   // ruim binnen de 30s Vercel-limiet
 const MAX_DAGEN = 366;
 const EVENT_KOLOMMEN = 'id,session_id,variant,event_type,stap_nr,vraag_id,quiz_versie,ts,lead_id';
+// Gedragsevents: aparte query mét meta (de funnel-query blijft licht). Eigen plafond.
+const GEDRAG_KOLOMMEN = 'id,session_id,variant,event_type,stap_nr,vraag_id,quiz_versie,ts,meta';
+export const MAX_GEDRAG_EVENTS_PER_VARIANT = 25000;
 
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 export function isGeldigeDatum(s) {
@@ -75,15 +83,17 @@ export function isOntbrekendeTabel(err) {
   return /could not find the table|does not exist/i.test(String(err.message || ''));
 }
 
-async function leesEventsVoorVariant(db, variant, startIso, eindIso, deadline) {
+async function leesEventsVoorVariant(db, variant, startIso, eindIso, deadline, {
+  types = BENODIGDE_EVENT_TYPES, kolommen = EVENT_KOLOMMEN, max = MAX_EVENTS_PER_VARIANT,
+} = {}) {
   const rijen = [];
   let laatsteId = null;
   let afgekapt = false;
   for (;;) {
     if (Date.now() > deadline) { afgekapt = true; break; }
-    let q = db.from('funnel_events').select(EVENT_KOLOMMEN)
+    let q = db.from('funnel_events').select(kolommen)
       .eq('variant', variant)
-      .in('event_type', BENODIGDE_EVENT_TYPES)
+      .in('event_type', types)
       .gte('ts', startIso).lt('ts', eindIso);
     if (laatsteId != null) q = q.gt('id', laatsteId);
     const { data, error } = await q.order('id', { ascending: true }).limit(PAGINA);
@@ -92,7 +102,7 @@ async function leesEventsVoorVariant(db, variant, startIso, eindIso, deadline) {
     rijen.push(...page);
     if (page.length < PAGINA) break;
     laatsteId = page[page.length - 1].id;
-    if (rijen.length >= MAX_EVENTS_PER_VARIANT) { afgekapt = true; break; }
+    if (rijen.length >= max) { afgekapt = true; break; }
   }
   return { rijen, afgekapt, fout: null };
 }
@@ -168,15 +178,24 @@ export default async function handler(req, res) {
 
     // 2) Events (per variant parallel, keyset-paging) + dekking leads↔sessies.
     let events = [];
+    let gedragEvents = [];
     let afgekapt = false;
     let gekoppeld = new Set();
     if (trackingActief) {
       const leadIds = (leadsRes.data || []).map((l) => l.id).filter(Boolean);
-      const [perVariant, gek] = await Promise.all([
+      const gedragOpts = { types: GEDRAG_LEES_TYPES, kolommen: GEDRAG_KOLOMMEN, max: MAX_GEDRAG_EVENTS_PER_VARIANT };
+      const [perVariant, gedragPerVariant, gek] = await Promise.all([
         Promise.all(varianten.map((v) => leesEventsVoorVariant(db, v, startIso, eindIso, deadline))),
+        Promise.all(varianten.map((v) => leesEventsVoorVariant(db, v, startIso, eindIso, deadline, gedragOpts))),
         leesGekoppeldeLeadIds(db, leadIds),
       ]);
       gekoppeld = gek;
+      // Gedrag is aanvullend: een leesfout hier maakt de funnel niet stuk.
+      for (const r of gedragPerVariant) {
+        gedragEvents = gedragEvents.concat(r.rijen);
+        if (r.afgekapt) afgekapt = true;
+        if (r.fout) console.error('[funnel-stats] gedrag-events fout:', r.fout);
+      }
       for (const r of perVariant) {
         events = events.concat(r.rijen);
         if (r.afgekapt) afgekapt = true;
@@ -185,7 +204,7 @@ export default async function handler(req, res) {
     }
 
     const agg = aggregeerFunnelStats({
-      events, leads: leadsRes.data || [], boekingen: boekRes.data || [],
+      events, gedragEvents, leads: leadsRes.data || [], boekingen: boekRes.data || [],
       gekoppeldeLeadIds: gekoppeld, varianten,
       start: periode.start, eindExclusief: periode.eindExclusief, trackingActief,
     });
@@ -200,6 +219,7 @@ export default async function handler(req, res) {
         eerste_event_ts: eersteEventTs,
         events_gelezen: events.length,
         events_genegeerd: agg.events_genegeerd,
+        gedrag_events_gelezen: gedragEvents.length,
         afgekapt,
         max_events_per_variant: MAX_EVENTS_PER_VARIANT,
         fase_telling: 'bereik — een sessie telt voor een fase als dat event in de periode voorkomt, ongeacht eerdere fases',

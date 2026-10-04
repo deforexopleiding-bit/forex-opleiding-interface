@@ -27,6 +27,7 @@
 // indienden; afgehaakt = gezien − door.
 
 import { nlDateString } from './nl-period.js';
+import { bouwGedrag, voegTijdToe, GEDRAG_LEES_TYPES } from './funnel-gedrag-compute.js';
 
 export const FUNNEL_VARIANTEN = Object.freeze([
   'kennismakingscursus-v1',
@@ -186,6 +187,8 @@ export function bouwAfhakenPerVraag(events) {
  *
  * @param {object} p
  * @param {Array}  p.events     funnel_events-rijen (session_id, variant, event_type, stap_nr, vraag_id, quiz_versie, ts, lead_id)
+ * @param {Array}  p.gedragEvents funnel_events-rijen mét meta, event_type in GEDRAG_LEES_TYPES
+ *                              (api/_lib/funnel-gedrag-compute.js) — het waarom achter afhaken
  * @param {Array}  p.leads      leads-rijen (id, bron, kwalificatie, email, aangemaakt, afspraak_op)
  * @param {Array}  p.boekingen  opstartsessie_submissions-rijen (booking_source, appointment_id, lead_id, created_at)
  * @param {Iterable} p.gekoppeldeLeadIds  lead-ids die in funnel_events voorkomen (dekking)
@@ -195,7 +198,7 @@ export function bouwAfhakenPerVraag(events) {
  * @param {boolean} p.trackingActief  false → funnel/afhaken blijven leeg (null)
  */
 export function aggregeerFunnelStats({
-  events = [], leads = [], boekingen = [], gekoppeldeLeadIds = [],
+  events = [], gedragEvents = [], leads = [], boekingen = [], gekoppeldeLeadIds = [],
   varianten = FUNNEL_VARIANTEN, start, eindExclusief, trackingActief = true,
 } = {}) {
   const startMs = start instanceof Date ? start.getTime() : tsMs(start);
@@ -210,6 +213,14 @@ export function aggregeerFunnelStats({
     if (!e || !eventsPerVariant.has(e.variant) || !EVENT_SET.has(e.event_type) || !e.session_id) { genegeerd += 1; continue; }
     if (!inPeriode(e.ts, startMs, eindMs)) { genegeerd += 1; continue; }
     eventsPerVariant.get(e.variant).push(e);
+  }
+  // Gedragsevents apart (eigen types, mét meta); zelfde variant- en periodefilter.
+  const gedragTypes = new Set(GEDRAG_LEES_TYPES);
+  const gedragPerVariant = new Map(gevraagd.map((v) => [v, []]));
+  for (const e of gedragEvents || []) {
+    if (!e || !gedragPerVariant.has(e.variant) || !gedragTypes.has(e.event_type) || !e.session_id) continue;
+    if (!inPeriode(e.ts, startMs, eindMs)) continue;
+    gedragPerVariant.get(e.variant).push(e);
   }
 
   const perVariant = {};
@@ -231,10 +242,13 @@ export function aggregeerFunnelStats({
       r.sessies_totaal = alleSessies.size;
       r.funnel = bouwFunnel(sessiesPerFase);
       r.afhaken_per_vraag = bouwAfhakenPerVraag(evs);
+      r.gedrag = bouwGedrag({ events: evs, gedragEvents: gedragPerVariant.get(variant) });
+      voegTijdToe(r.afhaken_per_vraag, r.gedrag.tijd_per_vraag);
     } else {
       r.sessies_totaal = null;
       r.funnel = null;
       r.afhaken_per_vraag = null;
+      r.gedrag = null;
     }
 
     // Lead-resultaat: leads met bron = variant, aangemaakt in de NL-periode.

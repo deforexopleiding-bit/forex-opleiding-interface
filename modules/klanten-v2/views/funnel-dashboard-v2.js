@@ -113,6 +113,19 @@
   // ── Render-helpers ────────────────────────────────────────────────────────
   const fmtPct = (v) => (v == null ? '—' : String(v).replace('.', ',') + '%');
   const num = (v) => (v == null ? '—' : String(v));
+  // Seconden (1 decimaal van de server) → "12,3 s" of "2m 05s".
+  const fmtSec = (v) => {
+    if (v == null || !isFinite(v)) return '—';
+    if (v < 60) return String(v).replace('.', ',') + ' s';
+    const s = Math.round(v % 60);
+    return Math.floor(v / 60) + 'm ' + (s < 10 ? '0' : '') + s + 's';
+  };
+
+  // Labels voor de gedragssignalen (veldNAMEN en enums — nooit waarden).
+  const VELD_LABEL = { voornaam: 'Voornaam', achternaam: 'Achternaam', email: 'E-mail', telefoon: 'Telefoon', akkoord: 'Akkoord-vinkje', overig: 'Overig' };
+  const TYPE_LABEL = { leeg: 'leeg gelaten', ongeldig: 'ongeldig', geen_landcode: 'landcode ontbreekt/klopt niet', niet_aangevinkt: 'niet aangevinkt' };
+  const FASE_LABEL = { landing: 'Landingspagina', formulier: 'Formulier', quiz: 'Vragenlijst', beoordeling: 'Tijdens beoordelen', toelating: 'Boekstap' };
+  const lbl = (map, k) => esc(map[k] || k);
 
   function funnelHtml(funnel) {
     if (!Array.isArray(funnel) || !funnel.length) {
@@ -148,6 +161,8 @@
           <td style="padding:4px 6px;text-align:right">${num(v.door)}</td>
           <td style="padding:4px 6px;text-align:right">${num(v.afgehaakt)}</td>
           <td style="padding:4px 6px;text-align:right;font-weight:600${hot ? ';color:var(--rose)' : ''}">${fmtPct(v.afhaak_pct)}</td>
+          <td class="fd-tijd" style="padding:4px 6px;text-align:right" title="${v.tijd_n ? 'mediaan ' + esc(fmtSec(v.mediaan_tijd_s)) + ' · ' + esc(v.tijd_n) + ' sessies' : 'geen tijdmeting'}">${fmtSec(v.gem_tijd_s)}</td>
+          <td style="padding:4px 6px;text-align:right;color:var(--text-2)" title="mediaan tijd op deze vraag van wie hier afhaakte">${fmtSec(v.afhakers_mediaan_s)}</td>
         </tr>`;
       }).join('');
       return `<div class="fd-quiz" data-versie="${esc(b.quiz_versie)}" style="margin-top:8px">
@@ -158,9 +173,50 @@
             <th style="padding:4px 6px">Vraag</th><th style="padding:4px 6px;text-align:right">Gezien</th>
             <th style="padding:4px 6px;text-align:right">Door</th><th style="padding:4px 6px;text-align:right">Afgehaakt</th>
             <th style="padding:4px 6px;text-align:right">Afhaak %</th>
+            <th style="padding:4px 6px;text-align:right" title="gemiddelde tijd op de vraag (hover: mediaan)">Gem. tijd</th>
+            <th style="padding:4px 6px;text-align:right" title="mediaan tijd van wie bij deze vraag afhaakte">Afhakers</th>
           </tr></thead><tbody>${rows}</tbody></table></div>
       </div>`;
     }).join('');
+  }
+
+  // ── Waarom afhaken (gedragssignalen) — onder de vraagtabel ────────────────
+  function lijstHtml(titel, rijen, leeg) {
+    const body = rijen.length
+      ? '<div style="display:flex;flex-direction:column;gap:3px">' + rijen.join('') + '</div>'
+      : '<div style="color:var(--text-3)">' + esc(leeg) + '</div>';
+    return '<div style="min-width:0"><div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">' + esc(titel) + '</div>' + body + '</div>';
+  }
+  function regel(links, rechts) {
+    return '<div style="display:flex;gap:8px;justify-content:space-between;min-width:0"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + links + '</span><span style="font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--text-2)">' + rechts + '</span></div>';
+  }
+  function gedragHtml(g) {
+    if (!g) return '';
+    if (!g.beschikbaar) {
+      return '<div class="fd-gedrag" style="margin-top:10px;color:var(--text-3);font-size:11.5px">Waarom afhaken: nog geen gedragssignalen in deze periode (scroll, laatste veld, validatie, rage clicks). De tijd per vraag hierboven komt dan uit vraag getoond → beantwoord.</div>';
+    }
+    const s = g.scroll || {};
+    const maxB = Math.max(1, ...((s.buckets || []).map((b) => b.sessies || 0)));
+    const scrollRijen = (s.buckets || []).map((b) => `<div style="display:grid;grid-template-columns:52px 1fr auto;gap:6px;align-items:center">
+        <span style="color:var(--text-2)">${esc(b.label)}</span>
+        <span style="background:var(--surface-2);border-radius:3px;height:10px;position:relative;overflow:hidden"><span style="position:absolute;left:0;top:0;bottom:0;width:${Math.round(((b.sessies || 0) / maxB) * 100)}%;background:var(--brand,#0A7490);opacity:.75"></span></span>
+        <span style="font-variant-numeric:tabular-nums;color:var(--text-2)">${num(b.sessies)}</span>
+      </div>`);
+    const ft = g.formulier_tijd || {};
+    const formulier = ft.sessies
+      ? [regel('Gemiddeld', esc(fmtSec(ft.gem_s))), regel('Mediaan', esc(fmtSec(ft.mediaan_s))), regel('Afhakers (mediaan)', esc(fmtSec(ft.afgehaakt_mediaan_s))), regel('Verstuurd', esc(ft.verstuurd) + ' van ' + esc(ft.sessies))]
+      : [];
+    return `<div class="fd-gedrag" style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);font-size:11.5px">
+      <div style="font-size:11.5px;font-weight:600;margin-bottom:8px">Waarom afhaken <span style="color:var(--text-3);font-weight:400">· ${esc(g.afhakers || 0)} afhakers met afhaakpunt</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:12px">
+        ${lijstHtml('Scrolldiepte (sessies)' + (s.mediaan_pct != null ? ' · mediaan ' + s.mediaan_pct + '%' : ''), s.sessies ? scrollRijen : [], 'Geen scrollmetingen')}
+        ${lijstHtml('Laatste veld vóór afhaken', (g.laatste_veld || []).map((r) => regel(lbl(VELD_LABEL, r.veld), esc(r.sessies) + ' · ' + fmtPct(r.pct))), 'Geen afhakers in het formulier')}
+        ${lijstHtml('Top validatiefouten', (g.validatie_top || []).map((r) => regel(lbl(VELD_LABEL, r.veld) + ' <span style="color:var(--text-3)">' + lbl(TYPE_LABEL, r.type) + '</span>', esc(r.sessies) + ' sessies')), 'Geen validatiefouten')}
+        ${lijstHtml('Waar afgehaakt', (g.afhaak_fases || []).map((r) => regel(lbl(FASE_LABEL, r.fase), esc(r.sessies) + ' · ' + fmtPct(r.pct))), 'Geen afhaakpunten')}
+        ${lijstHtml('Rage-click-hotspots', (g.rage_hotspots || []).map((r) => regel('<code style="font-size:10.5px">' + esc(r.doel) + '</code>', esc(r.sessies) + ' sessies · ' + esc(r.klikken) + '×')), 'Geen rage clicks')}
+        ${lijstHtml('Tijd op het formulier', formulier, 'Geen formuliermetingen')}
+      </div>
+    </div>`;
   }
 
   function leadHtml(lr, trackingActief) {
@@ -193,7 +249,7 @@
       ${leadHtml(v.lead_resultaat, trackingActief)}
       ${trackingActief ? `<div>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 8px" onclick="window.__fdToggle('${esc(v.variant)}')">${open ? '▾' : '▸'} Afhaken per vraag</button>
-        ${open ? `<div class="fd-afhaken">${afhakenHtml(v.afhaken_per_vraag)}</div>` : ''}
+        ${open ? `<div class="fd-afhaken">${afhakenHtml(v.afhaken_per_vraag)}${gedragHtml(v.gedrag)}</div>` : ''}
       </div>` : ''}
     </div>`;
   }

@@ -404,8 +404,8 @@ test('endpoint: leest >1000 events via keyset-paging, filtert variant + periode'
   assert.equal(v.funnel.find((f) => f.fase === 'lead_ingediend').sessions, 1);
   assert.equal(v.lead_resultaat.leads_met_sessie, 1);
   assert.equal(v.lead_resultaat.dekking_pct, 50);
-  // Twee pagina's (1000 + 501) + probe + dekking.
-  const eventQ = db.log.filter((q) => q.tabel === 'funnel_events' && q.kol && q.kol.startsWith('id,'));
+  // Twee pagina's (1000 + 501) + probe + dekking. (De gedrag-query met meta is apart; zie sectie 5.)
+  const eventQ = db.log.filter((q) => q.tabel === 'funnel_events' && q.kol && q.kol.startsWith('id,') && !q.kol.includes('meta'));
   assert.equal(eventQ.length, 2);
   assert.ok(eventQ[1].filters.some(([op, c, v2]) => op === 'gt' && c === 'id' && v2 === 1000));
   // Alleen de benodigde event-types worden opgehaald.
@@ -552,4 +552,92 @@ test('scherm: leadsonderhoud Funnels-tab tekent het dashboard bovenaan', () => {
   assert.match(fv, /window\.DFOFunnelDashboard\.render\(FUNNEL_REGISTRY\)/);
   assert.match(fv, /\/api\/leads-per-bron-count|_lsFunnelRowHtml/);   // bestaande telling blijft
   assert.match(src, /window\.DFO\.VIEWS\['leadsonderhoud\/Funnels'\]\s*=\s*funnelsView/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 5 · GEDRAG (waarom afhaken) — endpoint + scherm
+// ════════════════════════════════════════════════════════════════════════════
+
+test('gedrag-endpoint: aparte query mét meta, alleen de gedragstypes; funnel-telling ongewijzigd', async () => {
+  reset();
+  const V = '7-daagse-v1';
+  let id = 0;
+  const r = (extra) => ({ id: ++id, ...ev('s1', 'landing', { variant: V }), meta: null, ...extra });
+  db.tabellen.funnel_events = [
+    r({}),
+    r({ event_type: 'vraag_getoond', stap_nr: 1, quiz_versie: 'q1', ts: '2026-10-02T10:00:00Z' }),
+    r({ event_type: 'vraag_beantwoord', stap_nr: 1, quiz_versie: 'q1', ts: '2026-10-02T10:00:08Z' }),
+    r({ event_type: 'scroll_diepte', meta: { consent: false, pct: 70 } }),
+    r({ event_type: 'validatie_fout', meta: { veld: 'telefoon', type: 'geen_landcode' } }),
+    r({ event_type: 'afhaakpunt', stap_nr: 1, meta: { fase: 'quiz' } }),
+  ];
+  db.tabellen.leads = [];
+  db.tabellen.opstartsessie_submissions = [];
+  const res = await call({ van: '2026-10-02', tot: '2026-10-02', variant: V });
+  assert.equal(res.statusCode, 200);
+  const gq = db.log.filter((q) => q.tabel === 'funnel_events' && q.kol && q.kol.includes('meta'));
+  assert.equal(gq.length, 1);
+  const typesFilter = gq[0].filters.find(([op, c]) => op === 'in' && c === 'event_type')[2];
+  assert.ok(typesFilter.includes('rage_click') && typesFilter.includes('vraag_beantwoord'));
+  assert.ok(!typesFilter.includes('landing'));
+  assert.equal(res.body.meta.events_gelezen, 2);          // landing + vraag_getoond, zoals vóór gedrag
+  assert.equal(res.body.meta.gedrag_events_gelezen, 4);
+  const v = res.body.per_variant[V];
+  assert.equal(v.gedrag.beschikbaar, true);
+  assert.equal(v.gedrag.scroll.mediaan_pct, 70);
+  assert.deepEqual(v.gedrag.validatie_top, [{ veld: 'telefoon', type: 'geen_landcode', sessies: 1, keer: 1 }]);
+  assert.deepEqual(v.gedrag.afhaak_fases, [{ fase: 'quiz', sessies: 1, pct: 100 }]);
+  // Tijd per vraag hangt aan de bestaande afhaken-rij.
+  assert.equal(v.afhaken_per_vraag[0].vragen[0].gem_tijd_s, 8);
+});
+
+test('gedrag-endpoint: nog geen gedragsrijen (website/migratie niet live) → beschikbaar false, funnel heel', async () => {
+  reset();
+  db.tabellen.funnel_events = [{ id: 1, ...ev('s1', 'landing', { variant: '7-daagse-v2' }) }];
+  db.tabellen.leads = []; db.tabellen.opstartsessie_submissions = [];
+  const res = await call({ van: '2026-10-02', tot: '2026-10-02', variant: '7-daagse-v2' });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.per_variant['7-daagse-v2'].gedrag.beschikbaar, false);
+  assert.equal(res.body.per_variant['7-daagse-v2'].funnel[0].sessions, 1);
+});
+
+test('gedrag-scherm: tijdkolommen in Afhaken per vraag + blok Waarom afhaken', async () => {
+  const V = '7-daagse-v2';
+  const per = {};
+  for (const v of C.FUNNEL_VARIANTEN) {
+    per[v] = C.aggregeerFunnelStats({
+      events: [ev('s1', 'landing', { variant: v }), vraag('s1', 1, 'q1', { variant: v, ts: '2026-10-02T10:00:00Z' })],
+      gedragEvents: [
+        { ...ev('s1', 'stap_verlaten', { variant: v, stap_nr: 1, quiz_versie: 'q1' }), meta: { duur_ms: 75000, einde: 'weg', stap: 'vraag' } },
+        { ...ev('s1', 'afhaakpunt', { variant: v, stap_nr: 1 }), meta: { fase: 'quiz', veld: 'telefoon' } },
+        { ...ev('s1', 'rage_click', { variant: v }), meta: { doel: 'button#volgende', aantal: 5 } },
+      ],
+      start: START, eindExclusief: EIND, varianten: [v],
+    }).per_variant[v];
+  }
+  const { window, taken } = laadScherm({
+    periode: { van: '2026-10-02', tot: '2026-10-02' }, varianten: [...C.FUNNEL_VARIANTEN], per_variant: per,
+    meta: { tracking_actief: true, tabel_bestaat: true, blinde_vlekken: [] },
+  });
+  const D = window.DFOFunnelDashboard;
+  D.render([]); await taken[0]();
+  window.__fdToggle(V);
+  const html = D.render([]);
+  assert.match(html, /Gem\. tijd/);
+  assert.match(html, /1m 15s/);                       // 75 s, ook als afhaker
+  assert.equal((html.match(/class="fd-gedrag"/g) || []).length, 1);
+  assert.match(html, /Waarom afhaken/);
+  assert.match(html, /Vragenlijst/);                  // afhaakfase-label
+  assert.match(html, /button#volgende/);
+  assert.match(html, /Telefoon/);                     // laatste veld
+});
+
+test('gedrag-scherm: zonder gedragsdata een rustige melding, geen lege blokken', async () => {
+  const { window, taken } = laadScherm(nepPayload({ actief: true }));
+  const D = window.DFOFunnelDashboard;
+  D.render([]); await taken[0]();
+  window.__fdToggle('kennismakingscursus-v1');
+  const html = D.render([]);
+  assert.match(html, /nog geen gedragssignalen/);
+  assert.doesNotMatch(html, /Rage-click-hotspots/);
 });
