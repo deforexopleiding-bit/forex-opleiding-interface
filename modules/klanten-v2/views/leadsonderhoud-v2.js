@@ -3189,7 +3189,16 @@
     // Match op lowercase e-mailadres (customers.email); geen telefoon-match
     // zodat gedeelde testnummers geen valse vinkjes geven.
     const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
-    const rows = items.length ? items.map(s => {
+    // 2026-10-04 — alleen de LIJST: het tijd-filter ook client-side toetsen op
+    // het gekozen moment (de server doet hetzelfde). Zo verdwijnt een call die
+    // inmiddels begonnen is uit Aankomend zonder herladen, en staat een rij
+    // zonder moment nooit onder Aankomend/Verleden. Agenda krijgt `items`.
+    const lijstItems = (activeTijd === 'alles') ? items : items.filter((r) => {
+      const t = r.gekozen_start_at ? new Date(r.gekozen_start_at).getTime() : NaN;
+      if (isNaN(t)) return false;
+      return activeTijd === 'aankomend' ? t >= nowMs : t < nowMs;
+    });
+    const rows = lijstItems.length ? lijstItems.map(s => {
       const isCall = s.bron_type === 'ghl_call';
       const badge = isCall
         ? '<span style="color:var(--text-3)">–</span>'
