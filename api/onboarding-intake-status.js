@@ -27,8 +27,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { haalSessieOverzichtPerStudent, BRON_GELEZEN } from './_lib/dfo-lms-sessies.js';
-import { deriveIntakeStatus } from './_lib/intake-status.js';
+import { BRON_GELEZEN } from './_lib/dfo-lms-sessies.js';
+import { intakeItemsVoor } from './_lib/onboarding-intake-items.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_IDS = 500;
@@ -87,64 +87,11 @@ export default async function handler(req, res) {
     if (rowsErr) throw new Error('onboardings fetch: ' + rowsErr.message);
     const visible = Array.isArray(rows) ? rows : [];
 
-    // 2) Sessie-overzicht per student, RECHTSTREEKS uit het LMS.
-    //
-    // De vorige versie haalde de sessies per MENTOR uit Bubble en zocht de
-    // student daarin op. Dat had twee problemen: de mentoren werken sinds
-    // augustus 2026 in het LMS (dus Bubble is leeg), en een student van een
-    // mentor zonder Bubble-koppeling viel sowieso buiten beeld.
-    //
-    // We kijken nu per STUDENT, via onboardings.bubble_user_id →
-    // hlms_student.bubble_user_id. Die brug is gemeten aanwezig: 299 van de
-    // 304 studentrijen dragen 'm, en die waarden zijn uniek.
-    const bubbleIds = visible.map((r) => r.bubble_user_id).filter(Boolean);
-    // De tweede brug: het LMS-student-id, voor wie geen Bubble-id heeft.
-    const lmsIds = visible.filter((r) => !r.bubble_user_id).map((r) => r.dfo_lms_student_id).filter(Boolean);
-    const bron = await haalSessieOverzichtPerStudent({ bubbleUserIds: bubbleIds, lmsStudentIds: lmsIds });
-
-    const bronGelezen = bron.bron_status === BRON_GELEZEN;
-    if (!bronGelezen) {
-      console.warn('[onboarding-intake-status] sessies niet gelezen ('
-        + bron.bron_status + '): ' + (bron.fout || 'reden onbekend'));
-    }
-
-    // 3) Per zichtbare onboarding → afleiden.
-    const items = visible.map((r) => {
-      const bu = r.bubble_user_id ? String(r.bubble_user_id) : null;
-      const lid = r.dfo_lms_student_id ? String(r.dfo_lms_student_id) : null;
-      const v  = !bronGelezen ? null
-        : bu ? (bron.perStudent.get(bu) || null)
-        : lid ? (bron.perLmsStudent?.get(lid) || null)
-        : null;
-      const plannedIso = v?.next   || null;
-      const doneIso    = v?.done   || null;
-      const noshowIso  = v?.noshow || null;
-
-      // KON DE BRON NIET GELEZEN WORDEN, dan leiden we NIETS af.
-      // Zouden we dat wel doen, dan komt elke student op 'nog_te_benaderen'
-      // (rang 4) en dus BOVENAAN de probleemlijst — ook iemand die dertien
-      // sessies achter de rug heeft. Dat is niet leeg maar onwaar, en het
-      // zet iemand tot een verkeerde handeling aan: bellen wie al lang bezig
-      // is. Liever geen status dan een verzonnen status; de aanroeper houdt
-      // dan gewoon zijn vorige waarde.
-      const intake = bronGelezen
-        ? deriveIntakeStatus({
-            hasCompletedSession:  !!doneIso,
-            hasMentor:            !!r.mentor_user_id,
-            mentor_intake_status: r.mentor_intake_status || null,
-            hasNoshow:            !!noshowIso,
-            hasFutureCall:        !!plannedIso,
-          })
-        : null;
-
-      return {
-        onboarding_id:     r.id,
-        intake_status:     intake,
-        planned_call_at:   plannedIso,
-        last_completed_at: doneIso,
-        last_noshow_at:    noshowIso,
-      };
-    });
+    // 2) + 3) De afleiding zelf staat in een gedeelde lib — het LMS-overzicht
+    //    gebruikt exact dezelfde.
+    const { bron_status, fout, items } = await intakeItemsVoor(visible);
+    const bronGelezen = bron_status === BRON_GELEZEN;
+    const bron = { bron_status, fout };
 
     // De BRON-STATUS gaat altijd mee: zonder dat is 'overal null' niet te
     // onderscheiden van 'niemand heeft een sessie'.

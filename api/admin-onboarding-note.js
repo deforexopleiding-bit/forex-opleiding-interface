@@ -20,9 +20,9 @@
 //
 // Response 200: { ok:true, update:{kind,note,created_at,created_by} }.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { createNotification } from './_lib/notify.js';
+import { schrijfOnboardingNotitie } from './_lib/onboarding-acties.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,50 +54,8 @@ export default async function handler(req, res) {
   const note = noteRaw.slice(0, 2000);
 
   try {
-    // 1) Onboarding lookup voor mentor_user_id (mentor-aware notificatie).
-    const { data: ob, error: obErr } = await supabaseAdmin
-      .from('onboardings')
-      .select('id, mentor_user_id, customer_name, status')
-      .eq('id', onboardingId)
-      .maybeSingle();
-    if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
-    if (!ob) return res.status(404).json({ error: 'Onboarding niet gevonden.' });
-
-    // 2) Schrijf tijdlijn-rij. Bij fout breken we direct — er mag GEEN
-    // melding zonder bijbehorende tijdlijn-entry ontstaan.
-    const { data: upd, error: upErr } = await supabaseAdmin
-      .from('onboarding_mentor_updates')
-      .insert({
-        onboarding_id: onboardingId,
-        kind:          'note',
-        status:        null,
-        note,
-        created_by:    user.id,
-      })
-      .select('kind, note, created_at, created_by')
-      .single();
-    if (upErr) throw new Error('mentor_update insert: ' + upErr.message);
-
-    // 3) Mentor-notificatie via unified notifications-systeem (fail-soft).
-    // Alleen als er een mentor is; geen mentor → alleen tijdlijn-notitie.
-    if (ob.mentor_user_id) {
-      createNotification({
-        toUserId:   ob.mentor_user_id,
-        type:       'onboarding.admin_note',
-        title:      'Notitie van management' + (ob.customer_name ? (' · ' + ob.customer_name) : ''),
-        body:       note,
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   onboardingId,
-        createdBy:  user.id,
-      }).catch(() => {});
-    }
-
-    return res.status(200).json({
-      ok:              true,
-      update:          upd,
-      mentor_notified: !!ob.mentor_user_id,
-    });
+    const uitkomst = await schrijfOnboardingNotitie({ onboardingId, note, doorUserId: user.id });
+    return res.status(uitkomst.status).json(uitkomst.body);
   } catch (e) {
     console.error('[admin-onboarding-note]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

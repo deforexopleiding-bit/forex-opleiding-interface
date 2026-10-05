@@ -80,8 +80,9 @@ test('CONTRACT: alle elf schrijfpunten spiegelen via de helper', () => {
   // Elk endpoint dat de spiegel bijwerkt hoort dat via spiegelNaActie() te
   // doen. Zo staat de faalzachte afhandeling ook op één plek.
   const AANROEPERS = [
-    'api/onboarding-assign-mentor.js',
-    'api/admin-onboarding-start-date.js',
+    // Mentor toewijzen, startdatum en startstatus: sinds 5-10-2026 in één lib,
+    // zodat het CRM-scherm en de LMS-machine-route dezelfde uitvoering delen.
+    'api/_lib/onboarding-acties.js',
     'api/onboarding-archive.js',
     'api/mentor-future-student-update.js',
     'api/onboarding-step-save.js',
@@ -128,7 +129,8 @@ test('CONTRACT: er is nog maar ÉÉN computeBedenktijd in de hele api-map', () =
 test('CONTRACT: spiegel en admin-lijst gebruiken dezelfde berekening', () => {
   // Niet "dezelfde uitkomst bij toeval", maar aantoonbaar dezelfde bron.
   const spiegel = readFileSync(join(ROOT, 'api/_lib/onboarding-spiegel.js'), 'utf8');
-  const lijst   = readFileSync(join(ROOT, 'api/admin-future-students-list.js'), 'utf8');
+  // De bouwer van de admin-lijst staat sinds 5-10-2026 in een gedeelde lib.
+  const lijst   = readFileSync(join(ROOT, 'api/_lib/onboarding-overzicht-rijen.js'), 'utf8');
   const LIB = /onboarding-bedenktijd\.js/;
   assert.match(spiegel, LIB, 'de spiegel rekent niet via de gedeelde lib');
   assert.match(lijst,   LIB, 'de admin-lijst rekent niet via de gedeelde lib');
