@@ -11,11 +11,10 @@
 // Response 200: { ok:true, start_date, update:{kind,note,created_at,created_by},
 //                 notification_id?: uuid|null }.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { createNotification } from './_lib/notify.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
-import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { zetStartdatumOnboarding } from './_lib/onboarding-acties.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom). Voor losse ISO-timestamps slicen we
@@ -79,58 +78,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { data: ob, error: obErr } = await supabaseAdmin
-      .from('onboardings')
-      .select('id, mentor_user_id, start_date, customer_name')
-      .eq('id', onboardingId)
-      .maybeSingle();
-    if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
-    if (!ob)  return res.status(404).json({ error: 'Onboarding niet gevonden.' });
-
-    const { data: upd, error: updErr } = await supabaseAdmin
-      .from('onboardings')
-      .update({ start_date: raw })
-      .eq('id', onboardingId)
-      .select('start_date')
-      .single();
-    if (updErr) throw new Error('start_date update: ' + updErr.message);
-
-    const noteText = 'Startdatum gewijzigd naar ' + fmtDateNL(raw);
-    const { data: tlrow, error: tlErr } = await supabaseAdmin
-      .from('onboarding_mentor_updates')
-      .insert({
-        onboarding_id: onboardingId,
-        kind:          'note',
-        status:        null,
-        note:          noteText,
-        created_by:    user.id,
-      })
-      .select('kind, note, created_at, created_by')
-      .single();
-    if (tlErr) throw new Error('mentor_update insert: ' + tlErr.message);
-
-    // Mentor-notificatie via unified notifications-systeem (fail-soft).
-    if (ob.mentor_user_id) {
-      createNotification({
-        toUserId:   ob.mentor_user_id,
-        type:       'onboarding.start_date_changed',
-        title:      'Startdatum gewijzigd' + (ob.customer_name ? (' · ' + ob.customer_name) : ''),
-        body:       'Nieuwe startdatum: ' + fmtDateNL(raw),
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   onboardingId,
-        createdBy:  user.id,
-      }).catch(() => {});
-    }
-
-    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
-    await spiegelNaActie(onboardingId, 'admin-onboarding-start-date');
-
-    return res.status(200).json({
-      ok:         true,
-      start_date: upd.start_date,
-      update:     tlrow,
-    });
+    const uitkomst = await zetStartdatumOnboarding({ onboardingId, startDatum: raw, doorUserId: user.id });
+    return res.status(uitkomst.status).json(uitkomst.body);
   } catch (e) {
     console.error('[admin-onboarding-start-date]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

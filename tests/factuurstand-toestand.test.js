@@ -118,7 +118,7 @@ test('ontbrekende LMS-kolommen worden herkend en weggelaten — de rest gaat doo
 const lees = (pad) => readFileSync(join(ROOT, pad), 'utf8');
 
 test('CONTRACT: de onboardingroutes halen de factuurstand uit de gedeelde telling', () => {
-  for (const pad of ['api/admin-future-students-list.js', 'api/mentor-future-students-self.js',
+  for (const pad of ['api/_lib/onboarding-overzicht-rijen.js', 'api/mentor-future-students-self.js',
     'api/onboarding-detail.js']) {
     const bron = lees(pad);
     assert.match(bron, /factuurstandPerKlant/, pad + ' leest de gedeelde factuurstand niet');

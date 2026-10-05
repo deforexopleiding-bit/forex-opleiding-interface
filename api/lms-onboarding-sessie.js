@@ -7,6 +7,17 @@
 //   POST { actie: 'sessie_afgerond', student_id, sessie_id? }
 //   POST { actie: 'startdatum', student_id, start_datum: 'YYYY-MM-DD', notitie? }
 //
+// En op ONBOARDING-id (Hoofdmentor > Onboarding in het LMS, 5 oktober 2026),
+// telkens met `door_email` = wie het in het LMS deed:
+//   POST { actie: 'mentor_toewijzen', onboarding_id, mentor_lms_id | null, door_email }
+//   POST { actie: 'startdatum',       onboarding_id, start_datum, door_email }
+//   POST { actie: 'startstatus',      onboarding_id, status | null, notitie?, door_email }
+//   POST { actie: 'notitie',          onboarding_id, tekst, door_email }
+// Die lopen door DEZELFDE functies als de CRM-schermen
+// (api/_lib/onboarding-acties.js): dezelfde controles, dezelfde meldingen aan
+// mentoren, dezelfde spiegel. Annuleren en archiveren kunnen hier NIET — die
+// blijven in het CRM (onomkeerbaar, en ze raken Teamleader en Bubble).
+//
 // De tweede actie hoort bij "Start later op" (opdracht 5 oktober 2026): de
 // hoofdmentor keurt in het LMS goed, en de onboarding hier krijgt dezelfde
 // startdatum. Zie api/_lib/onboarding-startdatum-lms.js.
@@ -41,6 +52,13 @@ import {
 import {
   besluitStartdatum, datumNL, SD_WIJZIGEN, SD_TE_VROEG,
 } from './_lib/onboarding-startdatum-lms.js';
+import {
+  wijsMentorToe, zetStartdatumOnboarding, zetStartstatus, schrijfOnboardingNotitie,
+} from './_lib/onboarding-acties.js';
+import { crmMentorVoorLmsId, crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
+
+/** De acties die op een onboarding-id werken (en niet op een student-id). */
+export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -80,8 +98,18 @@ export default async function handler(req, res) {
   }
   const actie = String(body?.actie || '');
   const studentId = String(body?.student_id || '').trim();
-  if (actie !== 'sessie_afgerond' && actie !== 'startdatum') {
-    return antwoord(res, 400, false, 'ongeldige_actie', 'Onbekende actie. Verwacht: sessie_afgerond of startdatum.');
+  const onboardingId = String(body?.onboarding_id || '').trim();
+  if (actie !== 'sessie_afgerond' && !ONBOARDING_ACTIES.has(actie)) {
+    return antwoord(res, 400, false, 'ongeldige_actie',
+      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus of notitie.');
+  }
+  // DE ONBOARDING-ACTIES: op onboarding-id. `startdatum` met een student-id
+  // blijft de oude weg (start later op, PR6).
+  if (ONBOARDING_ACTIES.has(actie) && (actie !== 'startdatum' || onboardingId)) {
+    if (!UUID_RE.test(onboardingId)) {
+      return antwoord(res, 400, false, 'ongeldig_verzoek', 'onboarding_id ontbreekt of is geen uuid.');
+    }
+    return onboardingActie(res, actie, onboardingId, body);
   }
   if (!UUID_RE.test(studentId)) {
     return antwoord(res, 400, false, 'ongeldig_verzoek', 'student_id ontbreekt of is geen uuid.');
@@ -219,6 +247,64 @@ async function zetStartdatum(res, lms, studentId, body) {
   } catch (e) {
     console.error('[lms-onboarding-sessie] startdatum', e?.message || e);
     return antwoord(res, 500, false, 'fout', 'De startdatum kon in het CRM niet gezet worden.');
+  }
+}
+
+/**
+ * EEN ACTIE OP EEN ONBOARDING, VANUIT HET LMS. Wie het deed, gaat mee als
+ * e-mailadres; het CRM zoekt de gebruiker erbij (precies één actieve match).
+ * Vindt het hem niet, dan gebeurt de actie toch - op naam van niemand - en
+ * zegt de tijdlijn wie het in het LMS was. Een handeling weigeren omdat een
+ * profiel ontbreekt, zou de hoofdmentor laten zitten met iets wat hij niet
+ * kan oplossen.
+ */
+async function onboardingActie(res, actie, onboardingId, body) {
+  const doorEmail = typeof body?.door_email === 'string' ? body.door_email.trim().slice(0, 200) : '';
+  try {
+    const door = await crmGebruikerVoorEmail(doorEmail);
+    const doorUserId = door?.id || null;
+    const viaLms = 'via het LMS' + (doorEmail ? ' (' + doorEmail + ')' : '');
+
+    let uitkomst;
+    if (actie === 'mentor_toewijzen') {
+      const lmsId = body?.mentor_lms_id;
+      let mentorUserId = null;
+      if (lmsId !== null && lmsId !== undefined && lmsId !== '') {
+        const mentor = await crmMentorVoorLmsId(String(lmsId));
+        if (!mentor) {
+          return antwoord(res, 422, false, 'mentor_niet_te_vertalen',
+            'Deze mentor is in het CRM niet als actieve mentor te vinden (op e-mailadres). Er is niets gewijzigd.');
+        }
+        mentorUserId = mentor.user_id;
+      }
+      uitkomst = await wijsMentorToe({ onboardingId, mentorUserId, doorUserId });
+    } else if (actie === 'startdatum') {
+      const startDatum = String(body?.start_datum || '').trim().slice(0, 10);
+      uitkomst = await zetStartdatumOnboarding({ onboardingId, startDatum, doorUserId });
+    } else if (actie === 'startstatus') {
+      const status = body?.status === null || body?.status === undefined || body?.status === ''
+        ? null : String(body.status).trim();
+      const notitie = typeof body?.notitie === 'string' && body.notitie.trim()
+        ? body.notitie.trim().slice(0, 2000) + ' — ' + viaLms
+        : 'Startstatus gezet ' + viaLms;
+      uitkomst = await zetStartstatus({ onboardingId, status, note: notitie, doorUserId });
+    } else {
+      const tekst = typeof body?.tekst === 'string' ? body.tekst.trim() : '';
+      if (!tekst) return antwoord(res, 400, false, 'ongeldig_verzoek', 'De notitie is leeg.');
+      uitkomst = await schrijfOnboardingNotitie({
+        onboardingId, note: (tekst + ' — ' + viaLms).slice(0, 2000), doorUserId,
+      });
+    }
+
+    const ok = uitkomst.status >= 200 && uitkomst.status < 300;
+    const b = uitkomst.body || {};
+    return antwoord(res, uitkomst.status, ok,
+      ok ? 'gewijzigd' : (b.code || 'geweigerd'),
+      ok ? 'Gewijzigd in het CRM.' : (b.error || 'Het CRM weigerde de wijziging.'),
+      { ...b, door_gevonden: !!doorUserId });
+  } catch (e) {
+    console.error('[lms-onboarding-sessie] ' + actie, e?.message || e);
+    return antwoord(res, 500, false, 'fout', 'De wijziging kon in het CRM niet uitgevoerd worden.');
   }
 }
 
