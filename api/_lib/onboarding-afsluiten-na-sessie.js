@@ -61,7 +61,8 @@ export function afsluitPatch(sess, nowIso) {
   };
 }
 
-const OB_KOLOMMEN = 'id, status, archived_at, customer_name, auto_afgerond_sessie_id, created_at';
+// `start_date` erbij voor de actie 'startdatum' (later opstarten vanuit het LMS).
+const OB_KOLOMMEN = 'id, status, archived_at, customer_name, auto_afgerond_sessie_id, created_at, start_date';
 
 /**
  * De onboarding van een LMS-student: eerst op `dfo_lms_student_id` (exact),
