@@ -22,6 +22,7 @@ import {
   findAvailabilityBlock,
   buildAvailabilityView,
 } from './_lib/onboarding-wizard-default.js';
+import { factuurstandPerKlant } from './_lib/factuurstand-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -95,6 +96,7 @@ export default async function handler(req, res) {
       intakeChain,
       cancellation,
       mentorUpdates,
+      factuur,
     ] = await Promise.all([
       // 1) Mentor-naam ophalen indien toegewezen. Behoudt de throw-op-DB-fout
       // uit de oude versie (propaageert naar 500 via outer catch).
@@ -245,6 +247,18 @@ export default async function handler(req, res) {
           return [];
         }
       })(),
+      // De ENE factuurstand (api/_lib/factuurstand-spiegel.js). Faalzacht:
+      // null = onbekend, nooit "open".
+      (async () => {
+        if (!row.customer_id) return null;
+        try {
+          const kaart = await factuurstandPerKlant([row.customer_id]);
+          return kaart.get(String(row.customer_id)) || null;
+        } catch (e) {
+          console.error('[onboarding-detail] factuurstand:', e?.message || e);
+          return null;
+        }
+      })(),
     ]);
 
     const custEmail = contact.email;
@@ -273,6 +287,7 @@ export default async function handler(req, res) {
         current_step   : row.current_step || null,
         answers        : row.answers || null,
         paid,
+        factuur,
         waiver,
         bedenktijd,
         availability,

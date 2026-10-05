@@ -341,10 +341,23 @@
     return `<div style="font-weight:600">${esc(lbl)}</div>${calls}`;
   }
 
-  function paidBadgeHtml(paid) {
-    return paid
-      ? '<span class="ob-badge paid-yes">Betaald</span>'
-      : '<span class="ob-badge paid-no">Nog niet betaald</span>';
+  // DE FACTUURSTAND — vier toestanden, label en ernst komen van de server
+  // (api/_lib/factuurstand-spiegel.js · factuurToestandWeergave). Hier wordt
+  // niets meer uitgerekend: "niet betaald" bestaat niet als toestand. Zonder
+  // `factuur` (lezen mislukt) staat er "onbekend", nooit "open".
+  const FACTUUR_ERNST_KLASSE = {
+    grijs: 'fs-grijs', neutraal: 'fs-neutraal', oranje: 'fs-oranje',
+    rood: 'fs-rood', groen: 'fs-groen', onbekend: 'fs-grijs',
+  };
+  function factuurBadgeHtml(f) {
+    if (!f || !f.label) {
+      return '<span class="ob-badge fs-grijs" title="De factuurstand kon niet gelezen worden">Factuurstand onbekend</span>';
+    }
+    const kl = FACTUUR_ERNST_KLASSE[f.ernst] || 'fs-grijs';
+    const titel = (f.openstaand_bedrag != null && Number(f.open_aantal) > 0)
+      ? ' title="' + esc(f.open_aantal + ' open · € ' + Number(f.openstaand_bedrag).toFixed(2).replace('.', ',')) + '"'
+      : '';
+    return '<span class="ob-badge ' + kl + '"' + titel + '>' + esc(f.label) + '</span>';
   }
 
   // Bubble-provisioning-status (F2). Drie states:
@@ -607,7 +620,7 @@
         <td>${_intakePillHtml(intakeKey)}</td>
         <td>${trajectLabelHtml(r)}</td>
         <td>${statusBadgeHtml(r.status)}</td>
-        <td>${paidBadgeHtml(!!r.paid)}</td>
+        <td>${factuurBadgeHtml(r.factuur)}</td>
         <td>${bedenktijdBadge(r.bedenktijd || null, r.waiver || null)}</td>
         <td>${renderAvailabilityIcon(r.availability || null)}</td>
         <td>${mentorCellHtml(r)}</td>
@@ -1526,7 +1539,7 @@
             <dt>Gestart</dt>          <dd>${esc(fmtDateTimeNL(o.started_at))}</dd>
             <dt>Afgerond</dt>         <dd>${esc(fmtDateTimeNL(o.completed_at))}</dd>
             <dt>Gearchiveerd</dt>     <dd>${esc(fmtDateTimeNL(o.archived_at))}</dd>
-            <dt>Betaling</dt>         <dd>${paidBadgeHtml(!!o.paid)}</dd>
+            <dt>Betaling</dt>         <dd>${factuurBadgeHtml(o.factuur)}</dd>
             <dt>Bedenktijd</dt>       <dd>${bedenktijdBadge(o.bedenktijd || null, o.waiver || null)}</dd>
           </dl>
           <!-- Manager-acties (notitie / afgehandeld / startdatum / herverdelen)

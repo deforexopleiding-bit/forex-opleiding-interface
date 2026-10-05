@@ -44,6 +44,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { telAlsBetaald } from './factuur-betaald.js';
+import { spiegelFactuurstandNaWijziging } from './factuurstand-spiegel.js';
 import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
 } from './onboarding-bedenktijd.js';
@@ -220,6 +221,17 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       .from(SPIEGEL_TABEL)
       .upsert(rij, { onConflict: 'crm_onboarding_id' });
     if (upErr) throw new Error('spiegel schrijven: ' + upErr.message);
+
+    // DE FACTUURSTAND MEE, meteen. Een student in onboarding staat in het LMS
+    // bovenaan bij zijn mentor ("Klaar voor onboarding"), en de factuurchip op
+    // die kaart leest hlms_crm_factuurstand — niet `eerste_factuur_betaald`.
+    // Wachten op de nachtelijke ronde zou een nieuwe student een dag lang
+    // "factuurstand onbekend" geven. Faalzacht: deze aanroep gooit nooit, en
+    // een mislukking herstelt de ronde van vannacht. In toetsen (een eigen
+    // lmsClient) blijft hij uit: daar is er geen CRM om te lezen.
+    if (ob.customer_id && !opties.lmsClient) {
+      await spiegelFactuurstandNaWijziging(ob.customer_id, 'onboarding-spiegel');
+    }
 
     // De mentor-uitkomst gaat mee naar boven, ook bij succes: de rij is
     // geschreven, maar of daar een mentor in staat en waarom niet is een

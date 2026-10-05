@@ -207,6 +207,8 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
 
     // De twee drempels van de LMS-regel.
     met_1_vervallen: 0, met_2_of_meer_vervallen: 0, zonder_vervallen: 0,
+    // De vier toestanden — dezelfde woorden als op elk scherm.
+    toestanden: { geen_factuur: 0, open_niet_vervallen: 0, vervallen: 0, in_orde: 0 },
 
     // Metingen die een beslissing dragen.
     facturen_meegeteld: 0, is_historical_meegeteld: 0,
@@ -332,6 +334,9 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
           if (uit.via === 'onboarding') result.via_onboarding++;
           else if (uit.via === 'bubble') result.via_bubble++;
           else if (uit.via === 'email')  result.via_email++;
+
+          const t = uit.rij?.toestand;
+          if (t && Object.prototype.hasOwnProperty.call(result.toestanden, t)) result.toestanden[t]++;
 
           const n = uit.rij?.vervallen_aantal || 0;
           if (n === 0)      result.zonder_vervallen++;

@@ -28,6 +28,22 @@
   const H = window.KV_V2.helpers;
 
   const asArr = (x) => Array.isArray(x) ? x : [];
+
+  // DE FACTUURSTAND — vier toestanden; label en ernst komen van de server
+  // (api/_lib/factuurstand-spiegel.js). Hier stond een ja/nee op `paid` (Betaald /
+  // Open): elke klant zonder betaalde factuur heette "Open", ook als er nog
+  // nooit een factuur verstuurd was. Zonder `factuur` → "onbekend", nooit open.
+  const FACTUUR_PILL = { grijs: 'neutral', neutraal: 'info', oranje: 'warn', rood: 'danger', groen: 'ok', onbekend: 'neutral' };
+  const factuurPill = (f) => (f && f.label)
+    ? H.pill(FACTUUR_PILL[f.ernst] || 'neutral', f.label)
+    : H.pill('neutral', 'Factuurstand onbekend');
+  // Sorteren op ernst: een achterstand weegt het zwaarst, onbekend zit in het midden.
+  const FACTUUR_RANG = { vervallen: 4, open_niet_vervallen: 3, geen_factuur: 1, in_orde: 0 };
+  const factuurRang = (f) => {
+    if (!f || !f.toestand) return 2;
+    if (f.toestand === 'vervallen') return 4 + (Number(f.vervallen_aantal) || 0) / 100;
+    return FACTUUR_RANG[f.toestand] ?? 2;
+  };
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -351,7 +367,7 @@
         case 'status':     return String(r.status || '');
         case 'mentor':     return String(r.mentor_name || '').toLowerCase();
         case 'startdatum': return r.start_date ? new Date(r.start_date).getTime() : (dir === 'asc' ? Infinity : -Infinity);
-        case 'betaling':   return r.paid ? 1 : 0;
+        case 'betaling':   return factuurRang(r.factuur);
         case 'aangemeld':  return r.created_at ? new Date(r.created_at).getTime() : 0;
         default:           return r.created_at ? new Date(r.created_at).getTime() : 0;
       }
@@ -563,7 +579,7 @@
       <td>${mentorCell(r)}</td>
       <td>${voortgangCell(r)}</td>
       <td><span class="mono" style="color:var(--text-3);font-size:12.5px">${r.start_date ? new Date(r.start_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
-      <td>${r.paid ? H.pill('ok', 'Betaald') : H.pill('warn', 'Open')}</td>
+      <td>${factuurPill(r.factuur)}</td>
       <td>${bedenktijdCell(r)}</td>
       <td><span class="mono" style="color:var(--text-3);font-size:12px">${r.created_at ? new Date(r.created_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td>${kebabCell(r)}</td>

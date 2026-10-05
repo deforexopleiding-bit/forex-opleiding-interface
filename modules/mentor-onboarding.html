@@ -502,10 +502,15 @@
     const sub = parts.length ? ('<div class="mo-sub">' + esc(parts.join(' · ')) + '</div>') : '';
     return '<div>' + esc(lbl) + '</div>' + sub;
   }
-  function _paidCell(paid) {
-    return paid
-      ? '<i class="ti ti-check ico-ok" title="Betaald"></i>'
-      : '<i class="ti ti-x ico-bad" title="Nog niet betaald"></i>';
+  // De factuurstand in vier toestanden (api/_lib/factuurstand-spiegel.js).
+  // Was een vinkje of een kruis: een kruis las als "achterstand" bij een klant
+  // aan wie nog niets verstuurd was. Zonder `factuur` → onbekend.
+  function _paidCell(f) {
+    if (!f || !f.label) return '<i class="ti ti-help" style="color:var(--text-faint)" title="Factuurstand onbekend"></i>';
+    const ico = { groen: 'ti-check ico-ok', rood: 'ti-alert-triangle ico-bad', oranje: 'ti-alert-circle',
+                  neutraal: 'ti-file-invoice', grijs: 'ti-minus', onbekend: 'ti-help' }[f.ernst] || 'ti-help';
+    const kleur = f.ernst === 'oranje' ? ' style="color:var(--amber)"' : (f.ernst === 'grijs' || f.ernst === 'neutraal' ? ' style="color:var(--text-faint)"' : '');
+    return '<i class="ti ' + ico + '"' + kleur + ' title="' + esc(f.label) + '"></i>';
   }
   function _bubbleCell(s) {
     if (s.bubble_provisioned) {
@@ -635,7 +640,7 @@
           <td>${_intakePillHtml(intake)}</td>
           <td>${_trajectCell(s)}</td>
           <td>${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span class="ico-mute">—</span>'}</td>
-          <td>${_paidCell(!!s.paid)}</td>
+          <td>${_paidCell(s.factuur)}</td>
           <td>${_bubbleCell(s)}</td>
           <td>${_bedenktijdCell(s.bedenktijd || null)}</td>
           <td>${_wizardCell(s)}</td>
@@ -865,7 +870,7 @@
           <dt>Traject</dt><dd>${trajectLabel}</dd>
           <dt>Looptijd</dt><dd>${esc(looptijd)}</dd>
           <dt>Startdatum</dt><dd>${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span class="ico-mute">— niet ingesteld</span>'}</dd>
-          <dt>Betaald</dt><dd>${s.paid ? '<i class="ti ti-check ico-ok"></i> Ja' : '<i class="ti ti-x ico-bad"></i> Nog niet'}</dd>
+          <dt>Facturen</dt><dd>${_paidCell(s.factuur)} ${esc((s.factuur && s.factuur.label) || 'Factuurstand onbekend')}</dd>
           <dt>Bedenktijd</dt><dd>${btLine}</dd>
         </dl>
       </div>
