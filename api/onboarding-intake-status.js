@@ -29,6 +29,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { BRON_GELEZEN } from './_lib/dfo-lms-sessies.js';
 import { intakeItemsVoor } from './_lib/onboarding-intake-items.js';
+import { intakeGesprekkenVoor } from './_lib/intake-gesprek-stand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_IDS = 500;
@@ -89,7 +90,13 @@ export default async function handler(req, res) {
 
     // 2) + 3) De afleiding zelf staat in een gedeelde lib — het LMS-overzicht
     //    gebruikt exact dezelfde.
-    const { bron_status, fout, items } = await intakeItemsVoor(visible);
+    // Parallel: de startstatus (sessies) en het intakegesprek (intake-pot).
+    // Twee bronnen, elk met hun eigen status - de ene mag de andere niet
+    // wegdrukken.
+    const [{ bron_status, fout, items }, intakeGesprek] = await Promise.all([
+      intakeItemsVoor(visible),
+      intakeGesprekkenVoor(visible.map((r) => r.id)),
+    ]);
     const bronGelezen = bron_status === BRON_GELEZEN;
     const bron = { bron_status, fout };
 
@@ -97,6 +104,9 @@ export default async function handler(req, res) {
     // onderscheiden van 'niemand heeft een sessie'.
     const payload = { ok: true, bron: 'hlms_sessie', bron_status: bron.bron_status, items };
     if (!bronGelezen) payload.bron_fout = bron.fout || 'reden onbekend';
+    payload.gesprekken = intakeGesprek.gesprekken;
+    payload.gesprekken_status = intakeGesprek.status;
+    if (intakeGesprek.fout) payload.gesprekken_fout = intakeGesprek.fout;
     return res.status(200).json(payload);
   } catch (e) {
     console.error('[onboarding-intake-status]', e?.message || e);

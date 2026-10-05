@@ -142,7 +142,10 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // factuurstand van die student bij. Daarmee komen factuurstand-spiegel.js,
   // dunning-overdue-guard.js en dunning-pipeline.js erbij — allemaal lezen en
   // tellen, niets dat verstuurt (BEWIJS 1 hieronder blijft dat bewaken).
-  assert.ok(AFSLUITING.size <= 15,
+  // 15 → 16 (5 oktober 2026, tweede opdracht): de spiegel vult ook de
+  // intake-pot in het LMS (onboarding-intake-spiegel.js) — lezen uit het CRM,
+  // schrijven naar één LMS-tabel, niets dat verstuurt.
+  assert.ok(AFSLUITING.size <= 16,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

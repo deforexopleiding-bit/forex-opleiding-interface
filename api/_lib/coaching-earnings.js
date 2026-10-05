@@ -50,6 +50,13 @@
 // team_lms = 0 met _meta.lms_teamtraining = 'stand-kolom-ontbreekt'.
 //
 // Funded (€100): mentor_funded_certificates, funded_month in [from, to].
+//
+// Intake (€8,75 = ¼ × €35, sinds 5 oktober 2026): hlms_intake met
+// afgerond_door = mentorUserId en afgerond_op in het venster. Een intake is
+// GEEN hlms_sessie: hij verbruikt geen sessie van het pakket van de student
+// en sluit de onboarding niet. Vier intakes = één sessie. Benoemde
+// uitzondering op "nooit stil 0": zolang hlms_intake.sql niet gedraaid is,
+// bestaat de tabel niet → intake 0 met _meta.lms_intake = 'tabel-ontbreekt'.
 
 import { bubbleList as bubbleListDefault } from './bubble.js';
 import { supabaseAdmin } from '../supabase.js';
@@ -59,6 +66,10 @@ export const RATE_1ON1   = 35;
 export const RATE_TEAM   = 50;
 export const RATE_NOSHOW = 25;
 export const RATE_FUNDED = 100;
+/** Een afgeronde intake is een kwart sessie. */
+export const INTAKE_EENHEID = 0.25;
+export const RATE_INTAKE = RATE_1ON1 * INTAKE_EENHEID;
+export const LMS_INTAKE_TABEL_ONTBREEKT = 'tabel-ontbreekt';
 
 // Eerste dag (Brusselse tijd) waarop Bubble NIET meer bevraagd wordt.
 export const BUBBLE_EINDE = '2026-10-01';
@@ -173,12 +184,22 @@ export function isKolomOntbreektFout(error) {
   return /column .* does not exist/i.test(String(error.message || ''));
 }
 
+// De tabel zelf bestaat niet (migratie nog niet gedraaid): Postgres 42P01 of
+// PostgREST PGRST205 ("Could not find the table").
+export function isTabelOntbreektFout(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  if (code === '42P01' || code === 'PGRST205') return true;
+  return /relation .* does not exist|could not find the table/i.test(String(error.message || ''));
+}
+
 export function emptyBreakdown() {
   return {
     one_on_one : { count: 0, rate: RATE_1ON1,   total: 0 },
     team       : { count: 0, rate: RATE_TEAM,   total: 0 },
     no_show    : { count: 0, rate: RATE_NOSHOW, total: 0 },
     funded     : { count: 0, rate: RATE_FUNDED, total: 0 },
+    intake     : { count: 0, rate: RATE_INTAKE, total: 0 },
   };
 }
 
@@ -221,6 +242,11 @@ export function coachingRegelLabel(basis, cel) {
   const lijst = delen.length > 1 ? `${delen.slice(0, -1).join(', ')} en ${delen[delen.length - 1]}` : delen[0];
   const n = Number(cel.afspraken) || 0;
   return `${basis} à ${EENHEID_MINUTEN} min (${n} ${n === 1 ? 'afspraak' : 'afspraken'}, waarvan ${lijst})`;
+}
+
+/** Label van de intakeregel op de uitbetaling: "Intakes: 3 × 0,25". */
+export function intakeRegelLabel(n) {
+  return `Intakes: ${Number(n) || 0} × ${String(INTAKE_EENHEID).replace('.', ',')}`;
 }
 
 // ─── LMS-tak ─────────────────────────────────────────────────────────────
@@ -307,6 +333,30 @@ async function lmsTeamtrainingen(lms, mentorUserId, vanIso, totIso) {
     }
   }
   return { team, status: 'gelezen', rijen };
+}
+
+// Afgeronde intakes van deze mentor in het venster (zie de kop).
+async function lmsIntakes(lms, mentorUserId, vanIso, totIso) {
+  const rijen = [];
+  for (let pagina = 0; pagina < LMS_MAX_PAGINAS; pagina++) {
+    const van = pagina * LMS_PAGINA;
+    const { data, error } = await lms
+      .from('hlms_intake')
+      .select('crm_onboarding_id, afgerond_op')
+      .eq('afgerond_door', mentorUserId)
+      .gte('afgerond_op', vanIso)
+      .lt('afgerond_op', totIso)
+      .order('afgerond_op', { ascending: true })
+      .range(van, van + LMS_PAGINA - 1);
+    if (error) {
+      if (isTabelOntbreektFout(error)) return { intakes: 0, status: LMS_INTAKE_TABEL_ONTBREEKT };
+      throw lmsFout(`hlms_intake: ${error.message || error.code || 'onbekende fout'}`);
+    }
+    const arr = Array.isArray(data) ? data : [];
+    rijen.push(...arr);
+    if (arr.length < LMS_PAGINA) return { intakes: rijen.length, status: 'gelezen' };
+  }
+  throw lmsFout(`hlms_intake: meer dan ${LMS_PAGINA * LMS_MAX_PAGINAS} rijen — venster te groot`);
 }
 
 // Set van `${bubble_user_id}|${brusselsDag}` voor alle afgeronde/no-show
@@ -458,10 +508,11 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
   if (!lms) {
     throw bronFout('LMS niet geconfigureerd', 'DFO_LMS_SUPABASE_URL/KEY ontbreekt', 'LMS_NIET_GECONFIGUREERD');
   }
-  let lmsSessies, lmsTeam;
+  let lmsSessies, lmsTeam, lmsIntake;
   try {
     lmsSessies = await lmsSessiesVanMentor(lms, mentorUserId, vanIso, totIso);
     lmsTeam    = await lmsTeamtrainingen(lms, mentorUserId, vanIso, totIso);
+    lmsIntake  = await lmsIntakes(lms, mentorUserId, vanIso, totIso);
   } catch (e) {
     if (e?.code === 'LMS_ONBEREIKBAAR') throw e;
     throw lmsFout(e?.message || String(e));
@@ -516,11 +567,14 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
     team       : cel(team,   RATE_TEAM),
     no_show    : celVan(tn, RATE_NOSHOW),
     funded     : cel(funded, RATE_FUNDED),
+    // count = aantal intakes; eenheid = het deel van een sessie dat elk telt.
+    intake     : cel(lmsIntake.intakes, RATE_INTAKE, { eenheid: INTAKE_EENHEID }),
   };
   const grand_total = breakdown.one_on_one.total
                     + breakdown.team.total
                     + breakdown.no_show.total
-                    + breakdown.funded.total;
+                    + breakdown.funded.total
+                    + breakdown.intake.total;
 
   return {
     breakdown,
@@ -536,6 +590,7 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
           afgerond: lmsSessies.afgerond.eenheden,
           no_show : lmsSessies.no_show.eenheden,
           team    : lmsTeam.team,
+          intakes : lmsIntake.intakes,
           afspraken: {
             afgerond: lmsSessies.afgerond.afspraken,
             no_show : lmsSessies.no_show.afspraken,
@@ -556,6 +611,7 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
       lms_zelfde_moment                 : lmsSessies.zelfde_moment,
       lms_zonder_student                : lmsSessies.zonder_student,
       lms_teamtraining                  : lmsTeam.status,
+      lms_intake                        : lmsIntake.status,
       bubble_overgeslagen_dubbel_met_lms: bubble?.overgeslagen || 0,
       // Bubble-diagnose (zelfde velden als vóór de LMS-omzetting).
       fetchedRaw          : bubble?.sessions_fetched || 0,

@@ -148,6 +148,16 @@
       const map = new Map();
       for (const s of asArr(j?.items)) if (s?.onboarding_id) map.set(s.onboarding_id, s);
       let changed = false;
+      // HET INTAKEGESPREK uit de intake-pot van het LMS. Alleen bij een
+      // gelezen pot krijgt een rij een stand; anders blijft `_intakeGesprekBron`
+      // op de reden staan en zegt de cel "onbekend" - nooit "niet in de pot".
+      const gesprekStatus = j?.gesprekken_status || 'onbereikbaar';
+      _intakeGesprekBron = gesprekStatus;
+      const gesprekken = (j && typeof j.gesprekken === 'object' && j.gesprekken) || {};
+      for (const r of rows) {
+        const g = gesprekStatus === 'gelezen' ? (gesprekken[r.id] || null) : undefined;
+        if (r.intake_gesprek !== g) { r.intake_gesprek = g; changed = true; }
+      }
       for (const r of rows) {
         const s = map.get(r.id);
         if (!s) continue;
@@ -481,6 +491,26 @@
     return H.pill(meta[0], meta[1]);
   }
   const _seenUnknownIntake = new Set();
+
+  // INTAKEGESPREK — de intake-pot van het LMS (opdracht 5 okt 2026). Niet te
+  // verwarren met de START STATUS hierboven (die heet in de code ook
+  // "intake"). `undefined` = (nog) niet gelezen; `null` = gelezen, niet in de pot.
+  let _intakeGesprekBron = null;
+  function intakeGesprekCell(r) {
+    const g = r.intake_gesprek;
+    if (g === undefined) {
+      const reden = _intakeGesprekBron === 'tabel-ontbreekt' ? 'De intake-pot bestaat nog niet in het LMS.'
+        : _intakeGesprekBron ? 'De intake-pot kon niet gelezen worden.' : 'Nog aan het laden.';
+      return `<span style="color:var(--text-3);font-size:11px" title="${esc(reden)}">onbekend</span>`;
+    }
+    if (g === null) return '<span style="color:var(--text-3);font-size:11px">Niet in de pot</span>';
+    const dag = (iso) => (iso ? new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '');
+    if (g.stand === 'afgerond') return H.pill('ok', 'Afgerond' + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
+    if (g.te_laat) return H.pill('danger', 'Ontbreekt > 48u');
+    if (g.stand === 'ingepland') return H.pill('ok', 'Ingepland ' + dag(g.gesprek_op));
+    if (g.stand === 'geclaimd') return H.pill('neutral', 'Geclaimd' + (g.geclaimd_naam ? ' · ' + g.geclaimd_naam : ''));
+    return H.pill('warn', 'In de pot');
+  }
   function _warnUnknownIntake(key) {
     if (!key || _seenUnknownIntake.has(key)) return;
     _seenUnknownIntake.add(key);
@@ -568,6 +598,7 @@
       ${sortHeader(scope, 'startdatum', 'Startdatum')}
       ${sortHeader(scope, 'betaling', 'Betaling')}
       <th>Bedenktijd</th>
+      <th>Intakegesprek</th>
       ${sortHeader(scope, 'aangemeld', 'Aangemeld')}
       <th style="width:32px"></th>
     </tr>`;
@@ -581,13 +612,14 @@
       <td><span class="mono" style="color:var(--text-3);font-size:12.5px">${r.start_date ? new Date(r.start_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td>${factuurPill(r.factuur)}</td>
       <td>${bedenktijdCell(r)}</td>
+      <td>${intakeGesprekCell(r)}</td>
       <td><span class="mono" style="color:var(--text-3);font-size:12px">${r.created_at ? new Date(r.created_at).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>
       <td>${kebabCell(r)}</td>
     </tr>`).join('');
     return `<div class="tbl-wrap"><table><thead>${headers}</thead><tbody>${rowsHtml}</tbody></table></div>`;
   }
 
-  const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(11)}</tr></thead>
+  const skel = (n = 5) => `<div class="tbl-wrap"><table><thead><tr>${'<th></th>'.repeat(12)}</tr></thead>
     <tbody>${Array.from({ length: n }).map(() => `<tr style="opacity:.55">${Array.from({ length: 11 }).map(() => `<td><div style="height:12px;background:var(--surface-2);border-radius:4px;width:70%"></div></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const errBlk = (m) => `<div style="margin:20px;padding:14px 18px;border:1px solid var(--rose-line);background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:13px">⚠ Kon onboardings niet ophalen: ${esc(m)}</div>`;
 

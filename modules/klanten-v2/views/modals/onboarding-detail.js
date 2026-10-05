@@ -81,7 +81,47 @@ async function loadIntake(id) {
     body: JSON.stringify({ onboarding_ids: [id] }),
   });
   const items = Array.isArray(j?.items) ? j.items : [];
-  return items.find((it) => it && it.onboarding_id === id) || null;
+  // Het intakegesprek uit de intake-pot van het LMS rijdt mee op dezelfde
+  // sidecar. `undefined` = niet gelezen (dan zeggen we niets), `null` = niet
+  // in de pot.
+  const gesprek = j?.gesprekken_status === 'gelezen'
+    ? ((j.gesprekken || {})[id] || null)
+    : undefined;
+  return {
+    item: items.find((it) => it && it.onboarding_id === id) || null,
+    gesprek,
+    gesprekBron: j?.gesprekken_status || null,
+  };
+}
+
+// HET INTAKEGESPREK (opdracht 5 okt 2026): stand, wie, en na afronden de
+// uitkomst en het actieplan. Lezen alleen - claimen en afronden doet de mentor
+// in het LMS (Intake-pot).
+function renderIntakeGesprek() {
+  const g = state.intakeGesprek;
+  if (g === undefined) {
+    if (state.intakeStatus === 'laden') return '<span style="color:var(--text-3)">laden…</span>';
+    const reden = state.intakeGesprekBron === 'tabel-ontbreekt'
+      ? 'de intake-pot bestaat nog niet in het LMS'
+      : 'de intake-pot kon niet gelezen worden';
+    return `<span style="color:var(--amber,#B45309)" title="Dit betekent NIET dat er geen intake was.">onbekend (${esc(reden)})</span>`;
+  }
+  if (g === null) return '<span style="color:var(--text-3)">Niet in de intake-pot</span>';
+  const kop = g.stand === 'afgerond'
+    ? `Afgerond${g.afgerond_naam ? ' door ' + esc(g.afgerond_naam) : ''} · ${fmtDT(g.afgerond_op)}`
+    : g.te_laat ? '<b style="color:var(--rose)">Ontbreekt &gt; 48u</b>'
+    : g.stand === 'ingepland' ? `Ingepland op ${fmtDT(g.gesprek_op)}`
+    : g.stand === 'geclaimd' ? `Geclaimd${g.geclaimd_naam ? ' door ' + esc(g.geclaimd_naam) : ''}`
+    : 'In de pot, nog door niemand genomen';
+  if (g.stand !== 'afgerond') return kop;
+  const p = g.actieplan || {};
+  const regel = (k, v) => (v && String(v).trim() ? `<div><span style="color:var(--text-3)">${esc(k)}:</span> ${esc(v)}</div>` : '');
+  return `${kop}
+    <div style="margin-top:6px;font-size:12px;line-height:1.5" data-intake-actieplan>
+      ${g.uitkomst ? `<div style="white-space:pre-wrap">${esc(g.uitkomst)}</div>` : ''}
+      ${regel('Doel', p.doel)}${regel('Ervaring', p.ervaring)}${regel('Beschikbaarheid', p.beschikbaarheid)}
+      ${regel('Aandachtspunten', p.aandachtspunten)}${regel('Verder', p.vrij)}
+    </div>`;
 }
 
 // 'laden' zolang de sidecar loopt, 'fout' als die faalde, anders de datum of
@@ -158,6 +198,7 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Traject</span><span>${esc(o.traject_label || '—')}${o.calls ? ` <span style="color:var(--text-3)">· ${o.calls} call(s)</span>` : ''}</span></div>
       <div class="kv-onb-meta-row"><span>Status</span><span>${statusPill(o.status)}</span></div>
       <div class="kv-onb-meta-row"><span>Intake-status</span><span>${intakePill(o.mentor_intake_status)}${o.intake_handled_at ? ` <span style="color:var(--text-3);font-size:11px">· afgehandeld ${fmtDT(o.intake_handled_at)}</span>` : ''}</span></div>
+      <div class="kv-onb-meta-row"><span>Intakegesprek</span><span>${renderIntakeGesprek()}</span></div>
       <div class="kv-onb-meta-row"><span>Mentor</span><b>${esc(o.mentor_name || '— nog geen mentor —')}</b></div>
       <div class="kv-onb-meta-row"><span>Aangemeld</span><span>${fmtDT(o.created_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Startdatum</span><span>${fmtDate(o.start_date)}</span></div>
@@ -812,6 +853,9 @@ export async function openOnboardingDetailModal({ onboardingId, onSuccess } = {}
     onSuccess: onSuccess || null,
     // 'laden' | 'klaar' | 'fout' — staat van de lazy intake-sidecar.
     intakeStatus: 'laden',
+    // Het intakegesprek: undefined = niet gelezen, null = niet in de pot.
+    intakeGesprek: undefined,
+    intakeGesprekBron: null,
   };
   rerender();
   const [data] = await Promise.all([
@@ -832,8 +876,10 @@ export async function openOnboardingDetailModal({ onboardingId, onSuccess } = {}
   if (state.data) {
     const id = state.id;
     try {
-      const it = await loadIntake(id);
+      const { item: it, gesprek, gesprekBron } = await loadIntake(id);
       if (!state || state.id !== id) return;   // modal is intussen gesloten/gewisseld
+      state.intakeGesprek = gesprek;
+      state.intakeGesprekBron = gesprekBron;
       if (it) {
         state.data.intake_status     = it.intake_status     ?? state.data.intake_status;
         state.data.planned_call_at   = it.planned_call_at   ?? null;

@@ -32,6 +32,7 @@
       case 'coaching_team':    return 'Coaching · teamtraining';
       case 'coaching_noshow':  return 'Coaching · no-show';
       case 'coaching_funded':  return 'Coaching · funded';
+      case 'coaching_intake':  return 'Coaching · intake (¼ sessie)';
       case 'reiskosten':       return 'Reiskosten';
       case 'vast':             return 'Vaste maandpost';
       case 'handmatig':        return 'Handmatige correctie';

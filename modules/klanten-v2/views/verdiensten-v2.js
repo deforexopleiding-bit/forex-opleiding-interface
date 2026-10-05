@@ -1024,16 +1024,21 @@
       team:       Number(bd.team?.count       ?? bd.team?.qty       ?? bd.team_qty       ?? 0),
       no_show:    Number(bd.no_show?.count    ?? bd.no_show?.qty    ?? bd.no_show_qty    ?? 0),
       funded:     Number(bd.funded?.count     ?? bd.funded?.qty     ?? bd.funded_qty     ?? 0),
+      // Sinds 5-10-2026: afgeronde intakes, elk ¼ sessie. Ontbreekt bij een
+      // oudere server → 0, en dan staat de regel er niet.
+      intake:     Number(bd.intake?.count ?? 0),
     };
     const a = {
       one_on_one: Number(bd.one_on_one?.total ?? bd.one_on_one?.amount_incl ?? bd.one_on_one_amount ?? (b.one_on_one * 35)),
       team:       Number(bd.team?.total       ?? bd.team?.amount_incl       ?? bd.team_amount       ?? (b.team * 50)),
       no_show:    Number(bd.no_show?.total    ?? bd.no_show?.amount_incl    ?? bd.no_show_amount    ?? (b.no_show * 25)),
       funded:     Number(bd.funded?.total     ?? bd.funded?.amount_incl     ?? bd.funded_amount     ?? (b.funded * 100)),
+      intake:     Number(bd.intake?.total ?? 0),
     };
+    const intakeTarief = Number(bd.intake?.rate ?? 8.75);
     // Prefer server-side grand_total (autoritatief) boven client-som; valt
     // terug op client-som als het endpoint 'm ooit weglaat.
-    const total = Number(d.grand_total ?? (a.one_on_one + a.team + a.no_show + a.funded));
+    const total = Number(d.grand_total ?? (a.one_on_one + a.team + a.no_show + a.funded + a.intake));
     const from = d.from || _live.coaching.from || '—';
     const to   = d.to   || _live.coaching.to   || '—';
 
@@ -1055,11 +1060,12 @@
             <tr><td style="padding:8px 0">1-op-1 sessies</td><td style="text-align:right" class="mono">${b.one_on_one}</td><td style="text-align:right" class="mono">${eur(35)}</td><td style="text-align:right" class="money">${eur(a.one_on_one)}</td></tr>
             <tr><td style="padding:8px 0">Team-trainingen</td><td style="text-align:right" class="mono">${b.team}</td><td style="text-align:right" class="mono">${eur(50)}</td><td style="text-align:right" class="money">${eur(a.team)}</td></tr>
             <tr><td style="padding:8px 0">No-show</td><td style="text-align:right" class="mono">${b.no_show}</td><td style="text-align:right" class="mono">${eur(25)}</td><td style="text-align:right" class="money">${eur(a.no_show)}</td></tr>
+            ${b.intake > 0 ? `<tr data-regel="intake"><td style="padding:8px 0">Intakes: ${b.intake} × 0,25</td><td style="text-align:right" class="mono">${b.intake}</td><td style="text-align:right" class="mono">${eur(intakeTarief)}</td><td style="text-align:right" class="money">${eur(a.intake)}</td></tr>` : ''}
             <tr><td style="padding:8px 0">Funded certs</td><td style="text-align:right" class="mono">${b.funded}</td><td style="text-align:right" class="mono">${eur(100)}</td><td style="text-align:right" class="money">${eur(a.funded)}</td></tr>
             <tr style="border-top:1px solid var(--border);font-weight:600"><td style="padding:10px 0">Totaal</td><td></td><td></td><td style="text-align:right" class="money">${eur(total)}</td></tr>
           </tbody>
         </table>
-        <div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Tarieven vast in <code>api/_lib/coaching-earnings.js</code>. Aantallen komen live uit de afgeronde sessies en no-shows in het LMS.</div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Tarieven vast in <code>api/_lib/coaching-earnings.js</code>. Aantallen komen live uit de afgeronde sessies, no-shows en intakes in het LMS (een intake telt als ¼ sessie).</div>
       `)}
     </div>
     ${renderConfirmModal()}`;

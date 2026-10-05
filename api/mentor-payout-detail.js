@@ -19,7 +19,7 @@
 //       lines: [
 //         { id, kind, label, qty, unit_incl, amount_incl, amount_excl },
 //         // kinds: bonus | coaching_1on1 | coaching_team | coaching_noshow |
-//         //        coaching_funded | reiskosten | vast | handmatig
+//         //        coaching_funded | coaching_intake | reiskosten | vast | handmatig
 //       ],
 //       adjustments: [
 //         // alle mentor_payout_adjustments voor (mentor, period); UI gebruikt
