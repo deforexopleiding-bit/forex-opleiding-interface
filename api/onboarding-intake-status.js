@@ -78,7 +78,7 @@ export default async function handler(req, res) {
     //    mentor_user_id-eq, en verifieren daarna dat count matched (defense).
     let rowsQuery = supabaseAdmin
       .from('onboardings')
-      .select('id, mentor_user_id, bubble_user_id, mentor_intake_status')
+      .select('id, mentor_user_id, bubble_user_id, dfo_lms_student_id, mentor_intake_status')
       .in('id', ids);
     if (!scopeInfo.seesAll) {
       rowsQuery = rowsQuery.eq('mentor_user_id', scopeInfo.userId);
@@ -98,7 +98,9 @@ export default async function handler(req, res) {
     // hlms_student.bubble_user_id. Die brug is gemeten aanwezig: 299 van de
     // 304 studentrijen dragen 'm, en die waarden zijn uniek.
     const bubbleIds = visible.map((r) => r.bubble_user_id).filter(Boolean);
-    const bron = await haalSessieOverzichtPerStudent({ bubbleUserIds: bubbleIds });
+    // De tweede brug: het LMS-student-id, voor wie geen Bubble-id heeft.
+    const lmsIds = visible.filter((r) => !r.bubble_user_id).map((r) => r.dfo_lms_student_id).filter(Boolean);
+    const bron = await haalSessieOverzichtPerStudent({ bubbleUserIds: bubbleIds, lmsStudentIds: lmsIds });
 
     const bronGelezen = bron.bron_status === BRON_GELEZEN;
     if (!bronGelezen) {
@@ -109,7 +111,11 @@ export default async function handler(req, res) {
     // 3) Per zichtbare onboarding → afleiden.
     const items = visible.map((r) => {
       const bu = r.bubble_user_id ? String(r.bubble_user_id) : null;
-      const v  = (bronGelezen && bu) ? (bron.perStudent.get(bu) || null) : null;
+      const lid = r.dfo_lms_student_id ? String(r.dfo_lms_student_id) : null;
+      const v  = !bronGelezen ? null
+        : bu ? (bron.perStudent.get(bu) || null)
+        : lid ? (bron.perLmsStudent?.get(lid) || null)
+        : null;
       const plannedIso = v?.next   || null;
       const doneIso    = v?.done   || null;
       const noshowIso  = v?.noshow || null;
