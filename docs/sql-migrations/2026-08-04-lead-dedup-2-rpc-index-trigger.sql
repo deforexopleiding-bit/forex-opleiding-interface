@@ -1,0 +1,165 @@
+-- ============================================================================
+-- LEAD-DEDUP — DOC 2 / RPC + INDEX + TRIGGER (draai NA DOC 1)
+-- ============================================================================
+-- Alles in ÉÉN transactie, zodat er geen venster is waarin de oude trigger op
+-- de gedropte index draait. Bevat:
+--   1. upsert_lead(p jsonb)  — de centrale schrijf-functie (veldbeleid hieronder)
+--   2. index-swap: DROP leads_event_uniek -> CREATE UNIQUE leads_email_uniek
+--   3. herschrijf spiegel_attendee_naar_lead -> PERFORM upsert_lead(...)
+--
+-- VELDBELEID upsert_lead (ON CONFLICT (lower(email)) DO UPDATE):
+--   - Nieuwste wint (overschr.): traject, event_id, soort, bron, bijgewerkt=now()
+--   - COALESCE(nieuw, oud)     : voornaam, achternaam, telefoon, telefoon_e164,
+--                                score, kwalificatie, drempel, antwoorden,
+--                                campagne, pagina
+--   - afwijzer  = COALESCE(nieuw, oud)  — mirror geeft afwijzer NIET mee, dus
+--                                een event wist een eerdere 7-daagse-afwijzing niet
+--   - Attributie/consent behouden:
+--       meta_event_id  = COALESCE(oud, nieuw)   (eerste attributie behouden)
+--       ip_hash        = COALESCE(oud, nieuw)
+--       toestemming    = oud OR nieuw           (sticky, nooit downgraden)
+--       toestemming_op = COALESCE(oud, nieuw)   (eerste keer true)
+--   - NIET overschrijven (behouden): eigenaar_id, notitie, status, opgevolgd_op,
+--                                    customer_id, aangemaakt
+--   - soort is NOT NULL zonder default -> callers geven 'm ALTIJD mee
+--     (mirror='event', /api/lead=body.soort, PR2=primair).
+--
+-- Type-veiligheid: jsonb_populate_record(NULL::public.leads, p) mapt de jsonb-
+-- keys op de ECHTE kolomtypen van leads, dus geen handmatige casts nodig.
+--
+-- Jeffrey draait dit. Niets wordt automatisch gedraaid.
+-- ============================================================================
+
+-- STAP 0 — de skip-checks staan nu exact overgenomen; de te droppen index is
+-- bevestigd als leads_event_uniek. Dump ter controle alleen nog dat de trigger
+-- op AFTER INSERT deze functie aanroept en dat de huidige functie geen extra
+-- veld-mapping bevat die verloren zou gaan:
+--   SELECT pg_get_functiondef('public.spiegel_attendee_naar_lead'::regproc);
+--   SELECT tgname, tgenabled, pg_get_triggerdef(t.oid) FROM pg_trigger t
+--   WHERE tgrelid='public.event_attendees'::regclass AND NOT tgisinternal;
+
+
+BEGIN;
+
+-- ── 1) Centrale upsert ──────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.upsert_lead(p jsonb)
+RETURNS public.leads
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_in  public.leads;   -- type-veilig gevuld uit p (echte kolomtypen)
+  v_out public.leads;
+BEGIN
+  v_in := jsonb_populate_record(NULL::public.leads, p);
+  v_in.email := lower(v_in.email);
+  IF v_in.email IS NULL OR btrim(v_in.email) = '' THEN
+    RAISE EXCEPTION 'upsert_lead: lege email';
+  END IF;
+
+  -- INSERT: NOT NULL-kolommen krijgen een default als p ze weglaat. In de
+  -- DO UPDATE gebruiken we bewust v_in.* (de ORIGINELE input, null-als-weggelaten)
+  -- i.p.v. EXCLUDED.*, zodat COALESCE-behoud óók klopt voor die NOT NULL-kolommen
+  -- (EXCLUDED zou de default tonen en zo bestaande waarden overschrijven).
+  INSERT INTO public.leads AS l (
+    email, voornaam, achternaam, telefoon, telefoon_e164,
+    bron, soort, campagne, pagina, traject, kwalificatie, score, drempel,
+    afwijzer, antwoorden, event_id, meta_event_id, ip_hash,
+    toestemming, toestemming_op, status, bijgewerkt
+  ) VALUES (
+    v_in.email, v_in.voornaam, v_in.achternaam, v_in.telefoon, v_in.telefoon_e164,
+    v_in.bron, v_in.soort, v_in.campagne, v_in.pagina, v_in.traject, v_in.kwalificatie, v_in.score, v_in.drempel,
+    COALESCE(v_in.afwijzer, false), COALESCE(v_in.antwoorden, '[]'::jsonb), v_in.event_id, v_in.meta_event_id, v_in.ip_hash,
+    COALESCE(v_in.toestemming, false), v_in.toestemming_op, COALESCE(v_in.status, 'nieuw'), now()
+  )
+  ON CONFLICT (lower(email)) DO UPDATE SET
+    -- interactie-definitie: nieuwste wint (overschrijven)
+    traject   = v_in.traject,
+    event_id  = v_in.event_id,
+    soort     = v_in.soort,
+    bron      = v_in.bron,
+    -- interactie-data: nieuwste NON-NULL wint (wist niets)
+    voornaam      = COALESCE(v_in.voornaam,      l.voornaam),
+    achternaam    = COALESCE(v_in.achternaam,    l.achternaam),
+    telefoon      = COALESCE(v_in.telefoon,      l.telefoon),
+    telefoon_e164 = COALESCE(v_in.telefoon_e164, l.telefoon_e164),
+    score         = COALESCE(v_in.score,         l.score),
+    kwalificatie  = COALESCE(v_in.kwalificatie,  l.kwalificatie),
+    drempel       = COALESCE(v_in.drempel,       l.drempel),
+    antwoorden    = COALESCE(v_in.antwoorden,    l.antwoorden),
+    campagne      = COALESCE(v_in.campagne,      l.campagne),
+    pagina        = COALESCE(v_in.pagina,        l.pagina),
+    -- afwijzer: COALESCE(nieuw, bestaand). De mirror-trigger geeft afwijzer NIET
+    -- mee (v_in.afwijzer = NULL) → een event-aanmelding wist een eerdere
+    -- 7-daagse-afwijzing (true) niet; /api/lead geeft de echte afwijzer wél mee.
+    afwijzer      = COALESCE(v_in.afwijzer,      l.afwijzer),
+    -- attributie/consent: eerste waarde behouden (bestaand wint), consent sticky
+    meta_event_id  = COALESCE(l.meta_event_id,  v_in.meta_event_id),
+    ip_hash        = COALESCE(l.ip_hash,        v_in.ip_hash),
+    toestemming    = COALESCE(l.toestemming, false) OR COALESCE(v_in.toestemming, false),
+    toestemming_op = COALESCE(l.toestemming_op, v_in.toestemming_op),
+    -- altijd bijwerken
+    bijgewerkt    = now()
+    -- NIET in de SET (bewust behouden): eigenaar_id, notitie, status, opgevolgd_op, customer_id, aangemaakt
+  RETURNING l.* INTO v_out;
+
+  RETURN v_out;
+END $$;
+
+
+-- ── 2) Index-swap: partiële event-index eruit, unieke email-index erin ───────
+DROP INDEX IF EXISTS public.leads_event_uniek;
+CREATE UNIQUE INDEX leads_email_uniek ON public.leads (lower(email));
+
+
+-- ── 3) Mirror-trigger: schrijf via upsert_lead i.p.v. eigen INSERT ──────────
+-- Skip-checks 1-op-1 overgenomen uit de huidige functie. Behoud van
+-- SECURITY DEFINER + SET search_path=public + de EXCEPTION-fail-safe; alleen de
+-- WRITE verandert (eigen INSERT -> PERFORM upsert_lead).
+CREATE OR REPLACE FUNCTION public.spiegel_attendee_naar_lead()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_ev public.events;
+BEGIN
+  -- ── SKIP-CHECKS (exact zoals de bestaande functie) ─────────────────────
+  IF NEW.is_test IS TRUE THEN RETURN NEW; END IF;
+  IF NEW.status = 'switched_to_other_event' THEN RETURN NEW; END IF;
+  IF NEW.email IS NULL OR btrim(NEW.email) = '' THEN RETURN NEW; END IF;
+
+  SELECT * INTO v_ev FROM public.events WHERE id = NEW.event_id;
+  IF NOT FOUND THEN RETURN NEW; END IF;
+  IF v_ev.is_historical IS TRUE OR v_ev.title ILIKE 'ZZZ-TEST%' THEN RETURN NEW; END IF;
+
+  -- ── Schrijf via de centrale upsert (i.p.v. eigen INSERT ON CONFLICT) ───
+  PERFORM public.upsert_lead(jsonb_build_object(
+    'email',      NEW.email,
+    'voornaam',   NEW.first_name,
+    'achternaam', NEW.last_name,
+    'telefoon',   NEW.phone,
+    'traject',    'event',
+    'bron',       'event',
+    'soort',      'event',
+    'event_id',   NEW.event_id
+  ));
+
+  RETURN NEW;
+
+EXCEPTION WHEN OTHERS THEN
+  -- Fail-safe: een fout in de lead-spiegeling mag de attendee-insert NOOIT
+  -- breken (behoud van het bestaande gedrag).
+  RAISE WARNING '[spiegel_attendee_naar_lead] overgeslagen: %', SQLERRM;
+  RETURN NEW;
+END $$;
+-- De bestaande CREATE TRIGGER-binding blijft geldig (we vervangen alleen de
+-- functie). Controleer met STAP 0 dat de trigger inderdaad deze functie
+-- aanroept en op AFTER INSERT (evt. OR UPDATE) staat.
+
+COMMIT;
+
+
+-- STAP 4 — CONTROLE (na COMMIT): unieke index aanwezig?
+SELECT indexname, indexdef FROM pg_indexes
+WHERE schemaname='public' AND tablename='leads' AND indexname='leads_email_uniek';
