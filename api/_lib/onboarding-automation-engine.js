@@ -606,6 +606,16 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
               .update({ status: newStatus, updated_at: nowIso })
               .eq('id', onboarding.id);
             if (e) return { ok: false, error: e.message };
+            // DE SPIEGEL NAAR HET LMS. Dit was het enige schrijfpad op
+            // `status` zonder spiegel (gemeten 5-10-2026): de student stond
+            // dan tot de hersync van 07:20 met de oude stand in het LMS.
+            // Faalzacht en dynamisch geïmporteerd (geen importcyclus).
+            try {
+              const { spiegelNaActie } = await import('./onboarding-spiegel.js');
+              await spiegelNaActie(onboarding.id, 'automation-update-status');
+            } catch (sp) {
+              console.warn('[onboarding-automation-engine] spiegel na statuswijziging: ' + (sp?.message || sp));
+            }
             return { ok: true, new_status: newStatus, previous_status: onboarding.status };
           } catch (e) {
             return { ok: false, error: e?.message || 'status-update failed' };
