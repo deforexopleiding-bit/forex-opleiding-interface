@@ -110,7 +110,9 @@ test('KOLOMMEN — de wizard-structuur komt uit dezelfde bron als de admin-lijst
   // admin-future-students-list.js. Voor de structuur betekent dat: tabel
   // onboarding_wizard, kolom published_structure, id = 1 — niet per traject.
   const spiegel = lees('api/_lib/onboarding-spiegel.js');
-  const admin   = lees('api/admin-future-students-list.js');
+  // De bouwer van de admin-lijst staat sinds 5-10-2026 in een gedeelde lib
+  // (het LMS leest dezelfde rijen via een machine-route).
+  const admin   = lees('api/_lib/onboarding-overzicht-rijen.js');
 
   for (const bron of [spiegel, admin]) {
     assert.match(bron, /from\(['"]onboarding_wizard['"]\)/);

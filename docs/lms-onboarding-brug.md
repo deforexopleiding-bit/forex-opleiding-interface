@@ -63,3 +63,32 @@ dezelfde startdatum krijgt (en de spiegel naar het LMS meteen bijwerkt).
 - Schrijft alleen `onboardings.start_date` + één interne tijdlijnregel.
   Er gaat niets naar de klant; geen melding naar de mentor (die zag de
   beslissing al in het LMS).
+
+## Hoofdmentor > Onboarding in het LMS (5 oktober 2026)
+
+**Lezen — live.** `GET /api/lms-onboarding-overzicht` (header `x-dfo-secret`)
+geeft de rijen van het CRM-onboardingoverzicht (scope actief), met dezelfde
+bouwer als het CRM-scherm (`api/_lib/onboarding-overzicht-rijen.js`) en
+dezelfde startstatus-afleiding (`api/_lib/onboarding-intake-items.js`), plus
+de actieve mentoren met hun LMS-id (`api/_lib/lms-mentor-brug.js`, op
+e-mailadres, precies één match). Geen kopietabel: wat het CRM nu weet, ziet
+het LMS bij het openen of verversen. Het betaaltoken wordt weggelaten.
+
+**Schrijven — via dezelfde functies als de CRM-schermen.**
+`POST /api/lms-onboarding-sessie` met `onboarding_id` en `door_email`:
+
+| actie | velden | gedeelde functie |
+|---|---|---|
+| `mentor_toewijzen` | `mentor_lms_id` of `null` | `wijsMentorToe` |
+| `startdatum` | `start_datum` (vandaag + 3) | `zetStartdatumOnboarding` |
+| `startstatus` | `status` (nog_te_benaderen / geen_gehoor / wil_later / wil_niet) of `null`, `notitie?` | `zetStartstatus` |
+| `notitie` | `tekst` | `schrijfOnboardingNotitie` |
+
+Dezelfde controles, meldingen aan mentoren en spiegel naar het LMS als in het
+CRM. `door_email` wordt een CRM-gebruiker als er precies één actief profiel bij
+past; anders gebeurt de actie op naam van niemand en staat "via het LMS
+(e-mail)" op de tijdlijn. **Annuleren en archiveren kunnen hier niet** — die
+blijven in het CRM.
+
+Ook nieuw: de automatische statuswijziging (automations) spiegelt nu naar het
+LMS; dat was het enige schrijfpad op `status` zonder spiegel.

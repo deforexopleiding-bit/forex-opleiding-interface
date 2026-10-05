@@ -15,12 +15,9 @@
 //
 // Response 200: { ok:true, mentor_user_id, assigned_at }.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubblePatch } from './_lib/bubble.js';
-import { createNotification } from './_lib/notify.js';
-import { syncDfoLmsMentor } from './_lib/dfo-lms-student.js';
-import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { wijsMentorToe } from './_lib/onboarding-acties.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -59,157 +56,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1) Onboarding-staat valideren. customer_name + huidige mentor_user_id
-    // worden óók gelezen — beide nodig voor de reassigned_away-notificatie
-    // aan de oude mentor (Fase 3b: zie blok onderaan).
-    const { data: ob, error: obErr } = await supabaseAdmin
-      .from('onboardings')
-      .select('id, status, bubble_user_id, mentor_user_id, customer_name, start_date, traject:onboarding_trajecten(label)')
-      .eq('id', onboardingId)
-      .maybeSingle();
-    if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
-    if (!ob)  return res.status(404).json({ error: 'Onboarding niet gevonden' });
-    if (ob.status === 'gearchiveerd') {
-      return res.status(409).json({ error: 'Onboarding is gearchiveerd — eerst herstellen' });
-    }
-
-    // 2) Indien set: valideer actieve mentor + haal bubble_user_id.
-    let mentorBubbleUserId = null;
-    if (mentorUserId) {
-      const { data: tm, error: tmErr } = await supabaseAdmin
-        .from('team_members')
-        .select('user_id, type, is_active, bubble_user_id')
-        .eq('user_id', mentorUserId)
-        .eq('type', 'mentor')
-        .eq('is_active', true)
-        .maybeSingle();
-      if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-      if (!tm)  return res.status(400).json({ error: 'mentor_user_id is geen actieve mentor' });
-      mentorBubbleUserId = typeof tm.bubble_user_id === 'string' && tm.bubble_user_id.trim()
-        ? tm.bubble_user_id.trim()
-        : null;
-    }
-
-    // 3) Update.
-    const nowIso = new Date().toISOString();
-    const patch = mentorUserId
-      ? { mentor_user_id: mentorUserId, assigned_at: nowIso }
-      : { mentor_user_id: null,          assigned_at: null   };
-    const { data: updated, error: updErr } = await supabaseAdmin
-      .from('onboardings')
-      .update(patch)
-      .eq('id', onboardingId)
-      .select('mentor_user_id, assigned_at')
-      .single();
-    if (updErr) throw new Error('onboarding update: ' + updErr.message);
-
-    // 4) Bubble-side koppelen — alleen als zowel student als mentor een
-    // bubble_user_id hebben. Fail-soft: DB-koppeling staat al, een Bubble-
-    // fout mag de 200 niet kapot maken; we melden het wel in de response.
-    // Ontkoppelen (mentor_user_id=null) doen we hier NIET in Bubble (geen
-    // harde eis); een handmatige actie of admin-tool kan dat later opruimen.
-    let bubble = null;
-    if (mentorUserId && mentorBubbleUserId && ob.bubble_user_id) {
-      try {
-        await bubblePatch('user', ob.bubble_user_id, { mentor_user: mentorBubbleUserId });
-        bubble = { ok: true };
-      } catch (e) {
-        const msg = (e?.code || '') + ' ' + (e?.message || e);
-        console.error('[onboarding-assign-mentor] bubble patch fail:', msg);
-        bubble = { ok: false, error: msg.trim() };
-      }
-    } else if (mentorUserId) {
-      // Toelichting in response zodat de admin-UI kan tonen WAAROM Bubble
-      // niet bijgewerkt is (bv. mentor heeft geen bubble-koppeling, of de
-      // student is nog niet geprovisioned).
-      const reasons = [];
-      if (!ob.bubble_user_id)     reasons.push('student-niet-geprovisioned');
-      if (!mentorBubbleUserId)    reasons.push('mentor-zonder-bubble-koppeling');
-      bubble = { ok: false, skipped: true, reason: reasons.join(',') };
-    }
-
-    // 4b) dfo-lms — mentor doorschrijven naar hlms_student.mentor_id. Zelfde
-    // faalzachte opzet als het Bubble-blok hierboven: de toewijzing in het
-    // CRM staat al, dus een LMS-fout mag de 200 niet breken. Doet niets
-    // wanneer deze onboarding nog geen studentrij in dfo-lms heeft — die
-    // krijgt de mentor vanzelf mee bij het aanmaken.
-    let dfoLms = null;
-    try {
-      dfoLms = await syncDfoLmsMentor(onboardingId, mentorUserId);
-    } catch (e) {
-      const msg = e?.message || String(e);
-      console.error('[onboarding-assign-mentor] dfo-lms mentor-sync fail:', msg);
-      dfoLms = { ok: false, error: msg };
-    }
-
-    // 5) Fase 3b — reassign-notificaties. ALLEEN wanneer er daadwerkelijk
-    // gewisseld is van mentor (oldMentor != nieuwe), én er was een vorige
-    // mentor: laat 'm weten dat de student is overgedragen via het unified
-    // notifications-systeem. De oude mentor verliest toegang tot de
-    // onboarding zelf, maar ziet de melding wél in de sidebar-bel.
-    const oldMentor = ob.mentor_user_id || null;
-    const newMentor = updated.mentor_user_id || null;
-    if (oldMentor && oldMentor !== newMentor) {
-      let newMentorName = 'geen mentor';
-      if (newMentor) {
-        try {
-          const { data: newTm } = await supabaseAdmin
-            .from('team_members')
-            .select('name')
-            .eq('user_id', newMentor)
-            .maybeSingle();
-          if (newTm?.name) newMentorName = newTm.name;
-        } catch (e) {
-          console.warn('[onboarding-assign-mentor] new mentor name lookup (soft):', e?.message || e);
-        }
-      }
-      const custName = ob.customer_name || 'Een student';
-      createNotification({
-        toUserId:   oldMentor,
-        type:       'onboarding.reassigned_away',
-        title:      'Student overgedragen · ' + custName,
-        body:       custName + ' is overgedragen aan ' + newMentorName + '.',
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   onboardingId,
-        createdBy:  user.id,
-      }).catch(() => {});
-    }
-    if (newMentor && newMentor !== oldMentor) {
-      const custName = ob.customer_name || 'Een student';
-      // Notify de nieuwe mentor via unified notifications-systeem (fail-soft).
-      const trajectLabel = ob.traject?.label || null;
-      const startDateNL  = (() => {
-        if (typeof ob.start_date !== 'string') return null;
-        const m = ob.start_date.match(/^(\d{4})-(\d{2})-(\d{2})/);
-        if (!m) return null;
-        return m[3] + '-' + m[2] + '-' + m[1];
-      })();
-      const bodyParts = [];
-      if (trajectLabel) bodyParts.push(trajectLabel);
-      if (startDateNL)  bodyParts.push('start ' + startDateNL);
-      createNotification({
-        toUserId:   newMentor,
-        type:       'onboarding.new_student',
-        title:      'Nieuwe student · ' + custName,
-        body:       bodyParts.length ? bodyParts.join(' · ') : custName,
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   onboardingId,
-        createdBy:  user.id,
-      }).catch(() => {});
-    }
-
-    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
-    await spiegelNaActie(onboardingId, 'onboarding-assign-mentor');
-
-    return res.status(200).json({
-      ok            : true,
-      mentor_user_id: updated.mentor_user_id,
-      assigned_at   : updated.assigned_at,
-      bubble        : bubble,
-      dfo_lms       : dfoLms,
-    });
+    const uitkomst = await wijsMentorToe({ onboardingId, mentorUserId, doorUserId: user.id });
+    return res.status(uitkomst.status).json(uitkomst.body);
   } catch (e) {
     console.error('[onboarding-assign-mentor]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
