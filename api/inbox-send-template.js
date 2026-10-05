@@ -186,12 +186,9 @@ export default async function handler(req, res) {
     let convModule = 'finance';
     if (conv.phone_number_id) {
       try {
-        const { data: convMod, error: convModErr } = await supabaseAdmin
-          .from('whatsapp_module_config')
-          .select('module')
-          .eq('phone_number_id', conv.phone_number_id)
-          .eq('is_active', true)
-          .maybeSingle();
+        // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
+        const convMod = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id);
+        const convModErr = null;
         if (convModErr) {
           console.error('[inbox-send-template] conv-module lookup:', convModErr.message);
         } else if (convMod?.module) {

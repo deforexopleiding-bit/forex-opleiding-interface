@@ -20,7 +20,11 @@
 //   - Geen idempotentie-check (caller doet 'm voordat ie deze helper aanroept).
 //     Bv. invite-wrapper checkt `invite_sent_at`, reminder-cron checkt
 //     `reminder_count < max_reminders + day_offset bereikt`.
-//   - Geen e-mail.
+//   - Geen e-mail — BEHALVE de tijdelijke fallback (2026-10-05): heeft
+//     onboarding geen WhatsApp-nummer (oude Meta-WABA dicht, hoofdnummer is
+//     voor leads) én staat ONBOARDING_MAIL_FALLBACK=true, dan gaat hetzelfde
+//     bericht per e-mail (api/_lib/onboarding-mail-fallback.js). Zonder vlag:
+//     { sent:false, reason:'wa-geen-nummer' }.
 //   - Geen nieuwe Meta-client — hergebruikt sendTemplate uit meta-whatsapp.js.
 //
 // REFACTOR-NOTE:
@@ -36,6 +40,7 @@ import { buildMetaVariablesFromMapping } from './template-variables.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { ensureInvoicePaymentLink } from './invoice-payment-link.js';
+import { mailFallbackAan, waRouteOnboarding, vulTemplateTekst, stuurOnboardingMail } from './onboarding-mail-fallback.js';
 
 const MAX_VAR_VALUE = 1000;
 
@@ -125,7 +130,10 @@ export async function sendOnboardingTemplateGeneric({
       .eq('is_active', true)
       .maybeSingle();
     if (modErr) return { sent: false, reason: 'db-error', error: 'module-config lookup: ' + modErr.message };
-    if (!modCfg?.phone_number_id) return { sent: false, reason: 'geen-module-config' };
+    // 3b) Mag onboarding via WhatsApp? Zonder eigen nummer: e-mail-fallback of stoppen.
+    const waRoute = await waRouteOnboarding(modCfg?.phone_number_id);
+    if (!waRoute.wa && !mailFallbackAan()) return { sent: false, reason: 'wa-geen-nummer', error: waRoute.reden };
+    if (waRoute.wa && !modCfg?.phone_number_id) return { sent: false, reason: 'geen-module-config' };
 
     // 4) Template-row (APPROVED-gate).
     const { data: tplRow, error: tplErr } = await supabaseAdmin
@@ -142,7 +150,7 @@ export async function sendOnboardingTemplateGeneric({
     // 5) Module-context (afdeling-vars).
     let moduleContext = null;
     try {
-      moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id);
+      if (modCfg?.phone_number_id) moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id);
     } catch (e) {
       console.error('[onboarding-template-send] module-context:', e?.message || e);
     }
@@ -210,6 +218,25 @@ export async function sendOnboardingTemplateGeneric({
       .sort((a, b) => Number(a) - Number(b));
     const variables = sortedKeys.map((k) => String(resolved[k] ?? '').slice(0, MAX_VAR_VALUE));
 
+    // 6b) Geen WhatsApp-nummer voor onboarding → hetzelfde bericht per e-mail.
+    if (!waRoute.wa) {
+      const tekst = vulTemplateTekst(tplRow.body_text, resolved);
+      if (dry) return { sent: true, dry: true, kanaal: 'email', template_name: templateName, onboarding: ob, customer };
+      const mail = await stuurOnboardingMail({ customer, tekst, trajectLabel: ob.traject?.label || null });
+      if (!mail.ok) return { sent: false, reason: 'mail-fallback-fail', error: mail.reason };
+      const mailResult = { sent: true, kanaal: 'email', template_name: templateName, mail_message_id: mail.messageId };
+      if (typeof postSendUpdate === 'function') {
+        try { await postSendUpdate(ob, mailResult); } catch (e) { console.error('[onboarding-template-send] postSendUpdate:', e?.message || e); }
+      }
+      try {
+        await supabaseAdmin.from('audit_log').insert({
+          user_id: sentByUserId || null, action: auditAction, entity_type: 'onboarding', entity_id: onboardingId,
+          after_json: { template_name: templateName, kanaal: 'email', reden: waRoute.reden, mail_message_id: mail.messageId, preview: mail.preview, source },
+        });
+      } catch (e) { console.error('[onboarding-template-send audit]', e?.message || e); }
+      return { ...mailResult, onboarding: ob, customer };
+    }
+
     // 7) Dry-mode: terug-rapporteren zonder Meta-send + zonder persist.
     if (dry) {
       return {
@@ -247,6 +274,7 @@ export async function sendOnboardingTemplateGeneric({
         languageCode,
         variables,
         phoneNumberId : modCfg.phone_number_id,
+        module        : 'onboarding',   // transport weigert het leadnummer voor onboarding
       });
     } catch (e) {
       if (e instanceof MetaNotConfiguredError) {

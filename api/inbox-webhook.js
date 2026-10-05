@@ -1293,6 +1293,732 @@ async function applyTemplateStatusUpdate(req, value) {
   return true;
 }
 
+// ── Gedeelde verwerking van een Cloud-API-webhookbody ──────────────────────
+/**
+ * Verwerkt { entry:[{ changes:[{ field, value }] }] } — het Cloud-API-formaat
+ * dat zowel Meta als 360dialog sturen. Schrijft whatsapp_conversations /
+ * whatsapp_messages (idempotent via de UNIQUE meta_wamid), statusupdates en
+ * alle bestaande side-effects (opvolging, toegang, pipeline, Joost/Simone …).
+ * Throwt niet: per bericht/status een eigen try/catch; telt fouten in stats.
+ *
+ * Gebruikt door:
+ *   - api/inbox-webhook.js         (Meta, na X-Hub-Signature-256-check)
+ *   - api/whatsapp-360-webhook.js  (360dialog, na de gedeelde-geheim-check)
+ *
+ * @param {object} req   alleen voor audit (client-ip); mag een minimaal object zijn
+ * @param {object} body  geparste webhook-JSON
+ * @param {{ bron?: 'meta'|'360dialog', nummer?: object }} [ctx]
+ *        bron bepaalt waar mediabestanden vandaan komen (Meta Graph of 360dialog).
+ * @returns {Promise<{ msgs_new:number, msgs_dup:number, statuses_updated:number,
+ *                     template_status_updates:number, errors:number }>}
+ */
+export async function verwerkWhatsAppWebhookBody(req, body, ctx = {}) {
+  let stats = { msgs_new: 0, msgs_dup: 0, statuses_updated: 0, template_status_updates: 0, errors: 0 };
+
+  try {
+    const entries = Array.isArray(body?.entry) ? body.entry : [];
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        // Template status-updates (apart Meta webhook field, vereist
+        // aparte subscription op WABA-app niveau in Meta Developer Console).
+        if (change?.field === 'message_template_status_update') {
+          try {
+            const ok = await applyTemplateStatusUpdate(req, change.value || {});
+            if (ok) stats.template_status_updates++;
+          } catch (e) {
+            stats.errors++;
+            console.error('[inbox-webhook] template status fail:', e.message);
+          }
+          continue;
+        }
+        if (change?.field !== 'messages') continue;
+        const value = change.value || {};
+        const contacts = Array.isArray(value.contacts) ? value.contacts : [];
+        const messages = Array.isArray(value.messages) ? value.messages : [];
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+        // value.metadata levert phone_number_id van de WABA-lijn die het
+        // bericht ontving + display_phone_number (zonder +). We bewaren
+        // phone_number_id op de conversation zodat we outbound antwoorden
+        // via dezelfde lijn kunnen sturen (module-scoping).
+        const metadata = value.metadata || {};
+        const recvPhoneNumberId = metadata.phone_number_id
+          ? String(metadata.phone_number_id)
+          : null;
+
+        // ── Inbound messages ─────────────────────────────────────────────
+        for (const msg of messages) {
+          try {
+            const fromRaw = msg.from;
+            if (!fromRaw) {
+              console.warn('[inbox-webhook] msg without .from skipped wamid=' + (msg.id || '?'));
+              continue;
+            }
+            const phoneE164Plus = toE164Plus(fromRaw);
+            // Display name uit contacts[] (match op wa_id)
+            const contact = contacts.find(c => c?.wa_id === fromRaw);
+            const displayName = contact?.profile?.name || null;
+            const tsDate = msg.timestamp
+              ? new Date(parseInt(msg.timestamp, 10) * 1000)
+              : new Date();
+            const preview = (msg.text?.body)
+              || (msg[msg.type]?.caption)
+              || `[${msg.type || 'message'}]`;
+
+            // 1. Upsert conversation
+            const conv = await upsertConversation(req, {
+              phoneE164Plus,
+              displayName,
+              inboundTimestamp: tsDate,
+              previewText: preview,
+              phoneNumberId: recvPhoneNumberId,
+            });
+
+            // 2. Insert message
+            const insRes = await insertInboundMessage(conv.id, msg);
+            if (insRes.inserted) stats.msgs_new++;
+            else                 stats.msgs_dup++;
+
+            // v=2026-08-28: Toegang-gate hook (parallel aan de GHL-webhook
+            // hook). Meta-direct inbound WA landt hier IN whatsapp_messages
+            // — NIET in follow_up_messages — dus de gate-tak in
+            // follow-up-ghl-conversation-webhook wordt voor deze berichten
+            // nooit bereikt. Zelfde logica: match op telefoon last-9-digits
+            // tegen 'wachtend' toegang_aanvragen → status='gereageerd' +
+            // provisioning + "je bent binnen"-sendText. Alleen bij eerste
+            // insert (dedup skip). Fail-soft: gate mag webhook nooit breken.
+            // Onconditionele trace-log naar follow_up_events_log zodat we
+            // óók bij no-match kunnen zien wat er is gebeurd.
+            if (insRes.inserted) {
+              const _tsIso = new Date().toISOString();
+
+              // Additief (afspraak-flow): quick-reply "Ik ben erbij" → zet
+              // bevestigd_at op de matchende geplande afspraak. Volledig
+              // losstaand van de toegang-gate hieronder. Fail-soft.
+              try {
+                const _bevTekst = msg.text?.body || msg.button?.text
+                  || msg.interactive?.button_reply?.title
+                  || msg.interactive?.list_reply?.title || '';
+                await markeerAfspraakBevestigd(supabaseAdmin, { telefoon: phoneE164Plus, tekst: _bevTekst });
+              } catch (_) { /* mag de webhook nooit breken */ }
+
+              // Additief (opvolging, PR 6): een antwoord op 'Agenda
+              // doorsturen' — of elk ander Meta-bericht van iemand met een
+              // lopende opvolgkaart — telt als contact op die kaart.
+              // Idempotent op wamid, fail-soft (gooit nooit).
+              await opvolgingMetaInbound(supabaseAdmin, {
+                telefoon: phoneE164Plus, wamid: msg.id,
+                tekst: insRes.body, mediaType: msg.type,
+                tijdstipIso: tsDate.toISOString(),
+              });
+
+              const traceBase = {
+                ts: _tsIso,
+                source_endpoint: 'meta-inbox-webhook',
+                wamid: insRes.messageId || null,
+                phoneE164Plus,
+                conv_id: conv?.id || null,
+                receiver_phone_number_id: recvPhoneNumberId || null,
+              };
+              const traceEvents = [{ ...traceBase, stage: 'inbound-inserted' }];
+              try {
+                const digits = String(phoneE164Plus || '').replace(/\D/g, '');
+                const last9  = digits.slice(-9);
+                // v=2026-09-16 — DB-side match op generated column
+                // toegang_aanvragen.telefoon_last9 (partial index WHERE
+                // status='wachtend'). Was: LIMIT 50 + in-memory filter →
+                // bij >50 wachtenden viel de juiste rij buiten de set.
+                // Nu: PostgREST filtert direct op last9 tegen ALLE
+                // wachtenden. Zelfde deterministische sortering
+                // (created_at ASC, id ASC) — primair = oudste. Ondergrens
+                // op last9-lengte tegen valse matches op te korte
+                // inbound-nummers.
+                let kandidaten = [];
+                let matchStrategy = 'db_last9_indexed';
+                if (last9.length < 6) {
+                  matchStrategy = 'skipped_short_inbound';
+                } else {
+                  const { data: rows } = await supabaseAdmin
+                    .from('toegang_aanvragen')
+                    .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
+                    .eq('status', 'wachtend')
+                    .eq('telefoon_last9', last9)
+                    .order('created_at', { ascending: true })
+                    .order('id', { ascending: true })
+                    .limit(50);
+                  kandidaten = rows || [];
+                }
+                // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
+                // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE
+                // (created_at ASC) — enige die provisioning + "je bent binnen"
+                // krijgt, en alleen als de atomic claim ons in deze invocatie
+                // de winnaar maakte (race-veilig voor gelijktijdige webhooks).
+                const primair = kandidaten[0] || null;
+                const zusterrijen = kandidaten.slice(1);
+                traceEvents.push({ ...traceBase, stage: 'gate-lookup',
+                  kandidaten: kandidaten.length,
+                  match_id: primair?.id || null,
+                  zusterrijen_ids: zusterrijen.map((z) => z.id),
+                  inbound_last9: last9,
+                  match_strategy: matchStrategy,
+                });
+                console.log('[inbox-webhook] toegang-gate:',
+                  'strategy=', matchStrategy,
+                  'kandidaten=', kandidaten.length,
+                  'primair=', primair?.id || 'geen',
+                  'zusterrijen=', zusterrijen.length,
+                  'inbound-last9=', last9);
+
+                // ── Zusterrijen sluiten (alleen status-flip, geen provisioning,
+                //    geen "je bent binnen"). Atomic per rij via race-guard.
+                //    Cron-reminderfilter eist status='wachtend' → deze rijen
+                //    krijgen gegarandeerd geen reminder meer.
+                for (const z of zusterrijen) {
+                  try {
+                    const { data: zClaim } = await supabaseAdmin
+                      .from('toegang_aanvragen')
+                      .update({ status: 'gereageerd', reacted_at: _tsIso })
+                      .eq('id', z.id)
+                      .eq('status', 'wachtend')
+                      .select('id')
+                      .maybeSingle();
+                    traceEvents.push({ ...traceBase, stage: 'gate-zusterrij-closed',
+                      zusterrij_id: z.id, soort: z.soort,
+                      claimed: !!(zClaim && zClaim.id),
+                    });
+                  } catch (zErr) {
+                    console.warn('[inbox-webhook] zusterrij close (soft):', z.id, zErr?.message || zErr);
+                  }
+                }
+
+                if (primair) {
+                  const match = primair;    // alias voor bestaande code hieronder
+                  traceEvents.push({ ...traceBase, stage: 'gate-match',
+                    match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at,
+                  });
+                  // Atomic claim van de primaire rij (status='wachtend' → 'gereageerd').
+                  // Alleen als deze invocatie de winnaar is (claimed?.id) gaan we
+                  // provisioneren + "je bent binnen" sturen. Voorkomt dubbele
+                  // provisioning bij een gelijktijdige webhook op dezelfde rij.
+                  const { data: primClaim } = await supabaseAdmin
+                    .from('toegang_aanvragen')
+                    .update({ status: 'gereageerd', reacted_at: _tsIso })
+                    .eq('id', match.id)
+                    .eq('status', 'wachtend')
+                    .select('id')
+                    .maybeSingle();
+                  const primClaimed = !!(primClaim && primClaim.id);
+                  traceEvents.push({ ...traceBase, stage: 'gate-primair-claim',
+                    match_id: match.id, claimed: primClaimed,
+                  });
+                  // Provisioning + welkom-WA ALLEEN als we de rij zelf
+                  // hebben geclaimd én er nog niet eerder is geprovisioneerd.
+                  if (primClaimed && !match.provisioned_at) {
+                    const r = await belProvisioning({
+                      email: match.email, voornaam: match.voornaam, soort: match.soort,
+                    });
+                    traceEvents.push({ ...traceBase, stage: 'provisioning-call',
+                      ok: r?.ok === true, status: r?.status || null, error: r?.error || null,
+                      response_body: r?.body ? JSON.stringify(r.body).slice(0, 800) : null,
+                      email_sent_naar: match.email,
+                    });
+                    if (r.ok) {
+                      const { data: updated, error: guardErr } = await supabaseAdmin
+                        .from('toegang_aanvragen')
+                        .update({ provisioned_at: new Date().toISOString(), provisioned_error: null })
+                        .eq('id', match.id)
+                        .is('provisioned_at', null)
+                        .select('id')
+                        .maybeSingle();
+                      if (!guardErr && updated?.id) {
+                        try {
+                          const naam = match.voornaam || 'daar';
+                          const wabody =
+                            `Top ${naam}! ✅ Je inloggegevens zijn direct per mail naar je toegestuurd.\n\n` +
+                            `Nog een vraagje, ben je ook al bekend met traden of is dit volledig nieuw?`;
+                          // Hetzelfde nummer als waar de inbound binnenkwam →
+                          // recvPhoneNumberId. Dat is de meest betrouwbare bron
+                          // (Meta zelf zegt op welke lijn 't binnenkwam) en
+                          // voorkomt thread-mismatch — geen DB-lookup nodig.
+                          if (recvPhoneNumberId) {
+                            const sendRes = await sendText({ to: match.telefoon, body: wabody, phoneNumberId: recvPhoneNumberId });
+                            // v=2 (2026-08-29): log outbound naar
+                            // whatsapp_messages zodat "je bent binnen" in
+                            // Gesprekken staat naast inbound reply.
+                            await logOutboundWa(supabaseAdmin, {
+                              toPhone: match.telefoon,
+                              phoneNumberId: recvPhoneNumberId,
+                              body: wabody,
+                              wamid: sendRes?.wamid || null,
+                              source: 'toegang-gate-inbox-webhook',
+                            });
+                          } else {
+                            console.warn('[inbox-webhook] toegang-bevestig-wa: recvPhoneNumberId ontbreekt — skip');
+                          }
+                        } catch (waErr) {
+                          if (!(waErr instanceof MetaNotConfiguredError)) {
+                            console.warn('[inbox-webhook] toegang-bevestig-wa (soft):', waErr?.message || waErr);
+                          }
+                        }
+                      }
+                    } else {
+                      await supabaseAdmin.from('toegang_aanvragen')
+                        .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
+                        .eq('id', match.id);
+                      console.warn('[inbox-webhook] provisioning fail:', match.id, r.error);
+                    }
+                  }
+                }
+              } catch (gateErr) {
+                traceEvents.push({ ...traceBase, stage: 'gate-exception',
+                  error: (gateErr?.message || String(gateErr)).slice(0, 300),
+                });
+                console.warn('[inbox-webhook] toegang-gate exception (soft):', gateErr?.message || gateErr);
+              }
+              // Onconditionele trace-flush (fail-soft).
+              try {
+                await supabaseAdmin
+                  .from('follow_up_events_log')
+                  .insert({
+                    source: 'ghl', event_type: 'toegang-gate-trace',
+                    payload: { events: traceEvents }, processed: true,
+                  });
+              } catch (flushErr) {
+                console.warn('[inbox-webhook] toegang-gate trace-write (soft):', flushErr?.message || flushErr);
+              }
+            }
+
+            // 2a-media. Bij inbound MEDIA-berichten (image/document/audio/
+            // video/sticker) heeft insertInboundMessage 'meta-media-id:<id>'
+            // in media_url gezet. We downloaden nu de bytes van Meta en
+            // uploaden naar de whatsapp-media bucket, waarna we media_url
+            // vervangen door de publieke URL. Fire-and-forget zodat de
+            // webhook binnen het 200-OK budget van Meta blijft; fail-soft
+            // (bij mislukking blijft de 'meta-media-id:'-placeholder staan
+            // + log-lijn zodat handmatig re-run of debugging mogelijk is).
+            if (insRes.inserted && insRes.messageId && ['image','document','audio','video','sticker'].includes(insRes.type)) {
+              const mediaId = msg[insRes.type]?.id || null;
+              const filename = msg[insRes.type]?.filename || null;
+              if (mediaId) {
+                const runMediaFetch = async () => {
+                  try {
+                    const mod = await import('./_lib/whatsapp-media-download.js');
+                    const dl = ctx.bron === '360dialog' && ctx.nummer
+                        ? await mod.downloadAndStore360Media(ctx.nummer, mediaId, insRes.type, { messageId: insRes.messageId, filename })
+                        : await mod.downloadAndStoreMetaMedia(mediaId, insRes.type, { messageId: insRes.messageId, filename });
+                    if (!dl?.ok) {
+                      console.warn('[inbox-webhook] media download soft-fail', insRes.messageId, mediaId, dl?.error);
+                      return;
+                    }
+                    const upd = await mod.updateInboundMediaUrl(insRes.messageId, dl.publicUrl, {
+                      originalFilename: filename,
+                      hasBody         : !!insRes.body,
+                    });
+                    if (!upd?.ok) console.warn('[inbox-webhook] media url update soft-fail', insRes.messageId, upd?.error);
+                  } catch (e) {
+                    console.warn('[inbox-webhook] media fetch exception', insRes.messageId, mediaId, e?.message || e);
+                  }
+                };
+                try {
+                  if (typeof waitUntil === 'function') waitUntil(runMediaFetch());
+                  else runMediaFetch().catch(() => {});
+                } catch (_) { runMediaFetch().catch(() => {}); }
+              }
+            }
+
+            // 2a. Pipeline-hook: klant reageert → fase 'in_gesprek' (mits
+            // toggle aan). Volgorde-guard: alleen vanuit 'nieuw' of
+            // 'aangemaand' — een regeling/incasso mag niet automatisch
+            // terug naar in_gesprek. Alleen bij nieuw bericht (niet
+            // Meta-retry-dup) en alleen als de conv een customer_id heeft
+            // (alleen wanbetalers hebben een pipeline-record; anders skip).
+            // Fail-soft — webhook mag nooit falen.
+            if (insRes.inserted && conv.customerId) {
+              try {
+                const { isAutoEnabled, setStage } = await import('./_lib/dunning-pipeline.js');
+                if (await isAutoEnabled('on_inbound_to_in_gesprek')) {
+                  await setStage(conv.customerId, 'in_gesprek', 'inbound_reply', 'auto:inbound_reply', {
+                    onlyIfFrom: new Set(['nieuw', 'aangemaand']),
+                  });
+                }
+              } catch (e) {
+                console.warn('[inbox-webhook] pipeline hook soft-fail', conv.id, e?.message || e);
+              }
+            }
+
+            // 2b. Joost fase 2 — gespreks-pauze hook. Zodra een klant met
+            // een lopende dunning-run reageert, pauzeert de aanmaan-flow.
+            // Reminder-cron (cron-dunning-conversation-reminders) beslist
+            // wanneer de flow eventueel hervat. Bij elke nieuwe inbound
+            // wordt de reminder-teller gereset (nieuwe stilte begint).
+            // Alleen bij insRes.inserted (Meta-retry-dup mag niet nog een
+            // keer resetten) en customerId aanwezig. Fail-soft — webhook
+            // mag nooit falen.
+            if (insRes.inserted && conv.customerId) {
+              try {
+                const { pauseRunsForConversation } = await import('./_lib/dunning-arrangement-hooks.js');
+                await pauseRunsForConversation(conv.id, conv.customerId);
+              } catch (e) {
+                console.warn('[inbox-webhook] conv-pauze hook soft-fail', conv.id, e?.message || e);
+              }
+            }
+
+            // 2b. Fail-soft dual-write: notify mentor van deelnemer bij een
+            // NIEUW inbound bericht. Skip bij Meta-retry (duplicate). Skip
+            // als er geen mentor gekoppeld is (via onboardings). Throttle
+            // via dedupWithinMs 10min per conversatie tegen spam-bursts.
+            // Fail-soft: mag de webhook NOOIT vertragen/breken.
+            if (insRes.inserted && conv.customerId) {
+              try {
+                const { data: ob } = await supabaseAdmin
+                  .from('onboardings')
+                  .select('mentor_user_id')
+                  .eq('customer_id', conv.customerId)
+                  .not('mentor_user_id', 'is', null)
+                  .order('created_at', { ascending: false })
+                  .limit(1)
+                  .maybeSingle();
+                const mentorUserId = ob?.mentor_user_id || null;
+                if (mentorUserId) {
+                  // `customers` heeft geen kolom `name`; die stond hier wel,
+                  // dus gaf deze opvraging altijd een fout en kreeg de mentor
+                  // een telefoonnummer in de titel in plaats van een naam.
+                  const { data: custRow } = await supabaseAdmin
+                    .from('customers')
+                    .select('id, is_company, first_name, last_name, company_name')
+                    .eq('id', conv.customerId)
+                    .maybeSingle();
+                  const klantnaam = customerDisplayName(custRow, '')
+                    || (contact?.profile?.name || phoneE164Plus);
+                  const preview80 = String(insRes.body || '').trim().slice(0, 80);
+                  createNotification({
+                    toUserId:       mentorUserId,
+                    type:           'inbox.new_message',
+                    title:          'Nieuw bericht · ' + klantnaam,
+                    body:           preview80 || null,
+                    linkUrl:        '/modules/mentor-onboarding.html#inbox-deeplink',
+                    entityType:     'conversation',
+                    entityId:       conv.id,
+                    dedupWithinMs:  10 * 60 * 1000,
+                  }).catch(() => {});
+                }
+              } catch (_) { /* fail-soft */ }
+            }
+
+            // 3. Agent-flows: per-module reactive suggest + Joost intake
+            //
+            // Routing per moduleCtx.module (mutually exclusive):
+            //   - 'finance' → Joost-tak (Pad (i) intake óf Pad (ii) auto-suggest)
+            //   - 'events'  → Simone-tak (Fase 2 stap 2b — reactive only,
+            //                 geen intake-pad)
+            //   - null      → unrouted, geen agent (Fase 0 gate-hardening)
+            //
+            // Joost-paden (alleen bij module='finance'):
+            //   (i)  Intake (E2 autonomous intake) — runt als conv.customerId
+            //        IS NULL én feature_flags.e2_autonomous_intake = true.
+            //        Joost vraagt om e-mailadres, parsed het antwoord en
+            //        koppelt of escaleert. Vaste teksten, geen LLM.
+            //   (ii) Auto-suggest (E1.1) — runt als conv.customerId IS NOT NULL
+            //        (klant gekoppeld) én aan de overige filters voldoet.
+            //        LLM-aangedreven Joost-suggestie + optionele E2.1 chain.
+            //
+            // Simone-pad (alleen bij module='events'):
+            //   (iii) Auto-suggest — runt zonder customer_id-vereiste
+            //         (event-leads zijn prospects). Pre-filters identiek aan
+            //         Joost-(ii): body+TRIVIAL_REPLIES + anti-loop 60s.
+            //         Persist naar joost_suggestions met module='events'.
+            //
+            // Gedeelde gating-filters (over alle agents):
+            //   a) Nieuwe insert (geen Meta-retry)
+            //   b) text-type message
+            //   c) module van ontvangende lijn matched (geen silent-failover)
+            //   d) joost_config.is_enabled = true voor die module
+            //   e) joost_config.feature_flags.reactive_suggest_enabled = true
+            //   f) body >= 5 chars + niet in TRIVIAL_REPLIES set
+            //   g) anti-loop: geen outbound binnen 60s
+            //
+            // Aanroep: agents-suggest doet sinds Fase 2 stap 1 een IN-PROCESS
+            // call (runJoostSuggest / runSimoneSuggest), gewrapt in waitUntil()
+            // zodat de Vercel-lambda het werk afmaakt ná de 200-response. Geen
+            // HTTP-self-call meer, dus geen VERCEL_URL / INTERNAL_API_TOKEN
+            // afhankelijkheid voor dit pad. Intake-flow (Joost-only) gebruikt
+            // sendText direct + schrijft eigen outbound message-rij.
+            try {
+              if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
+                // Module + joost_config: éénmalige lookup voor beide paden.
+                const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
+                // FASE 0 Joost-gate-hardening: GEEN silent-failover.
+                // Een null/onbekende/non-finance/inactive module -> Joost
+                // wordt NOOIT getriggerd. Conversation blijft persisted in
+                // whatsapp_conversations (upsert hierboven), maar is
+                // 'unrouted' voor inbox-views (inbox-conversations-list
+                // filtert hardcoded op finance phone_number_id).
+                if (!moduleCtx) {
+                  console.warn(
+                    '[inbox-webhook] inbound van ongekoppeld nummer phone_number_id=' +
+                    String(recvPhoneNumberId || '<missing>') +
+                    ' - conversation persisted als unrouted, Joost-trigger geskipt'
+                  );
+                }
+                const isFinanceLijn = !!(moduleCtx
+                  && moduleCtx.module === 'finance'
+                  && moduleCtx.is_active === true);
+                if (isFinanceLijn) {
+                  const { data: jcfg, error: jcfgErr } = await supabaseAdmin
+                    .from('joost_config')
+                    .select('module, is_enabled, feature_flags')
+                    .eq('module', 'finance')
+                    .maybeSingle();
+                  if (jcfgErr) {
+                    console.warn('[inbox-webhook] joost_config lookup fail:', jcfgErr.message);
+                  } else if (jcfg && jcfg.is_enabled === true) {
+                    const flags = (jcfg.feature_flags && typeof jcfg.feature_flags === 'object')
+                      ? jcfg.feature_flags : {};
+                    const intakeEnabled = flags.e2_autonomous_intake === true;
+
+                    // Dunning-test-cockpit guard (BLOK 1 · PR-B).
+                    // De autonome intake-reply is de enige webhook-stille
+                    // outbound van de app. Voor is_test-convs mag die NOOIT
+                    // vuren: al het test-verkeer hoort door de cockpit-
+                    // grendel (test-cockpit-send.js). Detectie fail-CLOSED:
+                    // bij DB-error / onbekend → behandel als is_test → skip.
+                    // Alleen berekend als intakeEnabled — geen overhead bij
+                    // productie-crons met de flag UIT.
+                    let isTestConv = false;
+                    if (intakeEnabled) {
+                      try {
+                        isTestConv = await _detectIsTestConversation({
+                          convId:         conv.id,
+                          customerId:     conv.customerId,
+                          phoneE164Plus,
+                        });
+                      } catch (e) {
+                        console.warn('[inbox-webhook] is_test detectie faalde → fail-closed skip intake:', e?.message || e);
+                        isTestConv = true;
+                      }
+                      if (isTestConv) {
+                        // Markeer whatsapp_conversations.is_test (afgeleide
+                        // vlag, fail-soft — detectie was al waarheid).
+                        try {
+                          await supabaseAdmin.from('whatsapp_conversations')
+                            .update({ is_test: true })
+                            .eq('id', conv.id)
+                            .eq('is_test', false);
+                        } catch (e) {
+                          console.warn('[inbox-webhook] wa_conv.is_test update (soft):', e?.message || e);
+                        }
+                        console.warn('[inbox-webhook] Joost intake-reply SKIP: is_test conversation (fail-closed)');
+                      }
+                    }
+
+                    // Pad (i) Intake-flow: alleen als customer_id ontbreekt
+                    // én feature-flag aanstaat. Voor is_test-convs SKIP
+                    // (grendel; alleen de cockpit mag test-outbound sturen).
+                    // Outbound phone_number_id = conv.phone_number_id (al
+                    // opgeslagen bij upsert) of module-context fallback.
+                    // Bij undefined valt sendText terug op env-var
+                    // (META_WHATSAPP_PHONE_NUMBER_ID).
+                    let intakeHandled = false;
+                    if (!conv.customerId && intakeEnabled && !isTestConv) {
+                      const outboundPnId = recvPhoneNumberId || moduleCtx?.phone_number_id || undefined;
+                      // Bouw lokaal conv-object met fields die intake-flow nodig
+                      // heeft (id + phone_number) — webhook-upsert returnt geen
+                      // phone_number maar we kennen 'm uit phoneE164Plus.
+                      intakeHandled = await handleJoostIntakeFlow(req, {
+                        conv:           { id: conv.id, phone_number: phoneE164Plus },
+                        messageBody:    insRes.body || '',
+                        phoneNumberId:  outboundPnId,
+                      });
+                    }
+
+                    // Pad (ii) Auto-suggest: alleen als intake-flow NIET
+                    // heeft afgehandeld én klant gekoppeld is.
+                    if (!intakeHandled && conv.customerId) {
+                      // Per-module reactive-suggest gate (Fase 2 stap 1).
+                      // joost_config.feature_flags.reactive_suggest_enabled
+                      // bepaalt per module of de reactieve in-process suggest
+                      // vuurt na een inbound. Default UIT op finance zodat
+                      // observable gedrag identiek blijft aan de gebroken
+                      // HTTP-self-call-toestand (= geen suggesties). Admin
+                      // flipt 'm aan op de finance-rij (of straks events-rij
+                      // voor Simone) om reactieve drafts te activeren.
+                      const reactiveEnabled = flags.reactive_suggest_enabled === true;
+                      if (reactiveEnabled) {
+                        const trimmed = String(insRes.body || '').trim();
+                        const lower = trimmed.toLowerCase();
+                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                        if (isTriggerable) {
+                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                          if (noLoop) {
+                            // E2.1 reactive-autonomy gate: alleen chain naar
+                            // /api/joost-send-autonomous als feature-flag
+                            // e2_reactive_autonomy aanstaat. joost-send-autonomous
+                            // doet zelf nogmaals de check (defense-in-depth).
+                            const autonomyEnabled = flags.e2_reactive_autonomy === true;
+                            triggerJoostAutoSuggest({
+                              conversationId:        conv.id,
+                              triggeredByMessageId:  insRes.messageId,
+                              autonomyEnabled,
+                              clientIp:              getClientIp(req),
+                              module:                jcfg.module || moduleCtx?.module || null,
+                            });
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // ── Onboarding-tak (Fase A) ────────────────────────────────
+                // Mutually exclusive met finance- en events-tak. Persist
+                // naar joost_suggestions met module='onboarding'. Gates:
+                //   - whatsapp_module_config.module='onboarding' + is_active
+                //   - joost_config WHERE module='onboarding' + is_enabled
+                //   - feature_flags.reactive_suggest_enabled = true (per-mod)
+                //   - body >= 5 chars + niet in TRIVIAL_REPLIES
+                //   - anti-loop: geen outbound binnen 60s
+                // Geen customer_id-vereiste: matching gebeurt code-side
+                // (customers.phone) in runOnboardingSuggest met no-match
+                // fallback naar general-purpose onboarding-assistent.
+                const isOnboardingLijn = !!(moduleCtx
+                  && moduleCtx.module === 'onboarding'
+                  && moduleCtx.is_active === true);
+                if (isOnboardingLijn) {
+                  const { data: ocfg, error: ocfgErr } = await supabaseAdmin
+                    .from('joost_config')
+                    .select('module, is_enabled, feature_flags')
+                    .eq('module', 'onboarding')
+                    .maybeSingle();
+                  if (ocfgErr) {
+                    console.warn('[inbox-webhook] joost_config (onboarding) lookup fail:', ocfgErr.message);
+                  } else if (ocfg && ocfg.is_enabled === true) {
+                    const oFlags = (ocfg.feature_flags && typeof ocfg.feature_flags === 'object')
+                      ? ocfg.feature_flags : {};
+                    const oReactiveEnabled = oFlags.reactive_suggest_enabled === true;
+                    if (!oReactiveEnabled) {
+                      // Gate-redenering-log: maakt zichtbaar dat de onboarding-tak
+                      // het inbound zag maar bewust geskipt is (default-OFF na seed).
+                      console.log(
+                        '[inbox-webhook] reactive suggest skipped (onboarding): ' +
+                        'reactive_suggest_enabled=false conv=' + conv.id
+                      );
+                    } else {
+                      const trimmed = String(insRes.body || '').trim();
+                      const lower = trimmed.toLowerCase();
+                      const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                      if (isTriggerable) {
+                        const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                        if (noLoop) {
+                          triggerOnboardingAutoSuggest({
+                            conversationId:       conv.id,
+                            triggeredByMessageId: insRes.messageId,
+                            clientIp:             getClientIp(req),
+                            module:               ocfg.module || moduleCtx?.module || null,
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // ── Simone-tak (events) — Fase 2 stap 2b ───────────────────
+                // Mutually exclusive met finance-tak: moduleCtx.module is
+                // 'finance' XOR 'events' XOR null, dus events-inbound raakt
+                // de Joost-flows nooit en finance-inbound nooit Simone.
+                // Geen customer_id-vereiste: event-leads zijn prospects;
+                // runSimoneSuggest matcht zelf phone -> event_attendees en
+                // valt elegant terug op general-purpose bij no-match.
+                const isEventsLijn = !!(moduleCtx
+                  && moduleCtx.module === 'events'
+                  && moduleCtx.is_active === true);
+                if (isEventsLijn) {
+                  const { data: scfg, error: scfgErr } = await supabaseAdmin
+                    .from('joost_config')
+                    .select('module, is_enabled, feature_flags')
+                    .eq('module', 'events')
+                    .maybeSingle();
+                  if (scfgErr) {
+                    console.warn('[inbox-webhook] joost_config (events) lookup fail:', scfgErr.message);
+                  } else if (scfg && scfg.is_enabled === true) {
+                    const sFlags = (scfg.feature_flags && typeof scfg.feature_flags === 'object')
+                      ? scfg.feature_flags : {};
+                    const sReactiveEnabled = sFlags.reactive_suggest_enabled === true;
+                    if (!sReactiveEnabled) {
+                      // Gate-redenering-log: maakt zichtbaar dat de events-tak
+                      // het inbound zag maar bewust geskipt is (default-OFF na
+                      // seed). Finance-tak heeft deze log niet — daar was de
+                      // historische default ook OFF maar het gate-fenomeen
+                      // werd al geverifieerd via stap 1 smoke.
+                      console.log(
+                        '[inbox-webhook] reactive suggest skipped (events): ' +
+                        'reactive_suggest_enabled=false conv=' + conv.id
+                      );
+                    } else {
+                      const trimmed = String(insRes.body || '').trim();
+                      const lower = trimmed.toLowerCase();
+                      const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
+                      if (isTriggerable) {
+                        const noLoop = await hasNoRecentOutbound(conv.id, 60);
+                        if (noLoop) {
+                          // Autonomy alleen ketenen wanneer
+                          // feature_flags.events_reactive_autonomy aan staat.
+                          // Default UIT → triggerSimoneAutoSuggest doet alleen
+                          // de suggest-stap; geen self-call naar
+                          // /api/simone-send-autonomous.
+                          const sAutonomyEnabled = sFlags.events_reactive_autonomy === true;
+                          triggerSimoneAutoSuggest({
+                            conversationId:       conv.id,
+                            triggeredByMessageId: insRes.messageId,
+                            autonomyEnabled:      sAutonomyEnabled,
+                            clientIp:             getClientIp(req),
+                            module:               scfg.module || moduleCtx?.module || null,
+                          });
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (eAuto) {
+              // Auto-trigger / intake mag NOOIT de webhook breken — log + door
+              console.warn('[inbox-webhook] joost auto-trigger pre-check fail:', eAuto && eAuto.message);
+            }
+          } catch (e) {
+            stats.errors++;
+            console.error('[inbox-webhook] msg processing fail wamid=' + (msg.id || '?') + ':', e.message);
+          }
+        }
+
+        // ── Status updates ──────────────────────────────────────────────
+        for (const st of statuses) {
+          try {
+            const ok = await applyStatusUpdate(st);
+            if (ok) stats.statuses_updated++;
+            // Additief (opvolging, PR 6): een niet-afgeleverd bericht van
+            // 'Agenda doorsturen' wordt zichtbaar op de kaart, en een kaart
+            // die op inplanning wachtte gaat terug open. Fail-soft.
+            if (st && st.status === 'failed') {
+              const reden = Array.isArray(st.errors) && st.errors.length
+                ? st.errors.map((e) => `[${e.code}] ${e.title || e.message || ''}`).join('; ')
+                : 'onbekende reden';
+              const vandaagNl = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+              await opvolgingMetaFailed(supabaseAdmin, { wamid: st.id, reden, vandaag: vandaagNl });
+            }
+          } catch (e) {
+            stats.errors++;
+            console.error('[inbox-webhook] status processing fail wamid=' + (st.id || '?') + ':', e.message);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    stats.errors++;
+    console.error('[inbox-webhook] top-level processing fail:', e.message);
+  }
+
+  return stats;
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -1358,706 +2084,9 @@ export default async function handler(req, res) {
     // Process entries: per change.value: messages[] + statuses[]
     // CRITICAL: per-item try/catch + ALTIJD 200 returnen, ook bij partiele fail,
     // anders retried Meta de hele batch en triggeren we duplicate-processing.
-    let stats = { msgs_new: 0, msgs_dup: 0, statuses_updated: 0, template_status_updates: 0, errors: 0 };
-
-    try {
-      const entries = Array.isArray(body?.entry) ? body.entry : [];
-      for (const entry of entries) {
-        const changes = Array.isArray(entry?.changes) ? entry.changes : [];
-        for (const change of changes) {
-          // Template status-updates (apart Meta webhook field, vereist
-          // aparte subscription op WABA-app niveau in Meta Developer Console).
-          if (change?.field === 'message_template_status_update') {
-            try {
-              const ok = await applyTemplateStatusUpdate(req, change.value || {});
-              if (ok) stats.template_status_updates++;
-            } catch (e) {
-              stats.errors++;
-              console.error('[inbox-webhook] template status fail:', e.message);
-            }
-            continue;
-          }
-          if (change?.field !== 'messages') continue;
-          const value = change.value || {};
-          const contacts = Array.isArray(value.contacts) ? value.contacts : [];
-          const messages = Array.isArray(value.messages) ? value.messages : [];
-          const statuses = Array.isArray(value.statuses) ? value.statuses : [];
-          // value.metadata levert phone_number_id van de WABA-lijn die het
-          // bericht ontving + display_phone_number (zonder +). We bewaren
-          // phone_number_id op de conversation zodat we outbound antwoorden
-          // via dezelfde lijn kunnen sturen (module-scoping).
-          const metadata = value.metadata || {};
-          const recvPhoneNumberId = metadata.phone_number_id
-            ? String(metadata.phone_number_id)
-            : null;
-
-          // ── Inbound messages ─────────────────────────────────────────────
-          for (const msg of messages) {
-            try {
-              const fromRaw = msg.from;
-              if (!fromRaw) {
-                console.warn('[inbox-webhook] msg without .from skipped wamid=' + (msg.id || '?'));
-                continue;
-              }
-              const phoneE164Plus = toE164Plus(fromRaw);
-              // Display name uit contacts[] (match op wa_id)
-              const contact = contacts.find(c => c?.wa_id === fromRaw);
-              const displayName = contact?.profile?.name || null;
-              const tsDate = msg.timestamp
-                ? new Date(parseInt(msg.timestamp, 10) * 1000)
-                : new Date();
-              const preview = (msg.text?.body)
-                || (msg[msg.type]?.caption)
-                || `[${msg.type || 'message'}]`;
-
-              // 1. Upsert conversation
-              const conv = await upsertConversation(req, {
-                phoneE164Plus,
-                displayName,
-                inboundTimestamp: tsDate,
-                previewText: preview,
-                phoneNumberId: recvPhoneNumberId,
-              });
-
-              // 2. Insert message
-              const insRes = await insertInboundMessage(conv.id, msg);
-              if (insRes.inserted) stats.msgs_new++;
-              else                 stats.msgs_dup++;
-
-              // v=2026-08-28: Toegang-gate hook (parallel aan de GHL-webhook
-              // hook). Meta-direct inbound WA landt hier IN whatsapp_messages
-              // — NIET in follow_up_messages — dus de gate-tak in
-              // follow-up-ghl-conversation-webhook wordt voor deze berichten
-              // nooit bereikt. Zelfde logica: match op telefoon last-9-digits
-              // tegen 'wachtend' toegang_aanvragen → status='gereageerd' +
-              // provisioning + "je bent binnen"-sendText. Alleen bij eerste
-              // insert (dedup skip). Fail-soft: gate mag webhook nooit breken.
-              // Onconditionele trace-log naar follow_up_events_log zodat we
-              // óók bij no-match kunnen zien wat er is gebeurd.
-              if (insRes.inserted) {
-                const _tsIso = new Date().toISOString();
-
-                // Additief (afspraak-flow): quick-reply "Ik ben erbij" → zet
-                // bevestigd_at op de matchende geplande afspraak. Volledig
-                // losstaand van de toegang-gate hieronder. Fail-soft.
-                try {
-                  const _bevTekst = msg.text?.body || msg.button?.text
-                    || msg.interactive?.button_reply?.title
-                    || msg.interactive?.list_reply?.title || '';
-                  await markeerAfspraakBevestigd(supabaseAdmin, { telefoon: phoneE164Plus, tekst: _bevTekst });
-                } catch (_) { /* mag de webhook nooit breken */ }
-
-                // Additief (opvolging, PR 6): een antwoord op 'Agenda
-                // doorsturen' — of elk ander Meta-bericht van iemand met een
-                // lopende opvolgkaart — telt als contact op die kaart.
-                // Idempotent op wamid, fail-soft (gooit nooit).
-                await opvolgingMetaInbound(supabaseAdmin, {
-                  telefoon: phoneE164Plus, wamid: msg.id,
-                  tekst: insRes.body, mediaType: msg.type,
-                  tijdstipIso: tsDate.toISOString(),
-                });
-
-                const traceBase = {
-                  ts: _tsIso,
-                  source_endpoint: 'meta-inbox-webhook',
-                  wamid: insRes.messageId || null,
-                  phoneE164Plus,
-                  conv_id: conv?.id || null,
-                  receiver_phone_number_id: recvPhoneNumberId || null,
-                };
-                const traceEvents = [{ ...traceBase, stage: 'inbound-inserted' }];
-                try {
-                  const digits = String(phoneE164Plus || '').replace(/\D/g, '');
-                  const last9  = digits.slice(-9);
-                  // v=2026-09-16 — DB-side match op generated column
-                  // toegang_aanvragen.telefoon_last9 (partial index WHERE
-                  // status='wachtend'). Was: LIMIT 50 + in-memory filter →
-                  // bij >50 wachtenden viel de juiste rij buiten de set.
-                  // Nu: PostgREST filtert direct op last9 tegen ALLE
-                  // wachtenden. Zelfde deterministische sortering
-                  // (created_at ASC, id ASC) — primair = oudste. Ondergrens
-                  // op last9-lengte tegen valse matches op te korte
-                  // inbound-nummers.
-                  let kandidaten = [];
-                  let matchStrategy = 'db_last9_indexed';
-                  if (last9.length < 6) {
-                    matchStrategy = 'skipped_short_inbound';
-                  } else {
-                    const { data: rows } = await supabaseAdmin
-                      .from('toegang_aanvragen')
-                      .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
-                      .eq('status', 'wachtend')
-                      .eq('telefoon_last9', last9)
-                      .order('created_at', { ascending: true })
-                      .order('id', { ascending: true })
-                      .limit(50);
-                    kandidaten = rows || [];
-                  }
-                  // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
-                  // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE
-                  // (created_at ASC) — enige die provisioning + "je bent binnen"
-                  // krijgt, en alleen als de atomic claim ons in deze invocatie
-                  // de winnaar maakte (race-veilig voor gelijktijdige webhooks).
-                  const primair = kandidaten[0] || null;
-                  const zusterrijen = kandidaten.slice(1);
-                  traceEvents.push({ ...traceBase, stage: 'gate-lookup',
-                    kandidaten: kandidaten.length,
-                    match_id: primair?.id || null,
-                    zusterrijen_ids: zusterrijen.map((z) => z.id),
-                    inbound_last9: last9,
-                    match_strategy: matchStrategy,
-                  });
-                  console.log('[inbox-webhook] toegang-gate:',
-                    'strategy=', matchStrategy,
-                    'kandidaten=', kandidaten.length,
-                    'primair=', primair?.id || 'geen',
-                    'zusterrijen=', zusterrijen.length,
-                    'inbound-last9=', last9);
-
-                  // ── Zusterrijen sluiten (alleen status-flip, geen provisioning,
-                  //    geen "je bent binnen"). Atomic per rij via race-guard.
-                  //    Cron-reminderfilter eist status='wachtend' → deze rijen
-                  //    krijgen gegarandeerd geen reminder meer.
-                  for (const z of zusterrijen) {
-                    try {
-                      const { data: zClaim } = await supabaseAdmin
-                        .from('toegang_aanvragen')
-                        .update({ status: 'gereageerd', reacted_at: _tsIso })
-                        .eq('id', z.id)
-                        .eq('status', 'wachtend')
-                        .select('id')
-                        .maybeSingle();
-                      traceEvents.push({ ...traceBase, stage: 'gate-zusterrij-closed',
-                        zusterrij_id: z.id, soort: z.soort,
-                        claimed: !!(zClaim && zClaim.id),
-                      });
-                    } catch (zErr) {
-                      console.warn('[inbox-webhook] zusterrij close (soft):', z.id, zErr?.message || zErr);
-                    }
-                  }
-
-                  if (primair) {
-                    const match = primair;    // alias voor bestaande code hieronder
-                    traceEvents.push({ ...traceBase, stage: 'gate-match',
-                      match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at,
-                    });
-                    // Atomic claim van de primaire rij (status='wachtend' → 'gereageerd').
-                    // Alleen als deze invocatie de winnaar is (claimed?.id) gaan we
-                    // provisioneren + "je bent binnen" sturen. Voorkomt dubbele
-                    // provisioning bij een gelijktijdige webhook op dezelfde rij.
-                    const { data: primClaim } = await supabaseAdmin
-                      .from('toegang_aanvragen')
-                      .update({ status: 'gereageerd', reacted_at: _tsIso })
-                      .eq('id', match.id)
-                      .eq('status', 'wachtend')
-                      .select('id')
-                      .maybeSingle();
-                    const primClaimed = !!(primClaim && primClaim.id);
-                    traceEvents.push({ ...traceBase, stage: 'gate-primair-claim',
-                      match_id: match.id, claimed: primClaimed,
-                    });
-                    // Provisioning + welkom-WA ALLEEN als we de rij zelf
-                    // hebben geclaimd én er nog niet eerder is geprovisioneerd.
-                    if (primClaimed && !match.provisioned_at) {
-                      const r = await belProvisioning({
-                        email: match.email, voornaam: match.voornaam, soort: match.soort,
-                      });
-                      traceEvents.push({ ...traceBase, stage: 'provisioning-call',
-                        ok: r?.ok === true, status: r?.status || null, error: r?.error || null,
-                        response_body: r?.body ? JSON.stringify(r.body).slice(0, 800) : null,
-                        email_sent_naar: match.email,
-                      });
-                      if (r.ok) {
-                        const { data: updated, error: guardErr } = await supabaseAdmin
-                          .from('toegang_aanvragen')
-                          .update({ provisioned_at: new Date().toISOString(), provisioned_error: null })
-                          .eq('id', match.id)
-                          .is('provisioned_at', null)
-                          .select('id')
-                          .maybeSingle();
-                        if (!guardErr && updated?.id) {
-                          try {
-                            const naam = match.voornaam || 'daar';
-                            const wabody =
-                              `Top ${naam}! ✅ Je inloggegevens zijn direct per mail naar je toegestuurd.\n\n` +
-                              `Nog een vraagje, ben je ook al bekend met traden of is dit volledig nieuw?`;
-                            // Hetzelfde nummer als waar de inbound binnenkwam →
-                            // recvPhoneNumberId. Dat is de meest betrouwbare bron
-                            // (Meta zelf zegt op welke lijn 't binnenkwam) en
-                            // voorkomt thread-mismatch — geen DB-lookup nodig.
-                            if (recvPhoneNumberId) {
-                              const sendRes = await sendText({ to: match.telefoon, body: wabody, phoneNumberId: recvPhoneNumberId });
-                              // v=2 (2026-08-29): log outbound naar
-                              // whatsapp_messages zodat "je bent binnen" in
-                              // Gesprekken staat naast inbound reply.
-                              await logOutboundWa(supabaseAdmin, {
-                                toPhone: match.telefoon,
-                                phoneNumberId: recvPhoneNumberId,
-                                body: wabody,
-                                wamid: sendRes?.wamid || null,
-                                source: 'toegang-gate-inbox-webhook',
-                              });
-                            } else {
-                              console.warn('[inbox-webhook] toegang-bevestig-wa: recvPhoneNumberId ontbreekt — skip');
-                            }
-                          } catch (waErr) {
-                            if (!(waErr instanceof MetaNotConfiguredError)) {
-                              console.warn('[inbox-webhook] toegang-bevestig-wa (soft):', waErr?.message || waErr);
-                            }
-                          }
-                        }
-                      } else {
-                        await supabaseAdmin.from('toegang_aanvragen')
-                          .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
-                          .eq('id', match.id);
-                        console.warn('[inbox-webhook] provisioning fail:', match.id, r.error);
-                      }
-                    }
-                  }
-                } catch (gateErr) {
-                  traceEvents.push({ ...traceBase, stage: 'gate-exception',
-                    error: (gateErr?.message || String(gateErr)).slice(0, 300),
-                  });
-                  console.warn('[inbox-webhook] toegang-gate exception (soft):', gateErr?.message || gateErr);
-                }
-                // Onconditionele trace-flush (fail-soft).
-                try {
-                  await supabaseAdmin
-                    .from('follow_up_events_log')
-                    .insert({
-                      source: 'ghl', event_type: 'toegang-gate-trace',
-                      payload: { events: traceEvents }, processed: true,
-                    });
-                } catch (flushErr) {
-                  console.warn('[inbox-webhook] toegang-gate trace-write (soft):', flushErr?.message || flushErr);
-                }
-              }
-
-              // 2a-media. Bij inbound MEDIA-berichten (image/document/audio/
-              // video/sticker) heeft insertInboundMessage 'meta-media-id:<id>'
-              // in media_url gezet. We downloaden nu de bytes van Meta en
-              // uploaden naar de whatsapp-media bucket, waarna we media_url
-              // vervangen door de publieke URL. Fire-and-forget zodat de
-              // webhook binnen het 200-OK budget van Meta blijft; fail-soft
-              // (bij mislukking blijft de 'meta-media-id:'-placeholder staan
-              // + log-lijn zodat handmatig re-run of debugging mogelijk is).
-              if (insRes.inserted && insRes.messageId && ['image','document','audio','video','sticker'].includes(insRes.type)) {
-                const mediaId = msg[insRes.type]?.id || null;
-                const filename = msg[insRes.type]?.filename || null;
-                if (mediaId) {
-                  const runMediaFetch = async () => {
-                    try {
-                      const mod = await import('./_lib/whatsapp-media-download.js');
-                      const dl = await mod.downloadAndStoreMetaMedia(mediaId, insRes.type, { messageId: insRes.messageId, filename });
-                      if (!dl?.ok) {
-                        console.warn('[inbox-webhook] media download soft-fail', insRes.messageId, mediaId, dl?.error);
-                        return;
-                      }
-                      const upd = await mod.updateInboundMediaUrl(insRes.messageId, dl.publicUrl, {
-                        originalFilename: filename,
-                        hasBody         : !!insRes.body,
-                      });
-                      if (!upd?.ok) console.warn('[inbox-webhook] media url update soft-fail', insRes.messageId, upd?.error);
-                    } catch (e) {
-                      console.warn('[inbox-webhook] media fetch exception', insRes.messageId, mediaId, e?.message || e);
-                    }
-                  };
-                  try {
-                    if (typeof waitUntil === 'function') waitUntil(runMediaFetch());
-                    else runMediaFetch().catch(() => {});
-                  } catch (_) { runMediaFetch().catch(() => {}); }
-                }
-              }
-
-              // 2a. Pipeline-hook: klant reageert → fase 'in_gesprek' (mits
-              // toggle aan). Volgorde-guard: alleen vanuit 'nieuw' of
-              // 'aangemaand' — een regeling/incasso mag niet automatisch
-              // terug naar in_gesprek. Alleen bij nieuw bericht (niet
-              // Meta-retry-dup) en alleen als de conv een customer_id heeft
-              // (alleen wanbetalers hebben een pipeline-record; anders skip).
-              // Fail-soft — webhook mag nooit falen.
-              if (insRes.inserted && conv.customerId) {
-                try {
-                  const { isAutoEnabled, setStage } = await import('./_lib/dunning-pipeline.js');
-                  if (await isAutoEnabled('on_inbound_to_in_gesprek')) {
-                    await setStage(conv.customerId, 'in_gesprek', 'inbound_reply', 'auto:inbound_reply', {
-                      onlyIfFrom: new Set(['nieuw', 'aangemaand']),
-                    });
-                  }
-                } catch (e) {
-                  console.warn('[inbox-webhook] pipeline hook soft-fail', conv.id, e?.message || e);
-                }
-              }
-
-              // 2b. Joost fase 2 — gespreks-pauze hook. Zodra een klant met
-              // een lopende dunning-run reageert, pauzeert de aanmaan-flow.
-              // Reminder-cron (cron-dunning-conversation-reminders) beslist
-              // wanneer de flow eventueel hervat. Bij elke nieuwe inbound
-              // wordt de reminder-teller gereset (nieuwe stilte begint).
-              // Alleen bij insRes.inserted (Meta-retry-dup mag niet nog een
-              // keer resetten) en customerId aanwezig. Fail-soft — webhook
-              // mag nooit falen.
-              if (insRes.inserted && conv.customerId) {
-                try {
-                  const { pauseRunsForConversation } = await import('./_lib/dunning-arrangement-hooks.js');
-                  await pauseRunsForConversation(conv.id, conv.customerId);
-                } catch (e) {
-                  console.warn('[inbox-webhook] conv-pauze hook soft-fail', conv.id, e?.message || e);
-                }
-              }
-
-              // 2b. Fail-soft dual-write: notify mentor van deelnemer bij een
-              // NIEUW inbound bericht. Skip bij Meta-retry (duplicate). Skip
-              // als er geen mentor gekoppeld is (via onboardings). Throttle
-              // via dedupWithinMs 10min per conversatie tegen spam-bursts.
-              // Fail-soft: mag de webhook NOOIT vertragen/breken.
-              if (insRes.inserted && conv.customerId) {
-                try {
-                  const { data: ob } = await supabaseAdmin
-                    .from('onboardings')
-                    .select('mentor_user_id')
-                    .eq('customer_id', conv.customerId)
-                    .not('mentor_user_id', 'is', null)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                  const mentorUserId = ob?.mentor_user_id || null;
-                  if (mentorUserId) {
-                    // `customers` heeft geen kolom `name`; die stond hier wel,
-                    // dus gaf deze opvraging altijd een fout en kreeg de mentor
-                    // een telefoonnummer in de titel in plaats van een naam.
-                    const { data: custRow } = await supabaseAdmin
-                      .from('customers')
-                      .select('id, is_company, first_name, last_name, company_name')
-                      .eq('id', conv.customerId)
-                      .maybeSingle();
-                    const klantnaam = customerDisplayName(custRow, '')
-                      || (contact?.profile?.name || phoneE164Plus);
-                    const preview80 = String(insRes.body || '').trim().slice(0, 80);
-                    createNotification({
-                      toUserId:       mentorUserId,
-                      type:           'inbox.new_message',
-                      title:          'Nieuw bericht · ' + klantnaam,
-                      body:           preview80 || null,
-                      linkUrl:        '/modules/mentor-onboarding.html#inbox-deeplink',
-                      entityType:     'conversation',
-                      entityId:       conv.id,
-                      dedupWithinMs:  10 * 60 * 1000,
-                    }).catch(() => {});
-                  }
-                } catch (_) { /* fail-soft */ }
-              }
-
-              // 3. Agent-flows: per-module reactive suggest + Joost intake
-              //
-              // Routing per moduleCtx.module (mutually exclusive):
-              //   - 'finance' → Joost-tak (Pad (i) intake óf Pad (ii) auto-suggest)
-              //   - 'events'  → Simone-tak (Fase 2 stap 2b — reactive only,
-              //                 geen intake-pad)
-              //   - null      → unrouted, geen agent (Fase 0 gate-hardening)
-              //
-              // Joost-paden (alleen bij module='finance'):
-              //   (i)  Intake (E2 autonomous intake) — runt als conv.customerId
-              //        IS NULL én feature_flags.e2_autonomous_intake = true.
-              //        Joost vraagt om e-mailadres, parsed het antwoord en
-              //        koppelt of escaleert. Vaste teksten, geen LLM.
-              //   (ii) Auto-suggest (E1.1) — runt als conv.customerId IS NOT NULL
-              //        (klant gekoppeld) én aan de overige filters voldoet.
-              //        LLM-aangedreven Joost-suggestie + optionele E2.1 chain.
-              //
-              // Simone-pad (alleen bij module='events'):
-              //   (iii) Auto-suggest — runt zonder customer_id-vereiste
-              //         (event-leads zijn prospects). Pre-filters identiek aan
-              //         Joost-(ii): body+TRIVIAL_REPLIES + anti-loop 60s.
-              //         Persist naar joost_suggestions met module='events'.
-              //
-              // Gedeelde gating-filters (over alle agents):
-              //   a) Nieuwe insert (geen Meta-retry)
-              //   b) text-type message
-              //   c) module van ontvangende lijn matched (geen silent-failover)
-              //   d) joost_config.is_enabled = true voor die module
-              //   e) joost_config.feature_flags.reactive_suggest_enabled = true
-              //   f) body >= 5 chars + niet in TRIVIAL_REPLIES set
-              //   g) anti-loop: geen outbound binnen 60s
-              //
-              // Aanroep: agents-suggest doet sinds Fase 2 stap 1 een IN-PROCESS
-              // call (runJoostSuggest / runSimoneSuggest), gewrapt in waitUntil()
-              // zodat de Vercel-lambda het werk afmaakt ná de 200-response. Geen
-              // HTTP-self-call meer, dus geen VERCEL_URL / INTERNAL_API_TOKEN
-              // afhankelijkheid voor dit pad. Intake-flow (Joost-only) gebruikt
-              // sendText direct + schrijft eigen outbound message-rij.
-              try {
-                if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
-                  // Module + joost_config: éénmalige lookup voor beide paden.
-                  const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
-                  // FASE 0 Joost-gate-hardening: GEEN silent-failover.
-                  // Een null/onbekende/non-finance/inactive module -> Joost
-                  // wordt NOOIT getriggerd. Conversation blijft persisted in
-                  // whatsapp_conversations (upsert hierboven), maar is
-                  // 'unrouted' voor inbox-views (inbox-conversations-list
-                  // filtert hardcoded op finance phone_number_id).
-                  if (!moduleCtx) {
-                    console.warn(
-                      '[inbox-webhook] inbound van ongekoppeld nummer phone_number_id=' +
-                      String(recvPhoneNumberId || '<missing>') +
-                      ' - conversation persisted als unrouted, Joost-trigger geskipt'
-                    );
-                  }
-                  const isFinanceLijn = !!(moduleCtx
-                    && moduleCtx.module === 'finance'
-                    && moduleCtx.is_active === true);
-                  if (isFinanceLijn) {
-                    const { data: jcfg, error: jcfgErr } = await supabaseAdmin
-                      .from('joost_config')
-                      .select('module, is_enabled, feature_flags')
-                      .eq('module', 'finance')
-                      .maybeSingle();
-                    if (jcfgErr) {
-                      console.warn('[inbox-webhook] joost_config lookup fail:', jcfgErr.message);
-                    } else if (jcfg && jcfg.is_enabled === true) {
-                      const flags = (jcfg.feature_flags && typeof jcfg.feature_flags === 'object')
-                        ? jcfg.feature_flags : {};
-                      const intakeEnabled = flags.e2_autonomous_intake === true;
-
-                      // Dunning-test-cockpit guard (BLOK 1 · PR-B).
-                      // De autonome intake-reply is de enige webhook-stille
-                      // outbound van de app. Voor is_test-convs mag die NOOIT
-                      // vuren: al het test-verkeer hoort door de cockpit-
-                      // grendel (test-cockpit-send.js). Detectie fail-CLOSED:
-                      // bij DB-error / onbekend → behandel als is_test → skip.
-                      // Alleen berekend als intakeEnabled — geen overhead bij
-                      // productie-crons met de flag UIT.
-                      let isTestConv = false;
-                      if (intakeEnabled) {
-                        try {
-                          isTestConv = await _detectIsTestConversation({
-                            convId:         conv.id,
-                            customerId:     conv.customerId,
-                            phoneE164Plus,
-                          });
-                        } catch (e) {
-                          console.warn('[inbox-webhook] is_test detectie faalde → fail-closed skip intake:', e?.message || e);
-                          isTestConv = true;
-                        }
-                        if (isTestConv) {
-                          // Markeer whatsapp_conversations.is_test (afgeleide
-                          // vlag, fail-soft — detectie was al waarheid).
-                          try {
-                            await supabaseAdmin.from('whatsapp_conversations')
-                              .update({ is_test: true })
-                              .eq('id', conv.id)
-                              .eq('is_test', false);
-                          } catch (e) {
-                            console.warn('[inbox-webhook] wa_conv.is_test update (soft):', e?.message || e);
-                          }
-                          console.warn('[inbox-webhook] Joost intake-reply SKIP: is_test conversation (fail-closed)');
-                        }
-                      }
-
-                      // Pad (i) Intake-flow: alleen als customer_id ontbreekt
-                      // én feature-flag aanstaat. Voor is_test-convs SKIP
-                      // (grendel; alleen de cockpit mag test-outbound sturen).
-                      // Outbound phone_number_id = conv.phone_number_id (al
-                      // opgeslagen bij upsert) of module-context fallback.
-                      // Bij undefined valt sendText terug op env-var
-                      // (META_WHATSAPP_PHONE_NUMBER_ID).
-                      let intakeHandled = false;
-                      if (!conv.customerId && intakeEnabled && !isTestConv) {
-                        const outboundPnId = recvPhoneNumberId || moduleCtx?.phone_number_id || undefined;
-                        // Bouw lokaal conv-object met fields die intake-flow nodig
-                        // heeft (id + phone_number) — webhook-upsert returnt geen
-                        // phone_number maar we kennen 'm uit phoneE164Plus.
-                        intakeHandled = await handleJoostIntakeFlow(req, {
-                          conv:           { id: conv.id, phone_number: phoneE164Plus },
-                          messageBody:    insRes.body || '',
-                          phoneNumberId:  outboundPnId,
-                        });
-                      }
-
-                      // Pad (ii) Auto-suggest: alleen als intake-flow NIET
-                      // heeft afgehandeld én klant gekoppeld is.
-                      if (!intakeHandled && conv.customerId) {
-                        // Per-module reactive-suggest gate (Fase 2 stap 1).
-                        // joost_config.feature_flags.reactive_suggest_enabled
-                        // bepaalt per module of de reactieve in-process suggest
-                        // vuurt na een inbound. Default UIT op finance zodat
-                        // observable gedrag identiek blijft aan de gebroken
-                        // HTTP-self-call-toestand (= geen suggesties). Admin
-                        // flipt 'm aan op de finance-rij (of straks events-rij
-                        // voor Simone) om reactieve drafts te activeren.
-                        const reactiveEnabled = flags.reactive_suggest_enabled === true;
-                        if (reactiveEnabled) {
-                          const trimmed = String(insRes.body || '').trim();
-                          const lower = trimmed.toLowerCase();
-                          const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
-                          if (isTriggerable) {
-                            const noLoop = await hasNoRecentOutbound(conv.id, 60);
-                            if (noLoop) {
-                              // E2.1 reactive-autonomy gate: alleen chain naar
-                              // /api/joost-send-autonomous als feature-flag
-                              // e2_reactive_autonomy aanstaat. joost-send-autonomous
-                              // doet zelf nogmaals de check (defense-in-depth).
-                              const autonomyEnabled = flags.e2_reactive_autonomy === true;
-                              triggerJoostAutoSuggest({
-                                conversationId:        conv.id,
-                                triggeredByMessageId:  insRes.messageId,
-                                autonomyEnabled,
-                                clientIp:              getClientIp(req),
-                                module:                jcfg.module || moduleCtx?.module || null,
-                              });
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-
-                  // ── Onboarding-tak (Fase A) ────────────────────────────────
-                  // Mutually exclusive met finance- en events-tak. Persist
-                  // naar joost_suggestions met module='onboarding'. Gates:
-                  //   - whatsapp_module_config.module='onboarding' + is_active
-                  //   - joost_config WHERE module='onboarding' + is_enabled
-                  //   - feature_flags.reactive_suggest_enabled = true (per-mod)
-                  //   - body >= 5 chars + niet in TRIVIAL_REPLIES
-                  //   - anti-loop: geen outbound binnen 60s
-                  // Geen customer_id-vereiste: matching gebeurt code-side
-                  // (customers.phone) in runOnboardingSuggest met no-match
-                  // fallback naar general-purpose onboarding-assistent.
-                  const isOnboardingLijn = !!(moduleCtx
-                    && moduleCtx.module === 'onboarding'
-                    && moduleCtx.is_active === true);
-                  if (isOnboardingLijn) {
-                    const { data: ocfg, error: ocfgErr } = await supabaseAdmin
-                      .from('joost_config')
-                      .select('module, is_enabled, feature_flags')
-                      .eq('module', 'onboarding')
-                      .maybeSingle();
-                    if (ocfgErr) {
-                      console.warn('[inbox-webhook] joost_config (onboarding) lookup fail:', ocfgErr.message);
-                    } else if (ocfg && ocfg.is_enabled === true) {
-                      const oFlags = (ocfg.feature_flags && typeof ocfg.feature_flags === 'object')
-                        ? ocfg.feature_flags : {};
-                      const oReactiveEnabled = oFlags.reactive_suggest_enabled === true;
-                      if (!oReactiveEnabled) {
-                        // Gate-redenering-log: maakt zichtbaar dat de onboarding-tak
-                        // het inbound zag maar bewust geskipt is (default-OFF na seed).
-                        console.log(
-                          '[inbox-webhook] reactive suggest skipped (onboarding): ' +
-                          'reactive_suggest_enabled=false conv=' + conv.id
-                        );
-                      } else {
-                        const trimmed = String(insRes.body || '').trim();
-                        const lower = trimmed.toLowerCase();
-                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
-                        if (isTriggerable) {
-                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
-                          if (noLoop) {
-                            triggerOnboardingAutoSuggest({
-                              conversationId:       conv.id,
-                              triggeredByMessageId: insRes.messageId,
-                              clientIp:             getClientIp(req),
-                              module:               ocfg.module || moduleCtx?.module || null,
-                            });
-                          }
-                        }
-                      }
-                    }
-                  }
-
-                  // ── Simone-tak (events) — Fase 2 stap 2b ───────────────────
-                  // Mutually exclusive met finance-tak: moduleCtx.module is
-                  // 'finance' XOR 'events' XOR null, dus events-inbound raakt
-                  // de Joost-flows nooit en finance-inbound nooit Simone.
-                  // Geen customer_id-vereiste: event-leads zijn prospects;
-                  // runSimoneSuggest matcht zelf phone -> event_attendees en
-                  // valt elegant terug op general-purpose bij no-match.
-                  const isEventsLijn = !!(moduleCtx
-                    && moduleCtx.module === 'events'
-                    && moduleCtx.is_active === true);
-                  if (isEventsLijn) {
-                    const { data: scfg, error: scfgErr } = await supabaseAdmin
-                      .from('joost_config')
-                      .select('module, is_enabled, feature_flags')
-                      .eq('module', 'events')
-                      .maybeSingle();
-                    if (scfgErr) {
-                      console.warn('[inbox-webhook] joost_config (events) lookup fail:', scfgErr.message);
-                    } else if (scfg && scfg.is_enabled === true) {
-                      const sFlags = (scfg.feature_flags && typeof scfg.feature_flags === 'object')
-                        ? scfg.feature_flags : {};
-                      const sReactiveEnabled = sFlags.reactive_suggest_enabled === true;
-                      if (!sReactiveEnabled) {
-                        // Gate-redenering-log: maakt zichtbaar dat de events-tak
-                        // het inbound zag maar bewust geskipt is (default-OFF na
-                        // seed). Finance-tak heeft deze log niet — daar was de
-                        // historische default ook OFF maar het gate-fenomeen
-                        // werd al geverifieerd via stap 1 smoke.
-                        console.log(
-                          '[inbox-webhook] reactive suggest skipped (events): ' +
-                          'reactive_suggest_enabled=false conv=' + conv.id
-                        );
-                      } else {
-                        const trimmed = String(insRes.body || '').trim();
-                        const lower = trimmed.toLowerCase();
-                        const isTriggerable = trimmed.length >= 5 && !TRIVIAL_REPLIES.has(lower);
-                        if (isTriggerable) {
-                          const noLoop = await hasNoRecentOutbound(conv.id, 60);
-                          if (noLoop) {
-                            // Autonomy alleen ketenen wanneer
-                            // feature_flags.events_reactive_autonomy aan staat.
-                            // Default UIT → triggerSimoneAutoSuggest doet alleen
-                            // de suggest-stap; geen self-call naar
-                            // /api/simone-send-autonomous.
-                            const sAutonomyEnabled = sFlags.events_reactive_autonomy === true;
-                            triggerSimoneAutoSuggest({
-                              conversationId:       conv.id,
-                              triggeredByMessageId: insRes.messageId,
-                              autonomyEnabled:      sAutonomyEnabled,
-                              clientIp:             getClientIp(req),
-                              module:               scfg.module || moduleCtx?.module || null,
-                            });
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              } catch (eAuto) {
-                // Auto-trigger / intake mag NOOIT de webhook breken — log + door
-                console.warn('[inbox-webhook] joost auto-trigger pre-check fail:', eAuto && eAuto.message);
-              }
-            } catch (e) {
-              stats.errors++;
-              console.error('[inbox-webhook] msg processing fail wamid=' + (msg.id || '?') + ':', e.message);
-            }
-          }
-
-          // ── Status updates ──────────────────────────────────────────────
-          for (const st of statuses) {
-            try {
-              const ok = await applyStatusUpdate(st);
-              if (ok) stats.statuses_updated++;
-              // Additief (opvolging, PR 6): een niet-afgeleverd bericht van
-              // 'Agenda doorsturen' wordt zichtbaar op de kaart, en een kaart
-              // die op inplanning wachtte gaat terug open. Fail-soft.
-              if (st && st.status === 'failed') {
-                const reden = Array.isArray(st.errors) && st.errors.length
-                  ? st.errors.map((e) => `[${e.code}] ${e.title || e.message || ''}`).join('; ')
-                  : 'onbekende reden';
-                const vandaagNl = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-                await opvolgingMetaFailed(supabaseAdmin, { wamid: st.id, reden, vandaag: vandaagNl });
-              }
-            } catch (e) {
-              stats.errors++;
-              console.error('[inbox-webhook] status processing fail wamid=' + (st.id || '?') + ':', e.message);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      stats.errors++;
-      console.error('[inbox-webhook] top-level processing fail:', e.message);
-    }
+    // De verwerking zelf staat in verwerkWhatsAppWebhookBody (gedeeld met de
+    // 360dialog-webhook, api/whatsapp-360-webhook.js).
+    const stats = await verwerkWhatsAppWebhookBody(req, body, { bron: 'meta' });
 
     console.log('[inbox-webhook] POST processed', JSON.stringify(stats));
     // ALTIJD 200 — Meta retried bij non-2xx en dat is hier ongewenst.

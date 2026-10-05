@@ -40,6 +40,14 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   logt warning + skipt auto-trigger (geen runtime-crash). Setup: random
   32+ byte hex/base64 in alle Vercel-environments. Backup in 1Password.
 - Strato IMAP credentials per mailbox in env vars
+- WhatsApp via 360dialog (sinds 2026-10-05, oude Meta-WABA geblokkeerd): per nummer
+  uit `api/_lib/wa-nummers.js` drie env vars — `D360_API_KEY_<NUMMER>` (sensitive),
+  `D360_PHONE_NUMBER_ID_<NUMMER>` (Meta's phone_number_id, optioneel: anders opgevraagd
+  via /health_status) en `D360_WEBHOOK_TOKEN_<NUMMER>` (sensitive, gedeeld geheim voor
+  `/api/whatsapp-360-webhook?nummer=<sleutel>`). Nu: `HOOFDNUMMER` (+31 6 57210825,
+  lead-modules). Transport kiest per bericht 360dialog/Meta in `metaPostMessage`.
+  Onboarding NOOIT via het hoofdnummer (`module:'onboarding'` → WaGeenNummerError);
+  e-mail-fallback achter `ONBOARDING_MAIL_FALLBACK=true` (default uit).
 - DFO_LMS_AGENDA_SECRET in env vars (sensitive — server-side only): gedeeld geheim (header `x-dfo-secret`) voor de agendabrug `/api/lms-agenda-events` met het LMS; ontbreekt → route dicht (503). Zie docs/lms-agenda-brug.md.
 
 ## Productie-users

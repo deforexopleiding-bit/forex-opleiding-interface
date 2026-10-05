@@ -19,6 +19,7 @@
 // false zijn.
 
 import { supabase, supabaseAdmin } from '../supabase.js';
+import { getModuleContextByPhoneNumberId } from './module-context.js';
 
 /**
  * @returns {Promise<{ userId: string|null, seesAll: boolean, seesOwn: boolean }>}
@@ -161,16 +162,8 @@ export async function mentorOwnsCustomer(userId, customerId) {
 export async function resolveConversationModule(phoneNumberId) {
   if (!phoneNumberId || typeof phoneNumberId !== 'string') return null;
   try {
-    const { data, error } = await supabaseAdmin
-      .from('whatsapp_module_config')
-      .select('module')
-      .eq('phone_number_id', phoneNumberId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (error) {
-      console.error('[onboardingScope.resolveConversationModule]', error.message);
-      return null;
-    }
+    // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
+    const data = await getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumberId);
     return (data && typeof data.module === 'string') ? data.module : null;
   } catch (err) {
     console.error('[onboardingScope.resolveConversationModule] exception:', err?.message || err);

@@ -21,6 +21,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
+import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -78,12 +79,10 @@ export default async function handler(req, res) {
     let businessAccountId = null;
 
     if (conv.phone_number_id) {
-      const { data: lineCfg, error: lineErr } = await supabaseAdmin
-        .from('whatsapp_module_config')
-        .select('business_account_id')
-        .eq('phone_number_id', conv.phone_number_id)
-        .eq('is_active', true)
-        .maybeSingle();
+      // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
+      let lineCfg = null, lineErr = null;
+      try { lineCfg = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id); }
+      catch (e) { lineErr = e; }
       if (lineErr) {
         console.error('[inbox-quick-replies-list] line module-config lookup:', lineErr.message);
       } else if (lineCfg?.business_account_id) {

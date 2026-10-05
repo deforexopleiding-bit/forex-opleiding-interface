@@ -551,6 +551,7 @@ export default async function handler(req, res) {
             to:             conv.phone_number,
             body:           text,
             phoneNumberId:  outboundPnId,
+            module:         moduleKey,   // klant-module: nooit via het leadnummer (wa-nummers.js)
           });
         }
       } else {
@@ -558,6 +559,7 @@ export default async function handler(req, res) {
           to:             conv.phone_number,
           body:           text,
           phoneNumberId:  outboundPnId,
+          module:         moduleKey,   // klant-module: nooit via het leadnummer (wa-nummers.js)
         });
       }
     } catch (metaErr) {

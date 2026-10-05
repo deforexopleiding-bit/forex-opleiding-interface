@@ -34,7 +34,10 @@ export function binnenVenster(last_inbound_at) {
 export async function haalLijn() {
   const { data: s } = await supabaseAdmin
     .from('app_settings').select('value').eq('key', 'leadsonderhoud_wa_module').maybeSingle();
-  const module = instelWaarde(s) || 'onboarding';
+  // Default 'leadsonderhoud' (was 'onboarding'): leads horen niet op de
+  // klant-/onboardinglijn. Sinds 2026-10-05 draait leadsonderhoud op het
+  // 360dialog-hoofdnummer (api/_lib/wa-nummers.js).
+  const module = instelWaarde(s) || 'leadsonderhoud';
   const { data: cfg } = await supabaseAdmin
     .from('whatsapp_module_config')
     .select('phone_number_id, display_label')
