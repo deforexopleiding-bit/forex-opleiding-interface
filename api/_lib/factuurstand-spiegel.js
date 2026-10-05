@@ -149,6 +149,97 @@ export function teltMeeAlsOpen(inv) {
 }
 
 /**
+ * Welke statussen een factuur hebben die VERSTUURD is.
+ *
+ * De openstaande statussen plus `paid`. Wat er NIET bij staat, en waarom:
+ *   - `concept` — een concept is nog niet bij de klant geweest. Gemeten op
+ *     productie (16-09-2026): 77 rijen. Telden die mee, dan stond er bij een
+ *     klant met alleen een klaargezette factuur "factuur open" in plaats van
+ *     "nog geen factuur verstuurd" — exact de fout die bij Manjit gemeten is.
+ *   - `credited` / `writeoff` — die vragen niets meer van de klant.
+ *
+ * `overdue` wordt in de tabel nooit opgeslagen (hij wordt bij het lezen
+ * afgeleid), maar staat wel in de gedeelde lijst; meetellen kost niets.
+ */
+export const VERSTUURD_STATUSES = Object.freeze([...OPEN_INVOICE_STATUSES, 'paid']);
+
+/**
+ * Telt deze factuur als VERSTUURD?
+ *
+ * Een volledig gecrediteerde factuur telt niet, ook niet als hij na de
+ * Teamleader-sync nog op `paid` staat (zie api/_lib/factuur-betaald.js en de
+ * datafix van 29-09-2026: 282 rijen). Die factuur bestaat voor de klant niet
+ * meer; "betaald" zou er een bewering van maken die niemand gedaan heeft.
+ *
+ * PURE.
+ */
+export function teltMeeAlsVerstuurd(inv) {
+  if (!inv) return false;
+  if (inv.is_test === true) return false;
+  if (!VERSTUURD_STATUSES.includes(String(inv.status || '').trim().toLowerCase())) return false;
+  const totaal = Number(inv.amount_total) || 0;
+  const gecrediteerd = Number(inv.credited_amount) || 0;
+  if (totaal > 0 && gecrediteerd >= totaal) return false;
+  return true;
+}
+
+// ── DE VIER TOESTANDEN ─────────────────────────────────────────────────────
+// Eén woord per klant, en dezelfde vier woorden in het CRM (kolom Betaling),
+// in de LMS-spiegel en op elke kaart in het LMS. "Niet betaald" bestaat hier
+// niet als toestand: dat was de fout. Niet betaald kan betekenen dat er nog
+// niets verstuurd is, dat er iets open staat dat nog niet vervallen is, of
+// dat er een achterstand is — en die drie vragen elk iets anders.
+export const TOESTAND_GEEN_FACTUUR        = 'geen_factuur';
+export const TOESTAND_OPEN_NIET_VERVALLEN = 'open_niet_vervallen';
+export const TOESTAND_VERVALLEN           = 'vervallen';
+export const TOESTAND_IN_ORDE             = 'in_orde';
+export const TOESTANDEN = Object.freeze([
+  TOESTAND_GEEN_FACTUUR, TOESTAND_OPEN_NIET_VERVALLEN, TOESTAND_VERVALLEN, TOESTAND_IN_ORDE,
+]);
+
+/**
+ * De toestand uit de drie aantallen. De volgorde is de beslissing:
+ * een achterstand gaat voor alles, dan iets dat openstaat, dan "er is
+ * nooit iets verstuurd", en pas dan "in orde" (verstuurd en niets open).
+ *
+ * PURE.
+ */
+export function factuurToestand({ verstuurd_aantal = 0, open_aantal = 0, vervallen_aantal = 0 } = {}) {
+  if ((Number(vervallen_aantal) || 0) > 0) return TOESTAND_VERVALLEN;
+  if ((Number(open_aantal) || 0) > 0) return TOESTAND_OPEN_NIET_VERVALLEN;
+  if ((Number(verstuurd_aantal) || 0) === 0) return TOESTAND_GEEN_FACTUUR;
+  return TOESTAND_IN_ORDE;
+}
+
+/**
+ * De woorden en de ernst die bij een toestand horen, voor de CRM-schermen.
+ * De LMS-kant heeft dezelfde woorden in src/lib/hlms/factuur-toestand.ts;
+ * de ernst is één kleur per toestand (grijs / neutraal / oranje-rood / groen).
+ *
+ * PURE.
+ */
+export function factuurToestandWeergave(stand) {
+  if (!stand || !stand.toestand) {
+    return { label: 'Factuurstand onbekend', ernst: 'onbekend' };
+  }
+  const n = Number(stand.vervallen_aantal) || 0;
+  switch (stand.toestand) {
+    case TOESTAND_GEEN_FACTUUR:
+      return { label: 'Nog geen factuur verstuurd', ernst: 'grijs' };
+    case TOESTAND_OPEN_NIET_VERVALLEN:
+      return { label: 'Factuur open, nog niet vervallen', ernst: 'neutraal' };
+    case TOESTAND_VERVALLEN:
+      return n >= 2
+        ? { label: n + ' facturen vervallen', ernst: 'rood' }
+        : { label: '1 factuur vervallen', ernst: 'oranje' };
+    case TOESTAND_IN_ORDE:
+      return { label: 'Betaald', ernst: 'groen' };
+    default:
+      return { label: 'Factuurstand onbekend', ernst: 'onbekend' };
+  }
+}
+
+/**
  * De vier getallen voor één klant.
  *
  * @param {Array<object>} facturen  rijen uit `invoices`
@@ -168,8 +259,10 @@ export function telFactuurstand(facturen, { todayIso, graceDays = DEFAULT_GRACE_
   let vervallen = 0;
   let bedrag = 0;
   let oudste = null;
+  let verstuurd = 0;
 
   for (const inv of (Array.isArray(facturen) ? facturen : [])) {
+    if (teltMeeAlsVerstuurd(inv)) verstuurd += 1;
     if (!teltMeeAlsOpen(inv)) continue;
     open += 1;
     bedrag += restbedrag(inv);
@@ -186,6 +279,12 @@ export function telFactuurstand(facturen, { todayIso, graceDays = DEFAULT_GRACE_
     vervallen_aantal   : vervallen,
     oudste_vervaldatum : oudste,
     openstaand_bedrag  : r2(bedrag),
+    // Een open factuur is per definitie verstuurd. Het maximum vangt een
+    // invoer op die alleen open rijen bevat (een oude aanroeper).
+    verstuurd_aantal   : Math.max(verstuurd, open),
+    toestand           : factuurToestand({
+      verstuurd_aantal: Math.max(verstuurd, open), open_aantal: open, vervallen_aantal: vervallen,
+    }),
   };
 }
 
@@ -237,7 +336,15 @@ export function redenNietActief(student, todayIso) {
   if (String(student.product_soort || '').trim().toLowerCase() !== PRODUCT_MENTORSHIP) {
     return NIET_MENTORSHIP;
   }
-  if (!String(student.auth_id || '').trim()) return ZONDER_ACCOUNT;
+  // EIS 2 (AUTH_ID GEVULD) IS VERVALLEN — 5 oktober 2026.
+  //
+  // Een student die net uit een onboarding komt, staat al in de lijst van zijn
+  // mentor (onder "Klaar voor onboarding") voordat zijn account af is. Zonder
+  // rij las het LMS daar "factuurstand onbekend" — bij precies de studenten
+  // waar de eerste factuur de vraag IS. Een rij te veel kost niets: de motor
+  // in het LMS kiest zelf welke studenten hij beoordeelt, en de afdruk voor
+  // het hold-vangnet wordt er alleen breder van, nooit smaller.
+  // `ZONDER_ACCOUNT` blijft geëxporteerd zodat oude droogloopsleutels bestaan.
   const eind = student.eind_datum ? String(student.eind_datum).slice(0, 10) : null;
   if (eind && eind < String(todayIso).slice(0, 10)) return TRAJECT_AFGELOPEN;
   return null;
@@ -410,6 +517,8 @@ export function bepaalOnbereikbaarPatch(bestaand, fout, nuIso) {
     open_aantal       : 0,
     oudste_vervaldatum: null,
     openstaand_bedrag : null,
+    verstuurd_aantal  : null,
+    toestand          : null,
     bron_status       : BRON_ONBEREIKBAAR,
     bron_fout         : fout || 'onbekend',
     bijgewerkt_op     : nuIso,
@@ -464,8 +573,11 @@ export async function leesOpenFacturen(db, customerIds = null) {
   // PostgREST stil trekt is hier even echt; alleen de kosten van de oplossing
   // verschillen.
   for (let van = 0; van < 100000; van += PAGINA) {
+    // De VERSTUURDE statussen en niet alleen de openstaande: zonder de betaalde
+    // facturen valt "nog geen factuur verstuurd" niet te onderscheiden van
+    // "alles betaald". Openstaand blijft per factuur `teltMeeAlsOpen()`.
     let q = db.from('invoices').select(FACTUUR_KOLOMMEN)
-      .in('status', OPEN_INVOICE_STATUSES)
+      .in('status', VERSTUURD_STATUSES)
       .eq('is_test', false);
     if (ids) q = q.in('customer_id', ids);
     const { data, error } = await q.range(van, van + PAGINA - 1);
@@ -529,6 +641,9 @@ export async function spiegelFactuurstandVoorStudent(student, ctx, opties = {}) 
       // Bewust null en niet 0.00: bij 'niet_gekoppeld' is er geen bedrag
       // bekend, en 0,00 euro leest als "niets openstaand".
       openstaand_bedrag : null,
+      // Niet gekoppeld = we weten het niet. Geen toestand, nooit "geen factuur".
+      verstuurd_aantal  : null,
+      toestand          : null,
       bron_status       : BRON_NIET_GEKOPPELD,
       bron_fout         : keuze.reden || REDEN_GEEN_KANDIDAAT,
       bijgewerkt_op     : nuIso,
@@ -555,6 +670,8 @@ export async function spiegelFactuurstandVoorStudent(student, ctx, opties = {}) 
     open_aantal       : stand.open_aantal,
     oudste_vervaldatum: stand.oudste_vervaldatum,
     openstaand_bedrag : stand.openstaand_bedrag,
+    verstuurd_aantal  : stand.verstuurd_aantal,
+    toestand          : stand.toestand,
     bron_status       : BRON_GELEZEN,
     bron_fout         : null,
     bijgewerkt_op     : nuIso,
@@ -565,12 +682,53 @@ export async function spiegelFactuurstandVoorStudent(student, ctx, opties = {}) 
   });
 }
 
+// ── DE TWEE NIEUWE KOLOMMEN, EN DE MIGRATIE DIE NOG KAN ONTBREKEN ──────────
+// `verstuurd_aantal` en `toestand` komen met supabase/hlms_crm_factuurstand_
+// toestand.sql aan LMS-kant. Zolang die niet gedraaid is, weigert PostgREST
+// elke upsert die ze noemt — voor de HELE rij. Dan schrijven we de rij zonder
+// die twee kolommen, en onthouden we dat even, zodat een nachtelijke ronde
+// niet 300 keer dezelfde fout maakt. De oude kolommen kloppen dan nog steeds.
+export const NIEUWE_KOLOMMEN = Object.freeze(['verstuurd_aantal', 'toestand']);
+const NIEUWE_KOLOMMEN_GEHEUGEN_MS = 10 * 60 * 1000;
+let _nieuweKolommenOntbrekenTot = 0;
+
+/** Wijst deze fout op een kolom die (nog) niet bestaat? PURE. */
+export function isKolomOntbreekt(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  if (code === 'PGRST204' || code === '42703') return true;
+  const m = String(error.message || '').toLowerCase();
+  return (m.includes('column') && (m.includes('does not exist') || m.includes('could not find')));
+}
+
+/** De rij zonder de nieuwe kolommen. PURE. */
+export function zonderNieuweKolommen(rij) {
+  const uit = { ...rij };
+  for (const k of NIEUWE_KOLOMMEN) delete uit[k];
+  return uit;
+}
+
+/** Upsert met terugval voor een LMS-tabel zonder de nieuwe kolommen. */
+async function upsertMetTerugval(ctx, rij) {
+  if (_nieuweKolommenOntbrekenTot > Date.now()) {
+    return ctx.lms.from(SPIEGEL_TABEL).upsert(zonderNieuweKolommen(rij), { onConflict: 'student_id' });
+  }
+  const eerste = await ctx.lms.from(SPIEGEL_TABEL).upsert(rij, { onConflict: 'student_id' });
+  if (eerste.error && isKolomOntbreekt(eerste.error)) {
+    _nieuweKolommenOntbrekenTot = Date.now() + NIEUWE_KOLOMMEN_GEHEUGEN_MS;
+    console.warn('[factuurstand-spiegel] verstuurd_aantal/toestand bestaan nog niet in het LMS '
+      + '(migratie hlms_crm_factuurstand_toestand.sql) — rij zonder die twee geschreven');
+    return ctx.lms.from(SPIEGEL_TABEL).upsert(zonderNieuweKolommen(rij), { onConflict: 'student_id' });
+  }
+  return eerste;
+}
+
 /** De enige plek waar er inhoud naar de spiegeltabel gaat. */
 async function schrijfRij(ctx, rij, opties, extra) {
   if (opties.dry) {
     return { resultaat: SPIEGEL_GESCHREVEN, fout: null, rij, dry: true, ...extra };
   }
-  const { error } = await ctx.lms.from(SPIEGEL_TABEL).upsert(rij, { onConflict: 'student_id' });
+  const { error } = await upsertMetTerugval(ctx, rij);
   if (error) {
     if (isTabelOntbreekt(error)) {
       return { resultaat: SPIEGEL_TABEL_ONTBREEKT, fout: error.message, rij, ...extra };
@@ -616,8 +774,7 @@ async function schrijfOnbereikbaar(ctx, studentId, fout, nuIso, opties) {
 
   const { error } = bestaand
     ? await ctx.lms.from(SPIEGEL_TABEL).update(patch).eq('student_id', studentId)
-    : await ctx.lms.from(SPIEGEL_TABEL).upsert({ student_id: studentId, ...patch },
-        { onConflict: 'student_id' });
+    : await upsertMetTerugval(ctx, { student_id: studentId, ...patch });
   if (error) {
     if (isTabelOntbreekt(error)) {
       return { resultaat: SPIEGEL_TABEL_ONTBREEKT, bron_status: BRON_ONBEREIKBAAR,
@@ -769,6 +926,50 @@ export async function spiegelFactuurstandNaWijziging(customerId, label) {
     console.warn('[' + label + '] factuurstand-spiegel overgeslagen: ' + (e?.message || e));
     return { ok: false, reden: e?.message || String(e) };
   }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// 6) DE FACTUURSTAND PER KLANT — voor de CRM-schermen zelf
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * De factuurstand van een rij klanten, met PRECIES dezelfde telling als de
+ * spiegel naar het LMS. De kolom Betaling in het onboardingoverzicht leest
+ * dit, en niet meer een eigen `status = 'paid'`-vraag: die kende maar twee
+ * antwoorden, en "niet betaald" werd overal als "open" getoond — ook bij een
+ * klant aan wie nog nooit een factuur verstuurd was.
+ *
+ * Gooit bij een leesfout. De aanroeper beslist: een lijst die zonder
+ * factuurstand verder kan, toont dan "factuurstand onbekend" en nooit "open".
+ *
+ * @param {string[]} customerIds
+ * @param {{db?: object, todayIso?: string, graceDays?: number}} [opties]
+ * @returns {Promise<Map<string, object>>} customer_id → stand + weergave
+ */
+export async function factuurstandPerKlant(customerIds, opties = {}) {
+  const db = opties.db || supabaseAdmin;
+  const ids = Array.from(new Set((customerIds || []).filter(Boolean).map(String)));
+  const uit = new Map();
+  if (ids.length === 0) return uit;
+  const todayIso = opties.todayIso || todayIsoInTz(new Date());
+  const graceDays = Number.isFinite(Number(opties.graceDays))
+    ? Number(opties.graceDays) : await readGraceDaysSetting(db);
+
+  const perKlant = new Map();
+  const BLOK = 200;
+  for (let i = 0; i < ids.length; i += BLOK) {
+    const facturen = await leesOpenFacturen(db, ids.slice(i, i + BLOK));
+    for (const f of facturen) {
+      const k = String(f.customer_id);
+      if (!perKlant.has(k)) perKlant.set(k, []);
+      perKlant.get(k).push(f);
+    }
+  }
+  for (const id of ids) {
+    const stand = telFactuurstand(perKlant.get(id) || [], { todayIso, graceDays });
+    uit.set(id, { ...stand, ...factuurToestandWeergave(stand) });
+  }
+  return uit;
 }
 
 // Exporteren voor de ronde in api/_lib/factuurstand-sync.js.

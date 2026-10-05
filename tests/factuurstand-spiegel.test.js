@@ -349,12 +349,12 @@ test('alleen mentorship-studenten krijgen een rij', () => {
     'hoofdletters mogen het antwoord niet veranderen');
 });
 
-test('een student zonder auth-account krijgt GEEN rij', () => {
-  // Het LMS leest alleen studenten met een account. Een rij voor iemand
-  // zonder account wordt daar nooit gelezen — die hoort er niet te staan.
-  assert.equal(isActieveMentorshipStudent(student({ auth_id: null }), VANDAAG), false);
-  assert.equal(isActieveMentorshipStudent(student({ auth_id: '' }), VANDAAG), false);
-  assert.equal(isActieveMentorshipStudent(student({ auth_id: '   ' }), VANDAAG), false);
+test('een student zonder auth-account krijgt WEL een rij (sinds 5 oktober 2026)', () => {
+  // Een student die net uit een onboarding komt, staat al bij zijn mentor in
+  // "Klaar voor onboarding" voor zijn account af is. Zonder rij las het LMS
+  // daar "factuurstand onbekend" — precies waar de eerste factuur de vraag is.
+  assert.equal(isActieveMentorshipStudent(student({ auth_id: null }), VANDAAG), true);
+  assert.equal(isActieveMentorshipStudent(student({ auth_id: '' }), VANDAAG), true);
 });
 
 test('een afgelopen traject valt af, een lopend of open einde blijft', () => {
@@ -370,7 +370,9 @@ test('de reden van afvallen is per eis te onderscheiden', () => {
   // "zoveel studenten in de lijst" onnarekenbaar.
   assert.equal(redenNietActief(student(), VANDAAG), null);
   assert.equal(redenNietActief(student({ product_soort: 'membership' }), VANDAAG), NIET_MENTORSHIP);
-  assert.equal(redenNietActief(student({ auth_id: null }), VANDAAG), ZONDER_ACCOUNT);
+  assert.equal(redenNietActief(student({ auth_id: null }), VANDAAG), null,
+    'zonder account valt sinds 5-10-2026 niet meer af');
+  assert.ok(ZONDER_ACCOUNT, 'de sleutel blijft bestaan voor oude droogloopuitkomsten');
   assert.equal(redenNietActief(student({ eind_datum: '2026-09-15' }), VANDAAG), TRAJECT_AFGELOPEN);
   assert.equal(redenNietActief(null, VANDAAG), NIET_MENTORSHIP);
 });

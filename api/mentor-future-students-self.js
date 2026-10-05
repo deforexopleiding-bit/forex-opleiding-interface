@@ -30,6 +30,7 @@ import {
   findAvailabilityBlock,
   buildAvailabilityView,
 } from './_lib/onboarding-wizard-default.js';
+import { factuurstandPerKlant } from './_lib/factuurstand-spiegel.js';
 
 // Bouwt een leesbare vraag→antwoord-lijst uit de gepubliceerde wizard-
 // structuur. Per blok pakken we (label, value) waarbij value uit answers
@@ -158,6 +159,15 @@ export default async function handler(req, res) {
       }
     }
 
+    // De ENE factuurstand (zie api/_lib/factuurstand-spiegel.js). Faalzacht:
+    // mislukt hij, dan staat er "onbekend" en niet "open".
+    let factuurByCust = null;
+    try {
+      factuurByCust = await factuurstandPerKlant(customerIds);
+    } catch (e) {
+      console.error('[mentor-future-students-self] factuurstand:', e?.message || e);
+    }
+
     // Availability-blok + waiver-key 1× per request resolven uit de
     // GEPUBLICEERDE wizard-structuur. We berekenen daarmee ook bedenktijd
     // per row (zelfde semantiek als api/admin-future-students-list.js).
@@ -251,6 +261,7 @@ export default async function handler(req, res) {
         current_step         : r.current_step || null,
         total_steps          : totalSteps,
         paid                 : paidSet.has(r.customer_id),
+        factuur              : factuurByCust ? (factuurByCust.get(String(r.customer_id)) || null) : null,
         waiver,
         bedenktijd,
         availability,

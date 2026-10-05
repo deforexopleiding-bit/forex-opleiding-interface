@@ -35,6 +35,7 @@ import { deriveIntakeStatus, intakeStatusRank } from './_lib/intake-status.js';
 // DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
 // deze functie, en die waren NIET identiek — zie de toelichting daar.
 import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
+import { factuurstandPerKlant } from './_lib/factuurstand-spiegel.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -137,6 +138,7 @@ export default async function handler(req, res) {
       lastUpdateByOnb,
       wizardMeta,
       dealByCust,
+      factuurByCust,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -242,6 +244,19 @@ export default async function handler(req, res) {
           return obj;
         }
       })(),
+      // ── 4d) De factuurstand per klant — DEZELFDE telling als de spiegel ──
+      // naar het LMS (api/_lib/factuurstand-spiegel.js). Vier toestanden in
+      // plaats van betaald/niet betaald. Faalzacht: lukt het lezen niet, dan
+      // krijgt elke rij `factuur: null` en zegt de kolom "onbekend" — nooit
+      // "open" en nooit een 500 voor het hele overzicht.
+      (async () => {
+        try {
+          return await factuurstandPerKlant(customerIds);
+        } catch (e) {
+          console.error('[admin-future-students-list] factuurstand:', e?.message || e);
+          return null;
+        }
+      })(),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -340,6 +355,9 @@ export default async function handler(req, res) {
         token:                r.token,
         // Betaling + bedenktijd + beschikbaarheid:
         paid:                 paidSet.has(r.customer_id),
+        // De ENE factuurstand: toestand + aantallen + label + ernst. De kolom
+        // Betaling leest alleen dit veld. `null` = niet gelezen (onbekend).
+        factuur:              factuurByCust ? (factuurByCust.get(String(r.customer_id)) || null) : null,
         waiver,
         bedenktijd,
         availability,

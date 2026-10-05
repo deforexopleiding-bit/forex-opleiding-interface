@@ -138,7 +138,11 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   for (const ingang of INGANGEN) {
     assert.ok(AFSLUITING.has(ingang), ingang + ' hoort in de afsluiting te zitten');
   }
-  assert.ok(AFSLUITING.size <= 14,
+  // 14 → 15 (5 oktober 2026): de onboardingspiegel werkt sindsdien ook de
+  // factuurstand van die student bij. Daarmee komen factuurstand-spiegel.js,
+  // dunning-overdue-guard.js en dunning-pipeline.js erbij — allemaal lezen en
+  // tellen, niets dat verstuurt (BEWIJS 1 hieronder blijft dat bewaken).
+  assert.ok(AFSLUITING.size <= 15,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });
