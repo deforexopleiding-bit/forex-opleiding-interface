@@ -261,7 +261,7 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
       id: String(r.id),
       start_tijd: r.start_tijd,
       student_id: String(r.student_id),
-      bubble_user_id: brug,
+      bubble_user_id: brug || null,
       email: String(stu?.email || '').trim().toLowerCase() || null,
       voornaam: stu?.voornaam || null,
       achternaam: stu?.achternaam || null,
@@ -293,12 +293,24 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
  * @param {{bubbleUserIds: string[], nu?: Date, client?: object}} arg
  * @returns {Promise<{bron_status, perStudent: Map, fout}>}
  */
-export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Date(), client = null }) {
-  const leeg = { bron_status: BRON_ONBEREIKBAAR, perStudent: new Map(), fout: null };
+export async function haalSessieOverzichtPerStudent({
+  bubbleUserIds, nu = new Date(), client = null,
+  // DE TWEEDE BRUG (5 oktober 2026): `onboardings.dfo_lms_student_id`. Een
+  // student die het CRM rechtstreeks in het LMS aanmaakte, heeft vaak geen
+  // Bubble-id. Zonder deze ingang kreeg zijn onboarding nooit "call
+  // ingepland" en nooit "gestart". De uitkomst staat in `perLmsStudent`,
+  // per hlms_student.id; `perStudent` blijft per Bubble-id zoals altijd.
+  lmsStudentIds = [],
+}) {
+  const leeg = {
+    bron_status: BRON_ONBEREIKBAAR, perStudent: new Map(), perLmsStudent: new Map(), fout: null,
+  };
 
   const ids = Array.from(new Set((bubbleUserIds || [])
     .map((v) => String(v || '').trim()).filter(Boolean)));
-  if (ids.length === 0) return { ...leeg, bron_status: BRON_GELEZEN, fout: null };
+  const lmsIds = Array.from(new Set((lmsStudentIds || [])
+    .map((v) => String(v || '').trim()).filter(Boolean)));
+  if (ids.length === 0 && lmsIds.length === 0) return { ...leeg, bron_status: BRON_GELEZEN, fout: null };
 
   const lms = client || getDfoLmsClient();
   if (!lms) {
@@ -309,7 +321,7 @@ export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Da
   // 1) bubble_user_id → hlms_student.id. Dit IS de brug: 299 van de 304
   // studentrijen dragen 'm, en die waarden zijn uniek (gemeten 7-9-2026).
   let studentIdNaarBrug = new Map();
-  try {
+  if (ids.length > 0) try {
     const { data, error } = await lms
       .from('hlms_student')
       .select('id, bubble_user_id')
@@ -326,8 +338,9 @@ export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Da
     return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
   }
 
-  if (studentIdNaarBrug.size === 0) {
-    return { bron_status: BRON_GELEZEN, perStudent: new Map(), fout: null };
+  const alleStudentIds = Array.from(new Set([...studentIdNaarBrug.keys(), ...lmsIds]));
+  if (alleStudentIds.length === 0) {
+    return { bron_status: BRON_GELEZEN, perStudent: new Map(), perLmsStudent: new Map(), fout: null };
   }
 
   // 2) Alle sessies van die studenten.
@@ -336,7 +349,7 @@ export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Da
     const { data, error } = await lms
       .from('hlms_sessie')
       .select('id, start_tijd, status, student_id')
-      .in('student_id', Array.from(studentIdNaarBrug.keys()));
+      .in('student_id', alleStudentIds);
     if (error) throw new Error(error.message);
     rijen = Array.isArray(data) ? data : [];
   } catch (e) {
@@ -347,33 +360,36 @@ export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Da
 
   const nuMs = nu.getTime();
   const perStudent = new Map();
-  const zorg = (sleutel) => {
-    if (!perStudent.has(sleutel)) perStudent.set(sleutel, { next: null, done: null, noshow: null });
-    return perStudent.get(sleutel);
+  const perLmsStudent = new Map();
+  const zorgIn = (kaart, sleutel) => {
+    if (!kaart.has(sleutel)) kaart.set(sleutel, { next: null, done: null, noshow: null });
+    return kaart.get(sleutel);
   };
 
   for (const r of rijen) {
-    const sleutel = studentIdNaarBrug.get(String(r.student_id));
-    if (!sleutel) continue;
     const iso = r.start_tijd ? new Date(r.start_tijd).toISOString() : null;
     if (!iso) continue;
     const ms = new Date(iso).getTime();
     const status = String(r.status || '').trim().toLowerCase();
-    const v = zorg(sleutel);
-
-    if (status === 'afgerond') {
-      // VROEGSTE afgeronde sessie.
-      if (!v.done || ms < new Date(v.done).getTime()) v.done = iso;
-    } else if (status === 'no_show') {
-      // LAATSTE no-show.
-      if (!v.noshow || ms > new Date(v.noshow).getTime()) v.noshow = iso;
-    } else if (ms > nuMs) {
-      // Nog niet afgehandeld én in de toekomst → eerstvolgende geplande.
-      if (!v.next || ms < new Date(v.next).getTime()) v.next = iso;
+    const brug = studentIdNaarBrug.get(String(r.student_id));
+    const doelen = [];
+    if (brug) doelen.push(zorgIn(perStudent, brug));
+    if (lmsIds.includes(String(r.student_id))) doelen.push(zorgIn(perLmsStudent, String(r.student_id)));
+    for (const v of doelen) {
+      if (status === 'afgerond') {
+        // VROEGSTE afgeronde sessie.
+        if (!v.done || ms < new Date(v.done).getTime()) v.done = iso;
+      } else if (status === 'no_show') {
+        // LAATSTE no-show.
+        if (!v.noshow || ms > new Date(v.noshow).getTime()) v.noshow = iso;
+      } else if (ms > nuMs) {
+        // Nog niet afgehandeld én in de toekomst → eerstvolgende geplande.
+        if (!v.next || ms < new Date(v.next).getTime()) v.next = iso;
+      }
     }
   }
 
-  return { bron_status: BRON_GELEZEN, perStudent, fout: null };
+  return { bron_status: BRON_GELEZEN, perStudent, perLmsStudent, fout: null };
 }
 
 
@@ -540,7 +556,15 @@ export async function haalSessieTitels({ sessieIds, client = null }) {
  *
  * @param {{sindsIso: string, limiet?: number, client?: object}} arg
  */
-export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_LIMIET, client = null }) {
+export async function haalAfgerondeEersteSessies({
+  sindsIso, limiet = STANDAARD_LIMIET, client = null,
+  // OOK ZONDER BUBBLE-ID (5 oktober 2026). De cron vindt een onboarding sinds
+  // vandaag ook via `onboardings.dfo_lms_student_id`. Studenten die het CRM
+  // rechtstreeks in het LMS aanmaakt, dragen vaak geen Bubble-id; zonder deze
+  // vlag vielen ze hier af en sloot hun onboarding nooit vanzelf. Ze worden
+  // nog steeds GETELD in `zonder_bubble_koppeling`.
+  ookZonderBubble = false,
+}) {
   const leeg = {
     bron_status: BRON_ONBEREIKBAAR, sessies: [],
     totaal_afgerond: 0, gesloten_op_eerdere_sessie: 0,
@@ -662,7 +686,10 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
   for (const r of echtEerste) {
     const stu = studentById.get(String(r.student_id)) || null;
     const brug = String(stu?.bubble_user_id || '').trim();
-    if (!brug) { zonderBrug++; continue; }
+    if (!brug) {
+      zonderBrug++;
+      if (!ookZonderBubble) continue;
+    }
     sessies.push({
       // OORZAAK — dit is wat de aanroeper vastlegt.
       id: String(r.id),
@@ -672,7 +699,7 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
       aanleiding_op: String(r.aanleiding_op),
       op_eerdere_sessie: !!r.op_eerdere_sessie,
       student_id: String(r.student_id),
-      bubble_user_id: brug,
+      bubble_user_id: brug || null,
       email: String(stu?.email || '').trim().toLowerCase() || null,
       voornaam: stu?.voornaam || null,
       achternaam: stu?.achternaam || null,

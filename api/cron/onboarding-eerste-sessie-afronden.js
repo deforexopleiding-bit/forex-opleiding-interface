@@ -97,6 +97,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { haalAfgerondeEersteSessies, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
 import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
+import { afsluitPatch, vindOnboardingVoorStudent } from '../_lib/onboarding-afsluiten-na-sessie.js';
 
 const SETTING_KEY = 'onboarding_autocomplete_since';
 const FETCH_CAP   = 500;
@@ -247,7 +248,9 @@ export default async function handler(req, res) {
       return res.status(200).json(result);
     }
 
-    const bron = await haalAfgerondeEersteSessies({ sindsIso: sinds, limiet: FETCH_CAP });
+    const bron = await haalAfgerondeEersteSessies({
+      sindsIso: sinds, limiet: FETCH_CAP, ookZonderBubble: true,
+    });
     result.bron_status             = bron.bron_status;
     result.afgeronde_sessies       = bron.totaal_afgerond;
     result.gesloten_op_eerdere_sessie = bron.gesloten_op_eerdere_sessie;
@@ -322,15 +325,24 @@ export default async function handler(req, res) {
       // opnieuw langskomt.
       let afgehandeld = false;
       try {
-        // Onboarding zoeken via de brug bubble_user_id.
-        const { data: ob, error: obErr } = await supabaseAdmin
-          .from('onboardings')
-          .select('id, status, archived_at, customer_name, auto_afgerond_sessie_id')
-          .eq('bubble_user_id', sess.bubble_user_id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
+        // Onboarding zoeken via de brug bubble_user_id; zonder Bubble-id (een
+        // student die het CRM rechtstreeks in het LMS aanmaakte) via het
+        // student-id — `onboardings.dfo_lms_student_id`, de exacte verwijzing.
+        // Zonder die tweede weg sloot zo'n onboarding nooit vanzelf.
+        let ob = null;
+        if (sess.bubble_user_id) {
+          const { data, error: obErr } = await supabaseAdmin
+            .from('onboardings')
+            .select('id, status, archived_at, customer_name, auto_afgerond_sessie_id')
+            .eq('bubble_user_id', sess.bubble_user_id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
+          ob = data;
+        } else {
+          ob = (await vindOnboardingVoorStudent(supabaseAdmin, { studentId: sess.student_id })).ob;
+        }
 
         // IDEMPOTENT — vier afzonderlijke redenen om niets te doen. Als keten
         // en niet als reeks `continue`s, zodat het besluit ná de try nog
@@ -370,17 +382,7 @@ export default async function handler(req, res) {
             const nowIso = new Date().toISOString();
             const { data: upd, error: updErr } = await supabaseAdmin
               .from('onboardings')
-              .update({
-                status: 'afgerond',
-                completed_at: nowIso,
-                auto_afgerond_sessie_id: sess.id,
-                auto_afgerond_sessie_op: sess.start_tijd,
-                // Mag leeg zijn: de titel stuurt niets aan. Dat 'ie ontbreekt
-                // staat in titels_gelezen, niet in deze kolom.
-                auto_afgerond_sessie_titel: sess.titel || null,
-                auto_afgerond_op: nowIso,
-                updated_at: nowIso,
-              })
+              .update(afsluitPatch(sess, nowIso))
               .eq('id', ob.id)
               // Optimistische sluiting: als een andere run of een mens
               // tussendoor al iets deed, raakt deze update niets.

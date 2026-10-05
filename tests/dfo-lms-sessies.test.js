@@ -628,8 +628,15 @@ test('CONTRACT: het afsluiten is idempotent op auto_afgerond_sessie_id', () => {
 test('CONTRACT: bij afsluiten wordt de OORZAAK vastgelegd', () => {
   // Een onboarding die 'afgerond' zegt zonder aanwijsbare oorzaak is precies
   // het schermsoort dat dit project twee keer een halve dag heeft gekost.
+  //  Sinds 5 oktober 2026 staat de patch in de gedeelde helper, zodat de cron
+  //  en de machine-route (api/lms-onboarding-sessie.js) dezelfde velden
+  //  schrijven. De cron moet die helper dan ook echt gebruiken.
+  assert.match(AFRONDEN, /afsluitPatch\(sess, nowIso\)/,
+    'de cron schrijft niet meer via de gedeelde afsluitPatch()');
+  const PATCH = readFileSync(
+    new URL('../api/_lib/onboarding-afsluiten-na-sessie.js', import.meta.url), 'utf8');
   for (const veld of ['auto_afgerond_sessie_id', 'auto_afgerond_sessie_op', 'auto_afgerond_op']) {
-    assert.ok(AFRONDEN.includes(veld + ':'),
+    assert.ok(PATCH.includes(veld + ':'),
       'het veld ' + veld + ' wordt niet weggeschreven bij het afsluiten');
   }
 });
