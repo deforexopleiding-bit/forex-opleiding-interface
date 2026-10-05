@@ -95,3 +95,49 @@ test('CONTRACT: de afsluiting heeft de wacht tegen dubbel afsluiten in de update
   const bron = readFileSync(new URL('../api/_lib/onboarding-afsluiten-na-sessie.js', import.meta.url), 'utf8');
   assert.match(bron, /\.is\('auto_afgerond_sessie_id', null\)/);
 });
+
+// ── START LATER OP: de startdatum vanuit het LMS ────────────────────────────
+
+import {
+  besluitStartdatum, SD_WIJZIGEN, SD_ONGEWIJZIGD, SD_GEEN_ONBOARDING, SD_NIET_AANRAKEN,
+  SD_AL_AFGEROND, SD_TE_VROEG, SD_ONGELDIG,
+} from '../api/_lib/onboarding-startdatum-lms.js';
+
+test('besluitStartdatum: dezelfde ondergrens als de CRM-knop (vandaag + 3)', () => {
+  const nu = new Date('2026-10-05T10:00:00Z');
+  const ob = { id: 'o1', status: 'nieuw', start_date: '2026-10-20' };
+  assert.equal(besluitStartdatum(ob, '2026-11-01', nu).besluit, SD_WIJZIGEN);
+  const vroeg = besluitStartdatum(ob, '2026-10-06', nu);
+  assert.equal(vroeg.besluit, SD_TE_VROEG);
+  assert.equal(vroeg.min, '2026-10-08');
+  // TEGENPROEF: precies op de grens mag het.
+  assert.equal(besluitStartdatum(ob, '2026-10-08', nu).besluit, SD_WIJZIGEN);
+  assert.equal(besluitStartdatum(ob, '2026-10-20', nu).besluit, SD_ONGEWIJZIGD);
+  assert.equal(besluitStartdatum(ob, '20-10-2026', nu).besluit, SD_ONGELDIG);
+  assert.equal(besluitStartdatum(null, '2026-11-01', nu).besluit, SD_GEEN_ONBOARDING);
+  assert.equal(besluitStartdatum({ ...ob, status: 'gearchiveerd' }, '2026-11-01', nu).besluit, SD_NIET_AANRAKEN);
+  assert.equal(besluitStartdatum({ ...ob, archived_at: '2026-01-01' }, '2026-11-01', nu).besluit, SD_NIET_AANRAKEN);
+  assert.equal(besluitStartdatum({ ...ob, status: 'afgerond' }, '2026-11-01', nu).besluit, SD_AL_AFGEROND);
+});
+
+test('de route kent de actie startdatum, en een ongeldige datum is een 400', async () => {
+  const oud = { ...process.env };
+  try {
+    process.env.DFO_LMS_PUSH_SECRET = 'geheim';
+    const r = nepRes();
+    await handler({ method: 'POST', headers: { 'x-dfo-secret': 'geheim' },
+      body: { actie: 'startdatum', student_id: 'geen-uuid', start_datum: '2027-01-04' } }, r);
+    // Niet 'ongeldige_actie': de actie bestaat, het verzoek klopt niet.
+    assert.equal(r.uit.body.code, 'ongeldig_verzoek');
+  } finally {
+    process.env = oud;
+  }
+});
+
+test('CONTRACT: de startdatum-actie schrijft alleen start_date en stuurt niets naar de klant', () => {
+  const bron = readFileSync(new URL('../api/lms-onboarding-sessie.js', import.meta.url), 'utf8');
+  const stuk = bron.slice(bron.indexOf('async function zetStartdatum'), bron.indexOf('async function meldHoofdmentoren'));
+  assert.match(stuk, /\.update\(\{ start_date: startDatum \}\)/);
+  assert.doesNotMatch(stuk, /sendOnboardingMail|sendOnboardingTemplate|createNotification|whatsapp/i);
+  assert.match(stuk, /besluitStartdatum\(/);
+});

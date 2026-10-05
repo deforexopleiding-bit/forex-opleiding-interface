@@ -5,6 +5,11 @@
 // 07:00. Server-naar-server, GEEN CORS: het geheim mag nooit in een browser.
 //
 //   POST { actie: 'sessie_afgerond', student_id, sessie_id? }
+//   POST { actie: 'startdatum', student_id, start_datum: 'YYYY-MM-DD', notitie? }
+//
+// De tweede actie hoort bij "Start later op" (opdracht 5 oktober 2026): de
+// hoofdmentor keurt in het LMS goed, en de onboarding hier krijgt dezelfde
+// startdatum. Zie api/_lib/onboarding-startdatum-lms.js.
 //
 // Auth: header `x-dfo-secret`. Geldig is DFO_LMS_PUSH_SECRET (het geheim dat
 // CRM en LMS al delen voor de accountaanmaak) of DFO_LMS_AGENDA_SECRET (de
@@ -33,6 +38,9 @@ import { spiegelOnboarding } from './_lib/onboarding-spiegel.js';
 import {
   AFSLUITEN, besluitAfsluiting, sluitOnboardingAf, vindOnboardingVoorStudent,
 } from './_lib/onboarding-afsluiten-na-sessie.js';
+import {
+  besluitStartdatum, datumNL, SD_WIJZIGEN, SD_TE_VROEG,
+} from './_lib/onboarding-startdatum-lms.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -72,8 +80,8 @@ export default async function handler(req, res) {
   }
   const actie = String(body?.actie || '');
   const studentId = String(body?.student_id || '').trim();
-  if (actie !== 'sessie_afgerond') {
-    return antwoord(res, 400, false, 'ongeldige_actie', 'Onbekende actie. Verwacht: sessie_afgerond.');
+  if (actie !== 'sessie_afgerond' && actie !== 'startdatum') {
+    return antwoord(res, 400, false, 'ongeldige_actie', 'Onbekende actie. Verwacht: sessie_afgerond of startdatum.');
   }
   if (!UUID_RE.test(studentId)) {
     return antwoord(res, 400, false, 'ongeldig_verzoek', 'student_id ontbreekt of is geen uuid.');
@@ -83,6 +91,8 @@ export default async function handler(req, res) {
   if (!lms) {
     return antwoord(res, 503, false, 'lms_niet_geconfigureerd', 'DFO_LMS_SUPABASE_URL/KEY ontbreekt.');
   }
+
+  if (actie === 'startdatum') return zetStartdatum(res, lms, studentId, body);
 
   try {
     // 1) De EERSTE afgeronde sessie van deze student — uit de databank, niet
@@ -144,6 +154,71 @@ export default async function handler(req, res) {
     console.error('[lms-onboarding-sessie]', e?.message || e);
     return antwoord(res, 500, false, 'fout',
       'Er ging iets mis in het CRM; de ochtendronde haalt het in.');
+  }
+}
+
+/**
+ * START LATER OP — de startdatum van de onboarding van deze student.
+ *
+ * Dezelfde ondergrens als de knop in het CRM (vandaag + 3). Een te vroege dag
+ * is een 422 met `min` erbij, zodat het LMS de grens in woorden kan tonen.
+ * Wat er al stond, blijft staan: dezelfde dag twee keer is `ongewijzigd`.
+ */
+async function zetStartdatum(res, lms, studentId, body) {
+  const startDatum = String(body?.start_datum || '').trim().slice(0, 10);
+  const notitie = String(body?.notitie || '').trim().slice(0, 300);
+  try {
+    const { data: stu } = await lms
+      .from('hlms_student').select('id, bubble_user_id').eq('id', studentId).maybeSingle();
+    const { ob, via } = await vindOnboardingVoorStudent(supabaseAdmin, {
+      studentId, bubbleUserId: stu?.bubble_user_id || null,
+    });
+    const { besluit, min } = besluitStartdatum(ob, startDatum);
+    if (besluit === SD_TE_VROEG) {
+      return antwoord(res, 422, false, besluit,
+        'Het CRM aanvaardt een startdatum pas vanaf ' + datumNL(min) + ' (minstens drie dagen vooruit).',
+        { min, onboarding_id: ob?.id || null });
+    }
+    if (besluit !== SD_WIJZIGEN) {
+      const status = besluit === 'startdatum_ongeldig' ? 400 : 200;
+      return antwoord(res, status, status === 200, besluit, {
+        startdatum_ongeldig: 'start_datum ontbreekt of is geen YYYY-MM-DD.',
+        geen_onboarding: 'Deze student heeft in het CRM geen onboarding; er is niets gewijzigd.',
+        niet_aanraken: 'De onboarding is gearchiveerd of geannuleerd; er is niets gewijzigd.',
+        al_afgerond: 'De onboarding is al afgerond; de pauze in het LMS volstaat.',
+        ongewijzigd: 'Die startdatum stond er al.',
+      }[besluit] || 'Er is niets gewijzigd.', { onboarding_id: ob?.id || null, via });
+    }
+
+    const { error: updErr } = await supabaseAdmin
+      .from('onboardings')
+      .update({ start_date: startDatum })
+      .eq('id', ob.id);
+    if (updErr) throw new Error('start_date bijwerken: ' + updErr.message);
+
+    // De regel op de interne tijdlijn, zoals de knop in het CRM die schrijft.
+    // Faalzacht: de datum staat er, en dat is wat telt.
+    try {
+      const { error: tlErr } = await supabaseAdmin.from('onboarding_mentor_updates').insert({
+        onboarding_id: ob.id,
+        kind: 'note',
+        status: null,
+        note: 'Startdatum gewijzigd naar ' + datumNL(startDatum) + ' (start later op, goedgekeurd in het LMS)'
+          + (notitie ? ' — ' + notitie : ''),
+        created_by: null,
+      });
+      if (tlErr) console.warn('[lms-onboarding-sessie] tijdlijnregel mislukt: ' + tlErr.message);
+    } catch (e) {
+      console.warn('[lms-onboarding-sessie] tijdlijnregel mislukt: ' + (e?.message || e));
+    }
+
+    const spiegel = await spiegelOnboarding(ob.id);
+    return antwoord(res, 200, true, SD_WIJZIGEN, 'Startdatum in het CRM gezet op ' + datumNL(startDatum) + '.', {
+      onboarding_id: ob.id, via, start_datum: startDatum, spiegel: spiegel?.resultaat || null,
+    });
+  } catch (e) {
+    console.error('[lms-onboarding-sessie] startdatum', e?.message || e);
+    return antwoord(res, 500, false, 'fout', 'De startdatum kon in het CRM niet gezet worden.');
   }
 }
 
