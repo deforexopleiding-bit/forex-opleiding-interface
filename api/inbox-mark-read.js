@@ -95,7 +95,9 @@ export default async function handler(req, res) {
         console.warn('[inbox-mark-read]', metaWarning);
       } else if (lastIn && lastIn.meta_wamid) {
         try {
-          await markAsRead({ wamid: lastIn.meta_wamid });
+          // Via de lijn van het gesprek: een gelezen-melding moet over hetzelfde
+          // nummer als het bericht (360dialog-hoofdnummer of een Meta-lijn).
+          await markAsRead({ wamid: lastIn.meta_wamid, phoneNumberId: conv.phone_number_id || undefined });
           metaReadSent = true;
         } catch (metaErr) {
           if (metaErr instanceof MetaNotConfiguredError) {

@@ -14,6 +14,8 @@
 
 import crypto from 'node:crypto';
 import { supabaseAdmin } from '../supabase.js';
+import { D360_BASE_URL, apiKeyVan } from './wa-nummers.js';
+import { d360NummerVoorPhoneNumberId } from './meta-whatsapp.js';
 
 const META_API_VERSION = 'v20.0';
 const META_BASE_URL    = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -101,7 +103,62 @@ export async function downloadAndStoreMetaMedia(mediaId, waType, opts = {}) {
       return { ok: false, error: `download HTTP ${binResp.status}: ${t.slice(0, 200)}` };
     }
     const arrayBuf = await binResp.arrayBuffer();
-    const bytes    = new Uint8Array(arrayBuf);
+    return await bewaarMediaBytes(new Uint8Array(arrayBuf), contentType, waType, opts);
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * 360dialog-variant (2026-10-05). Zelfde twee stappen, maar via
+ * https://waba-v2.360dialog.io met header D360-API-KEY:
+ *   1) GET /{media_id}            → { url, mime_type, … } (url ~5 min geldig)
+ *   2) GET <url> met host lookaside.fbsbx.com vervangen door waba-v2.360dialog.io
+ * Foutteksten houden dezelfde vorm ("metadata HTTP 400: …") zodat de
+ * recovery-cron permanente fouten op dezelfde manier herkent. Throwt NIET.
+ */
+export async function downloadAndStore360Media(nummer, mediaId, waType, opts = {}) {
+  if (!mediaId) return { ok: false, error: 'media_id ontbreekt' };
+  const key = apiKeyVan(nummer);
+  if (!key) return { ok: false, error: `${nummer?.api_key_env || 'D360-API-KEY'} ontbreekt` };
+  try {
+    const metaResp = await fetch(`${D360_BASE_URL}/${encodeURIComponent(mediaId)}`, {
+      method: 'GET', headers: { 'D360-API-KEY': key },
+    });
+    if (!metaResp.ok) {
+      const t = await metaResp.text().catch(() => '');
+      return { ok: false, error: `metadata HTTP ${metaResp.status}: ${t.slice(0, 200)}` };
+    }
+    const info = await metaResp.json().catch(() => ({}));
+    const ruweUrl = info?.url || null;
+    const contentType = info?.mime_type || 'application/octet-stream';
+    if (!ruweUrl) return { ok: false, error: 'geen url in 360dialog metadata' };
+    const u = new URL(ruweUrl);
+    const url = D360_BASE_URL + u.pathname + u.search;
+    const binResp = await fetch(url, { method: 'GET', headers: { 'D360-API-KEY': key } });
+    if (!binResp.ok) {
+      const t = await binResp.text().catch(() => '');
+      return { ok: false, error: `download HTTP ${binResp.status}: ${t.slice(0, 200)}` };
+    }
+    return await bewaarMediaBytes(new Uint8Array(await binResp.arrayBuffer()), contentType, waType, opts);
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * Kiest de juiste bron voor een mediabestand op basis van de lijn waarop het
+ * binnenkwam: een 360dialog-nummer → 360dialog, anders Meta (legacy).
+ */
+export async function downloadAndStoreMediaVoorLijn(phoneNumberId, mediaId, waType, opts = {}) {
+  const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
+  if (nummer) return downloadAndStore360Media(nummer, mediaId, waType, opts);
+  return downloadAndStoreMetaMedia(mediaId, waType, opts);
+}
+
+/** Gedeeld: bytes → bucket `whatsapp-media` → publieke URL. Throwt NIET. */
+async function bewaarMediaBytes(bytes, contentType, waType, opts = {}) {
+  try {
     const sizeBytes = bytes.byteLength;
     const sha256    = crypto.createHash('sha256').update(bytes).digest('hex');
 

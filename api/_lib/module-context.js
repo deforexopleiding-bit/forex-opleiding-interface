@@ -66,21 +66,34 @@ export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumber
   }
 
   try {
-    const { data, error } = await supabaseAdmin
+    // 2026-10-05 (360dialog): meerdere modules kunnen één nummer delen (het
+    // hoofdnummer bedient leadsonderhoud/welkom/events/opvolging). Dan levert
+    // deze lookup meerdere rijen; eigenaar wordt de `inkomend_module` van dat
+    // nummer in api/_lib/wa-nummers.js. Eén rij → zoals vroeger.
+    const { data: rijen, error } = await supabaseAdmin
       .from('whatsapp_module_config')
       .select(MODULE_CONTEXT_SELECT)
       .eq('phone_number_id', String(phoneNumberId))
       .eq('is_active', true)
-      .maybeSingle();
+      .limit(20);
     if (error) {
       // eslint-disable-next-line no-console
       console.error('[module-context] phone_number_id lookup error:', error.message);
       return null;
     }
-    // data: object of null. Bij null -> ongeconfigureerd nummer; caller
-    // beslist (in de praktijk: skipt module-specifieke side-effects zoals
-    // Joost-trigger of afdeling.* template-vars).
-    return data || null;
+    const lijst = Array.isArray(rijen) ? rijen : (rijen ? [rijen] : []);
+    // Geen rij -> ongeconfigureerd nummer; caller beslist (in de praktijk:
+    // skipt module-specifieke side-effects zoals Joost-trigger of afdeling.*
+    // template-vars).
+    if (lijst.length <= 1) return lijst[0] || null;
+    const { d360NummerVoorPhoneNumberId } = await import('./meta-whatsapp.js');
+    const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
+    const eigenaar = nummer && lijst.find((r) => r.module === nummer.inkomend_module);
+    if (eigenaar) return eigenaar;
+    // eslint-disable-next-line no-console
+    console.warn('[module-context] meerdere modules op', phoneNumberId, '- geen inkomend_module; neem',
+      [...lijst].sort((a, b) => String(a.module).localeCompare(String(b.module)))[0].module);
+    return [...lijst].sort((a, b) => String(a.module).localeCompare(String(b.module)))[0];
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('[module-context] phone_number_id lookup exception:', e.message);

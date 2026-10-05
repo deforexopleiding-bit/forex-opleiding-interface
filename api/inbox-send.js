@@ -37,6 +37,7 @@ import { renderTemplatePreview } from './_lib/render-template-preview.js';
 import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel } from './_lib/gesprekken-werkstand.js';
+import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -158,12 +159,9 @@ export default async function handler(req, res) {
     let convModule = 'finance';
     if (conv.phone_number_id) {
       try {
-        const { data: convMod, error: convModErr } = await supabaseAdmin
-          .from('whatsapp_module_config')
-          .select('module')
-          .eq('phone_number_id', conv.phone_number_id)
-          .eq('is_active', true)
-          .maybeSingle();
+        // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
+        const convMod = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id);
+        const convModErr = null;
         if (convModErr) {
           console.error('[inbox-send] conv-module lookup:', convModErr.message);
         } else if (convMod?.module) {

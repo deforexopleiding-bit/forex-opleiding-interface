@@ -7,7 +7,10 @@
 //
 // Schedule: */10 * * * *  (elke 10 min)
 // Auth:     CRON_SECRET via Authorization header
-// Env:      META_WHATSAPP_ACCESS_TOKEN vereist
+// Env:      META_WHATSAPP_ACCESS_TOKEN (Meta-lijnen) en/of een D360_API_KEY_*
+//           (360dialog-lijnen, sinds 2026-10-05). Per rij kiest
+//           downloadAndStoreMediaVoorLijn de bron op basis van de lijn
+//           (whatsapp_conversations.phone_number_id) waarop het bericht binnenkwam.
 //
 // Flow per rij:
 //   1) SELECT ≤ BATCH rijen met media_url LIKE 'meta-media-id:%'
@@ -29,7 +32,8 @@
 // `whatsapp-media` (via helper).
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
-import { downloadAndStoreMetaMedia, updateInboundMediaUrl } from './_lib/whatsapp-media-download.js';
+import { downloadAndStoreMediaVoorLijn, updateInboundMediaUrl } from './_lib/whatsapp-media-download.js';
+import { actieveNummers, apiKeyVan } from './_lib/wa-nummers.js';
 
 const BATCH_LIMIT = 25;      // per run — houdt Vercel-timeout in de hand
 const ABORT_MS    = 25_000;  // Vercel default 30s, marge houden
@@ -41,9 +45,10 @@ export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
-  if (!process.env.META_WHATSAPP_ACCESS_TOKEN) {
+  const heeft360 = actieveNummers().some((n) => n.provider === '360dialog' && apiKeyVan(n));
+  if (!process.env.META_WHATSAPP_ACCESS_TOKEN && !heeft360) {
     return res.status(503).json({
-      error: 'META_WHATSAPP_ACCESS_TOKEN niet geconfigureerd — recovery skip.',
+      error: 'Geen META_WHATSAPP_ACCESS_TOKEN en geen D360_API_KEY_* — recovery skip.',
     });
   }
 
@@ -65,11 +70,21 @@ export default async function handler(req, res) {
     // verlaten — vanaf dan zit de sweep op net-recente stragglers.
     const { data: rows, error } = await supabaseAdmin
       .from('whatsapp_messages')
-      .select('id, media_url, media_type, created_at')
+      .select('id, media_url, media_type, created_at, conversation_id')
       .like('media_url', 'meta-media-id:%')
       .order('created_at', { ascending: false })
       .limit(BATCH_LIMIT);
     if (error) throw error;
+
+    // Lijn per gesprek (één query) → 360dialog of Meta per rij.
+    const convIds = [...new Set((rows || []).map((r) => r.conversation_id).filter(Boolean))];
+    const lijnPerConv = new Map();
+    if (convIds.length) {
+      const { data: convs, error: cErr } = await supabaseAdmin
+        .from('whatsapp_conversations').select('id, phone_number_id').in('id', convIds);
+      if (cErr) console.warn('[media-recovery] lijn-lookup:', cErr.message);
+      for (const c of (convs || [])) lijnPerConv.set(c.id, c.phone_number_id || null);
+    }
 
     for (const row of (rows || [])) {
       if (Date.now() - startMs > ABORT_MS) {
@@ -96,7 +111,7 @@ export default async function handler(req, res) {
       // NULL blijkt (bevestigd niet in productie, maar defensief).
       const waType = String(row.media_type || 'image').toLowerCase();
 
-      const dl = await downloadAndStoreMetaMedia(mediaId, waType, { messageId: row.id });
+      const dl = await downloadAndStoreMediaVoorLijn(lijnPerConv.get(row.conversation_id) || null, mediaId, waType, { messageId: row.id });
 
       if (dl.ok && dl.publicUrl) {
         const up = await updateInboundMediaUrl(row.id, dl.publicUrl, {

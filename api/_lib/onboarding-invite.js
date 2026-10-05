@@ -36,6 +36,7 @@ import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { buildMetaVariablesFromMapping } from './template-variables.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
+import { mailFallbackAan, waRouteOnboarding, vulTemplateTekst, stuurOnboardingMail } from './onboarding-mail-fallback.js';
 
 const MAX_VAR_VALUE = 1000;
 
@@ -117,7 +118,11 @@ export async function sendOnboardingInvite({
       .eq('is_active', true)
       .maybeSingle();
     if (modErr) return { sent: false, reason: 'db-error', error: 'module-config lookup: ' + modErr.message };
-    if (!modCfg?.phone_number_id) return { sent: false, reason: 'geen-module-config' };
+    // 3b) Onboarding zonder eigen WhatsApp-nummer (2026-10-05): e-mail-fallback
+    //     (ONBOARDING_MAIL_FALLBACK=true) of stoppen — nooit via het leadnummer.
+    const waRoute = await waRouteOnboarding(modCfg?.phone_number_id);
+    if (!waRoute.wa && !mailFallbackAan()) return { sent: false, reason: 'wa-geen-nummer', error: waRoute.reden };
+    if (waRoute.wa && !modCfg?.phone_number_id) return { sent: false, reason: 'geen-module-config' };
 
     // 4) Invite-template-naam uit joost_config.knowledge_base.invite.
     const { data: jcfg, error: jcfgErr } = await supabaseAdmin
@@ -150,15 +155,16 @@ export async function sendOnboardingInvite({
     // 6) Module-context (afdeling-vars).
     let moduleContext = null;
     try {
-      moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id);
+      if (modCfg?.phone_number_id) moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id);
     } catch (e) {
       console.error('[onboarding-invite] module-context:', e?.message || e);
     }
 
-    // 7) Conv-upsert (outbound) op de onboarding-lijn.
+    // 7) Conv-upsert (outbound) op de onboarding-lijn — alleen als er een
+    //    WhatsApp-route is (bij de e-mail-fallback hoort er geen WA-gesprek bij).
     let convId = null;
     let convCreated = false;
-    try {
+    if (waRoute.wa) try {
       const upsert = await upsertOutboundConversation({
         phoneE164Plus : phone,
         phoneNumberId : modCfg.phone_number_id,
@@ -196,6 +202,31 @@ export async function sendOnboardingInvite({
       .sort((a, b) => Number(a) - Number(b));
     const variables = sortedKeys.map((k) => String(resolved[k] ?? '').slice(0, MAX_VAR_VALUE));
 
+    // 8b) Geen WhatsApp-nummer voor onboarding → zelfde uitnodiging per e-mail.
+    if (!waRoute.wa) {
+      const tekst = vulTemplateTekst(tplRow.body_text, resolved);
+      const mail = await stuurOnboardingMail({ customer, tekst, trajectLabel: ob.traject?.label || null });
+      if (!mail.ok) return { sent: false, reason: 'mail-fallback-fail', error: mail.reason };
+      const nuIso = new Date().toISOString();
+      try {
+        await supabaseAdmin.from('onboardings').update({ invite_sent_at: nuIso }).eq('id', onboardingId);
+      } catch (e) {
+        console.error('[onboarding-invite] mark sent (mail):', e?.message || e);
+      }
+      try {
+        await supabaseAdmin.from('audit_log').insert({
+          user_id: sentByUserId || null, action: 'onboarding.invite.sent', entity_type: 'onboarding', entity_id: onboardingId,
+          after_json: { template_name: templateName, kanaal: 'email', reden: waRoute.reden, mail_message_id: mail.messageId, preview: mail.preview, source, forced: !!force },
+        });
+      } catch (e) {
+        console.error('[onboarding-invite audit]', e?.message || e);
+      }
+      return {
+        sent: true, kanaal: 'email', template_name: templateName, mail_message_id: mail.messageId,
+        wizard_link: `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(ob.token)}`,
+      };
+    }
+
     // 9) Send via Meta. sendTemplate verwacht 'to' ZONDER '+'.
     let metaResult;
     try {
@@ -205,6 +236,7 @@ export async function sendOnboardingInvite({
         languageCode,
         variables,
         phoneNumberId : modCfg.phone_number_id,
+        module        : 'onboarding',   // transport weigert het leadnummer voor onboarding
       });
     } catch (e) {
       if (e instanceof MetaNotConfiguredError) {
