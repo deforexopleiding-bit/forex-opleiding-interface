@@ -324,7 +324,12 @@
     if (f === 'alle') return arr;
     const today = _startOfToday();
     // In incasso-opvolging (6 okt 2026): eigen tab, niet tussen de actieve.
-    if (f === 'incasso') return arr.filter((r) => r.in_incasso === true);
+    if (f === 'incasso') return arr.filter((r) => r.in_incasso === true && !r.cancelled);
+    // Afgehandeld / Geannuleerd (6 okt 2026, gelijk met het LMS): wat niet
+    // meer in onboarding zit, apart. Dezelfde volgorde van vragen als het
+    // LMS (groepVan): geannuleerd gaat voor incasso, incasso voor afgehandeld.
+    if (f === 'geannuleerd') return arr.filter((r) => r.cancelled);
+    if (f === 'afgehandeld') return arr.filter((r) => !r.cancelled && r.in_incasso !== true && r.afgesloten === true);
     if (f === 'binnenkort') return arr.filter((r) => {
       if (r.cancelled || r.in_incasso === true) return false;
       const st = String(r.status || '').toLowerCase();
@@ -345,23 +350,27 @@
   function startCounts(rows) {
     const arr = asArr(rows);
     const today = _startOfToday();
-    let binnenkort = 0, probleem = 0, incasso = 0;
+    let binnenkort = 0, probleem = 0, incasso = 0, afgehandeld = 0, geannuleerd = 0;
     for (const r of arr) {
       const st = String(r.status || '').toLowerCase();
+      if (r.cancelled) { geannuleerd++; continue; }
       if (r.in_incasso === true) { incasso++; continue; }
+      if (r.afgesloten === true) afgehandeld++;
       if (!r.cancelled && r.afgesloten !== true && st !== 'gearchiveerd') {
         if (!r.start_date || new Date(r.start_date).getTime() >= today) binnenkort++;
       }
       if (!r.cancelled && st === 'aangemeld' && r.start_date && new Date(r.start_date).getTime() < today) probleem++;
     }
-    return { binnenkort, probleem, incasso, alle: arr.length };
+    return { binnenkort, probleem, incasso, afgehandeld, geannuleerd, alle: arr.length };
   }
   function startTabs(counts) {
     const cur = F('onb-start', 'binnenkort');
     const items = [
       { k: 'binnenkort', l: 'Moeten nog starten', n: counts.binnenkort },
       { k: 'probleem',   l: 'Op te lossen',       n: counts.probleem, warn: true },
+      { k: 'afgehandeld', l: 'Afgehandeld',       n: counts.afgehandeld },
       { k: 'incasso',    l: 'Incasso',            n: counts.incasso },
+      { k: 'geannuleerd', l: 'Geannuleerd',       n: counts.geannuleerd },
       { k: 'alle',       l: 'Alle',               n: counts.alle },
     ];
     return `<div class="kv-onb-tabline">
@@ -535,10 +544,32 @@
   // NB: bubbleBadge is bewust verwijderd op 2026-08-13 samen met de Bubble-kolom.
   // Bubble-status blijft zichtbaar in de detail-modal (tab "Account & Bubble" →
   // `modules/klanten-v2/views/modals/onboarding-detail.js` `bubbleBadgeHtml`).
+  // Dag als "6 okt" (Brussel), zoals het LMS.
+  function fmtDag(iso) {
+    try {
+      return new Date(iso).toLocaleDateString('nl-BE', { day: 'numeric', month: 'short', timeZone: 'Europe/Brussels' }).replace('.', '');
+    } catch { return ''; }
+  }
+  // Geannuleerd (6 okt 2026): wanneer, en het Discord-antwoord. Niet gelezen
+  // en niet gevraagd zijn twee verschillende zinnen.
+  function annuleringCell(r) {
+    const a = r.annulering;
+    if (!a) return '<span style="color:var(--rose);font-size:12px">Geannuleerd</span>'
+      + '<div style="font-size:11px;color:var(--text-3)">annuleerdatum niet gelezen</div>';
+    const d = a.discord_verwijderd === true ? 'Discord: verwijderd, bevestigd'
+      : a.discord_verwijderd === false ? 'Discord: nog niet verwijderd — taak bij de administratie'
+      : 'Discord: niet gevraagd';
+    return `<span style="color:var(--rose);font-size:12px">Geannuleerd op ${esc(fmtDag(a.op))}</span>`
+      + `<div style="font-size:11px;color:var(--text-3)">${esc(d)}</div>`;
+  }
   function voortgangCell(r) {
-    if (r.afgesloten === true) return '<span style="color:var(--emerald);font-size:12px">✓ Afgerond door sessie</span>';
+    if (r.status === 'geannuleerd') return annuleringCell(r);
+    if (r.afgesloten === true) {
+      const op = r.afgesloten_op ? ' op ' + fmtDag(r.afgesloten_op) : '';
+      const hoe = r.afgesloten_door === 'handmatig' ? 'Met de hand afgerond' : 'Afgerond door sessie';
+      return `<span style="color:var(--emerald);font-size:12px">✓ ${esc(hoe + op)}</span>`;
+    }
     if (r.status === 'afgerond') return '<span style="font-size:12px;color:var(--text-2)">Wizard voltooid</span>';
-    if (r.status === 'geannuleerd') return '<span style="color:var(--rose);font-size:12px">Geannuleerd</span>';
     const step = r.current_step != null ? String(r.current_step) : '0';
     return `<span style="font-size:12px;color:var(--text-2)">Stap ${esc(step)}</span>`;
   }
