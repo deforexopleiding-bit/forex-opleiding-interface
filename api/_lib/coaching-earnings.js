@@ -52,7 +52,11 @@
 // Funded (€100): mentor_funded_certificates, funded_month in [from, to].
 //
 // Intake (€8,75 = ¼ × €35, sinds 5 oktober 2026): hlms_intake met
-// afgerond_door = mentorUserId en afgerond_op in het venster. Een intake is
+// afgerond_door = mentorUserId en GOEDGEKEURD_OP in het venster. Sinds 6
+// oktober (Maxim) telt een intake pas als de hoofdmentor hem goedkeurde:
+// "Intake klaar" van de mentor alleen is nog geen verloning. Zolang
+// hlms_telefoon_en_intake_notitie.sql niet gedraaid is, bestaat
+// goedgekeurd_op niet → intake 0 met _meta.lms_intake = 'goedkeuring-ontbreekt'. Een intake is
 // GEEN hlms_sessie: hij verbruikt geen sessie van het pakket van de student
 // en sluit de onboarding niet. Vier intakes = één sessie. Benoemde
 // uitzondering op "nooit stil 0": zolang hlms_intake.sql niet gedraaid is,
@@ -70,6 +74,14 @@ export const RATE_FUNDED = 100;
 export const INTAKE_EENHEID = 0.25;
 export const RATE_INTAKE = RATE_1ON1 * INTAKE_EENHEID;
 export const LMS_INTAKE_TABEL_ONTBREEKT = 'tabel-ontbreekt';
+export const LMS_INTAKE_GOEDKEURING_ONTBREEKT = 'goedkeuring-ontbreekt';
+
+/** De kolom goedgekeurd_op bestaat (nog) niet. PURE. */
+export function isGoedkeuringKolomOntbreekt(error) {
+  const code = String(error?.code || '');
+  return (code === '42703' || code === 'PGRST204' || code === 'PGRST100')
+    && /goedgekeurd_op/.test(String(error?.message || ''));
+}
 
 // Eerste dag (Brusselse tijd) waarop Bubble NIET meer bevraagd wordt.
 export const BUBBLE_EINDE = '2026-10-01';
@@ -335,21 +347,22 @@ async function lmsTeamtrainingen(lms, mentorUserId, vanIso, totIso) {
   return { team, status: 'gelezen', rijen };
 }
 
-// Afgeronde intakes van deze mentor in het venster (zie de kop).
+// GOEDGEKEURDE intakes van deze mentor in het venster (zie de kop).
 async function lmsIntakes(lms, mentorUserId, vanIso, totIso) {
   const rijen = [];
   for (let pagina = 0; pagina < LMS_MAX_PAGINAS; pagina++) {
     const van = pagina * LMS_PAGINA;
     const { data, error } = await lms
       .from('hlms_intake')
-      .select('crm_onboarding_id, afgerond_op')
+      .select('crm_onboarding_id, goedgekeurd_op')
       .eq('afgerond_door', mentorUserId)
-      .gte('afgerond_op', vanIso)
-      .lt('afgerond_op', totIso)
-      .order('afgerond_op', { ascending: true })
+      .gte('goedgekeurd_op', vanIso)
+      .lt('goedgekeurd_op', totIso)
+      .order('goedgekeurd_op', { ascending: true })
       .range(van, van + LMS_PAGINA - 1);
     if (error) {
       if (isTabelOntbreektFout(error)) return { intakes: 0, status: LMS_INTAKE_TABEL_ONTBREEKT };
+      if (isGoedkeuringKolomOntbreekt(error)) return { intakes: 0, status: LMS_INTAKE_GOEDKEURING_ONTBREEKT };
       throw lmsFout(`hlms_intake: ${error.message || error.code || 'onbekende fout'}`);
     }
     const arr = Array.isArray(data) ? data : [];

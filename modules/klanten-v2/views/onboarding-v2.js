@@ -510,7 +510,9 @@
     }
     if (g === null) return '<span style="color:var(--text-3);font-size:11px">Niet in de pot</span>';
     const dag = (iso) => (iso ? new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '');
-    if (g.stand === 'afgerond') return H.pill('ok', 'Afgerond' + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
+    if (g.stand === 'afgerond') return H.pill('ok', (g.goedgekeurd_op ? 'Goedgekeurd' : 'Afgerond') + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
+    // "Intake klaar" van de mentor, wacht op de hoofdmentor (6 okt 2026).
+    if (g.stand === 'ter_goedkeuring') return H.pill('warn', 'Ter goedkeuring' + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
     if (g.te_laat) return H.pill('danger', 'Ontbreekt > 48u');
     if (g.stand === 'ingepland') return H.pill('ok', 'Ingepland ' + dag(g.gesprek_op));
     if (g.stand === 'geclaimd') return H.pill('neutral', 'Geclaimd' + (g.geclaimd_naam ? ' · ' + g.geclaimd_naam : ''));

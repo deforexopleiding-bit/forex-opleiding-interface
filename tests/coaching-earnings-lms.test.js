@@ -363,27 +363,42 @@ test('payout-generate-core vangt coachingfouten niet meer af en rekent vóór el
 
 // ── Intakes (sinds 5 oktober 2026) ─────────────────────────────────────
 
-test('intake: ¼ sessie per afgeronde intake van DEZE mentor in het venster — geen sessie', async () => {
+test('intake: ¼ sessie per GOEDGEKEURDE intake van DEZE mentor in het venster — geen sessie', async () => {
   const { RATE_INTAKE, intakeRegelLabel } = await import('../api/_lib/coaching-earnings.js');
   const lms = nepDb({
     hlms_sessie: [sessie({ start_tijd: '2026-10-10T10:00:00Z', duur_minuten: 45 })],
     hlms_intake: [
-      { crm_onboarding_id: 'a', afgerond_door: MENTOR, afgerond_op: '2026-10-02T09:00:00Z' },
-      { crm_onboarding_id: 'b', afgerond_door: MENTOR, afgerond_op: '2026-10-20T09:00:00Z' },
-      { crm_onboarding_id: 'c', afgerond_door: ANDER,  afgerond_op: '2026-10-20T09:00:00Z' },
-      { crm_onboarding_id: 'd', afgerond_door: MENTOR, afgerond_op: '2026-09-30T21:30:00Z' }, // 30/9 23:30 Brussel
-      { crm_onboarding_id: 'e', afgerond_door: MENTOR, afgerond_op: null },
+      { crm_onboarding_id: 'a', afgerond_door: MENTOR, afgerond_op: '2026-10-01T09:00:00Z', goedgekeurd_op: '2026-10-02T09:00:00Z' },
+      { crm_onboarding_id: 'b', afgerond_door: MENTOR, afgerond_op: '2026-10-20T09:00:00Z', goedgekeurd_op: '2026-10-20T10:00:00Z' },
+      { crm_onboarding_id: 'c', afgerond_door: ANDER,  afgerond_op: '2026-10-20T09:00:00Z', goedgekeurd_op: '2026-10-20T10:00:00Z' },
+      // Goedgekeurd 30/9 23:30 Brussel: buiten het venster, ook al ...
+      { crm_onboarding_id: 'd', afgerond_door: MENTOR, afgerond_op: '2026-09-30T20:00:00Z', goedgekeurd_op: '2026-09-30T21:30:00Z' },
+      // "Intake klaar" maar nog NIET goedgekeurd: telt niet (Maxim, 6 okt).
+      { crm_onboarding_id: 'e', afgerond_door: MENTOR, afgerond_op: '2026-10-05T09:00:00Z', goedgekeurd_op: null },
+      // Klaar in september, goedgekeurd in oktober: telt in oktober.
+      { crm_onboarding_id: 'f', afgerond_door: MENTOR, afgerond_op: '2026-09-29T09:00:00Z', goedgekeurd_op: '2026-10-03T09:00:00Z' },
     ],
   });
   const r = await reken({ lms });
   assert.equal(RATE_INTAKE, 8.75);
   assert.equal(4 * RATE_INTAKE, 35, 'vier intakes = één sessie');
-  assert.equal(r.breakdown.intake.count, 2);
-  assert.equal(r.breakdown.intake.total, 17.5);
+  assert.equal(r.breakdown.intake.count, 3);
+  assert.equal(r.breakdown.intake.total, 26.25);
   assert.equal(r.breakdown.one_on_one.count, 1, 'een intake verbruikt geen sessie');
-  assert.equal(r.grand_total, 35 + 17.5);
+  assert.equal(r.grand_total, 35 + 26.25);
   assert.equal(r._meta.lms_intake, 'gelezen');
   assert.equal(intakeRegelLabel(2), 'Intakes: 2 × 0,25');
+});
+
+test('intake: goedgekeurd_op bestaat nog niet (migratie) → 0 met benoemde meta, geen crash', async () => {
+  const { LMS_INTAKE_GOEDKEURING_ONTBREEKT } = await import('../api/_lib/coaching-earnings.js');
+  const lms = nepDb({
+    hlms_sessie: [sessie({ start_tijd: '2026-10-10T10:00:00Z' })],
+    hlms_intake: { code: '42703', message: 'column hlms_intake.goedgekeurd_op does not exist' },
+  });
+  const r = await reken({ lms });
+  assert.equal(r.breakdown.intake.count, 0);
+  assert.equal(r._meta.lms_intake, LMS_INTAKE_GOEDKEURING_ONTBREEKT);
 });
 
 test('intake: tabel bestaat nog niet → 0 met benoemde meta, geen crash', async () => {

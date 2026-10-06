@@ -25,6 +25,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { isTabelOntbreekt } from './factuurstand-spiegel.js';
 import { onboardingAfgesloten } from './onboarding-einde.js';
+import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const INTAKE_TABEL = 'hlms_intake';
 
@@ -55,6 +56,18 @@ export function hoortVanzelfInPot(ob, vanaf = intakePotVanaf()) {
 }
 
 let _tabelOntbreektGemeld = false;
+let _kolommenOntbrekenGemeld = false;
+
+/** De kolommen die hlms_telefoon_en_intake_notitie.sql toevoegt. */
+export const NIEUWE_KOLOMMEN = Object.freeze(['mentor_id', 'bedenktijd_status', 'bedenktijd_vervalt_op', 'bedenktijd_reden']);
+
+/** Is dit "een van de nieuwe kolommen bestaat nog niet"? PURE. */
+export function isNieuweKolomOntbreekt(err) {
+  const code = String(err?.code || '');
+  if (code !== 'PGRST204' && code !== '42703') return false;
+  const msg = String(err?.message || '');
+  return NIEUWE_KOLOMMEN.some((k) => msg.includes(k));
+}
 
 /**
  * @param {object} lms  de dfo-lms-client (service_role)
@@ -65,7 +78,7 @@ export async function spiegelIntake(lms, onboardingId) {
   try {
     const { data: ob, error } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, customer_name, status, archived_at, auto_afgerond_op, auto_afgerond_sessie_id, created_at, start_date, dfo_lms_student_id, is_test, traject:onboarding_trajecten(label)')
+      .select('id, customer_id, customer_name, status, archived_at, auto_afgerond_op, auto_afgerond_sessie_id, answers, mentor_user_id, created_at, start_date, dfo_lms_student_id, is_test, traject:onboarding_trajecten(label)')
       .eq('id', onboardingId)
       .maybeSingle();
     if (error) throw new Error('onboarding lezen: ' + error.message);
@@ -87,14 +100,19 @@ export async function spiegelIntake(lms, onboardingId) {
     // Een nieuwe rij voor een onboarding die al dicht is: niet nodig.
     if (!bestaand && crmStandVoorIntake(ob) !== 'open') return { resultaat: 'niet-open' };
 
-    let telefoon = null;
-    if (ob.customer_id) {
-      const { data: klant } = await supabaseAdmin
-        .from('customers').select('phone').eq('id', ob.customer_id).maybeSingle();
-      telefoon = klant?.phone ? String(klant.phone).trim() || null : null;
-    }
+    // Het nummer uit de gedeelde afleiding (klant → WhatsApp → lead →
+    // afspraak → wizard), niet meer alleen customers.phone (6 okt 2026).
+    const { telefoon } = await telefoonVoorOnboarding(supabaseAdmin, ob);
+
+    // De vaste mentor en de bedenktijd (6 okt 2026): de pot laat alleen de
+    // toegewezen mentor claimen, en toont de bedenktijd met de regel "één
+    // bericht en één belletje is genoeg". Dynamisch geïmporteerd: de spiegel
+    // importeert dit bestand ook.
+    const { intakeExtras } = await import('./onboarding-spiegel.js');
+    const extras = await intakeExtras(ob);
 
     const rij = {
+      ...extras,
       crm_onboarding_id: ob.id,
       student_id: ob.dfo_lms_student_id || null,
       naam: ob.customer_name || null,
@@ -109,10 +127,25 @@ export async function spiegelIntake(lms, onboardingId) {
     // is het moment van toevoegen, zodat er geen rode afteller met
     // terugwerkende kracht ontstaat.
     if (bestaand) delete rij.aangemeld_op;
+    // Niets gevonden: een bestaand nummer (bv. met de hand ingevuld bij "In de
+    // pot zetten") blijft staan. Nooit een nummer wegschrijven door een leegte.
+    if (!rij.telefoon) delete rij.telefoon;
 
-    const { error: upErr } = bestaand
-      ? await lms.from(INTAKE_TABEL).update(rij).eq('crm_onboarding_id', ob.id)
-      : await lms.from(INTAKE_TABEL).upsert(rij, { onConflict: 'crm_onboarding_id' });
+    const schrijf = (r) => (bestaand
+      ? lms.from(INTAKE_TABEL).update(r).eq('crm_onboarding_id', ob.id)
+      : lms.from(INTAKE_TABEL).upsert(r, { onConflict: 'crm_onboarding_id' }));
+    let { error: upErr } = await schrijf(rij);
+    // Vóór hlms_telefoon_en_intake_notitie.sql bestaan mentor_id en de
+    // bedenktijdkolommen niet: dan zonder, zodat de pot blijft lopen.
+    if (upErr && isNieuweKolomOntbreekt(upErr)) {
+      if (!_kolommenOntbrekenGemeld) {
+        console.warn('[intake-spiegel] mentor_id/bedenktijd ontbreken op hlms_intake — draai hlms_telefoon_en_intake_notitie.sql');
+        _kolommenOntbrekenGemeld = true;
+      }
+      const zonder = { ...rij };
+      for (const k of NIEUWE_KOLOMMEN) delete zonder[k];
+      ({ error: upErr } = await schrijf(zonder));
+    }
     if (upErr) throw new Error('hlms_intake schrijven: ' + upErr.message);
     return { resultaat: bestaand ? 'bijgewerkt' : 'aangemaakt' };
   } catch (e) {

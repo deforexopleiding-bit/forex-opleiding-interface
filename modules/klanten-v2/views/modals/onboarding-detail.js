@@ -115,12 +115,14 @@ function renderIntakeGesprek() {
   }
   if (g === null) return '<span style="color:var(--text-3)">Niet in de intake-pot</span>';
   const kop = g.stand === 'afgerond'
-    ? `Afgerond${g.afgerond_naam ? ' door ' + esc(g.afgerond_naam) : ''} · ${fmtDT(g.afgerond_op)}`
+    ? `${g.goedgekeurd_op ? 'Goedgekeurd' : 'Afgerond'}${g.afgerond_naam ? ' (intake door ' + esc(g.afgerond_naam) + ')' : ''} · ${fmtDT(g.goedgekeurd_op || g.afgerond_op)}`
+    : g.stand === 'ter_goedkeuring'
+    ? `Intake klaar${g.afgerond_naam ? ' door ' + esc(g.afgerond_naam) : ''} · wacht op goedkeuring van de hoofdmentor`
     : g.te_laat ? '<b style="color:var(--rose)">Ontbreekt &gt; 48u</b>'
     : g.stand === 'ingepland' ? `Ingepland op ${fmtDT(g.gesprek_op)}`
     : g.stand === 'geclaimd' ? `Geclaimd${g.geclaimd_naam ? ' door ' + esc(g.geclaimd_naam) : ''}`
     : 'In de pot, nog door niemand genomen';
-  if (g.stand !== 'afgerond') return kop;
+  if (g.stand !== 'afgerond' && g.stand !== 'ter_goedkeuring') return kop;
   const p = g.actieplan || {};
   const regel = (k, v) => (v && String(v).trim() ? `<div><span style="color:var(--text-3)">${esc(k)}:</span> ${esc(v)}</div>` : '');
   return `${kop}

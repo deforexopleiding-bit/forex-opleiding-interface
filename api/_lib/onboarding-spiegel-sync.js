@@ -67,6 +67,11 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
     mentor_open: [],
     overtollig_verwijderd: 0,
     overgeslagen_door_limiet: 0,
+    // ── HET TELEFOONNUMMER (6 oktober 2026) ─────────────────────────────
+    // Hoeveel geschreven rijen een nummer kregen, uit welke bron, en welke
+    // er nog zonder zitten — zodat de hersync zelf de meting is.
+    telefoon_met: 0, telefoon_zonder_landcode: 0, telefoon_zonder: 0,
+    telefoon_per_bron: {}, telefoon_open: [],
     errors: [],
   };
 
@@ -144,6 +149,17 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
             if (result.mentor_open.length < MAX_ERRORS) {
               result.mentor_open.push({ onboarding_id: id, reden: uit.mentor.reden });
             }
+          }
+        }
+
+        if (uit.resultaat === SPIEGEL_GESCHREVEN && uit.telefoon) {
+          const t = uit.telefoon;
+          if (!t.telefoon) {
+            result.telefoon_zonder++;
+            if (result.telefoon_open.length < MAX_ERRORS) result.telefoon_open.push({ onboarding_id: id });
+          } else {
+            if (t.zeker) result.telefoon_met++; else result.telefoon_zonder_landcode++;
+            result.telefoon_per_bron[t.bron] = (result.telefoon_per_bron[t.bron] || 0) + 1;
           }
         }
 

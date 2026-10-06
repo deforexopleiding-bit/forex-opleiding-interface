@@ -38,3 +38,11 @@ test('CONTRACT: alleen de CRM-kolommen — claim en afronding zijn van het LMS',
   const spiegel = readFileSync(new URL('../api/_lib/onboarding-spiegel.js', import.meta.url), 'utf8');
   assert.ok(spiegel.indexOf('spiegelIntake(lms, id)') < spiegel.indexOf('return await verwijderSpiegel(lms, id);'));
 });
+
+test('VÓÓR DE MIGRATIE: de nieuwe kolommen worden herkend als ontbrekend, een andere fout niet', async () => {
+  const { isNieuweKolomOntbreekt, NIEUWE_KOLOMMEN } = await import('../api/_lib/onboarding-intake-spiegel.js');
+  assert.deepEqual([...NIEUWE_KOLOMMEN], ['mentor_id', 'bedenktijd_status', 'bedenktijd_vervalt_op', 'bedenktijd_reden']);
+  assert.equal(isNieuweKolomOntbreekt({ code: 'PGRST204', message: "Could not find the 'mentor_id' column of 'hlms_intake'" }), true);
+  assert.equal(isNieuweKolomOntbreekt({ code: '42703', message: 'column "bedenktijd_status" does not exist' }), true);
+  assert.equal(isNieuweKolomOntbreekt({ code: '42501', message: 'permission denied' }), false);
+});
