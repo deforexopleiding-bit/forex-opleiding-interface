@@ -87,13 +87,12 @@ function nepFetch(antwoorden) {
 // 1 · Registry + routering
 // ════════════════════════════════════════════════════════════════════════════
 
-test('registry: één actief nummer, +31 6 57210825, channel n4BsS9CH, geen geheimen in code', () => {
+test('registry: één actief nummer, +31 6 44562426, geen geheimen in code', () => {
   const [n] = N.actieveNummers();
   assert.equal(N.actieveNummers().length, 1);
-  assert.equal(n.e164, '+31657210825');
-  assert.equal(n.channel_id, 'n4BsS9CH');
+  assert.equal(n.e164, '+31644562426');
   assert.equal(n.api_key_env, 'D360_API_KEY_HOOFDNUMMER');
-  assert.equal(N.nummerOpTelefoon('31657210825'), n);
+  assert.equal(N.nummerOpTelefoon('31644562426'), n);
   const src = readFileSync(new URL('../api/_lib/wa-nummers.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /D360-API-KEY['"]?\s*:\s*['"][A-Za-z0-9]/);
 });
@@ -209,7 +208,7 @@ function nepRes() {
 const cloudBody = (field) => JSON.stringify({
   object: 'whatsapp_business_account',
   entry: [{ id: 'WABA', changes: [{ ...(field ? { field } : {}), value: {
-    messaging_product: 'whatsapp', metadata: { display_phone_number: '31657210825', phone_number_id: PNID },
+    messaging_product: 'whatsapp', metadata: { display_phone_number: '31644562426', phone_number_id: PNID },
     statuses: [{ id: 'wamid.x', status: 'delivered' }],
   } }] }],
 });

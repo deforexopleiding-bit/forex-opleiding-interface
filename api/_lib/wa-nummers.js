@@ -40,9 +40,12 @@ export const WA_NUMMERS = Object.freeze([
   Object.freeze({
     sleutel: 'hoofdnummer',
     label: 'Hoofdnummer (leads)',
-    e164: '+31657210825',
+    // 2026-10-06: nieuwe 360dialog-account + WABA + nummer (was +31657210825,
+    // channel n4BsS9CH — dat account liep vast op 131042-betaalproblemen).
+    // Meta's phone_number_id van dit nummer: 1273723375834177 (Vercel-env).
+    e164: '+31644562426',
     provider: '360dialog',
-    channel_id: 'n4BsS9CH',
+    channel_id: null,   // TODO: channel-ID uit de 360dialog-hub invullen (alleen referentie, functioneel niet gebruikt)
     api_key_env: 'D360_API_KEY_HOOFDNUMMER',
     phone_number_id_env: 'D360_PHONE_NUMBER_ID_HOOFDNUMMER',
     webhook_token_env: 'D360_WEBHOOK_TOKEN_HOOFDNUMMER',
