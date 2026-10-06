@@ -81,7 +81,17 @@ export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumber
       console.error('[module-context] phone_number_id lookup error:', error.message);
       return null;
     }
-    const lijst = Array.isArray(rijen) ? rijen : (rijen ? [rijen] : []);
+    let lijst = Array.isArray(rijen) ? rijen : (rijen ? [rijen] : []);
+    // 2026-10-06: een gesprek op een VERVANGEN lijn (oud nummer) hoort bij de
+    // module(s) van de opvolger — anders valt het (nog niet gehechte) gesprek
+    // tussen wal en schip (ongerouteerd, verkeerde rechtencheck).
+    if (!lijst.length) {
+      const { huidigeLijnId } = await import('./meta-whatsapp.js');
+      const huidig = await huidigeLijnId(phoneNumberId);
+      if (huidig && huidig !== String(phoneNumberId)) {
+        return getModuleContextByPhoneNumberId(supabaseAdmin, huidig);
+      }
+    }
     // Geen rij -> ongeconfigureerd nummer; caller beslist (in de praktijk:
     // skipt module-specifieke side-effects zoals Joost-trigger of afdeling.*
     // template-vars).

@@ -27,6 +27,12 @@
 //                        op de standaard; die mogen niet stil op het leadnummer landen.
 //   inkomend_module      welke module eigenaar is van inkomende gesprekken
 //   templates            CRM-templatenaam → naam bij 360dialog (alleen als ze verschillen)
+//   vervangt_phone_number_ids
+//                        OUDE lijn-ID's waarvan dit nummer de opvolger is. Gesprekken
+//                        die nog op zo'n oud ID staan horen bij DIT nummer: sends uit
+//                        zo'n gesprek gaan via dit nummer, en het gesprek wordt bij het
+//                        eerstvolgende bericht aan de huidige lijn gehecht (één draad
+//                        per lead, geen splitsing). Zie api/_lib/wa-gesprek-lijn.js.
 //
 // ROUTERING NU: het hoofdnummer bedient de LEAD-/niet-klant-modules
 // (leadsonderhoud = welkom/afspraken/toegang/onderhoud/gesprekken, welkom,
@@ -54,6 +60,12 @@ export const WA_NUMMERS = Object.freeze([
     standaard: false,
     inkomend_module: 'leadsonderhoud',
     templates: Object.freeze({}),
+    // 2026-10-06: de lead-lijnen die dit nummer vervangt (alle drie geblokkeerd/opgeheven):
+    //   758003047390806  oorspronkelijk leadnummer +31657210825 (Meta → oude 360dialog-account)
+    //   1232908829908396 oude Esmee-lijn (toegang/afspraken)
+    //   1156034510929407 oude events-lijn
+    // NIET: finance (1194351613761790) en onboarding (1163203046877082) — klantlijnen.
+    vervangt_phone_number_ids: Object.freeze(['758003047390806', '1232908829908396', '1156034510929407']),
     actief: true,
   }),
 ]);
@@ -90,6 +102,13 @@ export function apiKeyVan(nummer) {
 export function phoneNumberIdUitEnv(nummer) {
   const v = nummer && process.env[nummer.phone_number_id_env];
   return v && String(v).trim() ? String(v).trim() : null;
+}
+
+/** Nummer waarvan dit een VERVANGEN (oude) lijn-ID is, of null. Synchroon. */
+export function nummerVoorVervangenLijn(pnId) {
+  if (!pnId) return null;
+  const p = String(pnId).trim();
+  return actieveNummers().find((n) => (n.vervangt_phone_number_ids || []).includes(p)) || null;
 }
 
 /** Nummer bij een phone_number_id — alleen via env (synchroon). */

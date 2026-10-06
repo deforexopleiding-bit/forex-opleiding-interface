@@ -47,6 +47,7 @@ import { sendTemplate, getConfigStatus, MetaNotConfiguredError } from './_lib/me
 import { buildMetaVariablesFromMapping, AVAILABLE_VARIABLES } from './_lib/template-variables.js';
 import { ensureInvoicePaymentLink, InvoicePaymentLinkError } from './_lib/invoice-payment-link.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
+import { hechtAanHuidigeLijn } from './_lib/wa-gesprek-lijn.js';
 // FIX A no-reply-reminder-bug: onze uitgaande template-reply moet de dunning-
 // run ontpauzeren + reminder-teller resetten (zelfde als inbox-send.js). Bij
 // een normale WA-conversatie waar wij een template sturen (bv. bevestiging /
@@ -600,6 +601,12 @@ export default async function handler(req, res) {
     }
 
     const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
+    // 2026-10-06: verstuurd via de lijn waar dit gesprek NU bij hoort (de
+    // transport leidt een oud lijn-ID om naar de opvolger, wa-nummers.js).
+    // Hecht het gesprek daarom ook aan die lijn, zodat het antwoord van de
+    // lead in DIT gesprek terugkomt i.p.v. in een nieuw (gesplitst) gesprek.
+    // Fail-soft; geen effect op finance/onboarding-lijnen.
+    await hechtAanHuidigeLijn(supabaseAdmin, conv);
     const nowIso = new Date().toISOString();
 
     // Persist outbound template-message.
