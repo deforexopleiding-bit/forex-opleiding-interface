@@ -77,3 +77,38 @@ student.
 Gemeten op 6 oktober na de eerste run: actieve studenten zonder nummer van 259
 naar 30 (van 304). De werklijst van die 30, met reden, staat in
 `docs/opvolging-oktober-2026.md` §9e in dfo-lms-prototype.
+
+## Onboarding opkuisen (6 oktober 2026, tweede opdracht van Maxim)
+
+**14-dagenregel.** `hoortVanzelfInPot()` zet een nieuwe onboarding alleen nog
+vanzelf in de pot als de start meer dan `INTAKE_POT_MIN_DAGEN` dagen
+(standaard 14) na het closen (`created_at`) ligt.
+- Bij een snellere start gaat hij meteen naar "Klaar voor onboarding".
+- Zonder startdatum komt hij wél in de pot.
+- 0 betekent: altijd in de pot.
+- Een bestaande rij blijft staan.
+
+**Intake overgeslagen.** De mentor plant meteen de eerste sessie; een trigger
+in het LMS (`hlms_intake_overslaan.sql`) sluit de open intake.
+- Het CRM toont de stand `overgeslagen` in de kolom Intakegesprek
+  (`intake-gesprek-stand.js`).
+- Een overgeslagen intake wordt niet verloond.
+
+**Handmatig afronden.** `api/_lib/onboarding-handmatig.js`
+(`handmatig_afgerond_op/_door/_reden`, migratie
+`2026-10-06-onboarding-handmatig-afgerond.sql`) is de tweede bron in
+`onboarding-einde.js`, naast de afsluiting door een sessie.
+- Je start het vanuit het LMS (machine-actie `handmatig_afronden`) of vanuit
+  het CRM-detailscherm (`api/onboarding-handmatig-afronden.js`).
+- Het overzicht geeft per open onboarding het bewijs mee voor "Waarschijnlijk
+  al gestart" (`onboarding-al-gestart.js`).
+
+**Naar incasso-opvolging.** `api/_lib/onboarding-incasso.js` (schrijft) en
+`onboarding-incasso-stand.js` (leest; dat bestand gebruikt de spiegel).
+Migratie: `2026-10-06-onboarding-incasso.sql`.
+- Een onboarding in incasso verdwijnt uit de LMS-spiegel en uit de pot
+  (`vervallen`). In het CRM staat hij in de tab Incasso.
+- Er wordt NIET geannuleerd: status, facturen, toegang en aanmaningen blijven
+  zoals ze zijn.
+- "Terug activeren" loopt via `zetStartdatumOnboarding`. Daarna wordt
+  `incasso_terug_op` gezet; `incasso_op` blijft staan als geschiedenis.
