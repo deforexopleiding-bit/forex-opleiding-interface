@@ -160,6 +160,14 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       .from('onboardings').select(CRM_KOLOMMEN).eq('id', id).maybeSingle();
     if (obErr) throw new Error('onboarding lezen: ' + obErr.message);
 
+    // DE INTAKE-POT (5 oktober 2026) — vóór de vroege uitgangen hieronder,
+    // want een onboarding zonder LMS-student of een geannuleerde hoort daar
+    // ook bijgewerkt te worden. Faalzacht: zie onboarding-intake-spiegel.js.
+    if (!opties.zonderIntake) {
+      const { spiegelIntake } = await import('./onboarding-intake-spiegel.js');
+      await spiegelIntake(lms, id);
+    }
+
     // Bestaat niet (meer) → net zo goed weg uit het LMS.
     if (!ob || !hoortZichtbaarTeZijn(ob)) {
       return await verwijderSpiegel(lms, id);

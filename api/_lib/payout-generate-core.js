@@ -32,7 +32,7 @@
 //     total, total_excl, btw_amount, lines:[...] }
 
 import { supabaseAdmin } from '../supabase.js';
-import { computeCoachingEarnings, coachingRegelLabel } from './coaching-earnings.js';
+import { computeCoachingEarnings, coachingRegelLabel, intakeRegelLabel } from './coaching-earnings.js';
 import { computeBonusOverview } from '../mentor-bonus-overview.js';
 
 export const BTW_RATE = 1.21;
@@ -316,6 +316,10 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
       { key: 'team',       kind: 'coaching_team',   label: 'Teamtrainingen' },
       { key: 'no_show',    kind: 'coaching_noshow', label: 'No-shows'       },
       { key: 'funded',     kind: 'coaching_funded', label: 'Funded-students'},
+      // Sinds 5-10-2026: een afgeronde intake = ¼ sessie. qty = aantal
+      // intakes, unit = €8,75; het label zegt "n × 0,25" zodat de regel naast
+      // de sessies narekenbaar is.
+      { key: 'intake',     kind: 'coaching_intake', label: 'Intakes'        },
     ];
     for (const def of COACH_DEFS) {
       const cell      = coachingBreakdown[def.key] || {};
@@ -328,7 +332,9 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
         kind        : def.kind,
         // qty = sessie-eenheden van 45 min; het label noemt de meervoudige
         // afspraken (bv. "waarvan 5 van 90 min") zodat qty ≠ afspraken uitlegbaar is.
-        label       : coachingRegelLabel(def.label, cell),
+        label       : def.key === 'intake'
+          ? intakeRegelLabel(qty)
+          : coachingRegelLabel(def.label, cell),
         qty,
         unit_incl   : unitIncl,
         amount_incl : amtIncl,
