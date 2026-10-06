@@ -186,13 +186,16 @@
   const STATUS_LABEL = {
     aangemeld    : 'Aangemeld',
     bezig        : 'Bezig',
-    afgerond     : 'Afgerond',
+    // status 'afgerond' = WIZARD voltooid, niet "onboarding afgelopen" —
+    // dat is pas `afgesloten` (een sessie sloot hem; onboarding-einde.js).
+    afgerond     : 'Wizard voltooid',
     gearchiveerd : 'Gearchiveerd',
   };
   // Voortgang per status — UX-uitleg zonder wizard-koppeling.
   function progressLabel(row) {
     const st = row?.status || '';
-    if (st === 'afgerond')     return 'Afgerond';
+    if (row?.afgesloten === true) return 'Afgerond door sessie';
+    if (st === 'afgerond')     return 'Wizard voltooid';
     if (st === 'gearchiveerd') return '—';
     if (st === 'bezig')        return row?.current_step ? ('Stap ' + esc(row.current_step)) : 'Wizard bezig';
     return 'Wizard nog niet gestart';

@@ -30,6 +30,8 @@ import path from 'node:path';
 
 import { hoortZichtbaarTeZijn, NIET_ZICHTBARE_STATUSSEN }
   from '../api/_lib/onboarding-spiegel.js';
+import { lmsStandVoor, onboardingAfgesloten, afgeslotenOp, STAND_WIZARD_VOLTOOID }
+  from '../api/_lib/onboarding-einde.js';
 
 const lees = (p) => readFileSync(path.resolve(process.cwd(), p), 'utf8');
 const MIGRATIE = 'docs/sql-migrations/2026-09-11-hlms-crm-onboarding-stand.sql';
@@ -39,18 +41,30 @@ const SPIEGEL  = 'api/_lib/onboarding-spiegel.js';
 // LETTERLIJKE DOORGIFTE
 // ══════════════════════════════════════════════════════════════════════════
 
-test('STAND 1 — de stand gaat ONGEWIJZIGD door, zonder lower of trim', () => {
+test('STAND 1 — de stand gaat ONGEWIJZIGD door, op wizard voltooid na', () => {
   const bron = lees(SPIEGEL);
-  assert.match(bron, /onboarding_stand\s*:\s*leesStandLetterlijk\(ob\.status\)/,
-    'de stand wordt niet letterlijk uit de CRM-status overgenomen');
-
-  const fn = bron.slice(bron.indexOf('function leesStandLetterlijk'));
-  const body = fn.slice(0, fn.indexOf('\n}'));
-  for (const verboden of ['toLowerCase', 'toUpperCase', 'trim', 'replace']) {
-    assert.ok(!body.includes(verboden),
-      'leesStandLetterlijk gebruikt ' + verboden + '() — dat is een bewerking, '
-      + 'en dan is het niet meer letterlijk');
+  assert.match(bron, /onboarding_stand\s*:\s*lmsStandVoor\(ob\)/,
+    'de stand komt niet uit de gedeelde afleiding in onboarding-einde.js');
+  // Letterlijk: geen lower, geen trim — een nieuw woord valt op in het LMS.
+  for (const w of ['aangemeld', 'bezig', 'on hold', ' On Hold ', 'iets nieuws']) {
+    assert.equal(lmsStandVoor({ status: w }), w);
   }
+});
+
+test('STAND 1b — status afgerond zonder sessie is NIET afgerond (6 okt 2026)', () => {
+  // Jonas Keppens / Quinten Braeckman: wizard voltooid, geen sessie gehad.
+  const wizard = { status: 'afgerond', completed_at: '2026-10-05T09:00:00Z', auto_afgerond_op: null };
+  assert.equal(onboardingAfgesloten(wizard), false);
+  assert.equal(lmsStandVoor(wizard), STAND_WIZARD_VOLTOOID);
+  assert.equal(afgeslotenOp(wizard), null, 'afgerond_op mag nooit het wizardmoment zijn');
+  const dicht = { ...wizard, auto_afgerond_op: '2026-10-07T12:00:00Z', auto_afgerond_sessie_id: 's1' };
+  assert.equal(onboardingAfgesloten(dicht), true);
+  assert.equal(lmsStandVoor(dicht), 'afgerond');
+  assert.equal(afgeslotenOp(dicht), '2026-10-07T12:00:00Z');
+  // Heropend na een automatische afsluiting: niet dicht.
+  assert.equal(onboardingAfgesloten({ ...dicht, status: 'bezig' }), false);
+  const bron = lees(SPIEGEL);
+  assert.match(bron, /afgerond_op\s*:\s*afgeslotenOp\(ob\)/);
 });
 
 /**
@@ -92,14 +106,10 @@ test('STAND 3 — de migratie zet GEEN CHECK op de kolom', () => {
 });
 
 test('STAND 4 — leeg blijft leeg, er wordt niet gegokt', () => {
-  const bron = lees(SPIEGEL);
-  const fn = bron.slice(bron.indexOf('function leesStandLetterlijk'));
-  const body = fn.slice(0, fn.indexOf('\n}'));
-  assert.match(body, /:\s*null/, 'een lege status hoort null te worden');
-  for (const gok of ['aangemeld', 'bezig', 'afgerond', 'onbekend']) {
-    assert.ok(!body.includes("'" + gok + "'"),
-      'leesStandLetterlijk vult ' + gok + ' in als er niets staat — dat is gokken');
+  for (const leeg of [null, undefined, '']) {
+    assert.equal(lmsStandVoor({ status: leeg }), null);
   }
+  assert.equal(lmsStandVoor(null), null);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -175,9 +185,9 @@ test('MIGRATIE 4 — afgerond_op zit erbij, anders is bewaren zinloos', () => {
   assert.match(sql, /completed_at/, 'de bron van afgerond_op staat er niet bij');
 });
 
-test('MIGRATIE 5 — completed_at wordt ook echt uit het CRM gelezen', () => {
+test('MIGRATIE 5 — de afsluiting door een sessie wordt ook echt uit het CRM gelezen', () => {
   const bron = lees(SPIEGEL);
   const i = bron.indexOf('const CRM_KOLOMMEN');
-  assert.match(bron.slice(i, i + 300), /completed_at/,
-    'completed_at staat niet in de select, dus afgerond_op blijft altijd leeg');
+  assert.match(bron.slice(i, i + 300), /auto_afgerond_op/,
+    'auto_afgerond_op staat niet in de select, dus afgerond_op blijft altijd leeg');
 });

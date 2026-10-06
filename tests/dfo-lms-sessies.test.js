@@ -631,7 +631,7 @@ test('CONTRACT: bij afsluiten wordt de OORZAAK vastgelegd', () => {
   //  Sinds 5 oktober 2026 staat de patch in de gedeelde helper, zodat de cron
   //  en de machine-route (api/lms-onboarding-sessie.js) dezelfde velden
   //  schrijven. De cron moet die helper dan ook echt gebruiken.
-  assert.match(AFRONDEN, /afsluitPatch\(sess, nowIso\)/,
+  assert.match(AFRONDEN, /afsluitPatch\(sess, nowIso(, ob)?\)/,
     'de cron schrijft niet meer via de gedeelde afsluitPatch()');
   const PATCH = readFileSync(
     new URL('../api/_lib/onboarding-afsluiten-na-sessie.js', import.meta.url), 'utf8');

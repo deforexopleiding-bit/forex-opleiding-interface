@@ -98,6 +98,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { haalAfgerondeEersteSessies, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
 import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
 import { afsluitPatch, vindOnboardingVoorStudent } from '../_lib/onboarding-afsluiten-na-sessie.js';
+import { onboardingAfgesloten } from '../_lib/onboarding-einde.js';
 
 const SETTING_KEY = 'onboarding_autocomplete_since';
 const FETCH_CAP   = 500;
@@ -333,7 +334,7 @@ export default async function handler(req, res) {
         if (sess.bubble_user_id) {
           const { data, error: obErr } = await supabaseAdmin
             .from('onboardings')
-            .select('id, status, archived_at, customer_name, auto_afgerond_sessie_id')
+            .select('id, status, archived_at, customer_name, auto_afgerond_sessie_id, auto_afgerond_op, completed_at')
             .eq('bubble_user_id', sess.bubble_user_id)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -359,7 +360,9 @@ export default async function handler(req, res) {
           result.al_automatisch++;
         } else if (ob.archived_at || NIET_MEER_AANRAKEN.has(String(ob.status || '').toLowerCase())) {
           result.niet_aanraken++;
-        } else if (String(ob.status || '').toLowerCase() === 'afgerond') {
+        } else if (onboardingAfgesloten(ob)) {
+          // NIET op status 'afgerond' alleen: dat is wizard voltooid, en die
+          // onboarding moet de eerste sessie juist nog afsluiten (6 okt 2026).
           result.al_afgerond++;
         } else {
           if (result.voorbeelden.length < 20) {
@@ -382,7 +385,7 @@ export default async function handler(req, res) {
             const nowIso = new Date().toISOString();
             const { data: upd, error: updErr } = await supabaseAdmin
               .from('onboardings')
-              .update(afsluitPatch(sess, nowIso))
+              .update(afsluitPatch(sess, nowIso, ob))
               .eq('id', ob.id)
               // Optimistische sluiting: als een andere run of een mens
               // tussendoor al iets deed, raakt deze update niets.
