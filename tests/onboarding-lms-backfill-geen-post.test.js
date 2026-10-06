@@ -150,7 +150,10 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // 17 → 19 (6 oktober 2026, Maxim): het telefoonnummer uit één afleiding
   // (onboarding-telefoon.js) met de bestaande NL/BE-normalisatie
   // (phone-e164.js). Alleen lezen en rekenen.
-  assert.ok(AFSLUITING.size <= 19,
+  // 19 → 20 (6 oktober 2026, Maxim): onboarding-handmatig.js — de spiegel
+  // leest of een onboarding met de hand afgerond is. Lezen uit het CRM; het
+  // afronden zelf schrijft alleen `onboardings` en de tijdlijn, niets dat verstuurt.
+  assert.ok(AFSLUITING.size <= 20,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

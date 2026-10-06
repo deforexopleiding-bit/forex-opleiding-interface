@@ -99,6 +99,7 @@ import { haalAfgerondeEersteSessies, BRON_GELEZEN } from '../_lib/dfo-lms-sessie
 import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
 import { afsluitPatch, vindOnboardingVoorStudent } from '../_lib/onboarding-afsluiten-na-sessie.js';
 import { onboardingAfgesloten } from '../_lib/onboarding-einde.js';
+import { vulHandmatigAan } from '../_lib/onboarding-handmatig.js';
 
 const SETTING_KEY = 'onboarding_autocomplete_since';
 const FETCH_CAP   = 500;
@@ -340,7 +341,7 @@ export default async function handler(req, res) {
             .limit(1)
             .maybeSingle();
           if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
-          ob = data;
+          ob = data ? await vulHandmatigAan(supabaseAdmin, data) : null;
         } else {
           ob = (await vindOnboardingVoorStudent(supabaseAdmin, { studentId: sess.student_id })).ob;
         }

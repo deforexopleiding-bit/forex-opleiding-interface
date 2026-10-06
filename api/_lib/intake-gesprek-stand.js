@@ -27,7 +27,7 @@ export function intakeGesprekStand(rij, personeelNaam = new Map(), nu = Date.now
   if (!rij) return null;
   const naam = (id) => (id ? personeelNaam.get(String(id)) || null : null);
   const aangemeld = Date.parse(rij.aangemeld_op || '');
-  const teLaat = !rij.afgerond_op && rij.crm_stand === 'open'
+  const teLaat = !rij.afgerond_op && !rij.overgeslagen_op && rij.crm_stand === 'open'
     && Number.isFinite(aangemeld) && nu - aangemeld > 48 * UUR;
   let stand = 'vrij';
   // Sinds 6 okt 2026 twee stappen: "Intake klaar" van de mentor (afgerond_op)
@@ -35,7 +35,10 @@ export function intakeGesprekStand(rij, personeelNaam = new Map(), nu = Date.now
   // kolom (migratie nog niet gedraaid: `goedgekeurd_op` undefined), dan geldt
   // afgerond als afgerond, zoals het tot dan werkte.
   const goedkeuringBekend = rij.goedgekeurd_op !== undefined;
-  if (rij.afgerond_op && goedkeuringBekend && !rij.goedgekeurd_op) stand = 'ter_goedkeuring';
+  // Overgeslagen (6 okt 2026): de eerste sessie werd ingepland zonder intake.
+  // Geen intake, dus ook geen verloning.
+  if (rij.overgeslagen_op && !rij.afgerond_op) stand = 'overgeslagen';
+  else if (rij.afgerond_op && goedkeuringBekend && !rij.goedgekeurd_op) stand = 'ter_goedkeuring';
   else if (rij.afgerond_op) stand = 'afgerond';
   else if (rij.gesprek_op) stand = 'ingepland';
   else if (rij.geclaimd_door) stand = 'geclaimd';
@@ -48,6 +51,8 @@ export function intakeGesprekStand(rij, personeelNaam = new Map(), nu = Date.now
     afgerond_op: rij.afgerond_op || null,
     afgerond_naam: naam(rij.afgerond_door),
     goedgekeurd_op: rij.goedgekeurd_op || null,
+    overgeslagen_op: rij.overgeslagen_op || null,
+    overgeslagen_reden: rij.overgeslagen_reden || null,
     uitkomst: rij.uitkomst || null,
     actieplan: rij.actieplan || null,
   };
@@ -67,7 +72,12 @@ export async function intakeGesprekkenVoor(onboardingIds, deps = {}) {
     for (let i = 0; i < ids.length; i += IN_CHUNK) {
       const deel = ids.slice(i, i + IN_CHUNK);
       const basis = 'crm_onboarding_id, aangemeld_op, crm_stand, geclaimd_door, gesprek_op, afgerond_door, afgerond_op, uitkomst, actieplan';
-      let { data, error } = await lms.from('hlms_intake').select(basis + ', goedgekeurd_op').in('crm_onboarding_id', deel);
+      let { data, error } = await lms.from('hlms_intake')
+        .select(basis + ', goedgekeurd_op, overgeslagen_op, overgeslagen_reden').in('crm_onboarding_id', deel);
+      // Vóór hlms_intake_overslaan.sql bestaan de overgeslagen-kolommen niet.
+      if (error && /overgeslagen/.test(String(error.message || ''))) {
+        ({ data, error } = await lms.from('hlms_intake').select(basis + ', goedgekeurd_op').in('crm_onboarding_id', deel));
+      }
       // Vóór hlms_telefoon_en_intake_notitie.sql bestaat goedgekeurd_op niet.
       if (error && /goedgekeurd_op/.test(String(error.message || ''))) {
         ({ data, error } = await lms.from('hlms_intake').select(basis).in('crm_onboarding_id', deel));

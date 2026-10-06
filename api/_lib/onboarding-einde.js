@@ -20,8 +20,14 @@
 //
 // Toets: status 'afgerond' en auto_afgerond_op null → NIET afgesloten.
 //
-// Wordt er later een handmatige afsluiting met reden gebouwd, dan komt die
-// hier bij als tweede bron — nergens anders.
+// ── DE TWEEDE BRON: MET DE HAND AFGEROND (Maxim, 6 oktober 2026) ─────────
+// Sommige trajecten lopen al zonder dat het LMS een afgeronde sessie heeft
+// (calls in Bubble, sessies van vóór het watermerk). Die sluit de hoofdmentor
+// met de hand af, met een reden: `handmatig_afgerond_op/_door/_reden`. Dat
+// staat NAAST de automatische afsluiting, in eigen kolommen, zodat altijd te
+// zien is welke van de twee het deed. Een handmatige afsluiting hangt niet af
+// van de wizardstatus: een traject dat al loopt is afgelopen als onboarding,
+// ook als de wizard nooit helemaal doorlopen werd.
 
 /** De stand die de spiegel doorgeeft voor "wizard klaar, eerste sessie nog niet". */
 export const STAND_WIZARD_VOLTOOID = 'wizard_voltooid';
@@ -35,16 +41,37 @@ export function wizardVoltooid(ob) {
   return statusVan(ob) === 'afgerond';
 }
 
-/** Is deze onboarding écht afgelopen, door een sessie? PURE. */
-export function onboardingAfgesloten(ob) {
+/** Afgesloten door een sessie? PURE. */
+export function automatischAfgesloten(ob) {
   if (!ob || statusVan(ob) !== 'afgerond') return false;
   return !!(ob.auto_afgerond_op || ob.auto_afgerond_sessie_id);
 }
 
+/** Met de hand afgesloten (met reden)? PURE. */
+export function handmatigAfgesloten(ob) {
+  if (!ob) return false;
+  const s = statusVan(ob);
+  if (s === 'geannuleerd' || s === 'gearchiveerd') return false;
+  return !!ob.handmatig_afgerond_op;
+}
+
+/** Is deze onboarding écht afgelopen — door een sessie of met de hand? PURE. */
+export function onboardingAfgesloten(ob) {
+  return automatischAfgesloten(ob) || handmatigAfgesloten(ob);
+}
+
 /** Wanneer hij afgesloten werd, of null als hij niet afgesloten is. PURE. */
 export function afgeslotenOp(ob) {
-  if (!onboardingAfgesloten(ob)) return null;
-  return ob.auto_afgerond_op || ob.auto_afgerond_sessie_op || null;
+  if (automatischAfgesloten(ob)) return ob.auto_afgerond_op || ob.auto_afgerond_sessie_op || null;
+  if (handmatigAfgesloten(ob)) return ob.handmatig_afgerond_op;
+  return null;
+}
+
+/** Hoe hij afgesloten werd: 'sessie', 'handmatig' of null. PURE. */
+export function afgeslotenDoor(ob) {
+  if (automatischAfgesloten(ob)) return 'sessie';
+  if (handmatigAfgesloten(ob)) return 'handmatig';
+  return null;
 }
 
 /**
@@ -58,6 +85,9 @@ export function afgeslotenOp(ob) {
 export function lmsStandVoor(ob) {
   const ruw = ob?.status;
   if (typeof ruw !== 'string' || ruw === '') return null;
+  // Met de hand afgesloten terwijl de status nog 'bezig' of 'aangemeld' zegt:
+  // voor het LMS is hij afgerond.
+  if (handmatigAfgesloten(ob)) return 'afgerond';
   if (wizardVoltooid(ob) && !onboardingAfgesloten(ob)) return STAND_WIZARD_VOLTOOID;
   return ruw;
 }

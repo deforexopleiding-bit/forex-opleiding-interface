@@ -25,6 +25,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { isTabelOntbreekt } from './factuurstand-spiegel.js';
 import { onboardingAfgesloten } from './onboarding-einde.js';
+import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const INTAKE_TABEL = 'hlms_intake';
@@ -49,10 +50,48 @@ export function crmStandVoorIntake(ob) {
   return 'open';
 }
 
+/**
+ * ── ALLEEN BIJ EEN LATE START (Maxim, 6 oktober 2026) ─────────────────────
+ * Een intake heeft vooral zin als er tijd zit tussen het closen en de start.
+ * Start de student binnen INTAKE_POT_MIN_DAGEN dagen na het closen, dan gaat
+ * hij NIET vanzelf in de pot maar meteen naar "Klaar voor onboarding" bij zijn
+ * mentor. Instelbaar: env INTAKE_POT_MIN_DAGEN (standaard 14). 0 = altijd in
+ * de pot (het gedrag van vóór 6 oktober).
+ *
+ * Geen startdatum bekend → wel in de pot: dan is er niets om op te beslissen,
+ * en een intake vangt juist de onduidelijke gevallen op.
+ *
+ * Het "closen" is het aanmaken van de onboarding (`created_at`): dat gebeurt
+ * bij het tekenen van de offerte. Een bestaande rij in de pot blijft staan;
+ * de regel beslist alleen over nieuwe rijen.
+ */
+export const INTAKE_POT_MIN_DAGEN = 14;
+
+export function intakePotMinDagen(env = process.env) {
+  const v = Number.parseInt(String(env.INTAKE_POT_MIN_DAGEN ?? ''), 10);
+  return Number.isFinite(v) && v >= 0 ? v : INTAKE_POT_MIN_DAGEN;
+}
+
+/** Dagen tussen het closen en de start (kalenderdagen, Brussel), of null. PURE. */
+export function dagenTotStart(ob) {
+  const start = String(ob?.start_date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !ob?.created_at) return null;
+  const closen = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Brussels' }).format(new Date(ob.created_at));
+  return Math.round((Date.parse(start + 'T00:00:00Z') - Date.parse(closen + 'T00:00:00Z')) / 86_400_000);
+}
+
+/** Start deze onboarding zo snel dat een intake overbodig is? PURE. */
+export function snelleStart(ob, minDagen = intakePotMinDagen()) {
+  if (!minDagen) return false;
+  const d = dagenTotStart(ob);
+  return d !== null && d <= minDagen;
+}
+
 /** Komt deze onboarding vanzelf in de pot? PURE. */
-export function hoortVanzelfInPot(ob, vanaf = intakePotVanaf()) {
+export function hoortVanzelfInPot(ob, vanaf = intakePotVanaf(), minDagen = intakePotMinDagen()) {
   if (!ob?.created_at) return false;
-  return new Date(ob.created_at).getTime() >= new Date(vanaf).getTime();
+  if (new Date(ob.created_at).getTime() < new Date(vanaf).getTime()) return false;
+  return !snelleStart(ob, minDagen);
 }
 
 let _tabelOntbreektGemeld = false;
@@ -83,6 +122,7 @@ export async function spiegelIntake(lms, onboardingId) {
       .maybeSingle();
     if (error) throw new Error('onboarding lezen: ' + error.message);
     if (!ob || ob.is_test) return { resultaat: 'overgeslagen' };
+    await vulHandmatigAan(supabaseAdmin, ob);
 
     const { data: bestaand, error: bErr } = await lms
       .from(INTAKE_TABEL).select('crm_onboarding_id').eq('crm_onboarding_id', ob.id).maybeSingle();
@@ -96,7 +136,9 @@ export async function spiegelIntake(lms, onboardingId) {
       }
       throw new Error('hlms_intake lezen: ' + bErr.message);
     }
-    if (!bestaand && !hoortVanzelfInPot(ob)) return { resultaat: 'van-voor-de-uitrol' };
+    if (!bestaand && !hoortVanzelfInPot(ob)) {
+      return { resultaat: snelleStart(ob) ? 'snelle-start' : 'van-voor-de-uitrol' };
+    }
     // Een nieuwe rij voor een onboarding die al dicht is: niet nodig.
     if (!bestaand && crmStandVoorIntake(ob) !== 'open') return { resultaat: 'niet-open' };
 

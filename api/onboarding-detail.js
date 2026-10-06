@@ -23,6 +23,7 @@ import {
   buildAvailabilityView,
 } from './_lib/onboarding-wizard-default.js';
 import { factuurstandPerKlant } from './_lib/factuurstand-spiegel.js';
+import { vulHandmatigAan } from './_lib/onboarding-handmatig.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (rowErr) throw new Error('onboarding fetch: ' + rowErr.message);
     if (!row)  return res.status(404).json({ error: 'Onboarding niet gevonden' });
+    await vulHandmatigAan(supabaseAdmin, row);
 
     // Fase 2a: ownership-guard. Een view_own-only-user mag uitsluitend
     // z'n eigen onboardings opvragen. Bewust 403 ipv 404 zodat de mentor
@@ -316,6 +318,10 @@ export default async function handler(req, res) {
         auto_afgerond_sessie_id   : row.auto_afgerond_sessie_id || null,
         auto_afgerond_sessie_op   : row.auto_afgerond_sessie_op || null,
         auto_afgerond_op          : row.auto_afgerond_op || null,
+        // Met de hand afgerond (6 okt 2026): wie, wanneer en waarom.
+        handmatig_afgerond_op     : row.handmatig_afgerond_op || null,
+        handmatig_afgerond_door   : row.handmatig_afgerond_door || null,
+        handmatig_afgerond_reden  : row.handmatig_afgerond_reden || null,
         invite_sent_at            : row.invite_sent_at || null,
         credentials_email_sent_at : row.credentials_email_sent_at || null,
         credentials_wa_sent_at    : row.credentials_wa_sent_at || null,

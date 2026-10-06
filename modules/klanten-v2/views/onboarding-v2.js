@@ -513,6 +513,8 @@
     if (g.stand === 'afgerond') return H.pill('ok', (g.goedgekeurd_op ? 'Goedgekeurd' : 'Afgerond') + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
     // "Intake klaar" van de mentor, wacht op de hoofdmentor (6 okt 2026).
     if (g.stand === 'ter_goedkeuring') return H.pill('warn', 'Ter goedkeuring' + (g.afgerond_naam ? ' · ' + g.afgerond_naam : ''));
+    // Geen intake nodig: de eerste sessie werd meteen ingepland (6 okt 2026).
+    if (g.stand === 'overgeslagen') return H.pill('neutral', 'Overgeslagen ' + dag(g.overgeslagen_op));
     if (g.te_laat) return H.pill('danger', 'Ontbreekt > 48u');
     if (g.stand === 'ingepland') return H.pill('ok', 'Ingepland ' + dag(g.gesprek_op));
     if (g.stand === 'geclaimd') return H.pill('neutral', 'Geclaimd' + (g.geclaimd_naam ? ' · ' + g.geclaimd_naam : ''));

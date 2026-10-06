@@ -55,7 +55,11 @@ function statusPill(s) { const m = STATUS_LABEL[s] || { label: s || '—', cls: 
 // Zelfde regel als api/_lib/onboarding-einde.js: afgesloten = status
 // 'afgerond' ÉN een sessie die het deed. De module draait in de browser en kan
 // dat bestand niet importeren, vandaar de korte herhaling.
-function afgesloten(o) { return o?.status === 'afgerond' && !!(o.auto_afgerond_op || o.auto_afgerond_sessie_id); }
+function afgesloten(o) {
+  if (o?.status === 'geannuleerd' || o?.status === 'gearchiveerd') return false;
+  return (o?.status === 'afgerond' && !!(o.auto_afgerond_op || o.auto_afgerond_sessie_id)) || !!o?.handmatig_afgerond_op;
+}
+function afgeslotenMoment(o) { return (o.status === 'afgerond' && o.auto_afgerond_op) ? o.auto_afgerond_op : o.handmatig_afgerond_op; }
 function statusPillVan(o) { return afgesloten(o) ? '<span class="kv-onb-pill kv-onb-pill-ok">Onboarding afgerond</span>' : statusPill(o.status); }
 function intakePill(s) { const m = INTAKE_LABEL[s]  || { l: s || '—',    cls: 'kv-onb-pill-neutral' }; return `<span class="kv-onb-pill ${m.cls}">${esc(m.l)}</span>`; }
 function fmtDate(iso) { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return '—'; } }
@@ -118,6 +122,8 @@ function renderIntakeGesprek() {
     ? `${g.goedgekeurd_op ? 'Goedgekeurd' : 'Afgerond'}${g.afgerond_naam ? ' (intake door ' + esc(g.afgerond_naam) + ')' : ''} · ${fmtDT(g.goedgekeurd_op || g.afgerond_op)}`
     : g.stand === 'ter_goedkeuring'
     ? `Intake klaar${g.afgerond_naam ? ' door ' + esc(g.afgerond_naam) : ''} · wacht op goedkeuring van de hoofdmentor`
+    : g.stand === 'overgeslagen'
+    ? `Overgeslagen · ${fmtDT(g.overgeslagen_op)}${g.overgeslagen_reden ? ' — ' + esc(g.overgeslagen_reden) : ''} (telt niet in de verloning)`
     : g.te_laat ? '<b style="color:var(--rose)">Ontbreekt &gt; 48u</b>'
     : g.stand === 'ingepland' ? `Ingepland op ${fmtDT(g.gesprek_op)}`
     : g.stand === 'geclaimd' ? `Geclaimd${g.geclaimd_naam ? ' door ' + esc(g.geclaimd_naam) : ''}`
@@ -217,7 +223,7 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Toegewezen</span><span>${fmtDT(o.assigned_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Gestart</span><span>${fmtDT(o.started_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Wizard voltooid</span><span>${fmtDT(o.completed_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Onboarding afgerond</span><span>${afgesloten(o) ? fmtDT(o.auto_afgerond_op) : 'nog niet — wacht op de eerste afgeronde sessie'}${autoAfgerondNoot(o)}</span></div>
+      <div class="kv-onb-meta-row"><span>Onboarding afgerond</span><span>${afgesloten(o) ? fmtDT(afgeslotenMoment(o)) : 'nog niet — wacht op de eerste afgeronde sessie'}${autoAfgerondNoot(o)}${handmatigNoot(o)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
@@ -273,6 +279,9 @@ function renderOverzichtTab() {
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-resolve ${state.savingAction ? 'disabled' : ''}>
           ${state.savingAction === 'resolve' ? 'Bezig…' : (o.intake_handled_at ? 'Markeer als open (heropen intake)' : 'Markeer intake als afgehandeld')}
         </button>
+        ${!afgesloten(o) && o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-handmatig ${state.savingAction ? 'disabled' : ''} title="Het traject loopt al (bv. calls in Bubble). Vraagt een reden.">
+          ${state.savingAction === 'handmatig' ? 'Bezig…' : 'Onboarding afronden (handmatig)'}
+        </button>` : ''}
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-archive ${state.savingAction ? 'disabled' : ''}>
           ${state.savingAction === 'archive' ? 'Bezig…' : (o.status === 'gearchiveerd' ? 'Herstellen uit archief' : 'Archiveren')}
         </button>
@@ -325,6 +334,16 @@ function renderAccountTab() {
 // een datum, en dan is niet na te gaan waardoor — precies het schermsoort dat
 // ons deze week twee keer een halve dag heeft gekost. Hier staat dus welke
 // sessie het deed en wanneer die was.
+// Met de hand afgerond (6 okt 2026): wie, wanneer en waarom — staat apart van
+// de automatische afsluiting, zodat altijd te zien is welke van de twee het deed.
+function handmatigNoot(o) {
+  if (!o.handmatig_afgerond_op) return '';
+  return `<div style="margin-top:3px;font-size:11.5px;color:var(--text-3);line-height:1.45">
+      Met de hand afgerond op ${esc(fmtDT(o.handmatig_afgerond_op))}${o.handmatig_afgerond_door ? ' door ' + esc(o.handmatig_afgerond_door) : ''}.
+      ${o.handmatig_afgerond_reden ? `<br>Reden: ${esc(o.handmatig_afgerond_reden)}` : ''}
+    </div>`;
+}
+
 function autoAfgerondNoot(o) {
   if (!o.auto_afgerond_op) return '';
   const wanneer = o.auto_afgerond_sessie_op ? fmtDT(o.auto_afgerond_sessie_op) : 'onbekend';
@@ -613,6 +632,12 @@ function actMentor() {
   const v = sel?.value || null;
   return callAction('mentor', '/api/onboarding-assign-mentor', { onboarding_id: state.id, mentor_user_id: v });
 }
+function actHandmatig() {
+  const reden = prompt('Waarom is deze onboarding al afgelopen? (bv. "traject loopt al, calls in Bubble")', '');
+  if (reden === null) return;
+  if (reden.trim().length < 5) { alert('Geef een reden van minstens 5 tekens.'); return; }
+  return callAction('handmatig', '/api/onboarding-handmatig-afronden', { onboarding_id: state.id, reden: reden.trim() });
+}
 function actArchive() {
   const isArchived = state.data?.status === 'gearchiveerd';
   const action = isArchived ? 'restore' : 'archive';
@@ -842,6 +867,7 @@ function wire() {
   box.querySelector('[data-kv-onb-mentor-save]')?.addEventListener('click', actMentor);
   box.querySelector('[data-kv-onb-start-save]')?.addEventListener('click', actStartDate);
   box.querySelector('[data-kv-onb-archive]')?.addEventListener('click', actArchive);
+  box.querySelector('[data-kv-onb-handmatig]')?.addEventListener('click', actHandmatig);
   box.querySelector('[data-kv-onb-cancel-preview]')?.addEventListener('click', actCancelPreview);
   box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);

@@ -12,7 +12,9 @@
 // Gooit bij een leesfout op de verplichte bronnen; de aanroeper maakt er een
 // 500 van. Faalzachte bronnen (wizard, deals, factuurstand) blijven faalzacht.
 
-import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp } from './onboarding-einde.js';
+import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp, afgeslotenDoor } from './onboarding-einde.js';
+import { vulHandmatigAan } from './onboarding-handmatig.js';
+import { alGestartBewijs } from './onboarding-al-gestart.js';
 import { telefoonsVoorOnboardings } from './onboarding-telefoon.js';
 import { supabaseAdmin } from '../supabase.js';
 import { deriveIntakeStatus, intakeStatusRank } from './intake-status.js';
@@ -73,6 +75,9 @@ export async function bouwOverzichtRijen(opts = {}) {
     if (rowErr) throw new Error('onboardings fetch: ' + rowErr.message);
     const list = rows || [];
     if (list.length === 0) return [];
+    // Met de hand afgerond (6 okt 2026): aparte, faalzachte lezing, zodat het
+    // overzicht niet omvalt zolang de migratie nog niet gedraaid is.
+    await vulHandmatigAan(supabaseAdmin, list);
 
     // Input-sets voor de 5 afgeleide queries. Bouwen we één keer vóór de
     // Promise.all zodat elk blok z'n eigen ids kan gebruiken.
@@ -92,6 +97,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       dealByCust,
       factuurByCust,
       telefoonByOb,
+      bewijsByStudent,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -213,6 +219,12 @@ export async function bouwOverzichtRijen(opts = {}) {
       // ── 8) Het telefoonnummer (6 okt 2026): één afleiding, fail-soft per
       //    bron — een ontbrekend nummer houdt het overzicht niet tegen.
       telefoonsVoorOnboardings(supabaseAdmin, list),
+      // ── 9) "Waarschijnlijk al gestart" (6 okt 2026): het bewijs uit het LMS
+      //    voor de OPEN onboardings met een LMS-student. `null` = niet gelezen.
+      alGestartBewijs(list
+        .filter((r) => r.dfo_lms_student_id && !onboardingAfgesloten(r)
+          && !['geannuleerd', 'gearchiveerd'].includes(String(r.status || '').toLowerCase()))
+        .map((r) => r.dfo_lms_student_id)),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -314,6 +326,17 @@ export async function bouwOverzichtRijen(opts = {}) {
         afgesloten_op:        afgeslotenOp(r),
         afgesloten_sessie_op: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_op || null) : null,
         afgesloten_sessie_titel: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_titel || null) : null,
+        // 'sessie' of 'handmatig' (6 okt 2026); bij 'handmatig' ook wie en waarom.
+        afgesloten_door:      afgeslotenDoor(r),
+        handmatig_afgerond_op:    r.handmatig_afgerond_op || null,
+        handmatig_afgerond_door:  r.handmatig_afgerond_door || null,
+        handmatig_afgerond_reden: r.handmatig_afgerond_reden || null,
+        // Het bewijs dat het traject al loopt, voor het blok "Waarschijnlijk
+        // al gestart". `null` = niet gelezen of niet van toepassing (geen
+        // LMS-student of al afgesloten); `al_gestart_gelezen` zegt welke.
+        al_gestart:           (bewijsByStudent && r.dfo_lms_student_id)
+          ? (bewijsByStudent.get(String(r.dfo_lms_student_id)) || null) : null,
+        al_gestart_gelezen:   bewijsByStudent !== null,
         // Het nummer (6 okt 2026) — `telefoon_zeker` = met landcode, dus
         // ook een WhatsApp-link; `telefoon_bron` voor wie wil nagaan waarvandaan.
         telefoon:             telefoonByOb.get(r.id)?.telefoon || null,
