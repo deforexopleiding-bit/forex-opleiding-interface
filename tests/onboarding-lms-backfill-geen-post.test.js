@@ -153,7 +153,10 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // 19 → 20 (6 oktober 2026, Maxim): onboarding-handmatig.js — de spiegel
   // leest of een onboarding met de hand afgerond is. Lezen uit het CRM; het
   // afronden zelf schrijft alleen `onboardings` en de tijdlijn, niets dat verstuurt.
-  assert.ok(AFSLUITING.size <= 20,
+  // 20 → 21 (6 oktober 2026, Maxim): onboarding-incasso-stand.js — de spiegel
+  // leest of een onboarding in incasso-opvolging staat (dan uit het LMS).
+  // Alleen lezen; het schrijvende onboarding-incasso.js zit er bewust NIET in.
+  assert.ok(AFSLUITING.size <= 21,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

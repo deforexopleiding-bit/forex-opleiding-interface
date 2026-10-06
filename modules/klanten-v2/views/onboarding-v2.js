@@ -323,8 +323,10 @@
     const arr = asArr(rows);
     if (f === 'alle') return arr;
     const today = _startOfToday();
+    // In incasso-opvolging (6 okt 2026): eigen tab, niet tussen de actieve.
+    if (f === 'incasso') return arr.filter((r) => r.in_incasso === true);
     if (f === 'binnenkort') return arr.filter((r) => {
-      if (r.cancelled) return false;
+      if (r.cancelled || r.in_incasso === true) return false;
       const st = String(r.status || '').toLowerCase();
       // Alleen een onboarding die een SESSIE afsloot valt eruit. Status
       // 'afgerond' alleen = wizard voltooid: die moet nog starten (6 okt 2026).
@@ -333,7 +335,7 @@
       return new Date(r.start_date).getTime() >= today;
     });
     if (f === 'probleem') return arr.filter((r) => {
-      if (r.cancelled) return false;
+      if (r.cancelled || r.in_incasso === true) return false;
       if (String(r.status || '').toLowerCase() !== 'aangemeld') return false;
       if (!r.start_date) return false;
       return new Date(r.start_date).getTime() < today;
@@ -343,21 +345,23 @@
   function startCounts(rows) {
     const arr = asArr(rows);
     const today = _startOfToday();
-    let binnenkort = 0, probleem = 0;
+    let binnenkort = 0, probleem = 0, incasso = 0;
     for (const r of arr) {
       const st = String(r.status || '').toLowerCase();
+      if (r.in_incasso === true) { incasso++; continue; }
       if (!r.cancelled && r.afgesloten !== true && st !== 'gearchiveerd') {
         if (!r.start_date || new Date(r.start_date).getTime() >= today) binnenkort++;
       }
       if (!r.cancelled && st === 'aangemeld' && r.start_date && new Date(r.start_date).getTime() < today) probleem++;
     }
-    return { binnenkort, probleem, alle: arr.length };
+    return { binnenkort, probleem, incasso, alle: arr.length };
   }
   function startTabs(counts) {
     const cur = F('onb-start', 'binnenkort');
     const items = [
       { k: 'binnenkort', l: 'Moeten nog starten', n: counts.binnenkort },
       { k: 'probleem',   l: 'Op te lossen',       n: counts.probleem, warn: true },
+      { k: 'incasso',    l: 'Incasso',            n: counts.incasso },
       { k: 'alle',       l: 'Alle',               n: counts.alle },
     ];
     return `<div class="kv-onb-tabline">
@@ -481,7 +485,9 @@
     nog_te_benaderen: ['neutral', 'Nog te benaderen'],
   };
   const statusPill = (s) => { const [c, l] = STATUS_PILL[s] || ['neutral', s || '—']; return H.pill(c, l); };
-  const statusPillVan = (r) => (r.afgesloten === true ? H.pill('ok', 'Onboarding afgerond') : statusPill(r.status));
+  const statusPillVan = (r) => (r.in_incasso === true
+    ? H.pill('danger', 'Incasso-opvolging')
+    : r.afgesloten === true ? H.pill('ok', 'Onboarding afgerond') : statusPill(r.status));
   // Prioriteit: derived intake_status (server) → raw mentor_intake_status →
   // default 'nog_te_benaderen' (nooit bare "—"). Zie v1 regel 1432 patroon.
   function intakePillOf(row) {

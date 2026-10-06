@@ -56,9 +56,11 @@ test('CONTRACT: de leesroute gebruikt DEZELFDE bouwer en afleiding als het CRM-s
   assert.match(lees('api/onboarding-intake-status.js'), /intakeItemsVoor\(/);
 });
 
-test('DE SCHRIJFACTIES: vijf op onboarding-id, en GEEN annuleren of archiveren', async () => {
-  // handmatig_afronden kwam erbij op 6 oktober 2026 (Maxim).
-  assert.deepEqual([...ONBOARDING_ACTIES].sort(), ['handmatig_afronden', 'mentor_toewijzen', 'notitie', 'startdatum', 'startstatus']);
+test('DE SCHRIJFACTIES: zeven op onboarding-id, en GEEN annuleren of archiveren', async () => {
+  // handmatig_afronden, naar_incasso en terug_activeren kwamen erbij op
+  // 6 oktober 2026 (Maxim). Naar incasso is uitdrukkelijk NIET annuleren.
+  assert.deepEqual([...ONBOARDING_ACTIES].sort(),
+    ['handmatig_afronden', 'mentor_toewijzen', 'naar_incasso', 'notitie', 'startdatum', 'startstatus', 'terug_activeren']);
   const oud = { ...process.env };
   try {
     process.env.DFO_LMS_PUSH_SECRET = 'geheim';
