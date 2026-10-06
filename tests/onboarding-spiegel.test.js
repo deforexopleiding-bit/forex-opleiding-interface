@@ -87,7 +87,9 @@ test('CONTRACT: alle elf schrijfpunten spiegelen via de helper', () => {
     'api/mentor-future-student-update.js',
     'api/onboarding-step-save.js',
     'api/onboarding-complete.js',
-    'api/onboarding-cancel.js',
+    // De annulering: sinds 6-10-2026 in één lib, gedeeld door de CRM-knop
+    // (api/onboarding-cancel.js) en de LMS-knop (api/lms-onboarding-annuleren.js).
+    'api/_lib/onboarding-annuleren.js',
     // Het eerste moment waarop dfo_lms_student_id bestaat — zonder deze twee
     // verschijnt een net aangemaakte student pas de volgende ochtend.
     'api/onboarding-create.js',

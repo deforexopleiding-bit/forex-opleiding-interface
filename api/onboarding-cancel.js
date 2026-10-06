@@ -16,6 +16,10 @@
 //       e) onboardings.status = 'geannuleerd'
 //       f) insert onboarding_cancellations (snapshot subscription_value + steps jsonb)
 //       g) mentor_notification (kind:'cancelled') — fail-soft
+//       h) lopende onboarding-automaties stoppen (sinds 6 okt 2026)
+//       i) LMS-toegang dicht: hlms_student.eind_datum op gisteren (sinds 6 okt 2026)
+//     De uitvoering staat in api/_lib/onboarding-annuleren.js, gedeeld met de
+//     knop in het LMS (api/lms-onboarding-annuleren.js).
 //     Elke stap zit in try/catch; één falende stap stopt de cascade NIET. Alle
 //     resultaten landen in `steps` zodat de UI kan tonen wat wel/niet lukte.
 //
@@ -25,25 +29,11 @@
 // { already_cancelled:true } ZONDER opnieuw TL/Bubble/DB te raken. Voorkomt
 // dubbele credits, dubbele Bubble-patches en spook-cancellation-records.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
-import { bubblePatch } from './_lib/bubble.js';
-import { createNotification } from './_lib/notify.js';
-import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { gatherContext, voerAnnuleringUit } from './_lib/onboarding-annuleren.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function tlCall(path, body, attempt = 0) {
-  await sleep(150);
-  const r = await tlFetch(path, { method: 'POST', body: JSON.stringify(body) });
-  if (r.status === 429 && attempt < 3) {
-    await sleep(2000 * Math.pow(2, attempt));
-    return tlCall(path, body, attempt + 1);
-  }
-  return r;
-}
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
@@ -54,95 +44,6 @@ function inclPerTerm(sub) {
       sum + (Number(li.amount) || 0) * (1 + (Number(li.vat_percentage) || 0) / 100), 0);
   }
   return (Number(sub.amount) || 0) * (1 + (Number(sub.vat_percentage) || 0) / 100);
-}
-
-function yesterdayIsoUtc() {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
-}
-
-// Welke facturen crediteren we?
-//   - status NIET 'concept'  (creditten kan niet, finance-invoice-credit weigert 409)
-//   - status NIET 'paid'     (al volledig betaald — crediteren = onnodige boekhoud-actie)
-//   - credited_amount < amount_total (niet al volledig gecrediteerd; voorkomt dubbele credits ook
-//     wanneer de orchestrator twee keer ongelukkig aangeroepen wordt op een rij die net door een
-//     andere admin handmatig is gecrediteerd)
-function shouldCreditInvoice(inv) {
-  const status = String(inv?.status || '').toLowerCase();
-  if (!status) return false;
-  if (status === 'concept' || status === 'paid') return false;
-  const total    = Number(inv?.amount_total)    || 0;
-  const credited = Number(inv?.credited_amount) || 0;
-  if (total <= 0) return false;
-  if (credited + 0.01 >= total) return false; // 1ct tolerantie (consistent met arrangements-propose)
-  return true;
-}
-
-async function gatherContext(onboardingId) {
-  // 1) onboarding zelf
-  const { data: ob, error: obErr } = await supabaseAdmin
-    .from('onboardings')
-    .select('id, customer_id, customer_name, mentor_user_id, bubble_user_id, status')
-    .eq('id', onboardingId)
-    .maybeSingle();
-  if (obErr) throw new Error('onboarding fetch: ' + obErr.message);
-  if (!ob) return { ob: null };
-  const customerId = ob.customer_id || null;
-
-  // 2) facturen — alle van deze klant, te crediteren = subset.
-  let invoices = [];
-  if (customerId) {
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .select('id, tl_invoice_id, invoice_number, amount_total, credited_amount, status')
-      .eq('customer_id', customerId)
-      .limit(500);
-    if (error) throw new Error('invoices fetch: ' + error.message);
-    invoices = (data || []).filter(shouldCreditInvoice);
-  }
-
-  // 3) abonnementen — actief (status != 'cancelled').
-  let subscriptions = [];
-  if (customerId) {
-    // Subscriptions koppelen via deal → customer. Variant op sales-subscriptions-list.
-    const { data: deals } = await supabaseAdmin
-      .from('deals')
-      .select('id')
-      .eq('customer_id', customerId)
-      .limit(200);
-    const dealIds = (deals || []).map((d) => d.id);
-    if (dealIds.length > 0) {
-      const { data: subs, error: subErr } = await supabaseAdmin
-        .from('subscriptions')
-        .select('id, deal_id, description, amount, vat_percentage, term_count, status, teamleader_subscription_id, line_items')
-        .in('deal_id', dealIds)
-        .neq('status', 'cancelled')
-        .limit(200);
-      if (subErr) throw new Error('subscriptions fetch: ' + subErr.message);
-      subscriptions = subs || [];
-    }
-  }
-
-  // 4) offertes/deals — niet al-gearchiveerde.
-  let deals = [];
-  if (customerId) {
-    const { data, error } = await supabaseAdmin
-      .from('deals')
-      .select('id, tl_deal_id, tl_quotation_id, quote_reference, archived_at')
-      .eq('customer_id', customerId)
-      .is('archived_at', null)
-      .limit(200);
-    if (error) throw new Error('deals fetch: ' + error.message);
-    deals = data || [];
-  }
-
-  const subscription_value = r2(
-    subscriptions.reduce((sum, s) => sum + inclPerTerm(s), 0),
-  );
-
-  return { ob, invoices, subscriptions, deals, subscription_value };
 }
 
 export default async function handler(req, res) {
@@ -218,234 +119,17 @@ export default async function handler(req, res) {
     }
 
     // ── EXECUTE ────────────────────────────────────────────────────────────
-    // KRITIEKE GUARD: al gecanceld → niets doen. Voorkomt dubbele credits /
-    // Bubble-patches / cancellation-records bij retries of dubbel-klikken.
-    if (alreadyCancelled) {
-      return res.status(200).json({
-        ok:                true,
-        already_cancelled: true,
-      });
-    }
-
-    const reasonRaw = typeof body.reason === 'string' ? body.reason.trim() : '';
-    if (!reasonRaw) return res.status(400).json({ error: 'reason is verplicht bij execute.' });
-    const reason = reasonRaw.slice(0, 2000);
-
-    const steps = {
-      invoices_credit:        { ok: false, results: [] },
-      subscriptions_deactivate: { ok: false, results: [] },
-      offertes_cancel:        { ok: false, results: [] },
-      bubble_membership_end:  { ok: false },
-      onboarding_status:      { ok: false },
-      cancellation_record:    { ok: false },
-      notify_mentor:          { ok: false },
-    };
-
-    // a) Facturen crediteren — per factuur try/catch, falende factuur stopt
-    //    de loop NIET (anderen worden alsnog gecrediteerd).
-    {
-      const out = [];
-      let allOk = true;
-      for (const inv of ctx.invoices) {
-        const rec = { invoice_id: inv.id, invoice_number: inv.invoice_number, tl_invoice_id: inv.tl_invoice_id || null };
-        try {
-          if (!inv.tl_invoice_id) { rec.ok = false; rec.error = 'geen TL-id'; allOk = false; out.push(rec); continue; }
-          const r = await tlCall('/invoices.credit', { id: inv.tl_invoice_id, description: 'Onboarding annulering' });
-          if (!r.ok) {
-            const txt = await r.text().catch(() => '');
-            rec.ok = false;
-            rec.error = `TL HTTP ${r.status}: ${(txt || '').slice(0, 200)}`;
-            allOk = false;
-          } else {
-            let creditId = null;
-            try { creditId = (await r.json())?.data?.id || null; } catch {}
-            rec.ok = true;
-            rec.tl_credit_note_id = creditId;
-          }
-        } catch (e) {
-          rec.ok = false;
-          rec.error = e?.message || String(e);
-          allOk = false;
-        }
-        out.push(rec);
-      }
-      steps.invoices_credit = { ok: allOk, results: out };
-    }
-
-    // b) Abonnement(en) deactiveren — TL + lokaal status='cancelled'.
-    {
-      const out = [];
-      let allOk = true;
-      for (const sub of ctx.subscriptions) {
-        const rec = { subscription_id: sub.id, teamleader_subscription_id: sub.teamleader_subscription_id || null };
-        try {
-          if (sub.teamleader_subscription_id) {
-            const r = await tlCall('/subscriptions.deactivate', { id: sub.teamleader_subscription_id });
-            if (!r.ok) {
-              const txt = await r.text().catch(() => '');
-              rec.tl_ok = false;
-              rec.tl_error = `HTTP ${r.status}: ${(txt || '').slice(0, 200)}`;
-              // Geen TL-deactivatie maar wel doorgaan met lokaal stopzetten
-              // (consistent met sales-subscription-delete force-pad).
-            } else {
-              rec.tl_ok = true;
-            }
-          } else {
-            rec.tl_skipped = true;
-          }
-          const { error: upErr } = await supabaseAdmin
-            .from('subscriptions')
-            .update({ status: 'cancelled' })
-            .eq('id', sub.id);
-          if (upErr) { rec.local_ok = false; rec.local_error = upErr.message; allOk = false; }
-          else       { rec.local_ok = true;  rec.ok = true; }
-          if (rec.tl_ok === false) allOk = false;
-        } catch (e) {
-          rec.ok = false; rec.error = e?.message || String(e); allOk = false;
-        }
-        out.push(rec);
-      }
-      steps.subscriptions_deactivate = { ok: allOk, results: out };
-    }
-
-    // c) Offertes/deals annuleren — TL best-effort + lokaal archived_at.
-    {
-      const out = [];
-      let allOk = true;
-      const tlTok = await getActiveToken().catch(() => null);
-      for (const deal of ctx.deals) {
-        const rec = { deal_id: deal.id, tl_deal_id: deal.tl_deal_id || null, tl_quotation_id: deal.tl_quotation_id || null };
-        try {
-          if (tlTok && deal.tl_quotation_id) {
-            try {
-              const r = await tlCall('/quotations.delete', { id: deal.tl_quotation_id });
-              rec.tl_quotation_ok = r.ok;
-              if (!r.ok) rec.tl_quotation_error = `HTTP ${r.status}`;
-            } catch (e) { rec.tl_quotation_ok = false; rec.tl_quotation_error = e?.message || String(e); }
-          }
-          if (tlTok && deal.tl_deal_id) {
-            try {
-              const r = await tlCall('/deals.lose', { id: deal.tl_deal_id });
-              rec.tl_deal_ok = r.ok;
-              if (!r.ok) rec.tl_deal_error = `HTTP ${r.status}`;
-            } catch (e) { rec.tl_deal_ok = false; rec.tl_deal_error = e?.message || String(e); }
-          }
-          const nowIso = new Date().toISOString();
-          const { error: upErr } = await supabaseAdmin
-            .from('deals')
-            .update({ archived_at: nowIso, tl_quotation_declined_at: nowIso })
-            .eq('id', deal.id);
-          if (upErr) { rec.local_ok = false; rec.local_error = upErr.message; allOk = false; }
-          else       { rec.local_ok = true;  rec.ok = true; }
-        } catch (e) {
-          rec.ok = false; rec.error = e?.message || String(e); allOk = false;
-        }
-        out.push(rec);
-      }
-      steps.offertes_cancel = { ok: allOk, results: out };
-    }
-
-    // d) Bubble: einddatum gisteren + login uit. Fail-soft.
-    if (ctx.ob.bubble_user_id) {
-      try {
-        const endIso = yesterdayIsoUtc();
-        await bubblePatch('user', ctx.ob.bubble_user_id, {
-          membership_end_date_date: endIso,
-          login_student_boolean:    false,
-        });
-        steps.bubble_membership_end = { ok: true, end_date: endIso };
-      } catch (e) {
-        steps.bubble_membership_end = { ok: false, error: e?.message || String(e) };
-      }
-    } else {
-      steps.bubble_membership_end = { ok: true, skipped: true, reason: 'geen-bubble-user-id' };
-    }
-
-    // e) onboardings.status='geannuleerd'.
-    try {
-      const { error: upErr } = await supabaseAdmin
-        .from('onboardings')
-        .update({ status: 'geannuleerd' })
-        .eq('id', onboardingId);
-      if (upErr) throw new Error(upErr.message);
-      steps.onboarding_status = { ok: true };
-    } catch (e) {
-      steps.onboarding_status = { ok: false, error: e?.message || String(e) };
-    }
-
-    // f) Cancellation-record met snapshot. KRITIEK voor audit + omzet-impact.
-    let cancellationId = null;
-    try {
-      const { data: rec, error: insErr } = await supabaseAdmin
-        .from('onboarding_cancellations')
-        .insert({
-          onboarding_id:      onboardingId,
-          customer_id:        ctx.ob.customer_id || null,
-          customer_name:      ctx.ob.customer_name || null,
-          cancelled_by:       user.id,
-          reason,
-          subscription_value: ctx.subscription_value,
-          steps,
-        })
-        .select('id')
-        .single();
-      if (insErr) throw new Error(insErr.message);
-      cancellationId = rec?.id || null;
-      steps.cancellation_record = { ok: true, id: cancellationId };
-    } catch (e) {
-      steps.cancellation_record = { ok: false, error: e?.message || String(e) };
-    }
-
-    // g) Mentor- + management-melding via unified notifications-systeem
-    // (fail-soft). Alleen bij een geslaagde EXECUTE — de guard hierboven
-    // return't al voor already_cancelled/preview, dus we komen hier
-    // uitsluitend na een afgeronde annulering-cascade. Twee gescheiden
-    // fan-outs (mentor + management) omdat mentor mogelijk NIET in role=
-    // 'manager' zit.
-    if (ctx.ob.mentor_user_id) {
-      steps.notify_mentor = { ok: true };
-    } else {
-      steps.notify_mentor = { ok: true, skipped: true, reason: 'geen-mentor' };
-    }
-
-    const custNameCancel = ctx.ob.customer_name || 'De student';
-    if (ctx.ob.mentor_user_id) {
-      createNotification({
-        toUserId:   ctx.ob.mentor_user_id,
-        type:       'onboarding.cancelled',
-        title:      'Student geannuleerd' + (ctx.ob.customer_name ? (' · ' + ctx.ob.customer_name) : ''),
-        body:       custNameCancel,
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   onboardingId,
-        createdBy:  user.id,
-      }).catch(() => {});
-    }
-    createNotification({
-      toRole:     ['manager', 'super_admin'],
-      type:       'onboarding.cancelled',
-      title:      'Student geannuleerd' + (ctx.ob.customer_name ? (' · ' + ctx.ob.customer_name) : ''),
-      body:       custNameCancel,
-      linkUrl:    '/modules/onboarding-hub.html',
-      entityType: 'onboarding',
-      entityId:   onboardingId,
-      createdBy:  user.id,
-    }).catch(() => {});
-
-    // Spiegel naar het LMS. Bij een annulering is dit een VERWIJDERING:
-    // spiegelOnboarding() ziet dat de onboarding niet meer zichtbaar hoort
-    // te zijn en haalt de rij weg. Daarmee verdwijnt de student overal in
-    // het LMS — bij de mentor en straks bij de hoofdmentor. Mislukt het,
-    // dan haalt de hersync van morgen 'm alsnog weg: de verwachte
-    // verzameling daar sluit geannuleerde onboardings per definitie uit.
-    await spiegelNaActie(ctx.ob.id, 'onboarding-cancel');
-
-    return res.status(200).json({
-      ok:              true,
-      cancellation_id: cancellationId,
-      subscription_value: ctx.subscription_value,
-      steps,
+    // De cascade staat sinds 6 oktober 2026 in api/_lib/onboarding-annuleren.js,
+    // gedeeld met de knop in het LMS. Zelfde stappen, plus: lopende
+    // automaties stoppen en de LMS-toegang dicht (Maxim).
+    const { status, body: uit } = await voerAnnuleringUit({
+      onboardingId,
+      reden: body.reason,
+      doorUserId: user.id,
+      doorLabel: String(user.email || user.id),
+      via: 'crm',
     });
+    return res.status(status).json(uit);
   } catch (e) {
     console.error('[onboarding-cancel]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
