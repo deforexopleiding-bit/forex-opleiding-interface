@@ -49,6 +49,7 @@ import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
 } from './onboarding-bedenktijd.js';
 import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
+import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
 
@@ -186,11 +187,14 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // geschreven is. Zo bestaat een halve rij niet.
     // Het traject wordt ÉÉN keer gelezen; zowel de waiver-sleutel als het
     // aantal stappen komen uit dezelfde structuur.
-    const [betaald, wizard, dealRow, mentor] = await Promise.all([
+    const [betaald, wizard, dealRow, mentor, tel] = await Promise.all([
       leesEersteFactuurBetaald(ob.customer_id),
       leesWizardStructuur(),
       leesOfferteDeal(ob.customer_id),
       leesLmsMentorId(ob.mentor_user_id),
+      // Het nummer is GEEN feit dat de rij mag tegenhouden: de afleiding
+      // gooit nooit (een bron die faalt valt weg), en leeg is een uitkomst.
+      telefoonVoorOnboarding(supabaseAdmin, ob),
     ]);
     const structure = wizard.structure;
 
@@ -231,12 +235,12 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // onzichtbaar — maar met de waarheid erbij dat de bron haperde.
       bron_status            : wizard.fout ? BRON_ONBEREIKBAAR : BRON_GELEZEN,
       bron_fout              : wizard.fout,
+      // Het telefoonnummer (6 okt 2026) — zie onboarding-telefoon.js.
+      telefoon               : tel.telefoon,
     };
 
-    const { error: upErr } = await lms
-      .from(SPIEGEL_TABEL)
-      .upsert(rij, { onConflict: 'crm_onboarding_id' });
-    if (upErr) throw new Error('spiegel schrijven: ' + upErr.message);
+    await schrijfSpiegelRij(lms, rij);
+    await vulStudentTelefoonAan(lms, ob.dfo_lms_student_id, tel.telefoon);
 
     // DE FACTUURSTAND MEE, meteen. Een student in onboarding staat in het LMS
     // bovenaan bij zijn mentor ("Klaar voor onboarding"), en de factuurchip op
@@ -253,7 +257,7 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // geschreven, maar of daar een mentor in staat en waarom niet is een
     // aparte vraag die de aanroeper moet kunnen beantwoorden.
     return { resultaat: SPIEGEL_GESCHREVEN, bron_status: BRON_GELEZEN, fout: null,
-      rij, mentor };
+      rij, mentor, telefoon: tel };
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('[onboarding-spiegel] ' + id + ': ' + msg);
@@ -262,6 +266,54 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // blijft staan met zijn oude bijgewerkt_op, en het scherm ziet aan die
     // tijdstempel dat de spiegel stilstaat.
     return { resultaat: SPIEGEL_MISLUKT, bron_status: BRON_ONBEREIKBAAR, fout: msg };
+  }
+}
+
+let _telefoonKolomOntbreektGemeld = false;
+
+/** Is dit de fout "kolom telefoon bestaat (nog) niet"? PURE. */
+export function isTelefoonKolomOntbreekt(err) {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || '');
+  return (code === 'PGRST204' || code === '42703') && /telefoon/.test(msg);
+}
+
+/**
+ * De rij wegschrijven. Bestaat `hlms_crm_onboarding.telefoon` nog niet (de
+ * migratie hlms_telefoon_en_intake_notitie.sql is nog niet gedraaid), dan
+ * opnieuw zonder dat veld: de spiegel mag niet stilvallen op een kolom die er
+ * pas morgen is.
+ */
+async function schrijfSpiegelRij(lms, rij) {
+  let { error } = await lms.from(SPIEGEL_TABEL).upsert(rij, { onConflict: 'crm_onboarding_id' });
+  if (error && isTelefoonKolomOntbreekt(error)) {
+    if (!_telefoonKolomOntbreektGemeld) {
+      console.warn('[onboarding-spiegel] kolom telefoon ontbreekt op ' + SPIEGEL_TABEL
+        + ' — draai hlms_telefoon_en_intake_notitie.sql; rij zonder telefoon geschreven.');
+      _telefoonKolomOntbreektGemeld = true;
+    }
+    const { telefoon: _weg, ...zonder } = rij;
+    ({ error } = await lms.from(SPIEGEL_TABEL).upsert(zonder, { onConflict: 'crm_onboarding_id' }));
+  }
+  if (error) throw new Error('spiegel schrijven: ' + error.message);
+}
+
+/**
+ * hlms_student.telefoon AANVULLEN — alleen als hij leeg is, nooit
+ * overschrijven: een nummer dat iemand in het LMS rechtzette, wint. De
+ * voorwaarde staat in de update zelf, dus er is geen moment waarop een
+ * gevuld nummer overschreven kan worden. Faalzacht: de spiegelrij staat er al.
+ */
+async function vulStudentTelefoonAan(lms, studentId, telefoon) {
+  if (!studentId || !telefoon) return;
+  try {
+    const { error } = await lms.from('hlms_student')
+      .update({ telefoon })
+      .eq('id', studentId)
+      .or('telefoon.is.null,telefoon.eq.');
+    if (error) console.warn('[onboarding-spiegel] telefoon student aanvullen: ' + error.message);
+  } catch (e) {
+    console.warn('[onboarding-spiegel] telefoon student aanvullen: ' + (e?.message || e));
   }
 }
 
@@ -380,6 +432,38 @@ async function leesLmsMentorId(mentorUserId) {
     return { id: null, reden: uitkomst?.reden || 'mentor-niet-te-vertalen' };
   }
   return { id: uitkomst.id, reden: null };
+}
+
+/**
+ * WAT DE INTAKE-POT VAN DEZE ONBOARDING MOET WETEN (6 okt 2026, Maxim):
+ * de vaste mentor (in LMS-termen) en de bedenktijd — met dezelfde lezers en
+ * dezelfde rekenregel als de spiegelrij hierboven, zodat de pot en "Klaar voor
+ * onboarding" nooit iets anders zeggen. Faalzacht per onderdeel: een bron die
+ * hapert geeft `undefined` (= niet bijwerken), nooit een verzonnen leegte.
+ */
+export async function intakeExtras(ob, nu) {
+  const uit = {};
+  try {
+    const m = await leesLmsMentorId(ob.mentor_user_id);
+    // Alleen een UITSPRAAK schrijven: geen mentor in het CRM = null; een
+    // mentor die niet te vertalen is, laat het veld met rust.
+    if (m.id || m.reden === MENTOR_GEEN_IN_CRM) uit.mentor_id = m.id || null;
+  } catch (e) {
+    console.warn('[intake-extras] mentor: ' + (e?.message || e));
+  }
+  try {
+    const [wizard, dealRow] = await Promise.all([leesWizardStructuur(), leesOfferteDeal(ob.customer_id)]);
+    if (!wizard.fout) {
+      const waiver = leesWaiver(ob.answers, findWaiverConsentKey(wizard.structure));
+      const b = computeBedenktijd(waiver, leesOfferteMoment(dealRow), nu);
+      uit.bedenktijd_status = b.status;
+      uit.bedenktijd_vervalt_op = b.vervalt_op;
+      uit.bedenktijd_reden = b.reason;
+    }
+  } catch (e) {
+    console.warn('[intake-extras] bedenktijd: ' + (e?.message || e));
+  }
+  return uit;
 }
 
 /**

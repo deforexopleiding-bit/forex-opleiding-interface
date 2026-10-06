@@ -78,3 +78,11 @@ test('de uitbetaling krijgt een eigen regel "Intakes: n × 0,25"', () => {
   const render = readFileSync(new URL('../modules/shared/mentor-payout-render.js', import.meta.url), 'utf8');
   assert.match(render, /case 'coaching_intake'/);
 });
+
+test('TWEE STAPPEN (6 okt 2026): klaar = ter goedkeuring, pas goedgekeurd = afgerond; zonder kolom zoals vroeger', () => {
+  const NU2 = Date.parse('2026-10-06T12:00:00Z');
+  const basis = { crm_onboarding_id: 'o', aangemeld_op: '2026-10-05T10:00:00Z', crm_stand: 'open', afgerond_door: 'm', afgerond_op: '2026-10-06T09:00:00Z' };
+  assert.equal(intakeGesprekStand({ ...basis, goedgekeurd_op: null }, new Map(), NU2).stand, 'ter_goedkeuring');
+  assert.equal(intakeGesprekStand({ ...basis, goedgekeurd_op: '2026-10-06T10:00:00Z' }, new Map(), NU2).stand, 'afgerond');
+  assert.equal(intakeGesprekStand(basis, new Map(), NU2).stand, 'afgerond', 'migratie nog niet gedraaid');
+});

@@ -147,7 +147,10 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // schrijven naar één LMS-tabel, niets dat verstuurt.
   // 16 → 17 (6 oktober 2026): onboarding-einde.js — de pure regel "wanneer
   // is een onboarding écht afgelopen". Geen import, geen I/O.
-  assert.ok(AFSLUITING.size <= 17,
+  // 17 → 19 (6 oktober 2026, Maxim): het telefoonnummer uit één afleiding
+  // (onboarding-telefoon.js) met de bestaande NL/BE-normalisatie
+  // (phone-e164.js). Alleen lezen en rekenen.
+  assert.ok(AFSLUITING.size <= 19,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

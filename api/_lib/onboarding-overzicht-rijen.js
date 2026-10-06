@@ -13,6 +13,7 @@
 // 500 van. Faalzachte bronnen (wizard, deals, factuurstand) blijven faalzacht.
 
 import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp } from './onboarding-einde.js';
+import { telefoonsVoorOnboardings } from './onboarding-telefoon.js';
 import { supabaseAdmin } from '../supabase.js';
 import { deriveIntakeStatus, intakeStatusRank } from './intake-status.js';
 import { computeBedenktijd, findWaiverConsentKey } from './onboarding-bedenktijd.js';
@@ -90,6 +91,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       wizardMeta,
       dealByCust,
       factuurByCust,
+      telefoonByOb,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -208,6 +210,9 @@ export async function bouwOverzichtRijen(opts = {}) {
           return null;
         }
       })(),
+      // ── 8) Het telefoonnummer (6 okt 2026): één afleiding, fail-soft per
+      //    bron — een ontbrekend nummer houdt het overzicht niet tegen.
+      telefoonsVoorOnboardings(supabaseAdmin, list),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -309,6 +314,11 @@ export async function bouwOverzichtRijen(opts = {}) {
         afgesloten_op:        afgeslotenOp(r),
         afgesloten_sessie_op: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_op || null) : null,
         afgesloten_sessie_titel: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_titel || null) : null,
+        // Het nummer (6 okt 2026) — `telefoon_zeker` = met landcode, dus
+        // ook een WhatsApp-link; `telefoon_bron` voor wie wil nagaan waarvandaan.
+        telefoon:             telefoonByOb.get(r.id)?.telefoon || null,
+        telefoon_zeker:       telefoonByOb.get(r.id)?.zeker === true,
+        telefoon_bron:        telefoonByOb.get(r.id)?.bron || null,
         assigned_at:          r.assigned_at,
         archived_at:          r.archived_at,
         token:                r.token,
