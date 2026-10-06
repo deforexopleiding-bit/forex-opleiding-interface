@@ -20,7 +20,7 @@
 //
 // CONFIGURATIE:
 //   PUBLIC_BASE_URL                          (env, fallback vercel.app)
-//   EVENTS_QUESTIONNAIRE_TEMPLATE_NAME       (env, fallback 'vragenlijst_herinnering')
+//   EVENTS_QUESTIONNAIRE_TEMPLATE_NAME       (env, fallback 'vragenlijst_herinnering_correct')
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventMail, wrapEmailHtml } from '../mailer.js';
@@ -28,7 +28,10 @@ import { sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl';
-const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering_v3';
+// 2026-10-06: default 'vragenlijst_herinnering_correct' (was '_v3', die bestaat
+// niet op de 360dialog-WABA → de handmatige uitnodiging faalde). Zelfde template
+// als de on_signup-automation; variabelen komen uit z'n meta_param_mapping.
+const TEMPLATE_NAME   = process.env.EVENTS_QUESTIONNAIRE_TEMPLATE_NAME || 'vragenlijst_herinnering_correct';
 const TEMPLATE_LANG   = 'nl';
 
 function escHtml(s) {

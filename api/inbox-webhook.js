@@ -38,6 +38,7 @@ import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 import { markeerAfspraakBevestigd } from './_lib/afspraak-bevestig.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
+import { vindOfHechtGesprek } from './_lib/wa-gesprek-lijn.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
@@ -165,14 +166,19 @@ async function upsertConversation(req, { phoneE164Plus, displayName, inboundTime
   let existing = null;
   let selErr   = null;
   if (phoneNumberId) {
-    const r = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .select('id, customer_id, unread_count, phone_number_id, status')
-      .eq('phone_number',    phoneE164Plus)
-      .eq('phone_number_id', phoneNumberId)
-      .maybeSingle();
-    existing = r.data || null;
-    selErr   = r.error || null;
+    // 2026-10-06: via vindOfHechtGesprek — staat het gesprek van deze lead nog
+    // op een vervangen lijn (oud nummer), dan wordt het aan deze lijn gehecht
+    // i.p.v. dat er een tweede gesprek naast komt (gesplitste inbox).
+    try {
+      const r = await vindOfHechtGesprek(supabaseAdmin, {
+        phoneE164Plus, phoneNumberId,
+        select: 'id, customer_id, unread_count, phone_number_id, status',
+      });
+      existing = r.conv;
+      if (r.gehecht) console.log('[inbox-webhook] gesprek gehecht aan huidige lijn', existing?.id, r.lijnId);
+    } catch (e) {
+      selErr = e;
+    }
   } else {
     console.warn(
       '[inbox-webhook] upsertConversation: geen pnId, phone-only fallback voor ' +

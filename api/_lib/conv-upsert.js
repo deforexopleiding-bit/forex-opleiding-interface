@@ -27,6 +27,7 @@
 //   - customerId: customer_id van de conv (kan null)
 
 import { supabaseAdmin } from '../supabase.js';
+import { vindOfHechtGesprek } from './wa-gesprek-lijn.js';
 
 /**
  * Upsert whatsapp_conversations voor outbound aanmaak/lookup.
@@ -48,16 +49,15 @@ export async function upsertOutboundConversation({
   if (!phoneE164Plus) throw new Error('upsertOutboundConversation: phoneE164Plus vereist');
   if (!phoneNumberId) throw new Error('upsertOutboundConversation: phoneNumberId vereist');
 
-  // 1. Tuple-SELECT op (phone_number, phone_number_id).
-  const { data: existing, error: selErr } = await supabaseAdmin
-    .from('whatsapp_conversations')
-    .select('id, customer_id, phone_number_id')
-    .eq('phone_number',    phoneE164Plus)
-    .eq('phone_number_id', phoneNumberId)
-    .maybeSingle();
-  if (selErr) {
-    throw new Error('conv select: ' + selErr.message);
-  }
+  // 1. Tuple-SELECT op (phone_number, huidige lijn). Sinds 2026-10-06 via
+  //    vindOfHechtGesprek: een gesprek op een VERVANGEN lijn (oud nummer) wordt
+  //    aan de huidige lijn gehecht i.p.v. dat er een tweede gesprek bij komt.
+  //    De INSERT hieronder gebruikt de huidige lijn-ID (lijnId).
+  const gevonden = await vindOfHechtGesprek(supabaseAdmin, {
+    phoneE164Plus, phoneNumberId, select: 'id, customer_id, phone_number_id',
+  });
+  const existing = gevonden.conv;
+  phoneNumberId = gevonden.lijnId;
 
   if (existing) {
     return {

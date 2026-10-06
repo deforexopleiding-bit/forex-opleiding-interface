@@ -40,6 +40,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   D360_BASE_URL, actieveNummers, apiKeyVan, phoneNumberIdUitEnv, nummerVoorModule,
   standaardNummer, moduleMagViaNummer, templateNaamVoor, nummerStatus, NOOIT_VIA_WILDCARD,
+  nummerVoorVervangenLijn,
 } from './wa-nummers.js';
 
 const META_API_VERSION = 'v20.0';
@@ -204,10 +205,16 @@ export async function d360PhoneNumberId(nummer) {
   return pnId;
 }
 
-/** Is deze phone_number_id een van onze 360dialog-nummers? → het nummer, anders null. */
+/**
+ * Is deze phone_number_id een van onze 360dialog-nummers? → het nummer, anders null.
+ * Ook een VERVANGEN (oude) lijn-ID telt: een send uit een gesprek dat nog op
+ * een opgeheven lead-lijn staat, gaat via de opvolger (vervangt_phone_number_ids).
+ */
 export async function d360NummerVoorPhoneNumberId(pnId) {
   if (!pnId) return null;
   const p = String(pnId).trim();
+  const opvolger = nummerVoorVervangenLijn(p);
+  if (opvolger && opvolger.provider === '360dialog') return opvolger;
   for (const n of actieveNummers()) {
     if (n.provider !== '360dialog') continue;
     if (phoneNumberIdUitEnv(n) === p) return n;
@@ -217,6 +224,30 @@ export async function d360NummerVoorPhoneNumberId(pnId) {
     if ((await d360PhoneNumberId(n)) === p) return n;
   }
   return null;
+}
+
+/**
+ * De HUIDIGE lijn-ID voor een (mogelijk oude) lijn-ID: een vervangen lijn →
+ * het phone_number_id van de opvolger; anders ongewijzigd. Lukt het opvragen
+ * van de opvolger-ID niet, dan ook ongewijzigd (fail-soft).
+ */
+export async function huidigeLijnId(pnId) {
+  if (!pnId) return pnId;
+  const opvolger = nummerVoorVervangenLijn(pnId);
+  if (!opvolger) return String(pnId);
+  return (await d360PhoneNumberId(opvolger)) || String(pnId);
+}
+
+/**
+ * Alle lijn-ID's die bij dezelfde lijn horen: [huidig, ...vervangen]. Voor een
+ * lijn die nergens in de registry staat: alleen zichzelf.
+ */
+export async function lijnFamilie(pnId) {
+  if (!pnId) return { huidig: pnId, alle: pnId ? [String(pnId)] : [] };
+  const huidig = await huidigeLijnId(pnId);
+  const nummer = nummerVoorVervangenLijn(pnId) || (await d360NummerVoorPhoneNumberId(huidig));
+  const oud = nummer ? [...(nummer.vervangt_phone_number_ids || [])] : [];
+  return { huidig, alle: [...new Set([huidig, ...oud])] };
 }
 
 /**

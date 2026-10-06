@@ -27,6 +27,8 @@
 // ALLE stappen fail-soft: elke fout → console.warn, GEEN throw. De caller
 // verstuurt WA/mail sowieso al; log-fout mag de send-flow niet breken.
 
+import { vindOfHechtGesprek } from './wa-gesprek-lijn.js';
+
 /**
  * @param {object} supabaseAdmin  service-role client
  * @param {object} args
@@ -83,32 +85,32 @@ export async function logOutboundWa(supabaseAdmin, {
   const fullBody = (renderedBody || '').slice(0, 1000);
 
   // ── 1) Conv opzoeken (lijn-specifiek) ─────────────────────────────────
+  // 2026-10-06: gelogd op de lijn waarover écht verstuurd is. Vroeger viel een
+  // gemiste match terug op ELK gesprek van dit nummer (ongeacht lijn) — na de
+  // nummerwissel kwamen nieuwe berichten zo in het oude gesprek met het oude
+  // lijn-ID, en ging een inbox-antwoord via de geblokkeerde oude lijn.
+  // Nu: (telefoon, huidige lijn) → anders een gesprek op een VERVANGEN lijn
+  // hechten (vindOfHechtGesprek) → anders alleen een echte legacy-rij zónder
+  // lijn-ID → anders een nieuw gesprek op de huidige lijn.
   let convId = null;
+  let lijnId = String(phoneNumberId);
   try {
-    const { data: existing } = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .select('id, phone_number_id')
-      .eq('phone_number', phoneE164Plus)
-      .eq('phone_number_id', String(phoneNumberId))
-      .maybeSingle();
-    if (existing?.id) {
-      convId = existing.id;
+    const gevonden = await vindOfHechtGesprek(supabaseAdmin, { phoneE164Plus, phoneNumberId });
+    lijnId = gevonden.lijnId;
+    if (gevonden.conv?.id) {
+      convId = gevonden.conv.id;
     } else {
-      // Fallback: één-per-nummer UNIQUE index betekent dat er ook een rij
-      // zonder pnId kan bestaan (legacy). Try zonder pnId — als match:
-      // heal 'em met de pnId zodra we outbound naar die lijn sturen.
       const { data: legacy } = await supabaseAdmin
         .from('whatsapp_conversations')
-        .select('id, phone_number_id')
+        .select('id')
         .eq('phone_number', phoneE164Plus)
-        .maybeSingle();
-      if (legacy?.id) {
-        convId = legacy.id;
-        if (!legacy.phone_number_id) {
-          await supabaseAdmin.from('whatsapp_conversations')
-            .update({ phone_number_id: String(phoneNumberId) })
-            .eq('id', convId);
-        }
+        .is('phone_number_id', null)
+        .limit(1);
+      if (legacy && legacy[0]?.id) {
+        convId = legacy[0].id;
+        await supabaseAdmin.from('whatsapp_conversations')
+          .update({ phone_number_id: lijnId })
+          .eq('id', convId);
       }
     }
   } catch (e) {
@@ -122,7 +124,7 @@ export async function logOutboundWa(supabaseAdmin, {
         .from('whatsapp_conversations')
         .insert({
           phone_number:         phoneE164Plus,
-          phone_number_id:      String(phoneNumberId),
+          phone_number_id:      lijnId,
           status:               'open',
           last_message_at:      nowIso,
           last_message_preview: preview,
@@ -140,6 +142,7 @@ export async function logOutboundWa(supabaseAdmin, {
             .from('whatsapp_conversations')
             .select('id')
             .eq('phone_number', phoneE164Plus)
+            .eq('phone_number_id', lijnId)
             .maybeSingle();
           convId = raced?.id || null;
         } catch (_) {}

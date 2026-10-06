@@ -38,6 +38,7 @@ import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js'
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel } from './_lib/gesprekken-werkstand.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
+import { hechtAanHuidigeLijn } from './_lib/wa-gesprek-lijn.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -263,6 +264,12 @@ export default async function handler(req, res) {
     }
 
     const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
+    // 2026-10-06: verstuurd via de lijn waar dit gesprek NU bij hoort (de
+    // transport leidt een oud lijn-ID om naar de opvolger, wa-nummers.js).
+    // Hecht het gesprek daarom ook aan die lijn, zodat het antwoord van de
+    // lead in DIT gesprek terugkomt i.p.v. in een nieuw (gesplitst) gesprek.
+    // Fail-soft; geen effect op finance/onboarding-lijnen.
+    await hechtAanHuidigeLijn(supabaseAdmin, conv);
     const nowIso = new Date().toISOString();
 
     // Persist outbound message. Voor mediaKind: media_url = bucket-link,
