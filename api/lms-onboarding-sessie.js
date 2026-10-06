@@ -13,6 +13,7 @@
 //   POST { actie: 'startdatum',       onboarding_id, start_datum, door_email }
 //   POST { actie: 'startstatus',      onboarding_id, status | null, notitie?, door_email }
 //   POST { actie: 'notitie',          onboarding_id, tekst, door_email }
+//   POST { actie: 'handmatig_afronden', onboarding_id, reden, door_email }  (6 okt 2026)
 // Die lopen door DEZELFDE functies als de CRM-schermen
 // (api/_lib/onboarding-acties.js): dezelfde controles, dezelfde meldingen aan
 // mentoren, dezelfde spiegel. Annuleren en archiveren kunnen hier NIET — die
@@ -55,10 +56,11 @@ import {
 import {
   wijsMentorToe, zetStartdatumOnboarding, zetStartstatus, schrijfOnboardingNotitie,
 } from './_lib/onboarding-acties.js';
+import { rondOnboardingHandmatigAf } from './_lib/onboarding-handmatig.js';
 import { crmMentorVoorLmsId, crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
 
 /** De acties die op een onboarding-id werken (en niet op een student-id). */
-export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie']);
+export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie', 'handmatig_afronden']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -101,7 +103,7 @@ export default async function handler(req, res) {
   const onboardingId = String(body?.onboarding_id || '').trim();
   if (actie !== 'sessie_afgerond' && !ONBOARDING_ACTIES.has(actie)) {
     return antwoord(res, 400, false, 'ongeldige_actie',
-      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus of notitie.');
+      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie of handmatig_afronden.');
   }
   // DE ONBOARDING-ACTIES: op onboarding-id. `startdatum` met een student-id
   // blijft de oude weg (start later op, PR6).
@@ -288,6 +290,11 @@ async function onboardingActie(res, actie, onboardingId, body) {
         ? body.notitie.trim().slice(0, 2000) + ' — ' + viaLms
         : 'Startstatus gezet ' + viaLms;
       uitkomst = await zetStartstatus({ onboardingId, status, note: notitie, doorUserId });
+    } else if (actie === 'handmatig_afronden') {
+      const reden = typeof body?.reden === 'string' ? body.reden.trim().slice(0, 1000) : '';
+      uitkomst = await rondOnboardingHandmatigAf({
+        onboardingId, reden, door: (door?.full_name || doorEmail || 'onbekend') + ' ' + viaLms, doorUserId,
+      });
     } else {
       const tekst = typeof body?.tekst === 'string' ? body.tekst.trim() : '';
       if (!tekst) return antwoord(res, 400, false, 'ongeldig_verzoek', 'De notitie is leeg.');

@@ -22,6 +22,7 @@
 // er geen Bubble-id is.
 
 import { onboardingAfgesloten } from './onboarding-einde.js';
+import { vulHandmatigAan } from './onboarding-handmatig.js';
 
 /** Statussen die niet meer aangeraakt worden. */
 export const NIET_MEER_AANRAKEN = new Set(['gearchiveerd', 'geannuleerd']);
@@ -89,7 +90,7 @@ export async function vindOnboardingVoorStudent(db, { studentId, bubbleUserId })
       .limit(1)
       .maybeSingle();
     if (error) throw new Error('onboarding op student-id: ' + error.message);
-    if (data?.id) return { ob: data, via: 'student_id' };
+    if (data?.id) return { ob: await vulHandmatigAan(db, data), via: 'student_id' };
   }
   if (bubbleUserId) {
     const { data, error } = await db
@@ -100,7 +101,7 @@ export async function vindOnboardingVoorStudent(db, { studentId, bubbleUserId })
       .limit(1)
       .maybeSingle();
     if (error) throw new Error('onboarding op bubble-id: ' + error.message);
-    if (data?.id) return { ob: data, via: 'bubble' };
+    if (data?.id) return { ob: await vulHandmatigAan(db, data), via: 'bubble' };
   }
   return { ob: null, via: null };
 }

@@ -49,6 +49,7 @@ import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
 } from './onboarding-bedenktijd.js';
 import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
+import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
@@ -161,6 +162,8 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings').select(CRM_KOLOMMEN).eq('id', id).maybeSingle();
     if (obErr) throw new Error('onboarding lezen: ' + obErr.message);
+    // Met de hand afgerond (6 okt 2026): aparte, faalzachte lezing.
+    if (ob) await vulHandmatigAan(supabaseAdmin, ob);
 
     // DE INTAKE-POT (5 oktober 2026) — vóór de vroege uitgangen hieronder,
     // want een onboarding zonder LMS-student of een geannuleerde hoort daar
