@@ -467,7 +467,9 @@ test('__opvBoek kent nu drie bestemmingen', () => {
   assert.match(blok, /m\.soort === 'aanmeld-zoom'/);
   assert.match(blok, /uitgang: 'liever_zoom'/);
   assert.match(blok, /appointment_id: call\.appointment_id/, 'verzetten blijft');
-  assert.match(blok, /taak_id: m\.taakId, start: startIso \}\)/, 'de gewone weg blijft');
+  // `...extra` draagt alleen `handmatig: true` bij een zelf gekozen moment
+  // (zie tests/opvolging-eigen-moment.test.js); de gewone weg is dezelfde post.
+  assert.match(blok, /taak_id: m\.taakId, start: startIso(, \.\.\.extra)? \}\)/, 'de gewone weg blijft');
   assert.match(blok, /if \(_ui\.bezig\) return;/, 'dubbelklik-guard');
   assert.match(blok, /finally \{/);
 });

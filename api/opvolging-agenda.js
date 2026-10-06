@@ -6,8 +6,12 @@
 //        → { timezone, window, dagen:[{ dag, vrij:[{tijd}], bezet:[{tijd,naam,status}] }],
 //            agenda_beschikbaar, melding, achterstand?:[…] }
 //
+//   GET  /api/opvolging-agenda?eigen_dag=YYYY-MM-DD&eigen_tijd=HH:mm[&taak_id=…|&appointment_id=…]
+//        → { moment:{ iso, dag, tijd }, botsingen:[…], botsingen_melding }
+//        Controle vóór een HANDMATIG moment buiten de vrije slots van GHL.
+//
 //   POST /api/opvolging-agenda
-//        { taak_id, start } → boekt en zet de taak op 'ingepland'.
+//        { taak_id, start[, handmatig:true] } → boekt en zet de taak op 'ingepland'.
 //
 // TWEE BRONNEN
 //   · Vrij  — Dave's GHL-kalender (calendars/free-slots), dezelfde kalender en
@@ -44,6 +48,7 @@ import { bestemmingPerParent, vulVerzetBestemming } from './_lib/opvolging-dagbe
 import { dagEnTijd } from './_lib/opvolging-dagbeeld.js';
 import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
 import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
+import { leesEigenMoment, zoekBotsingen, BOTSING_MARGE_MIN } from './_lib/opvolging-eigen-moment.js';
 import fetch from 'node-fetch';
 
 const GHL_BASE    = 'https://services.leadconnectorhq.com';
@@ -152,6 +157,7 @@ export default async function handler(req, res) {
   const allowed = await requirePermission(req, 'opvolging.module.access');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten (opvolging.module.access)' });
 
+  if (req.method === 'GET' && (req.query || {}).eigen_dag != null) return await controleerEigenMoment(req, res);
   if (req.method === 'GET')  return await lees(req, res, supabase);
   if (req.method === 'POST') return await boek(req, res);
   res.setHeader('Allow', 'GET, POST');
@@ -647,6 +653,22 @@ async function boek(req, res) {
   const start = b.start ? new Date(b.start) : null;
   if (!start || isNaN(start.getTime())) return res.status(400).json({ error: 'start (ISO) ontbreekt of is ongeldig' });
 
+  // HANDMATIG — een moment dat Dave zelf koos, buiten de vrije slots van GHL.
+  // Er wordt nergens gecontroleerd of een start in de vrije slots zit (niet
+  // hier, niet in createAppointmentForLead); de vlag dient om het te kunnen
+  // onderscheiden in het rapport en in het log. Wel: niet in het verleden.
+  // Een vrij slot kan dat niet zijn, een zelf getikt moment wel.
+  const handmatig = b.handmatig === true;
+  if (handmatig && start.getTime() <= Date.now()) {
+    return res.status(400).json({ error: 'Dat moment ligt in het verleden.' });
+  }
+  if (handmatig) {
+    console.log('[opvolging-agenda] handmatig moment buiten de agenda:', {
+      start: start.toISOString(), taak_id: b.taak_id || null, appointment_id: b.appointment_id || null,
+      uitgang: b.uitgang || null,
+    });
+  }
+
   // TWEE INGANGEN, ÉÉN RECHT.
   //
   //   taak_id        — de werklijst: een kaart krijgt een afspraak.
@@ -657,14 +679,14 @@ async function boek(req, res) {
   // levert een valse no-show op in het rapport en een overbodige kaart in de
   // werklijst, en allebei kloppen ze niet: hij kwam niet niet-opdagen, hij
   // belde.
-  if (b.appointment_id) return await verzetCall(req, res, b, start);
+  if (b.appointment_id) return await verzetCall(req, res, b, start, handmatig);
   if (!b.taak_id) return res.status(400).json({ error: 'taak_id of appointment_id ontbreekt' });
 
   // DERDE UITGANG: 'liever via zoom' vanaf een aanmeldkaart. Zelfde boekmotor,
   // andere afsluiting — zie lieverZoom() onderaan. De gewone weg zet de taak op
   // 'ingepland' en laat hem wachten op bewijs uit de agenda; voor een
   // aanmeldkaart is dat fout, want die is met dit besluit klaar.
-  if (String(b.uitgang || '') === 'liever_zoom') return await lieverZoom(req, res, b, start);
+  if (String(b.uitgang || '') === 'liever_zoom') return await lieverZoom(req, res, b, start, handmatig);
 
   let taak;
   try {
@@ -704,6 +726,8 @@ async function boek(req, res) {
     ghl_appointment_id : afspraak.ghl_appointment_id,
     zoom_join_url      : afspraak.zoom_join_url,
     scheduled_at       : afspraak.scheduled_at,
+    // Alleen als het waar is: een gewone slot-boeking blijft er precies zo uitzien als vroeger.
+    ...(handmatig ? { handmatig: true } : {}),
   };
   try {
     const { error } = await supabaseAdmin.from('opvolging_taken').update({
@@ -737,6 +761,78 @@ async function boek(req, res) {
   }
 
   return res.status(200).json({ success: true, afspraak: afspraakRef });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET · EEN HANDMATIG MOMENT CONTROLEREN, VÓÓR HET BOEKEN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Het venster stuurt dag + uur zoals Dave ze koos (Brussel); de omrekening naar
+// een tijdstip gebeurt HIER, en het venster boekt daarna precies de `iso` die
+// terugkomt. Zelfde regel als bij de vrije slots: de browser rekent niet.
+//
+// BOTSINGEN ZIJN EEN WAARSCHUWING, GEEN BLOKKADE. Dave kan doorgaan; hij ziet
+// alleen wat er al staat. Lezen met supabaseAdmin, om dezelfde reden als
+// hangWhatsAppAanCalls: een RLS-nul zou hier lezen als 'geen botsing', en een
+// valse geruststelling is erger dan geen controle. Lukt het lezen niet, dan
+// zegt het antwoord dat — nooit stil een lege lijst.
+async function controleerEigenMoment(req, res) {
+  if (!(await requirePermission(req, 'opvolging.agenda.boeken'))) {
+    return res.status(403).json({ error: 'Geen rechten (opvolging.agenda.boeken)' });
+  }
+  const q = req.query || {};
+  const m = leesEigenMoment(q.eigen_dag, q.eigen_tijd);
+  if (m.fout) return res.status(400).json({ error: m.fout });
+
+  const momentMs = Date.parse(m.iso);
+  let persoon = null;
+  let negeerId = null;
+  let botsingen = null;
+  let melding = null;
+  try {
+    if (q.appointment_id) {
+      const { data, error } = await supabaseAdmin.from('follow_up_appointments')
+        .select('id, lead_name, lead_email, lead_phone, lead_ghl_contact_id')
+        .eq('id', String(q.appointment_id)).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (data) { persoon = data; negeerId = data.id; }
+    } else if (q.taak_id) {
+      const { data, error } = await supabaseAdmin.from('opvolging_taken')
+        .select('id, telefoon, email, bron_ref')
+        .eq('id', String(q.taak_id)).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (data) {
+        persoon = {
+          lead_phone         : data.telefoon || null,
+          lead_email         : data.email || null,
+          lead_ghl_contact_id: (data.bron_ref && data.bron_ref.ghl_contact_id) || null,
+        };
+        // Een opwarmkaart hangt aan een afspraak die zelf verzet wordt; die
+        // botst niet met zichzelf.
+        negeerId = (data.bron_ref && data.bron_ref.appointment_id) || null;
+      }
+    }
+
+    const vanIso = new Date(momentMs - BOTSING_MARGE_MIN * 60000).toISOString();
+    const totIso = new Date(momentMs + BOTSING_MARGE_MIN * 60000).toISOString();
+    const KOLOMMEN = 'id, lead_name, lead_email, lead_phone, lead_ghl_contact_id, scheduled_at, status';
+    const leesRijen = (kolommen) => supabaseAdmin.from('follow_up_appointments')
+      .select(kolommen).gt('scheduled_at', vanIso).lt('scheduled_at', totIso).limit(50);
+    let { data, error } = await leesRijen(KOLOMMEN + ', is_test');
+    // is_test komt uit een eigen migratie; zonder die kolom gewoon zonder.
+    if (error && error.code === '42703') ({ data, error } = await leesRijen(KOLOMMEN));
+    if (error) throw new Error(error.message);
+    botsingen = zoekBotsingen({ momentMs, afspraken: data || [], persoon, negeerId });
+  } catch (e) {
+    console.warn('[opvolging-agenda] botsingscontrole:', e?.message || e);
+    melding = 'De controle op andere afspraken lukte niet. Kijk zelf in de agenda of er niets op dit moment staat.';
+  }
+
+  return res.status(200).json({
+    moment           : { iso: m.iso, dag: m.dag, tijd: m.tijd },
+    botsingen,
+    botsingen_melding: melding,
+  });
 }
 
 /**
@@ -806,7 +902,7 @@ const VERZET_SLUIT_REDENEN = ['zoom_geannuleerd', 'no_show_call', 'zoom_nabellen
 const KAART_LOPEND = ['open', 'wacht_inplanning'];
 const VERZET_ARCHIEF_REDEN = 'opnieuw ingepland vanuit het afrondvenster';
 
-async function verzetCall(req, res, b, start) {
+async function verzetCall(req, res, b, start, handmatig = false) {
   let afspraak;
   try {
     const { data, error } = await supabaseAdmin
@@ -833,6 +929,7 @@ async function verzetCall(req, res, b, start) {
       duurMinuten  : afspraak.duration_minutes || DUUR_MIN,
       doorUserId   : null,
       bron         : 'opvolging-afronden',
+      handmatig,
     });
   } catch (e) {
     if (e?.code === 'GHL_UPDATE') {
@@ -978,7 +1075,7 @@ async function hangVerzetBestemming(dagen, afspraken) {
 const LIEVER_ZOOM_REDEN_CODE   = 'naar_zoom';
 const LIEVER_ZOOM_ARCHIEF_REDEN = 'liever via zoom — afspraak geboekt';
 
-async function lieverZoom(req, res, b, start) {
+async function lieverZoom(req, res, b, start, handmatig = false) {
   let taak;
   try {
     const { data, error } = await supabaseAdmin
@@ -1023,6 +1120,7 @@ async function lieverZoom(req, res, b, start) {
     ghl_appointment_id : afspraak.ghl_appointment_id,
     zoom_join_url      : afspraak.zoom_join_url,
     scheduled_at       : afspraak.scheduled_at,
+    ...(handmatig ? { handmatig: true } : {}),
   };
 
   // ── 2 · AFMELDEN IN DE EVENTMODULE ─────────────────────────────────────

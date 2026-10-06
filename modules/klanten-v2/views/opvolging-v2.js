@@ -1594,6 +1594,16 @@
 .opv .warn{background:var(--o-ambs);border:1px solid #f3ddb4;border-radius:11px;padding:12px 14px;font-size:13px;color:#7a4d00;margin-bottom:12px}
 .opv .info{background:var(--o-accs);border:1px solid #cfdcff;border-radius:11px;padding:12px 14px;font-size:13px;color:#1a3d9e;margin-bottom:12px}
 .opv textarea,.opv input[type=date],.opv input[type=text]{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit;box-sizing:border-box}
+/* Ander moment kiezen, buiten de vrije slots van GHL. Onder het weekraster,
+   in elk venster dat agendaBlok() gebruikt. */
+.opv .eigen{border-top:1px solid var(--o-line);margin-top:14px;padding-top:12px}
+.opv .eigen .rij{display:flex;gap:8px;align-items:center}
+.opv .eigen .rij>*{flex:1;min-width:0}
+.opv .eigen select{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit;box-sizing:border-box;background:#fff}
+.opv .eigen .mom{font-size:15px;font-weight:700;margin:2px 0 10px}
+.opv .eigen .bots{background:var(--o-reds);border:1px solid #f3c9cb;color:#8f1f23;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:12px}
+.opv .eigen .bots ul{margin:6px 0 0;padding-left:18px}
+.opv .agleeg.uitleg{font-size:11px;line-height:1.35;padding:8px 2px}
 /* Kopje boven een veld. Twee velden onder elkaar zonder label is raden waar
    wat hoort; hier gaat het ene naar de eventmodule en het andere niet. */
 .opv .veldkop{display:block;margin:12px 0 5px;font-size:12.5px;font-weight:650;color:var(--o-ink)}
@@ -4120,14 +4130,16 @@
       '<button class="obtn" ' + (heen ? '' : 'disabled style="opacity:.4;cursor:default" ') +
         'onclick="window.__opvWeek(1)">&#8594;</button></div>';
 
-    if (_agenda.loading && !_agenda.data) return kop + '<div class="agleeg">Agenda laden&hellip;</div>';
+    // Het handmatige moment staat er ALTIJD onder, ook als de agenda laadt of
+    // stuk is: juist dan is het de enige weg.
+    const eigen = eigenMomentBlok(_ui.modal);
+    if (_agenda.loading && !_agenda.data) return kop + '<div class="agleeg">Agenda laden&hellip;</div>' + eigen;
     if (_agenda.error) {
       return kop + '<div class="warn2"><b>De agenda is nu niet bereikbaar.</b> ' + esc(_agenda.error) +
         (handmatig
-          ? '<br>Je kunt hem hieronder gewoon zelf op een dag zetten.'
-          : '<br>Probeer het zo opnieuw. Een zoomcall heeft een uur nodig, dus een kale datum ' +
-            'is hier geen uitweg &mdash; lukt het niet, bel de lead dan even terug met een moment.') +
-        '</div>';
+          ? '<br>Je kunt hem hieronder gewoon zelf op een dag zetten, of zelf een moment kiezen.'
+          : '<br>Kies hieronder zelf een dag en uur, buiten de agenda.') +
+        '</div>' + eigen;
     }
 
     const d = _agenda.data;
@@ -4137,13 +4149,21 @@
     const wacht = bezig
       ? '<div class="ronde zacht">Bezig met vastleggen&hellip;</div>' : '';
 
+    // NOOIT MEER EEN STIL STREEPJE. Vanaf 27/10 stond er in elke kolom '—' en
+    // wist Dave niet of de agenda stuk was of de dag vol. Nu zegt de kolom
+    // waarom er niets staat, en waar hij dan wél kan kiezen.
+    const laatsteVrij = laatsteVrijeDag(dagen);
+    const agendaOk = !(d && d.agenda_beschikbaar === false);
     const kolommen = dagen.map((dag) => {
       const vrij = (dag.vrij || []).map((s) => bezig
         ? '<span class="slot vrij" style="opacity:.45;cursor:default">' + esc(s.tijd) + '</span>'
         : '<button class="slot vrij" onclick="window.__opvBoek(\'' + esc(s.iso) + '\')">' + esc(s.tijd) + '</button>').join('');
       const bezet = (dag.bezet || []).map((b) =>
         '<span class="slot bezet">' + esc(b.tijd) + '<span class="w">' + esc(b.naam) + '</span></span>').join('');
-      const leeg = (!vrij && !bezet) ? '<div class="agleeg">&mdash;</div>' : '';
+      const uitleg = vrij ? null : legeDagUitleg({
+        dag: dag.dag, vandaag: vandaag(), laatsteVrij, agendaOk, heeftBezet: !!bezet,
+      });
+      const leeg = uitleg ? '<div class="agleeg uitleg">' + esc(uitleg) + '</div>' : '';
       return '<div class="agd"><div class="dh">' + esc(dagNaam(dag.dag)) + '<b>' + esc(nl(dag.dag)) + '</b></div>' +
         vrij + bezet + leeg + '</div>';
     }).join('');
@@ -4153,8 +4173,170 @@
     const niets = dagen.length === 0
       ? '<div class="agleeg">Geen momenten in deze week. Blader naar de volgende.</div>' : '';
 
-    return kop + melding + wacht + '<div class="agw">' + kolommen + '</div>' + niets;
+    return kop + melding + wacht + '<div class="agw">' + kolommen + '</div>' + niets + eigen;
   }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // ANDER MOMENT KIEZEN — BUITEN DE VRIJE SLOTS VAN GHL
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // De vrije momenten van GHL blijven de standaard; dit is de bewuste
+  // uitzondering. De kalender heeft een boekvenster van ca. 20 dagen, en
+  // daarbuiten kon Dave niets kiezen (gemeten 6 okt: vanaf 27/10 alleen '—').
+  //
+  // DRIE STAPPEN, MET OPZET:
+  //   1. kies     — dag + uur (per kwartier, Brussel).
+  //   2. bevestig — de server rekent het moment om, zoekt botsingen (±30 min)
+  //                 en het venster zegt hardop dat dit moment niet vrij staat.
+  //   3. boek     — via __opvBoek, dus hetzelfde POST-pad als een gewoon slot:
+  //                 zelfde Zoom-link, bevestiging, reminders en afspraakrij.
+  // Botsingen zijn een waarschuwing, geen blokkade.
+  //
+  // De staat hangt aan het venster zelf (_ui.modal.eigen): elk nieuw venster
+  // begint dicht, en sluiten ruimt hem vanzelf op.
+
+  /** Het uurveld: 07:00 t/m 22:00, per kwartier. */
+  const EIGEN_TIJDEN = (() => {
+    const uit = [];
+    for (let m = 7 * 60; m <= 22 * 60; m += 15) {
+      uit.push(String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
+    }
+    return uit;
+  })();
+
+  /** De laatste dag in deze week waarop GHL nog iets vrij gaf, of null. */
+  function laatsteVrijeDag(dagen) {
+    let laatste = null;
+    for (const d of dagen || []) if ((d.vrij || []).length && (!laatste || d.dag > laatste)) laatste = d.dag;
+    return laatste;
+  }
+
+  /**
+   * Wat er in een kolom zonder vrij moment staat. Nooit een stil '—'.
+   *
+   *  · voorbij           — die dag is al geweest; daar valt niets te kiezen.
+   *  · agenda stuk       — we weten niet wat er vrij is.
+   *  · na de laatste vrije dag (of een hele week leeg) — buiten het
+   *    boekvenster van GHL, de situatie van 27/10.
+   *  · anders            — die dag is gewoon vol.
+   * In de laatste drie gevallen wijst de tekst naar het handmatige moment.
+   *
+   * @returns {?string} null als er niets onder de bezette momenten hoeft.
+   */
+  function legeDagUitleg({ dag, vandaag: nu, laatsteVrij, agendaOk, heeftBezet }) {
+    if (dag < nu) return heeftBezet ? null : 'Voorbij';
+    if (!agendaOk) return 'Agenda niet bereikbaar \u2014 kies hieronder handmatig een moment';
+    if (!laatsteVrij || dag > laatsteVrij) {
+      return 'Buiten het boekvenster van de agenda \u2014 kies hieronder handmatig een moment';
+    }
+    return 'Niets vrij \u2014 kies hieronder handmatig een moment';
+  }
+
+  /** "wo 28/10 om 10:30" — uit de dag en het uur die de server teruggaf. */
+  const eigenMomentTekst = (mo) => mo ? dagNaam(mo.dag) + ' ' + nl(mo.dag) + ' om ' + mo.tijd : '';
+
+  function eigenMomentBlok(m) {
+    if (!m) return '';
+    const e = m.eigen;
+    const bezig = !!_ui.bezig || !!(e && e.laden);
+    const uit = bezig ? ' disabled style="opacity:.5;cursor:default"' : '';
+    if (!e || !e.open) {
+      return '<div class="eigen"><button class="obtn" style="width:100%"' + uit +
+        ' onclick="window.__opvEigenOpen()">Ander moment kiezen (buiten de agenda)</button></div>';
+    }
+
+    if (e.stap === 'bevestig' && e.controle) {
+      const c = e.controle;
+      const bots = c.botsingen || [];
+      const botsHtml = bots.length
+        ? '<div class="bots"><b>Let op: er staat al iets binnen 30 minuten.</b><ul>' +
+          bots.map((b) => '<li>' + esc(b.naam) + ' om ' + esc(b.tijd) +
+            (b.zelfde_persoon ? ' &mdash; <b>dezelfde persoon</b>' : '') + '</li>').join('') +
+          '</ul></div>'
+        : '';
+      const meldHtml = c.botsingen_melding ? '<div class="warn2">' + esc(c.botsingen_melding) + '</div>' : '';
+      return '<div class="eigen">' +
+        '<div class="ronde">Handmatig moment</div>' +
+        '<div class="mom">' + esc(eigenMomentTekst(c.moment)) + '</div>' +
+        '<div class="warn2"><b>Dit moment staat niet vrij in de agenda van GHL.</b> ' +
+        'Controleer zelf dat er geen andere call op staat.</div>' +
+        botsHtml + meldHtml +
+        '<div class="rij">' +
+        '<button class="obtn"' + uit + ' onclick="window.__opvEigenTerug()">Terug</button>' +
+        '<button class="obtn p"' + uit + ' onclick="window.__opvEigenBoek()">' +
+        (bots.length ? 'Toch inplannen' : 'Inplannen') + ' op ' + esc(eigenMomentTekst(c.moment)) + '</button>' +
+        '</div></div>';
+    }
+
+    const opties = EIGEN_TIJDEN.map((t) =>
+      '<option value="' + t + '"' + (t === e.tijd ? ' selected' : '') + '>' + t + '</option>').join('');
+    return '<div class="eigen">' +
+      '<div class="ronde">Ander moment, buiten de agenda. Kies een dag en een uur (Belgische/Nederlandse tijd).</div>' +
+      '<div class="rij">' +
+      '<input type="date" id="opv-eigen-dag" value="' + esc(e.dag || '') + '" min="' + vandaag() + '"' +
+        ' max="' + dagPlus(vandaag(), 365) + '" onchange="window.__opvEigenZet(\'dag\', this.value)">' +
+      '<select id="opv-eigen-tijd" onchange="window.__opvEigenZet(\'tijd\', this.value)">' + opties + '</select>' +
+      '</div>' +
+      (e.fout ? '<div class="warn2" style="margin:10px 0 0">' + esc(e.fout) + '</div>' : '') +
+      '<div class="rij" style="margin-top:10px">' +
+      '<button class="obtn"' + uit + ' onclick="window.__opvEigenDicht()">Annuleren</button>' +
+      '<button class="obtn p"' + uit + ' onclick="window.__opvEigenVerder()">' +
+        (e.laden ? 'Controleren&hellip;' : 'Verder') + '</button>' +
+      '</div></div>';
+  }
+
+  window.__opvEigenOpen = () => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    // Standaard de getoonde week (vaak de week waarin niets vrij stond), maar
+    // nooit een dag die al voorbij is.
+    const start = agendaVan() > vandaag() ? agendaVan() : vandaag();
+    m.eigen = { open: true, stap: 'kies', dag: start, tijd: '10:00', controle: null, fout: null, laden: false };
+    render();
+  };
+  window.__opvEigenDicht = () => { const m = _ui.modal; if (m) { m.eigen = null; render(); } };
+  window.__opvEigenTerug = () => {
+    const m = _ui.modal; if (!m || !m.eigen) return;
+    m.eigen.stap = 'kies'; m.eigen.controle = null; render();
+  };
+  // Alleen onthouden, niet hertekenen: een render midden in het kiezen zou
+  // het veld onder de vinger vervangen.
+  window.__opvEigenZet = (veld, waarde) => {
+    const m = _ui.modal; if (!m || !m.eigen) return;
+    m.eigen[veld] = String(waarde || ''); m.eigen.fout = null;
+  };
+
+  /** Welke afspraak/taak hoort bij dit venster — voor de botsingscontrole. */
+  function eigenDoel(m) {
+    if (m.soort === 'call-verzet') {
+      const c = callOp(m.callIndex);
+      return c && c.appointment_id ? 'appointment_id=' + encodeURIComponent(c.appointment_id) : '';
+    }
+    return m.taakId ? 'taak_id=' + encodeURIComponent(m.taakId) : '';
+  }
+
+  window.__opvEigenVerder = async () => {
+    const m = _ui.modal; if (!m || !m.eigen || m.eigen.laden || _ui.bezig) return;
+    const e = m.eigen;
+    if (!e.dag) { e.fout = 'Kies een dag.'; render(); return; }
+    if (!e.tijd) { e.fout = 'Kies een uur.'; render(); return; }
+    e.laden = true; e.fout = null; render();
+    const doel = eigenDoel(m);
+    const j = await haal('/api/opvolging-agenda?eigen_dag=' + encodeURIComponent(e.dag) +
+      '&eigen_tijd=' + encodeURIComponent(e.tijd) + (doel ? '&' + doel : ''));
+    // Het venster kan intussen dicht of een ander zijn.
+    if (_ui.modal !== m || m.eigen !== e) return;
+    e.laden = false;
+    if (j.__error) { e.fout = j.__error; render(); return; }
+    if (!j.moment || !j.moment.iso) { e.fout = 'De server gaf geen moment terug. Probeer het opnieuw.'; render(); return; }
+    e.controle = j; e.stap = 'bevestig';
+    render();
+  };
+
+  window.__opvEigenBoek = () => {
+    const m = _ui.modal; if (!m || !m.eigen || !m.eigen.controle) return;
+    // Precies het tijdstip dat de server teruggaf; de browser rekent niet om.
+    window.__opvBoek(m.eigen.controle.moment.iso, { handmatig: true });
+  };
 
   const DAGNAMEN = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
   const dagNaam = (d) => DAGNAMEN[new Date(d + 'T12:00:00Z').getUTCDay()] || '';
@@ -5110,8 +5292,11 @@
    * De tweede tak is er omdat verzetten anders alleen via 'no-show afronden'
    * kon, en dat is een oordeel dat niet klopt over iemand die juist belde.
    */
-  window.__opvBoek = async (startIso) => {
+  window.__opvBoek = async (startIso, opties) => {
     const m = _ui.modal; if (!m || !startIso) return;
+    // Een zelf gekozen moment buiten de vrije slots. Gaat mee in elk van de
+    // vier verzoeken hieronder, zodat de server het kan vastleggen.
+    const extra = opties && opties.handmatig === true ? { handmatig: true } : {};
     // Dubbelklik-guard. post() zet _ui.bezig zelf ook, maar pas bij de aanroep;
     // tussen twee snelle klikken past een tweede verzoek.
     if (_ui.bezig) return;
@@ -5130,12 +5315,12 @@
 
     try {
       const antwoord = opwarmVerzet
-        ? await post('/api/opvolging-zoom-actie', { taak_id: m.taakId, actie: 'verplaatsen', start: startIso })
+        ? await post('/api/opvolging-zoom-actie', { taak_id: m.taakId, actie: 'verplaatsen', start: startIso, ...extra })
         : verzetten
-        ? await post('/api/opvolging-agenda', { appointment_id: call.appointment_id, start: startIso })
+        ? await post('/api/opvolging-agenda', { appointment_id: call.appointment_id, start: startIso, ...extra })
         : naarZoom
-          ? await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso, uitgang: 'liever_zoom' })
-          : await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
+          ? await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso, uitgang: 'liever_zoom', ...extra })
+          : await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso, ...extra });
       _ui.modal = null;
       _agenda.data = null; _agenda.key = null;
       // leegTakenCache() leegt óók _calls, en dat is hier het punt: de oude
@@ -5491,6 +5676,9 @@
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
   window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst, brugTellersBlok };
+  // Het handmatige moment en de uitleg bij een lege dag, getest in
+  // tests/opvolging-eigen-moment.test.js tegen dit bestand zelf.
+  window.__opvEigenMomentHelpers = { legeDagUitleg, laatsteVrijeDag, eigenMomentBlok, EIGEN_TIJDEN };
 
   // De weekbalk los na te slaan, en getest in tests/opvolging-weekbalk.test.js
   // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.
