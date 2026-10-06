@@ -786,7 +786,7 @@ async function actResend() {
 // ── Cancel-confirm sub-modal ───────────────────────────────────────────────
 // 2-step preview→confirm. Reden verplicht (min 10 chars), geen typ-CANCEL
 // meer — expliciete waarschuwing + destructieve knop-label is voldoende.
-const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande facturen worden gecrediteerd, actieve abonnementen worden gedeactiveerd, gekoppelde offertes worden op geannuleerd gezet en de Bubble-membership wordt beëindigd. De klant behoudt toegang tot voltooide onderdelen tot Bubble-sync.';
+const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande facturen worden gecrediteerd, actieve abonnementen worden gedeactiveerd, gekoppelde offertes worden op geannuleerd gezet en de Bubble-membership wordt beëindigd. Sinds 6 oktober ook: lopende onboarding-automaties stoppen (er gaat niets meer naar de klant) en de toegang tot het LMS gaat dicht (einddatum gisteren).';
 
 let _cancelPreview = null;
 let _cancelReason  = '';

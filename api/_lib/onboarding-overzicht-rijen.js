@@ -101,6 +101,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       telefoonByOb,
       bewijsByStudent,
       faseByKlant,
+      annuleringByOb,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -245,6 +246,32 @@ export async function bouwOverzichtRijen(opts = {}) {
           return null;
         }
       })(),
+      // ── 11) De annulering (6 okt 2026): wanneer, en het antwoord op
+      //     "Discord verwijderd?" — voor de geannuleerde rijen. Faalzacht (null).
+      (async () => {
+        const ids = list.filter((r) => String(r.status || '').toLowerCase() === 'geannuleerd').map((r) => r.id);
+        const kaart = new Map();
+        if (!ids.length) return kaart;
+        try {
+          const { data, error } = await supabaseAdmin.from('onboarding_cancellations')
+            .select('onboarding_id, created_at, steps').in('onboarding_id', ids)
+            .order('created_at', { ascending: false });
+          if (error) throw new Error(error.message);
+          for (const c of data || []) {
+            if (kaart.has(c.onboarding_id)) continue;
+            const d = c.steps?.discord;
+            kaart.set(c.onboarding_id, {
+              op: c.created_at,
+              discord_verwijderd: d && !d.skipped ? (d.verwijderd ?? null) : null,
+              door: d?.door || null,
+            });
+          }
+          return kaart;
+        } catch (e) {
+          console.warn('[onboarding-overzicht] annuleringen:', e?.message || e);
+          return null;
+        }
+      })(),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -359,6 +386,7 @@ export async function bouwOverzichtRijen(opts = {}) {
         al_gestart_gelezen:   bewijsByStudent !== null,
         // In incasso-opvolging (6 okt 2026): NIET geannuleerd, wel uit de
         // actieve lijsten. `incasso` = null als hij er niet (meer) in staat.
+        annulering:           annuleringByOb ? (annuleringByOb.get(r.id) || null) : null,
         in_incasso:           inIncasso(r),
         incasso:              inIncasso(r) ? {
           op: r.incasso_op, door: r.incasso_door || null, reden: r.incasso_reden || null,

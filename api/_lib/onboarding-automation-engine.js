@@ -487,6 +487,16 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         summary.cancelled += 1;
         continue;
       }
+      // Geannuleerd (6 okt 2026, Maxim): nooit meer een bericht naar een klant
+      // die geannuleerd is. De annulering stopt de runs zelf al; dit vangt een
+      // run op die er toch nog tussen glipt.
+      if (String(onboarding.status || '').toLowerCase() === 'geannuleerd') {
+        await supabaseAdmin.from('onboarding_automation_runs')
+          .update({ status: 'cancelled', next_run_at: null, last_error: 'onboarding geannuleerd', updated_at: nowIso })
+          .eq('id', run.id);
+        summary.cancelled += 1;
+        continue;
+      }
       if (onboarding.archived_at) {
         await supabaseAdmin.from('onboarding_automation_runs')
           .update({ status: 'cancelled', next_run_at: null, last_error: 'archived', updated_at: nowIso })
