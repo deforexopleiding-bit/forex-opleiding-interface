@@ -225,6 +225,7 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Wizard voltooid</span><span>${fmtDT(o.completed_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Onboarding afgerond</span><span>${afgesloten(o) ? fmtDT(afgeslotenMoment(o)) : 'nog niet — wacht op de eerste afgeronde sessie'}${autoAfgerondNoot(o)}${handmatigNoot(o)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
+      ${o.in_incasso ? `<div class="kv-onb-meta-row"><span>Incasso-opvolging</span><span><span class="kv-onb-pill kv-onb-pill-danger">Sinds ${esc(fmtDT(o.incasso_op))}</span>${o.incasso_door ? ' · ' + esc(o.incasso_door) : ''}${o.incasso_reden ? `<div style="margin-top:3px;font-size:11.5px;color:var(--text-3)">Reden: ${esc(o.incasso_reden)}<br>Niet geannuleerd: facturen, toegang en aanmaningen lopen gewoon door.</div>` : ''}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
 
@@ -279,6 +280,9 @@ function renderOverzichtTab() {
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-resolve ${state.savingAction ? 'disabled' : ''}>
           ${state.savingAction === 'resolve' ? 'Bezig…' : (o.intake_handled_at ? 'Markeer als open (heropen intake)' : 'Markeer intake als afgehandeld')}
         </button>
+        ${o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? (o.in_incasso
+          ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-incasso-terug ${state.savingAction ? 'disabled' : ''} title="De klant start toch: kies een nieuwe startdatum.">${state.savingAction === 'incasso' ? 'Bezig…' : 'Terug activeren'}</button>`
+          : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-incasso ${state.savingAction ? 'disabled' : ''} title="Niet annuleren: uit de actieve lijsten, facturen en aanmaningen lopen door. Vraagt een reden.">${state.savingAction === 'incasso' ? 'Bezig…' : 'Naar incasso-opvolging'}</button>`) : ''}
         ${!afgesloten(o) && o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-handmatig ${state.savingAction ? 'disabled' : ''} title="Het traject loopt al (bv. calls in Bubble). Vraagt een reden.">
           ${state.savingAction === 'handmatig' ? 'Bezig…' : 'Onboarding afronden (handmatig)'}
         </button>` : ''}
@@ -638,6 +642,18 @@ function actHandmatig() {
   if (reden.trim().length < 5) { alert('Geef een reden van minstens 5 tekens.'); return; }
   return callAction('handmatig', '/api/onboarding-handmatig-afronden', { onboarding_id: state.id, reden: reden.trim() });
 }
+function actIncasso() {
+  const reden = prompt('Waarom naar incasso-opvolging? (bv. "bedenktijd voorbij, geen contact, zit in de wanbetalers-pipeline")\n\nDit annuleert NIET: facturen, toegang en aanmaningen lopen gewoon door.', '');
+  if (reden === null) return;
+  if (reden.trim().length < 5) { alert('Geef een reden van minstens 5 tekens.'); return; }
+  return callAction('incasso', '/api/onboarding-incasso', { onboarding_id: state.id, actie: 'naar', reden: reden.trim() });
+}
+function actIncassoTerug() {
+  const datum = prompt('Nieuwe startdatum (JJJJ-MM-DD, minstens drie dagen vooruit):', '');
+  if (datum === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum.trim())) { alert('Gebruik de vorm JJJJ-MM-DD.'); return; }
+  return callAction('incasso', '/api/onboarding-incasso', { onboarding_id: state.id, actie: 'terug', start_datum: datum.trim() });
+}
 function actArchive() {
   const isArchived = state.data?.status === 'gearchiveerd';
   const action = isArchived ? 'restore' : 'archive';
@@ -868,6 +884,8 @@ function wire() {
   box.querySelector('[data-kv-onb-start-save]')?.addEventListener('click', actStartDate);
   box.querySelector('[data-kv-onb-archive]')?.addEventListener('click', actArchive);
   box.querySelector('[data-kv-onb-handmatig]')?.addEventListener('click', actHandmatig);
+  box.querySelector('[data-kv-onb-incasso]')?.addEventListener('click', actIncasso);
+  box.querySelector('[data-kv-onb-incasso-terug]')?.addEventListener('click', actIncassoTerug);
   box.querySelector('[data-kv-onb-cancel-preview]')?.addEventListener('click', actCancelPreview);
   box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);

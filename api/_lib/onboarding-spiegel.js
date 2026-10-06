@@ -50,6 +50,7 @@ import {
 } from './onboarding-bedenktijd.js';
 import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
+import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
@@ -118,6 +119,9 @@ export function hoortZichtbaarTeZijn(ob) {
   // `onboardings` — maar het is een gevolgtrekking uit ander bestand en geen
   // regel hier. Eén rij met status 'gearchiveerd' en een lege archived_at zou
   // zo in het LMS belanden. Nu is het een regel.
+  // In incasso-opvolging (6 okt 2026): uit de actieve lijsten van het LMS,
+  // zonder te annuleren. Terug actief → de rij komt bij de volgende spiegel terug.
+  if (inIncasso(ob)) return false;
   return !NIET_ZICHTBARE_STATUSSEN.includes(
     String(ob.status || '').trim().toLowerCase());
 }
@@ -164,6 +168,8 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     if (obErr) throw new Error('onboarding lezen: ' + obErr.message);
     // Met de hand afgerond (6 okt 2026): aparte, faalzachte lezing.
     if (ob) await vulHandmatigAan(supabaseAdmin, ob);
+    // In incasso-opvolging (6 okt 2026): ook een aparte, faalzachte lezing.
+    if (ob) await vulIncassoAan(supabaseAdmin, ob);
 
     // DE INTAKE-POT (5 oktober 2026) — vóór de vroege uitgangen hieronder,
     // want een onboarding zonder LMS-student of een geannuleerde hoort daar

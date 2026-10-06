@@ -26,6 +26,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { isTabelOntbreekt } from './factuurstand-spiegel.js';
 import { onboardingAfgesloten } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
+import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 
 export const INTAKE_TABEL = 'hlms_intake';
@@ -46,6 +47,8 @@ export function intakePotVanaf(env = process.env) {
 export function crmStandVoorIntake(ob) {
   const s = String(ob?.status || '').trim().toLowerCase();
   if (ob?.archived_at || s === 'gearchiveerd' || s === 'geannuleerd') return 'vervallen';
+  // In incasso-opvolging: niet meer in de pot (6 okt 2026).
+  if (inIncasso(ob)) return 'vervallen';
   if (onboardingAfgesloten(ob)) return 'afgerond';
   return 'open';
 }
@@ -123,6 +126,7 @@ export async function spiegelIntake(lms, onboardingId) {
     if (error) throw new Error('onboarding lezen: ' + error.message);
     if (!ob || ob.is_test) return { resultaat: 'overgeslagen' };
     await vulHandmatigAan(supabaseAdmin, ob);
+    await vulIncassoAan(supabaseAdmin, ob);
 
     const { data: bestaand, error: bErr } = await lms
       .from(INTAKE_TABEL).select('crm_onboarding_id').eq('crm_onboarding_id', ob.id).maybeSingle();

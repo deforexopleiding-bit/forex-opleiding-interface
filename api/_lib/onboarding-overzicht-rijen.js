@@ -14,6 +14,7 @@
 
 import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp, afgeslotenDoor } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
+import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { alGestartBewijs } from './onboarding-al-gestart.js';
 import { telefoonsVoorOnboardings } from './onboarding-telefoon.js';
 import { supabaseAdmin } from '../supabase.js';
@@ -78,6 +79,7 @@ export async function bouwOverzichtRijen(opts = {}) {
     // Met de hand afgerond (6 okt 2026): aparte, faalzachte lezing, zodat het
     // overzicht niet omvalt zolang de migratie nog niet gedraaid is.
     await vulHandmatigAan(supabaseAdmin, list);
+    await vulIncassoAan(supabaseAdmin, list);
 
     // Input-sets voor de 5 afgeleide queries. Bouwen we één keer vóór de
     // Promise.all zodat elk blok z'n eigen ids kan gebruiken.
@@ -98,6 +100,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       factuurByCust,
       telefoonByOb,
       bewijsByStudent,
+      faseByKlant,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -222,9 +225,26 @@ export async function bouwOverzichtRijen(opts = {}) {
       // ── 9) "Waarschijnlijk al gestart" (6 okt 2026): het bewijs uit het LMS
       //    voor de OPEN onboardings met een LMS-student. `null` = niet gelezen.
       alGestartBewijs(list
-        .filter((r) => r.dfo_lms_student_id && !onboardingAfgesloten(r)
+        .filter((r) => r.dfo_lms_student_id && !onboardingAfgesloten(r) && !inIncasso(r)
           && !['geannuleerd', 'gearchiveerd'].includes(String(r.status || '').toLowerCase()))
         .map((r) => r.dfo_lms_student_id)),
+      // ── 10) De fase in de wanbetalers-pipeline, voor de groep "Incasso"
+      //     (6 okt 2026). Alleen voor wie in incasso staat; faalzacht (null).
+      (async () => {
+        const ids = [...new Set(list.filter(inIncasso).map((r) => r.customer_id).filter(Boolean))];
+        const kaart = new Map();
+        if (!ids.length) return kaart;
+        try {
+          const { data, error } = await supabaseAdmin.from('dunning_pipeline_customers')
+            .select('customer_id, stage_slug, stage_changed_at').in('customer_id', ids);
+          if (error) throw new Error(error.message);
+          for (const d of data || []) kaart.set(String(d.customer_id), { fase: d.stage_slug || null, sinds: d.stage_changed_at || null });
+          return kaart;
+        } catch (e) {
+          console.warn('[onboarding-overzicht] wanbetalersfase:', e?.message || e);
+          return null;
+        }
+      })(),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -337,6 +357,14 @@ export async function bouwOverzichtRijen(opts = {}) {
         al_gestart:           (bewijsByStudent && r.dfo_lms_student_id)
           ? (bewijsByStudent.get(String(r.dfo_lms_student_id)) || null) : null,
         al_gestart_gelezen:   bewijsByStudent !== null,
+        // In incasso-opvolging (6 okt 2026): NIET geannuleerd, wel uit de
+        // actieve lijsten. `incasso` = null als hij er niet (meer) in staat.
+        in_incasso:           inIncasso(r),
+        incasso:              inIncasso(r) ? {
+          op: r.incasso_op, door: r.incasso_door || null, reden: r.incasso_reden || null,
+          wanbetalers: faseByKlant === null ? undefined
+            : (faseByKlant.get(String(r.customer_id)) || null),
+        } : null,
         // Het nummer (6 okt 2026) — `telefoon_zeker` = met landcode, dus
         // ook een WhatsApp-link; `telefoon_bron` voor wie wil nagaan waarvandaan.
         telefoon:             telefoonByOb.get(r.id)?.telefoon || null,
