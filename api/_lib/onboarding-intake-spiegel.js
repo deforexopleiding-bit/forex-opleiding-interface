@@ -24,6 +24,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { isTabelOntbreekt } from './factuurstand-spiegel.js';
+import { onboardingAfgesloten } from './onboarding-einde.js';
 
 export const INTAKE_TABEL = 'hlms_intake';
 
@@ -33,11 +34,17 @@ export function intakePotVanaf(env = process.env) {
   return v || '2026-10-06T00:00:00+02:00';
 }
 
-/** De stand in de pot, uit de CRM-status. PURE. */
+/**
+ * De stand in de pot, uit de CRM-status. PURE.
+ *
+ * 'afgerond' alleen als een SESSIE de onboarding afsloot — status 'afgerond'
+ * zonder `auto_afgerond_op` is wizard voltooid en hoort open in de pot te
+ * blijven (zie onboarding-einde.js).
+ */
 export function crmStandVoorIntake(ob) {
   const s = String(ob?.status || '').trim().toLowerCase();
   if (ob?.archived_at || s === 'gearchiveerd' || s === 'geannuleerd') return 'vervallen';
-  if (s === 'afgerond') return 'afgerond';
+  if (onboardingAfgesloten(ob)) return 'afgerond';
   return 'open';
 }
 
@@ -58,7 +65,7 @@ export async function spiegelIntake(lms, onboardingId) {
   try {
     const { data: ob, error } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, customer_name, status, archived_at, created_at, start_date, dfo_lms_student_id, is_test, traject:onboarding_trajecten(label)')
+      .select('id, customer_id, customer_name, status, archived_at, auto_afgerond_op, auto_afgerond_sessie_id, created_at, start_date, dfo_lms_student_id, is_test, traject:onboarding_trajecten(label)')
       .eq('id', onboardingId)
       .maybeSingle();
     if (error) throw new Error('onboarding lezen: ' + error.message);

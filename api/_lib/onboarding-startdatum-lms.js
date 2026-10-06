@@ -20,6 +20,7 @@
 
 import { assertStartDateNotTooEarly } from './onboarding-start-date.js';
 import { NIET_MEER_AANRAKEN } from './onboarding-afsluiten-na-sessie.js';
+import { onboardingAfgesloten } from './onboarding-einde.js';
 
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -46,7 +47,9 @@ export function besluitStartdatum(ob, startDatum, now = new Date()) {
   if (ob.archived_at || NIET_MEER_AANRAKEN.has(String(ob.status || '').toLowerCase())) {
     return { besluit: SD_NIET_AANRAKEN };
   }
-  if (String(ob.status || '').toLowerCase() === 'afgerond') return { besluit: SD_AL_AFGEROND };
+  // Alleen een onboarding die een SESSIE afsloot; wizard voltooid krijgt
+  // gewoon een nieuwe startdatum (zie onboarding-einde.js).
+  if (onboardingAfgesloten(ob)) return { besluit: SD_AL_AFGEROND };
   const teVroeg = assertStartDateNotTooEarly(startDatum, now);
   if (teVroeg) {
     return { besluit: teVroeg.code === 'START_DATE_TOO_EARLY' ? SD_TE_VROEG : SD_ONGELDIG, min: teVroeg.min };

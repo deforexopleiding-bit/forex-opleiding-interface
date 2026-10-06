@@ -69,7 +69,10 @@ test('besluitAfsluiting: dezelfde volgorde als de cron altijd had', () => {
   assert.equal(besluitAfsluiting({ id: 'o', auto_afgerond_sessie_id: 's', status: 'bezig' }), AL_AUTOMATISCH);
   assert.equal(besluitAfsluiting({ id: 'o', status: 'geannuleerd' }), NIET_AANRAKEN);
   assert.equal(besluitAfsluiting({ id: 'o', status: 'bezig', archived_at: '2026-10-01' }), NIET_AANRAKEN);
-  assert.equal(besluitAfsluiting({ id: 'o', status: 'afgerond' }), AL_AFGEROND);
+  // 6 okt 2026: status 'afgerond' ZONDER sessie is wizard voltooid. Die moet
+  // de eerste sessie juist nog afsluiten (Jonas Keppens / Quinten Braeckman).
+  assert.equal(besluitAfsluiting({ id: 'o', status: 'afgerond', auto_afgerond_op: null }), AFSLUITEN);
+  assert.equal(besluitAfsluiting({ id: 'o', status: 'afgerond', auto_afgerond_op: '2026-10-01T07:00:00Z' }), AL_AFGEROND);
   assert.equal(besluitAfsluiting({ id: 'o', status: 'aangemeld' }), AFSLUITEN);
   assert.equal(besluitAfsluiting({ id: 'o', status: 'bezig' }), AFSLUITEN);
 });
@@ -81,6 +84,11 @@ test('de patch legt de OORZAAK vast: sessie-id, -tijd, -titel en het moment', ()
     auto_afgerond_sessie_id: 's1', auto_afgerond_sessie_op: '2026-10-05T17:00:00.000Z',
     auto_afgerond_sessie_titel: 'Eerste sessie', auto_afgerond_op: 'NU', updated_at: 'NU',
   });
+  // Wizard al voltooid: dat moment blijft staan, het afsluiten zit in auto_afgerond_op.
+  const q = afsluitPatch({ id: 's1', start_tijd: '2026-10-07T11:45:00.000Z' }, 'NU',
+    { status: 'afgerond', completed_at: '2026-10-05T09:00:00.000Z' });
+  assert.equal(q.completed_at, '2026-10-05T09:00:00.000Z');
+  assert.equal(q.auto_afgerond_op, 'NU');
 });
 
 test('CONTRACT: de route leest de afgeronde sessie zelf en vertrouwt het verzoek niet', () => {
@@ -117,7 +125,9 @@ test('besluitStartdatum: dezelfde ondergrens als de CRM-knop (vandaag + 3)', () 
   assert.equal(besluitStartdatum(null, '2026-11-01', nu).besluit, SD_GEEN_ONBOARDING);
   assert.equal(besluitStartdatum({ ...ob, status: 'gearchiveerd' }, '2026-11-01', nu).besluit, SD_NIET_AANRAKEN);
   assert.equal(besluitStartdatum({ ...ob, archived_at: '2026-01-01' }, '2026-11-01', nu).besluit, SD_NIET_AANRAKEN);
-  assert.equal(besluitStartdatum({ ...ob, status: 'afgerond' }, '2026-11-01', nu).besluit, SD_AL_AFGEROND);
+  assert.equal(besluitStartdatum({ ...ob, status: 'afgerond', auto_afgerond_op: '2026-10-01T07:00:00Z' }, '2026-11-01', nu).besluit, SD_AL_AFGEROND);
+  // Wizard voltooid, nog geen sessie: de startdatum mag gewoon nog schuiven.
+  assert.equal(besluitStartdatum({ ...ob, status: 'afgerond', auto_afgerond_op: null }, '2026-11-01', nu).besluit, SD_WIJZIGEN);
 });
 
 test('de route kent de actie startdatum, en een ongeldige datum is een 400', async () => {

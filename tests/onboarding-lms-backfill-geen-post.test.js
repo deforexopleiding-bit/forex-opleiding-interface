@@ -145,7 +145,9 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // 15 → 16 (5 oktober 2026, tweede opdracht): de spiegel vult ook de
   // intake-pot in het LMS (onboarding-intake-spiegel.js) — lezen uit het CRM,
   // schrijven naar één LMS-tabel, niets dat verstuurt.
-  assert.ok(AFSLUITING.size <= 16,
+  // 16 → 17 (6 oktober 2026): onboarding-einde.js — de pure regel "wanneer
+  // is een onboarding écht afgelopen". Geen import, geen I/O.
+  assert.ok(AFSLUITING.size <= 17,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

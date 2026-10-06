@@ -326,7 +326,9 @@
     if (f === 'binnenkort') return arr.filter((r) => {
       if (r.cancelled) return false;
       const st = String(r.status || '').toLowerCase();
-      if (st === 'afgerond' || st === 'gearchiveerd') return false;
+      // Alleen een onboarding die een SESSIE afsloot valt eruit. Status
+      // 'afgerond' alleen = wizard voltooid: die moet nog starten (6 okt 2026).
+      if (r.afgesloten === true || st === 'gearchiveerd') return false;
       if (!r.start_date) return true; // geen startdatum → nog te plannen, dus in "binnenkort"
       return new Date(r.start_date).getTime() >= today;
     });
@@ -344,7 +346,7 @@
     let binnenkort = 0, probleem = 0;
     for (const r of arr) {
       const st = String(r.status || '').toLowerCase();
-      if (!r.cancelled && st !== 'afgerond' && st !== 'gearchiveerd') {
+      if (!r.cancelled && r.afgesloten !== true && st !== 'gearchiveerd') {
         if (!r.start_date || new Date(r.start_date).getTime() >= today) binnenkort++;
       }
       if (!r.cancelled && st === 'aangemeld' && r.start_date && new Date(r.start_date).getTime() < today) probleem++;
@@ -440,7 +442,7 @@
   }
   function kpisArchive(rows) {
     const list = asArr(rows);
-    const done = list.filter((r) => r.status === 'afgerond').length;
+    const done = list.filter((r) => r.afgesloten === true).length;
     const cancelled = list.filter((r) => r.status === 'geannuleerd').length;
     const archived  = list.filter((r) => r.status === 'gearchiveerd').length;
     // Fix ronde-6 (P3): 3e tegel toonde 'Geannuleerd 0' terwijl alle rijen
@@ -458,7 +460,9 @@
   const STATUS_PILL = {
     aangemeld:    ['info',    'Aangemeld'],
     bezig:        ['warn',    'Bezig'],
-    afgerond:     ['ok',      'Afgerond'],
+    // 'afgerond' is de WIZARD; het afsluiten door de eerste sessie toont
+    // statusPillVan() hieronder apart (onboarding-einde.js, 6 okt 2026).
+    afgerond:     ['info',    'Wizard voltooid'],
     gearchiveerd: ['neutral', 'Gearchiveerd'],
     geannuleerd:  ['danger',  'Geannuleerd'],
   };
@@ -477,6 +481,7 @@
     nog_te_benaderen: ['neutral', 'Nog te benaderen'],
   };
   const statusPill = (s) => { const [c, l] = STATUS_PILL[s] || ['neutral', s || '—']; return H.pill(c, l); };
+  const statusPillVan = (r) => (r.afgesloten === true ? H.pill('ok', 'Onboarding afgerond') : statusPill(r.status));
   // Prioriteit: derived intake_status (server) → raw mentor_intake_status →
   // default 'nog_te_benaderen' (nooit bare "—"). Zie v1 regel 1432 patroon.
   function intakePillOf(row) {
@@ -521,7 +526,8 @@
   // Bubble-status blijft zichtbaar in de detail-modal (tab "Account & Bubble" →
   // `modules/klanten-v2/views/modals/onboarding-detail.js` `bubbleBadgeHtml`).
   function voortgangCell(r) {
-    if (r.status === 'afgerond') return '<span style="color:var(--emerald);font-size:12px">✓ Afgerond</span>';
+    if (r.afgesloten === true) return '<span style="color:var(--emerald);font-size:12px">✓ Afgerond door sessie</span>';
+    if (r.status === 'afgerond') return '<span style="font-size:12px;color:var(--text-2)">Wizard voltooid</span>';
     if (r.status === 'geannuleerd') return '<span style="color:var(--rose);font-size:12px">Geannuleerd</span>';
     const step = r.current_step != null ? String(r.current_step) : '0';
     return `<span style="font-size:12px;color:var(--text-2)">Stap ${esc(step)}</span>`;
@@ -606,7 +612,7 @@
       <td><span class="kv-onb-title">${esc(r.customer_name) || '—'}</span></td>
       <td>${intakePillOf(r)}</td>
       <td><span style="color:var(--text-2);font-size:12.5px">${esc(r.traject_label) || '—'}</span></td>
-      <td>${statusPill(r.status)}</td>
+      <td>${statusPillVan(r)}</td>
       <td>${mentorCell(r)}</td>
       <td>${voortgangCell(r)}</td>
       <td><span class="mono" style="color:var(--text-3);font-size:12.5px">${r.start_date ? new Date(r.start_date).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' }) : '—'}</span></td>

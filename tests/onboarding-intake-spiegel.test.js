@@ -10,7 +10,9 @@ import {
 test('DE STAND IN DE POT volgt de CRM-status', () => {
   assert.equal(crmStandVoorIntake({ status: 'aangemeld' }), 'open');
   assert.equal(crmStandVoorIntake({ status: 'bezig' }), 'open');
-  assert.equal(crmStandVoorIntake({ status: 'afgerond' }), 'afgerond');
+  // Wizard voltooid is géén afgesloten onboarding: open in de pot (6 okt 2026).
+  assert.equal(crmStandVoorIntake({ status: 'afgerond' }), 'open');
+  assert.equal(crmStandVoorIntake({ status: 'afgerond', auto_afgerond_op: '2026-10-07T12:00:00Z' }), 'afgerond');
   assert.equal(crmStandVoorIntake({ status: 'geannuleerd' }), 'vervallen');
   assert.equal(crmStandVoorIntake({ status: 'gearchiveerd' }), 'vervallen');
   assert.equal(crmStandVoorIntake({ status: 'bezig', archived_at: '2026-10-01' }), 'vervallen');

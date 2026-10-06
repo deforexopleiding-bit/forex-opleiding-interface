@@ -12,6 +12,7 @@
 // Gooit bij een leesfout op de verplichte bronnen; de aanroeper maakt er een
 // 500 van. Faalzachte bronnen (wizard, deals, factuurstand) blijven faalzacht.
 
+import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp } from './onboarding-einde.js';
 import { supabaseAdmin } from '../supabase.js';
 import { deriveIntakeStatus, intakeStatusRank } from './intake-status.js';
 import { computeBedenktijd, findWaiverConsentKey } from './onboarding-bedenktijd.js';
@@ -56,6 +57,7 @@ export async function bouwOverzichtRijen(opts = {}) {
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error,
                bubble_user_id, mentor_intake_status, dfo_lms_student_id,
                intake_handled_at, intake_handled_by,
+               auto_afgerond_op, auto_afgerond_sessie_id, auto_afgerond_sessie_op, auto_afgerond_sessie_titel,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('is_test', false)
       .order('created_at', { ascending: false })
@@ -299,6 +301,14 @@ export async function bouwOverzichtRijen(opts = {}) {
         created_at:           r.created_at,
         started_at:           r.started_at,
         completed_at:         r.completed_at,
+        // `status = 'afgerond'` = WIZARD voltooid. Écht afgesloten is pas wat
+        // een sessie afsloot (onboarding-einde.js, 6 okt 2026). Elk scherm
+        // leest `afgesloten`, nooit de status, voor "onboarding afgerond".
+        wizard_voltooid:      wizardVoltooid(r),
+        afgesloten:           onboardingAfgesloten(r),
+        afgesloten_op:        afgeslotenOp(r),
+        afgesloten_sessie_op: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_op || null) : null,
+        afgesloten_sessie_titel: onboardingAfgesloten(r) ? (r.auto_afgerond_sessie_titel || null) : null,
         assigned_at:          r.assigned_at,
         archived_at:          r.archived_at,
         token:                r.token,

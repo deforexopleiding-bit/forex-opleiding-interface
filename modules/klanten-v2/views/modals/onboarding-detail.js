@@ -34,7 +34,9 @@ const esc = (v) => K().esc(v);
 const STATUS_LABEL = {
   aangemeld:    { label: 'Aangemeld',     cls: 'kv-onb-pill-info' },
   bezig:        { label: 'Bezig',         cls: 'kv-onb-pill-warn' },
-  afgerond:     { label: 'Afgerond',      cls: 'kv-onb-pill-ok' },
+  // status 'afgerond' = WIZARD voltooid. "Onboarding afgerond" komt alleen
+  // uit auto_afgerond_op — zie statusPillVan() (6 okt 2026).
+  afgerond:     { label: 'Wizard voltooid', cls: 'kv-onb-pill-info' },
   gearchiveerd: { label: 'Gearchiveerd',  cls: 'kv-onb-pill-neutral' },
   geannuleerd:  { label: 'Geannuleerd',   cls: 'kv-onb-pill-danger' },
 };
@@ -50,6 +52,11 @@ const INTAKE_LABEL = {
 };
 
 function statusPill(s) { const m = STATUS_LABEL[s] || { label: s || '—', cls: 'kv-onb-pill-neutral' }; return `<span class="kv-onb-pill ${m.cls}">${esc(m.label)}</span>`; }
+// Zelfde regel als api/_lib/onboarding-einde.js: afgesloten = status
+// 'afgerond' ÉN een sessie die het deed. De module draait in de browser en kan
+// dat bestand niet importeren, vandaar de korte herhaling.
+function afgesloten(o) { return o?.status === 'afgerond' && !!(o.auto_afgerond_op || o.auto_afgerond_sessie_id); }
+function statusPillVan(o) { return afgesloten(o) ? '<span class="kv-onb-pill kv-onb-pill-ok">Onboarding afgerond</span>' : statusPill(o.status); }
 function intakePill(s) { const m = INTAKE_LABEL[s]  || { l: s || '—',    cls: 'kv-onb-pill-neutral' }; return `<span class="kv-onb-pill ${m.cls}">${esc(m.l)}</span>`; }
 function fmtDate(iso) { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return '—'; } }
 function fmtDT(iso)   { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } }
@@ -196,7 +203,7 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>E-mail</span><span>${o.email ? `<a href="mailto:${esc(o.email)}">${esc(o.email)}</a>` : '—'}</span></div>
       <div class="kv-onb-meta-row"><span>Telefoon</span><span>${o.phone ? esc(o.phone) : '—'}</span></div>
       <div class="kv-onb-meta-row"><span>Traject</span><span>${esc(o.traject_label || '—')}${o.calls ? ` <span style="color:var(--text-3)">· ${o.calls} call(s)</span>` : ''}</span></div>
-      <div class="kv-onb-meta-row"><span>Status</span><span>${statusPill(o.status)}</span></div>
+      <div class="kv-onb-meta-row"><span>Status</span><span>${statusPillVan(o)}</span></div>
       <div class="kv-onb-meta-row"><span>Intake-status</span><span>${intakePill(o.mentor_intake_status)}${o.intake_handled_at ? ` <span style="color:var(--text-3);font-size:11px">· afgehandeld ${fmtDT(o.intake_handled_at)}</span>` : ''}</span></div>
       <div class="kv-onb-meta-row"><span>Intakegesprek</span><span>${renderIntakeGesprek()}</span></div>
       <div class="kv-onb-meta-row"><span>Mentor</span><b>${esc(o.mentor_name || '— nog geen mentor —')}</b></div>
@@ -207,7 +214,8 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Laatste no-show</span><span>${o.last_noshow_at ? `<span style="color:var(--rose)">${fmtIntake(o.last_noshow_at)}</span>` : fmtIntake(null)}</span></div>
       <div class="kv-onb-meta-row"><span>Toegewezen</span><span>${fmtDT(o.assigned_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Gestart</span><span>${fmtDT(o.started_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}${autoAfgerondNoot(o)}</span></div>
+      <div class="kv-onb-meta-row"><span>Wizard voltooid</span><span>${fmtDT(o.completed_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Onboarding afgerond</span><span>${afgesloten(o) ? fmtDT(o.auto_afgerond_op) : 'nog niet — wacht op de eerste afgeronde sessie'}${autoAfgerondNoot(o)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
@@ -540,7 +548,8 @@ function renderTijdlijnTab() {
   if (o.last_completed_at)   rows.push({ at: o.last_completed_at,   label: '✓ Call voltooid' });
   if (o.last_noshow_at)      rows.push({ at: o.last_noshow_at,      label: '⚠ No-show' });
   if (o.intake_handled_at)   rows.push({ at: o.intake_handled_at,   label: '✓ Intake afgehandeld' });
-  if (o.completed_at)        rows.push({ at: o.completed_at,        label: '🎉 Onboarding afgerond' });
+  if (o.completed_at)        rows.push({ at: o.completed_at,        label: '✓ Wizard voltooid' });
+  if (afgesloten(o))         rows.push({ at: o.auto_afgerond_op,    label: '🎉 Onboarding afgerond door de eerste sessie' });
   if (o.archived_at)         rows.push({ at: o.archived_at,         label: '📁 Gearchiveerd' });
   if (o.cancelled && o.cancellation?.cancelled_at) rows.push({ at: o.cancellation.cancelled_at, label: `❌ Onboarding geannuleerd${o.cancellation.reason ? ' — ' + esc(o.cancellation.reason) : ''}` });
   for (const u of updates) {

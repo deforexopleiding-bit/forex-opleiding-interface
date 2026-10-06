@@ -48,6 +48,7 @@ import { spiegelFactuurstandNaWijziging } from './factuurstand-spiegel.js';
 import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
 } from './onboarding-bedenktijd.js';
+import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
 
@@ -65,7 +66,8 @@ export const SPIEGEL_MISLUKT    = 'mislukt';
 
 const CRM_KOLOMMEN =
   'id, customer_id, traject_id, status, archived_at, start_date, current_step, ' +
-  'mentor_user_id, dfo_lms_student_id, answers, completed_at';
+  'mentor_user_id, dfo_lms_student_id, answers, completed_at, ' +
+  'auto_afgerond_op, auto_afgerond_sessie_id, auto_afgerond_sessie_op';
 
 /**
  * De reden die zegt: in het CRM staat hier gewoon nog geen mentor. Dat is
@@ -74,8 +76,10 @@ const CRM_KOLOMMEN =
  */
 export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
 
-/**
- * De stand zoals die in het CRM staat, LETTERLIJK.
+/*
+ * De stand zoals die in het CRM staat, LETTERLIJK — op één woord na.
+ * De code staat sinds 6 okt 2026 in onboarding-einde.js (`lmsStandVoor`):
+ * 'afgerond' zonder afsluitende sessie gaat als 'wizard_voltooid'.
  *
  * Geen vertaling, geen lower(), geen trim(), geen woordenlijst. Het woord uit
  * `onboardings.status` gaat ongewijzigd naar `hlms_crm_onboarding.
@@ -99,9 +103,6 @@ export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
  * Leeg blijft leeg: geen status in het CRM betekent geen stand hier, en niet
  * een gok. Het LMS behandelt leeg als onbekend.
  */
-function leesStandLetterlijk(status) {
-  return (typeof status === 'string' && status !== '') ? status : null;
-}
 
 /** Hoort deze onboarding zichtbaar te zijn in het LMS? */
 export const NIET_ZICHTBARE_STATUSSEN = Object.freeze(['geannuleerd', 'gearchiveerd']);
@@ -209,8 +210,15 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // of archiveren), maar tot nu zei de spiegel nergens DAT hij afgerond
       // was. De mentorband kan daardoor lopend werk niet van afgerond werk
       // scheiden — gemeten 11 september: 5 van de 25 rijen zijn afgerond.
-      onboarding_stand       : leesStandLetterlijk(ob.status),
-      afgerond_op            : ob.completed_at || null,
+      //
+      // LET OP (6 okt 2026): `status = 'afgerond'` is WIZARD voltooid, niet
+      // "onboarding afgelopen". Afgelopen is pas wat een sessie afsloot
+      // (`auto_afgerond_op`) — zie onboarding-einde.js. Zonder die afleiding
+      // verdwenen Jonas Keppens en Quinten Braeckman bij hun mentor uit
+      // "Klaar voor onboarding" vóór hun eerste sessie. `afgerond_op` volgt
+      // dezelfde regel: nooit meer `completed_at` (= het wizardmoment).
+      onboarding_stand       : lmsStandVoor(ob),
+      afgerond_op            : afgeslotenOp(ob),
       wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
       wizard_stappen_totaal  : stappenTotaal,
       eerste_factuur_betaald : betaald,
