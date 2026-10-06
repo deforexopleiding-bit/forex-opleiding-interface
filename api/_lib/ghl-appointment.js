@@ -43,6 +43,12 @@ export async function createGhlAppointment({
     // blokkeren. Als GHL het veld anders noemt en dit faalt, toont de
     // error-log de exacte veldnaam die GHL verwacht.
     ignoreFreeSlotValidation: true,
+    // Ook buiten het boekvenster van de kalender (ca. 20 dagen) en de
+    // minimale aankondigingstermijn. Veldnaam en betekenis staan zo in GHL's
+    // eigen OpenAPI-spec (AppointmentCreateSchema): "If set to true, the
+    // minimum scheduling notice and date range would be ignored". Zonder dit
+    // kon Opvolging geen zoomcall handmatig voorbij dat venster zetten.
+    ignoreDateRange: true,
   };
   if (title)          payload.title          = title;
   if (assignedUserId) payload.assignedUserId = assignedUserId;
@@ -117,6 +123,10 @@ export async function updateGhlAppointmentTime(appointmentId, newStartIso, newEn
     startTime: newStartIso,
     endTime: newEndIso,
     ignoreFreeSlotValidation: true,
+    // Zelfde reden als bij createGhlAppointment: een call handmatig verzetten
+    // naar een moment voorbij het boekvenster (AppointmentEditSchema kent het
+    // veld ook).
+    ignoreDateRange: true,
   };
   if (process.env.GHL_CALENDAR_ID)   putBody.calendarId     = process.env.GHL_CALENDAR_ID;
   if (process.env.GHL_LOCATION_ID)   putBody.locationId     = process.env.GHL_LOCATION_ID;

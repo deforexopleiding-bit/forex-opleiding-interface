@@ -66,6 +66,7 @@ function fout(code, bericht, extra) {
  * @param {number} [o.duurMinuten]    duur van de nieuwe afspraak
  * @param {?string}[o.doorUserId]     wie het deed, voor de audit-regel
  * @param {string} [o.bron]           'manual' (cockpit) of 'opvolging-afronden'
+ * @param {boolean}[o.handmatig]      moment zelf gekozen, buiten de vrije slots van GHL
  * @returns {Promise<{nieuweAfspraak:object, ghlBijgewerkt:boolean, zoomBijgewerkt:boolean}>}
  */
 export async function verzetAfspraak({
@@ -75,6 +76,7 @@ export async function verzetAfspraak({
   duurMinuten = VERZET_DUUR_MIN,
   doorUserId = null,
   bron = 'manual',
+  handmatig = false,
 }) {
   if (!supabaseAdmin) throw fout('ARG', 'supabaseAdmin ontbreekt');
   if (!afspraak || !afspraak.id) throw fout('ARG', 'afspraak ontbreekt');
@@ -184,6 +186,9 @@ export async function verzetAfspraak({
         zoom_updated       : zoomBijgewerkt,
         ghl_updated        : ghlBijgewerkt,
         changed_by         : doorUserId,
+        // Zodat het rapport een zelf gekozen moment kan onderscheiden van een
+        // vrij slot. Alleen als het waar is.
+        ...(handmatig ? { handmatig: true } : {}),
       },
     });
     if (error) throw new Error(error.message);

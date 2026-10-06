@@ -210,6 +210,8 @@ async function verplaats({ req, res, taak, appointmentId, b, nu, vandaag, notiti
       duurMinuten  : afspraak.duration_minutes || VERZET_DUUR_MIN,
       doorUserId   : null,
       bron         : 'opvolging-opwarm',
+      // Zelf gekozen moment buiten de vrije slots van GHL — komt in de audit.
+      handmatig    : b.handmatig === true,
     });
   } catch (e) {
     if (e?.code === 'GHL_UPDATE') {
