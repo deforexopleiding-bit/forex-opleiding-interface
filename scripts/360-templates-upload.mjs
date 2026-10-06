@@ -2,7 +2,7 @@
 // scripts/360-templates-upload.mjs
 //
 // Dient de WhatsApp-templates van de LEAD-flows in één keer in bij 360dialog
-// (nieuwe WABA van het hoofdnummer +31 6 57210825), met EXACT dezelfde naam,
+// (WABA van het hoofdnummer, sinds 2026-10-06 +31 6 44562426), met EXACT dezelfde naam,
 // taal, tekst en variabele-volgorde als in de database — zodat de bestaande
 // CRM-code (meta_param_mapping, templatenamen in flows) ze herkent.
 //

@@ -44,7 +44,7 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   uit `api/_lib/wa-nummers.js` drie env vars — `D360_API_KEY_<NUMMER>` (sensitive),
   `D360_PHONE_NUMBER_ID_<NUMMER>` (Meta's phone_number_id, optioneel: anders opgevraagd
   via /health_status) en `D360_WEBHOOK_TOKEN_<NUMMER>` (sensitive, gedeeld geheim voor
-  `/api/whatsapp-360-webhook?nummer=<sleutel>`). Nu: `HOOFDNUMMER` (+31 6 57210825,
+  `/api/whatsapp-360-webhook?nummer=<sleutel>`). Nu: `HOOFDNUMMER` (+31 6 44562426, phone_number_id 1273723375834177; tot 2026-10-06 +31 6 57210825,
   lead-modules). Transport kiest per bericht 360dialog/Meta in `metaPostMessage`.
   Onboarding NOOIT via het hoofdnummer (`module:'onboarding'` → WaGeenNummerError);
   e-mail-fallback achter `ONBOARDING_MAIL_FALLBACK=true` (default uit).
