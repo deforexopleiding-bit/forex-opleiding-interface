@@ -73,13 +73,15 @@ async function veilig(label, fn) {
 }
 
 /**
- * De nummers van een reeks onboardings, in één ronde per bron.
+ * De nummers van een reeks PERSONEN, in één ronde per bron. Een persoon is
+ * een CRM-klant (customer_id), een e-mailadres, of allebei - zo werkt dezelfde
+ * voorrangsregel ook voor een LMS-student zonder onboarding (6 okt 2026).
  * @param {object} db  supabase-client (service_role)
- * @param {{id: string, customer_id?: string|null, answers?: object|null}[]} obs
+ * @param {{sleutel: string, customer_id?: string|null, email?: string|null, answers?: object|null}[]} personen
  * @returns {Promise<Map<string, {telefoon: string|null, bron: string|null, zeker: boolean}>>}
  */
-export async function telefoonsVoorOnboardings(db, obs) {
-  const lijst = (obs || []).filter((o) => o?.id);
+export async function telefoonsVoorPersonen(db, personen) {
+  const lijst = (personen || []).filter((p) => p?.sleutel);
   const klantIds = [...new Set(lijst.map((o) => o.customer_id).filter(Boolean))];
 
   // 1) De klantkaart: telefoon, e-mail (sleutel voor 3 en 4) en land.
@@ -110,7 +112,12 @@ export async function telefoonsVoorOnboardings(db, obs) {
     });
   }
 
-  const emails = [...new Set([...klanten.values()].map((k) => emailSleutel(k.email)).filter(Boolean))];
+  // De e-mail per persoon: die van de klantkaart, anders die van de persoon zelf.
+  const emailVan = (p) => {
+    const k = p.customer_id ? klanten.get(p.customer_id) : null;
+    return emailSleutel(k?.email) || emailSleutel(p.email);
+  };
+  const emails = [...new Set(lijst.map(emailVan).filter(Boolean))];
 
   // 3) De lead (op e-mail).
   const leads = new Map();
@@ -145,7 +152,7 @@ export async function telefoonsVoorOnboardings(db, obs) {
   const uit = new Map();
   for (const o of lijst) {
     const k = o.customer_id ? klanten.get(o.customer_id) : null;
-    const e = emailSleutel(k?.email);
+    const e = emailVan(o);
     const kandidaten = [
       { bron: 'klant', ruw: k?.phone },
       { bron: 'whatsapp', ruw: o.customer_id ? wa.get(o.customer_id) : null },
@@ -153,9 +160,18 @@ export async function telefoonsVoorOnboardings(db, obs) {
       { bron: 'afspraak', ruw: e ? afspraken.get(e) : null },
       ...telefoonsUitAntwoorden(o.answers).map((ruw) => ({ bron: 'wizard', ruw })),
     ];
-    uit.set(o.id, kiesTelefoon(kandidaten, k?.address_country || null));
+    uit.set(o.sleutel, kiesTelefoon(kandidaten, k?.address_country || null));
   }
   return uit;
+}
+
+/**
+ * De nummers van een reeks onboardings (sleutel = onboarding-id).
+ * @param {{id: string, customer_id?: string|null, answers?: object|null}[]} obs
+ */
+export async function telefoonsVoorOnboardings(db, obs) {
+  return telefoonsVoorPersonen(db, (obs || []).filter((o) => o?.id)
+    .map((o) => ({ sleutel: o.id, customer_id: o.customer_id || null, answers: o.answers || null })));
 }
 
 /** Eén onboarding. */

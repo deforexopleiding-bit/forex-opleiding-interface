@@ -392,6 +392,34 @@
 
       <hr style="margin:24px 0;border:0;border-top:1px solid var(--border)">
 
+      <h3 style="margin:0 0 6px">Telefoonnummers aanvullen voor alle studenten</h3>
+      <p style="margin:0 0 4px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        De hersync hierboven geeft een nummer aan studenten <strong>met</strong> een onboarding.
+        Deze knop doet het voor <strong>alle</strong> studenten in het LMS die nog geen nummer
+        hebben &mdash; ook de Bubble-imports. De student wordt aan een CRM-klant gekoppeld via
+        de onboarding, het Bubble-id of het e-mailadres, en het nummer komt uit dezelfde
+        voorrang als in de spiegel: klantkaart, WhatsApp-gesprek, lead, geboekte call, wizard.
+      </p>
+      <p style="margin:0 0 14px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        Alleen <strong>lege</strong> nummers worden gevuld; een bestaand nummer blijft altijd
+        staan. Er gaat <strong>niets</strong> naar de student. Dit draait ook elke ochtend
+        om 07:35, na de hersync.
+      </p>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button type="button" id="obTelDroogloop" class="btn">
+          <i class="ti ti-eye"></i> Droogloop &mdash; alleen tellen
+        </button>
+        <button type="button" id="obTelUitvoeren" class="btn primary">
+          <i class="ti ti-phone-plus"></i> Nummers aanvullen
+        </button>
+        <span id="obTelStatus" style="font-size:13px;color:var(--text-2)"></span>
+      </div>
+
+      <div id="obTelUitkomst"></div>
+
+      <hr style="margin:24px 0;border:0;border-top:1px solid var(--border)">
+
       <h3 style="margin:0 0 6px">Factuurstand naar het LMS</h3>
       <p style="margin:0 0 4px;color:var(--text-2);font-size:13.5px;line-height:1.55">
         Het LMS krijgt per actieve mentorship-student de stand van zijn facturen: hoeveel
@@ -584,6 +612,11 @@
     if (sDro) sDro.addEventListener('click', () => spiegelDraai(true));
     if (sUit) sUit.addEventListener('click', () => spiegelDraai(false));
 
+    const tDro = document.getElementById('obTelDroogloop');
+    const tUit = document.getElementById('obTelUitvoeren');
+    if (tDro) tDro.addEventListener('click', () => telefoonDraai(true));
+    if (tUit) tUit.addEventListener('click', () => telefoonDraai(false));
+
     const fDro = document.getElementById('obFactDroogloop');
     const fUit = document.getElementById('obFactUitvoeren');
     if (fDro) fDro.addEventListener('click', () => factuurstandDraai(true));
@@ -759,6 +792,123 @@
       html += '</table></div>';
     }
 
+    host.innerHTML = html;
+  }
+
+  // ── Telefoonnummers aanvullen voor alle studenten (6 okt 2026) ──────────
+  // Zelfde vorm als de hersync. Geen verplichte droogloop: de ronde vult
+  // alleen lege velden en is dus herhaalbaar zonder schade.
+  let _telBezig = false;
+
+  function telefoonStatus(tekst, kleur) {
+    const el = document.getElementById('obTelStatus');
+    if (el) { el.textContent = tekst || ''; el.style.color = kleur || 'var(--text-2)'; }
+  }
+
+  async function telefoonDraai(dry) {
+    if (_telBezig) return;
+    _telBezig = true;
+    const dro = document.getElementById('obTelDroogloop');
+    const uit = document.getElementById('obTelUitvoeren');
+    if (dro) dro.disabled = true;
+    if (uit) uit.disabled = true;
+    telefoonStatus(dry ? 'Tellen…' : 'Bezig met aanvullen…');
+    try {
+      const r = await window.AgentShared.apiFetch('/api/student-telefoon-aanvullen-run', {
+        method: 'POST',
+        body: JSON.stringify({ dry: !!dry }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
+        telefoonRender(d || { ok: false, error: 'HTTP ' + r.status }, dry);
+        telefoonStatus('Mislukt: ' + ((d && d.error) || ('HTTP ' + r.status)), 'var(--rose)');
+        return;
+      }
+      telefoonRender(d, dry);
+      if (d.ok === false) telefoonStatus('Mislukt — zie hieronder', 'var(--rose)');
+      else if (d.mislukt) telefoonStatus(d.mislukt + ' rij(en) mislukt', 'var(--rose)');
+      else telefoonStatus(dry ? 'Droogloop klaar' : 'Klaar', 'var(--green)');
+    } catch (e) {
+      telefoonRender({ ok: false, error: (e && e.message) || String(e) }, dry);
+      telefoonStatus('Mislukt — zie hieronder', 'var(--rose)');
+    } finally {
+      _telBezig = false;
+      if (dro) dro.disabled = false;
+      if (uit) uit.disabled = false;
+    }
+  }
+
+  function telefoonRender(d, dry) {
+    const host = document.getElementById('obTelUitkomst');
+    if (!host) return;
+    if (!d) { host.innerHTML = ''; return; }
+    const esc = (window.AgentShared && window.AgentShared.esc)
+      ? window.AgentShared.esc
+      : (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+          { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    // Ging de ronde niet door, dan is er niets geteld: streepjes, geen nullen.
+    const gemeten = d.ok !== false;
+    const tel = (n, w) => '<span style="margin-right:16px"><strong>'
+      + (gemeten && Number.isFinite(Number(n)) ? Number(n) : '—')
+      + '</strong> ' + w + '</span>';
+    const blok = (titel, inhoud) => '<div style="background:var(--bg-elev);border:1px solid var(--border);'
+      + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px;line-height:1.8">'
+      + '<div style="margin-bottom:2px"><strong>' + titel + '</strong></div>' + inhoud + '</div>';
+
+    let html = blok(
+      !gemeten ? 'Niet uitgevoerd — er is niets geteld'
+               : (dry ? 'Droogloop — er is niets gewijzigd' : 'Nummers aangevuld'),
+      tel(d.zonder_nummer, 'studenten zonder nummer')
+      + tel(d.zonder_nummer_actief, 'waarvan actief'));
+
+    if (gemeten) {
+      const g = d.gekoppeld || {};
+      html += blok('Gekoppeld aan het CRM',
+        tel(g.onboarding, 'via onboarding')
+        + tel(g.bubble, 'via Bubble-id')
+        + tel(g.email, 'via e-mail (klantkaart)')
+        + tel(d.niet_gekoppeld, 'geen CRM-klant gevonden')
+        + (d.email_dubbel ? '<span style="color:var(--amber)"><strong>' + d.email_dubbel
+            + '</strong> e-mailadres bij meer dan één klant (niet gekoppeld)</span>' : ''));
+
+      const bronLabel = { klant: 'klantkaart', whatsapp: 'WhatsApp-gesprek', lead: 'lead', afspraak: 'geboekte call', wizard: 'wizard' };
+      const perBron = Object.entries(d.per_bron || {})
+        .map(([b, n]) => (bronLabel[b] || b) + ' ' + n).join(' · ');
+      html += blok('Telefoonnummer',
+        tel(d.gevonden, 'nummers gevonden')
+        + tel(d.gevonden_actief, 'waarvan actief')
+        + tel(d.zonder_landcode, 'zonder landcode (geen WhatsApp-link)')
+        + (d.niet_gevonden_actief
+            ? '<span style="color:var(--rose)"><strong>' + d.niet_gevonden_actief
+              + '</strong> actief en nergens een nummer</span>'
+            : tel(d.niet_gevonden_actief, 'actief en nergens een nummer'))
+        + (perBron ? '<div style="color:var(--text-2);font-size:12.5px">Bron: ' + esc(perBron) + '</div>' : ''));
+
+      if (!dry) {
+        html += blok('Geschreven',
+          tel(d.geschreven, 'aangevuld in het LMS')
+          + tel(d.al_gevuld, 'intussen al gevuld (blijft staan)')
+          + (d.mislukt ? '<span style="color:var(--rose)"><strong>' + d.mislukt + '</strong> mislukt</span>'
+                       : tel(d.mislukt, 'mislukt')));
+      }
+    }
+
+    if (d.error) {
+      html += '<div style="background:var(--rose-soft);border:1px solid var(--rose-line);'
+        + 'color:var(--rose);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">'
+        + esc(d.error) + '</div>';
+    }
+    const errs = Array.isArray(d.errors) ? d.errors : [];
+    if (errs.length) {
+      html += '<div style="font-size:13px"><div style="margin-bottom:6px"><strong>Waarom het misging</strong></div>'
+        + '<table style="width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed">';
+      for (const e of errs) {
+        html += '<tr style="border-top:1px solid var(--border)">'
+          + '<td style="padding:6px 8px 6px 0;color:var(--text-2);overflow-wrap:anywhere;width:40%">' + esc(e.student_id || '—') + '</td>'
+          + '<td style="padding:6px 0;color:var(--rose);overflow-wrap:anywhere">' + esc(e.fout || '') + '</td></tr>';
+      }
+      html += '</table></div>';
+    }
     host.innerHTML = html;
   }
 

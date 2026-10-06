@@ -199,6 +199,10 @@
       "schedule": "20 7 * * *"
     },
     {
+      "path": "/api/cron/student-telefoon-aanvullen",
+      "schedule": "35 7 * * *"
+    },
+    {
       "path": "/api/cron/factuurstand-spiegel-sync",
       "schedule": "10 2 * * *"
     },
