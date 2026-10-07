@@ -214,7 +214,9 @@ export async function d360NummerVoorPhoneNumberId(pnId) {
   if (!pnId) return null;
   const p = String(pnId).trim();
   const opvolger = nummerVoorVervangenLijn(p);
-  if (opvolger && opvolger.provider === '360dialog') return opvolger;
+  // Alleen omleiden als de opvolger al een API-key heeft — anders blijft het
+  // oude pad (een nog niet geconfigureerd nummer mag niets breken).
+  if (opvolger && opvolger.provider === '360dialog' && apiKeyVan(opvolger)) return opvolger;
   for (const n of actieveNummers()) {
     if (n.provider !== '360dialog') continue;
     if (phoneNumberIdUitEnv(n) === p) return n;
@@ -234,7 +236,7 @@ export async function d360NummerVoorPhoneNumberId(pnId) {
 export async function huidigeLijnId(pnId) {
   if (!pnId) return pnId;
   const opvolger = nummerVoorVervangenLijn(pnId);
-  if (!opvolger) return String(pnId);
+  if (!opvolger || !apiKeyVan(opvolger)) return String(pnId);
   return (await d360PhoneNumberId(opvolger)) || String(pnId);
 }
 
@@ -246,7 +248,9 @@ export async function lijnFamilie(pnId) {
   if (!pnId) return { huidig: pnId, alle: pnId ? [String(pnId)] : [] };
   const huidig = await huidigeLijnId(pnId);
   const nummer = nummerVoorVervangenLijn(pnId) || (await d360NummerVoorPhoneNumberId(huidig));
-  const oud = nummer ? [...(nummer.vervangt_phone_number_ids || [])] : [];
+  // Een nummer zonder API-key heeft de oude lijnen nog niet overgenomen:
+  // dan blijft elke lijn zijn eigen familie (finance en onboarding apart).
+  const oud = nummer && apiKeyVan(nummer) ? [...(nummer.vervangt_phone_number_ids || [])] : [];
   return { huidig, alle: [...new Set([huidig, ...oud])] };
 }
 
@@ -270,7 +274,8 @@ export async function kiesVerzendroute(opts = {}) {
     if (module) {
       const viaModule = nummerVoorModule(module);
       if (viaModule && apiKeyVan(viaModule)) return { provider: '360dialog', nummer: viaModule };
-      if (!viaModule && NOOIT_VIA_WILDCARD.includes(module)) {
+      // Onboarding: zonder eigen nummer MET key nooit via een andere lijn.
+      if ((!viaModule || !apiKeyVan(viaModule)) && NOOIT_VIA_WILDCARD.includes(module)) {
         throw new WaGeenNummerError(module, 'nog geen eigen nummer');
       }
     }
@@ -279,7 +284,8 @@ export async function kiesVerzendroute(opts = {}) {
   if (module) {
     const viaModule = nummerVoorModule(module);
     if (viaModule && apiKeyVan(viaModule)) return { provider: '360dialog', nummer: viaModule };
-    if (!viaModule && NOOIT_VIA_WILDCARD.includes(module)) {
+    // Onboarding: zonder eigen nummer MET key nooit via een andere lijn.
+    if ((!viaModule || !apiKeyVan(viaModule)) && NOOIT_VIA_WILDCARD.includes(module)) {
       throw new WaGeenNummerError(module, 'nog geen eigen nummer');
     }
     return { provider: 'meta' };

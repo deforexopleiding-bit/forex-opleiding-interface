@@ -150,7 +150,7 @@ export async function sendOnboardingTemplateGeneric({
     // 5) Module-context (afdeling-vars).
     let moduleContext = null;
     try {
-      if (modCfg?.phone_number_id) moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id);
+      if (modCfg?.phone_number_id) moduleContext = await getModuleContextByPhoneNumberId(supabaseAdmin, modCfg.phone_number_id, { module: 'onboarding' });
     } catch (e) {
       console.error('[onboarding-template-send] module-context:', e?.message || e);
     }

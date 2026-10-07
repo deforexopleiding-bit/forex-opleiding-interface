@@ -94,7 +94,7 @@ export default async function handler(req, res) {
     if (conv.phone_number_id) {
       // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
       let lineCfg = null, lineErr = null;
-      try { lineCfg = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id); }
+      try { lineCfg = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id, { customerId: conv.customer_id }); }
       catch (e) { lineErr = e; }
       if (lineErr) {
         console.error('[inbox-template-list] line module-config lookup:', lineErr.message);

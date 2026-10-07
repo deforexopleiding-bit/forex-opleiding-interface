@@ -33,6 +33,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel, inBlokken, isVandaag, metWerkstand } from './_lib/gesprekken-werkstand.js';
+import { filterGesprekkenOpKlantModule } from './_lib/klant-module.js';
 // NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
 // per ontwerp is de onboarding-inbox gedeeld voor iedereen met
 // onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
@@ -205,8 +206,17 @@ export default async function handler(req, res) {
       query = query.or(orParts.join(','));
     }
 
-    const { data, error, count } = await query;
+    const { data: ruweRijen, error, count: ruweCount } = await query;
     if (error) throw new Error(error.message);
+
+    // Gedeeld klantnummer (onboarding + finance op één lijn): per klant
+    // bepalen in welke inbox het gesprek hoort (api/_lib/klant-module.js).
+    // Andere lijnen: ongewijzigd.
+    const { rows: data, gefilterd } = await filterGesprekkenOpKlantModule(
+      supabaseAdmin, ruweRijen, modulePnId, moduleRaw);
+    const count = gefilterd && Number(ruweCount || 0) <= (ruweRijen || []).length
+      ? data.length
+      : ruweCount;
 
     // ── Email-activity-verrijking (voor last_activity_at-sort) ─────────
     // Batch-query: max(date_received) per customer_id, gecapt op laatste

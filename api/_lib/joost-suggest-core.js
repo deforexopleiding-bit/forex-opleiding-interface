@@ -264,7 +264,7 @@ export async function runJoostSuggest({
   // webhook-pad gaat al door isFinanceLijn-gate (inbox-webhook); manual-knop
   // op finance.html werkt alleen op finance-conv; events-conv die per
   // ongeluk doorgegeven wordt → expliciete afwijzing.
-  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id);
+  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id, { customerId: conv.customer_id });
   if (moduleCtx?.module !== 'finance') {
     return {
       status: 422,

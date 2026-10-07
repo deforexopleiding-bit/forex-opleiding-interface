@@ -157,13 +157,15 @@ export async function mentorOwnsCustomer(userId, customerId) {
  * onboarding-specifieke ownership-guard).
  *
  * @param {string|null} phoneNumberId
+ * @param {string|null} [customerId] - nodig op het gedeelde klantnummer (onboarding vs finance)
  * @returns {Promise<string|null>}
  */
-export async function resolveConversationModule(phoneNumberId) {
+export async function resolveConversationModule(phoneNumberId, customerId = null) {
   if (!phoneNumberId || typeof phoneNumberId !== 'string') return null;
   try {
     // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
-    const data = await getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumberId);
+    // Op het gedeelde klantnummer bepaalt de klant onboarding vs finance.
+    const data = await getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumberId, { customerId });
     return (data && typeof data.module === 'string') ? data.module : null;
   } catch (err) {
     console.error('[onboardingScope.resolveConversationModule] exception:', err?.message || err);
@@ -213,10 +215,10 @@ export async function isMentorOnly(req) {
  *
  * @returns {Promise<{ok:true} | {ok:false, status:number, error:string}>}
  */
-export async function checkOnboardingConvAccess(req, { phoneNumberId, customerId }) { // eslint-disable-line no-unused-vars
+export async function checkOnboardingConvAccess(req, { phoneNumberId, customerId }) {
   const scope = await getOnboardingScope(req);
   if (scope.seesAll) return { ok: true };
-  const convModule = await resolveConversationModule(phoneNumberId);
+  const convModule = await resolveConversationModule(phoneNumberId, customerId);
   if (convModule !== 'onboarding') return { ok: true };
   // Onboarding-inbox is gedeeld (Jeffrey-beslissing): elke
   // onboarding.inbox.view-houder mag elke onboarding-conv. Mentor-

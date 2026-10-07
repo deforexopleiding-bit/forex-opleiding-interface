@@ -34,13 +34,21 @@
 //                        eerstvolgende bericht aan de huidige lijn gehecht (één draad
 //                        per lead, geen splitsing). Zie api/_lib/wa-gesprek-lijn.js.
 //
-// ROUTERING NU: het hoofdnummer bedient de LEAD-/niet-klant-modules
-// (leadsonderhoud = welkom/afspraken/toegang/onderhoud/gesprekken, welkom,
-// events, opvolging). KLANT-modules staan er bewust buiten:
-//   - onboarding  → krijgt later een eigen nummer; tot dan e-mail (zie
-//                   api/_lib/onboarding-template-send.js / onboarding-invite.js);
-//   - finance / dunning (wanbetalers, Joost, Iris) → klanten; beslissing Jeffrey.
-//     Aanzetten = 'finance' en 'dunning' van uitgesloten_modules naar modules.
+// ROUTERING NU (2026-10-07): twee nummers, strikt gescheiden.
+//   hoofdnummer  → LEAD-/niet-klant-modules (leadsonderhoud = welkom/afspraken/
+//                  toegang/onderhoud/gesprekken, welkom, events, opvolging).
+//   klantnummer  → KLANT-modules: onboarding + finance/dunning (wanbetalers,
+//                  Joost, Iris). Inkomende gesprekken krijgen per gesprek een
+//                  module (inkomend_resolver 'klant', zie api/_lib/klant-module.js):
+//                  actieve onboarding zonder openstaande aanmaning → onboarding,
+//                  anders finance.
+// Een nummer zonder API-key in de env doet NIETS: sends naar z'n modules/oude
+// lijnen blijven op het vorige pad (onboarding: geen WhatsApp, e-mail-fallback),
+// en gesprekken worden niet gehecht. Zo kan de code vóór de env live.
+//
+//   inkomend_resolver    optioneel: 'klant' = module per gesprek bepalen i.p.v.
+//                        altijd inkomend_module (alleen zinvol als meerdere
+//                        modules één nummer delen).
 
 export const WA_NUMMERS = Object.freeze([
   Object.freeze({
@@ -66,6 +74,27 @@ export const WA_NUMMERS = Object.freeze([
     //   1156034510929407 oude events-lijn
     // NIET: finance (1194351613761790) en onboarding (1163203046877082) — klantlijnen.
     vervangt_phone_number_ids: Object.freeze(['758003047390806', '1232908829908396', '1156034510929407']),
+    actief: true,
+  }),
+  Object.freeze({
+    sleutel: 'klantnummer',
+    label: 'Klantnummer (onboarding + finance)',
+    // 2026-10-07: zelfde 360dialog-account als het hoofdnummer, maar eigen channel,
+    // API-key en WABA. Meta's phone_number_id: 1399327383258229 (Vercel-env).
+    e164: null,         // TODO: het telefoonnummer invullen (alleen voor de webhook-controle; mismatch = waarschuwing)
+    provider: '360dialog',
+    channel_id: null,   // TODO: channel-ID uit de 360dialog-hub (alleen referentie)
+    api_key_env: 'D360_API_KEY_KLANTNUMMER',
+    phone_number_id_env: 'D360_PHONE_NUMBER_ID_KLANTNUMMER',
+    webhook_token_env: 'D360_WEBHOOK_TOKEN_KLANTNUMMER',
+    modules: Object.freeze(['onboarding', 'finance', 'dunning']),
+    uitgesloten_modules: Object.freeze(['leadsonderhoud', 'welkom', 'events', 'opvolging']),
+    standaard: false,
+    inkomend_module: 'finance',      // terugval als de resolver niets kan zeggen
+    inkomend_resolver: 'klant',
+    templates: Object.freeze({}),
+    // De klantlijnen die dit nummer vervangt: oude finance- en onboardinglijn.
+    vervangt_phone_number_ids: Object.freeze(['1194351613761790', '1163203046877082']),
     actief: true,
   }),
 ]);

@@ -188,7 +188,7 @@ export default async function handler(req, res) {
     if (conv.phone_number_id) {
       try {
         // Via module-context: kan meerdere modules op één nummer aan (360dialog-hoofdnummer).
-        const convMod = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id);
+        const convMod = await getModuleContextByPhoneNumberId(supabaseAdmin, conv.phone_number_id, { customerId: conv.customer_id });
         const convModErr = null;
         if (convModErr) {
           console.error('[inbox-send-template] conv-module lookup:', convModErr.message);
@@ -405,6 +405,7 @@ export default async function handler(req, res) {
           moduleContext = await getModuleContextByPhoneNumberId(
             supabaseAdmin,
             conv.phone_number_id || financePnId || null,
+            { customerId: conv.customer_id },
           );
           if (!moduleContext) {
             resolveWarnings.push('Geen module-context gevonden voor afdeling.* variabele(n)');

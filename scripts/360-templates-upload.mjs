@@ -1,26 +1,34 @@
 #!/usr/bin/env node
 // scripts/360-templates-upload.mjs
 //
-// Dient de WhatsApp-templates van de LEAD-flows in één keer in bij 360dialog
-// (WABA van het hoofdnummer, sinds 2026-10-06 +31 6 44562426), met EXACT dezelfde naam,
+// Dient de WhatsApp-templates van één nummer in één keer in bij 360dialog
+// (--nummer=hoofdnummer: LEAD-flows, WABA van +31 6 44562426 — de default;
+//  --nummer=klantnummer: onboarding + finance/dunning, eigen WABA sinds 2026-10-07),
+// met EXACT dezelfde naam,
 // taal, tekst en variabele-volgorde als in de database — zodat de bestaande
 // CRM-code (meta_param_mapping, templatenamen in flows) ze herkent.
 //
 // GEBRUIK
 //   node --env-file=<pad/naar/.env> scripts/360-templates-upload.mjs --dry-run
 //   node --env-file=<pad/naar/.env> scripts/360-templates-upload.mjs --apply
-//   Optioneel: --only=naam1,naam2   (alleen deze templates)
+//   Optioneel: --nummer=hoofdnummer|klantnummer (default hoofdnummer)
+//              --only=naam1,naam2   (alleen deze templates)
 //              --json               (dry-run-uitvoer als JSON)
 //
 // ENV (nooit in code, nooit geprint)
 //   SUPABASE_URL (of NEXT_PUBLIC_SUPABASE_URL) + SUPABASE_SERVICE_ROLE_KEY — alleen LEZEN
-//   D360_API_KEY_HOOFDNUMMER — vereist voor --apply; bij --dry-run optioneel
-//                              (dan toont de dry-run ook wat al bij 360dialog staat)
+//   D360_API_KEY_HOOFDNUMMER / D360_API_KEY_KLANTNUMMER (per --nummer) — vereist
+//                              voor --apply; bij --dry-run optioneel (dan toont de
+//                              dry-run ook wat al bij 360dialog staat)
 //
 // WAT HET DOET
-//   1. Verzamelt de benodigde namen: de vaste lijst uit PR #1729 + de namen die
-//      in de DB staan (onderhoud_sjablonen.meta_template, event_automations
-//      steps[].config.template_name, leadsonderhoud_bulk_jobs.template_name).
+//   1. Verzamelt de benodigde namen: een vaste lijst per nummer + de namen die
+//      in de DB staan.
+//      hoofdnummer: onderhoud_sjablonen.meta_template, event_automations
+//        steps[].config.template_name, leadsonderhoud_bulk_jobs.template_name.
+//      klantnummer: dunning_templates.meta_template_name (actief, WhatsApp),
+//        onboarding_automations steps[].config.template_name,
+//        joost_config(finance/onboarding).autonomy_config.no_reply.reminder_1/2_template_name.
 //   2. Leest per naam de rij uit whatsapp_meta_templates (voorkeur: APPROVED,
 //      dan meest recent) en bouwt de components met dezelfde functie als het
 //      CRM-indienscherm (api/_lib/wa-template-components.js).
@@ -51,6 +59,22 @@ export const VASTE_TEMPLATES = Object.freeze({
   intern: ['interne_nieuwe_afspraak_nl', 'nieuwe_lead'],
 });
 
+// Klantnummer (onboarding + finance/dunning). De DB-bronnen vullen aan; deze
+// lijst garandeert de kern ook als een workflow even uit staat.
+export const VASTE_KLANT_TEMPLATES = Object.freeze({
+  onboarding: ['welkom_onboarding', 'betaalherinnering_eerste_call'],
+  dunning: ['aanmaning_dag7', 'aanmaning_dag14', 'aanmaning_dag17', 'aanmaning_dag21', 'aanmaning_dag37',
+    'meerdere_facturen_open_1', 'meerdere_facturen_herinnering_2', 'meerdere_facturen_herinnering_3',
+    'meerdere_facturen_incasso'],
+  joost: ['opvolging_geen_reactie2'],
+});
+
+// Per nummer: welke key-env, welke vaste lijst.
+export const NUMMERS = Object.freeze({
+  hoofdnummer: Object.freeze({ keyEnv: 'D360_API_KEY_HOOFDNUMMER', vast: VASTE_TEMPLATES }),
+  klantnummer: Object.freeze({ keyEnv: 'D360_API_KEY_KLANTNUMMER', vast: VASTE_KLANT_TEMPLATES }),
+});
+
 // Voorbeeldwaarden voor templates zonder opgeslagen voorbeelden/mapping (alleen
 // de sample die Meta bij de beoordeling ziet — de tekst zelf verandert niet).
 export const VOORBEELD_OVERRIDES = Object.freeze({
@@ -74,6 +98,9 @@ const UTILITY_NAMEN = [
   [/^agenda_(doorsturen|herinnering)/, 'agenda-link na een gesprek'],
   [/^(events_keuze_link|vragenlijst_herinnering|event_vragenlijst)/, 'inschrijving/vragenlijst event'],
   [/^(interne_|nieuwe_lead$)/, 'interne melding aan het team'],
+  [/^(aanmaning_|meerdere_facturen_|betaalherinnering)/, 'herinnering aan een openstaande factuur'],
+  [/^(opvolging_geen_reactie|joost_reminder)/, 'opvolging van een lopend betaalgesprek'],
+  [/^welkom_onboarding/, 'start van de gekochte opleiding'],
 ];
 const PROMO = [
   [/\bplan\b[^.!?\n]{0,40}\bopstartsessie\b/i, 'spoort aan een opstartsessie (salesgesprek) in te plannen'],
@@ -92,6 +119,8 @@ export function kiesCategorie({ naam, bronnen = [], body = '', dbCategorie = nul
   }
   if (bronnen.includes('onderhoud_sjablonen')) return { categorie: 'UTILITY', reden: 'lead-onderhoud: dienstbericht over de lopende toegang/sessie, geen aanbod' };
   if (bronnen.includes('event_automations')) return { categorie: 'UTILITY', reden: 'event-automation: bericht over de eigen inschrijving' };
+  if (bronnen.includes('dunning_templates')) return { categorie: 'UTILITY', reden: 'aanmaning: bericht over een eigen openstaande factuur' };
+  if (bronnen.includes('onboarding_automations')) return { categorie: 'UTILITY', reden: 'onboarding: bericht over de gekochte opleiding' };
   const db = String(dbCategorie || '').toUpperCase();
   if (db === 'UTILITY' || db === 'MARKETING') return { categorie: db, reden: 'geen regel van toepassing — categorie uit de database' };
   return { categorie: 'UTILITY', reden: 'geen regel van toepassing — standaard UTILITY' };
@@ -100,11 +129,12 @@ export function kiesCategorie({ naam, bronnen = [], body = '', dbCategorie = nul
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 export function leesArgs(argv) {
-  const a = { apply: false, dryRun: true, only: null, json: false };
+  const a = { apply: false, dryRun: true, only: null, json: false, nummer: 'hoofdnummer' };
   for (const x of argv) {
     if (x === '--apply') { a.apply = true; a.dryRun = false; }
     else if (x === '--dry-run') { a.dryRun = true; a.apply = false; }
     else if (x === '--json') a.json = true;
+    else if (x.startsWith('--nummer=')) a.nummer = x.slice(9).trim().toLowerCase();
     else if (x.startsWith('--only=')) a.only = new Set(x.slice(7).split(',').map((s) => s.trim()).filter(Boolean));
   }
   return a;
@@ -166,8 +196,10 @@ export function bouwPayload(rij, categorie) {
   };
 }
 
+let keyEnv = NUMMERS.hoofdnummer.keyEnv; // gezet in main() op basis van --nummer
+
 async function d360(pad, init = {}) {
-  const key = process.env.D360_API_KEY_HOOFDNUMMER;
+  const key = process.env[keyEnv];
   const res = await fetch(D360 + pad, {
     ...init,
     headers: { 'D360-API-KEY': key, 'Content-Type': 'application/json', ...(init.headers || {}) },
@@ -197,6 +229,45 @@ async function bestaandeBij360() {
 
 const isBestaatFout = (r) => /already exists|bestaat al|duplicate|2388024/i.test(JSON.stringify(r.json || r.tekst || ''));
 
+// ── DB-bronnen per nummer ──────────────────────────────────────────────────
+
+async function verzamelLeadBronnen(db, voegToe, fouten) {
+  const { data: sjablonen, error: sErr } = await db.from('onderhoud_sjablonen').select('meta_template').not('meta_template', 'is', null);
+  if (sErr) fouten.push('onderhoud_sjablonen: ' + sErr.message);
+  for (const r of sjablonen || []) voegToe(r.meta_template, 'onderhoud_sjablonen');
+
+  const { data: autos, error: aErr } = await db.from('event_automations').select('steps');
+  if (aErr) fouten.push('event_automations: ' + aErr.message);
+  for (const a of autos || []) for (const s of (Array.isArray(a.steps) ? a.steps : [])) voegToe(s?.config?.template_name, 'event_automations');
+
+  const { data: jobs, error: jErr } = await db.from('leadsonderhoud_bulk_jobs').select('template_name').not('template_name', 'is', null);
+  if (jErr) fouten.push('leadsonderhoud_bulk_jobs: ' + jErr.message);
+  for (const j of jobs || []) voegToe(j.template_name, 'bulk-historie');
+}
+
+/** Template-namen uit een joost_config.autonomy_config (no_reply-reminders). PURE. */
+export function joostTemplateNamen(autonomyConfig) {
+  const nr = autonomyConfig && typeof autonomyConfig === 'object' ? autonomyConfig.no_reply : null;
+  if (!nr || typeof nr !== 'object') return [];
+  return [nr.reminder_1_template_name, nr.reminder_2_template_name]
+    .map((n) => String(n || '').trim()).filter(Boolean);
+}
+
+async function verzamelKlantBronnen(db, voegToe, fouten) {
+  const { data: dt, error: dErr } = await db.from('dunning_templates')
+    .select('meta_template_name, kind, is_active').eq('is_active', true).not('meta_template_name', 'is', null);
+  if (dErr) fouten.push('dunning_templates: ' + dErr.message);
+  for (const r of dt || []) if (!r.kind || r.kind === 'whatsapp') voegToe(r.meta_template_name, 'dunning_templates');
+
+  const { data: autos, error: aErr } = await db.from('onboarding_automations').select('steps');
+  if (aErr) fouten.push('onboarding_automations: ' + aErr.message);
+  for (const a of autos || []) for (const s of (Array.isArray(a.steps) ? a.steps : [])) voegToe(s?.config?.template_name, 'onboarding_automations');
+
+  const { data: jc, error: jErr } = await db.from('joost_config').select('module, autonomy_config').in('module', ['finance', 'onboarding']);
+  if (jErr) fouten.push('joost_config: ' + jErr.message);
+  for (const r of jc || []) for (const n of joostTemplateNamen(r.autonomy_config)) voegToe(n, 'joost_config:' + r.module);
+}
+
 // ── Hoofdprogramma ──────────────────────────────────────────────────────────
 
 async function main() {
@@ -207,9 +278,15 @@ async function main() {
     console.error('SUPABASE_URL (of NEXT_PUBLIC_SUPABASE_URL) en SUPABASE_SERVICE_ROLE_KEY zijn nodig (via --env-file).');
     process.exit(2);
   }
-  const heeft360 = !!(process.env.D360_API_KEY_HOOFDNUMMER || '').trim();
+  const nummerCfg = NUMMERS[args.nummer];
+  if (!nummerCfg) {
+    console.error(`Onbekend --nummer=${args.nummer}; verwacht ${Object.keys(NUMMERS).join('|')}.`);
+    process.exit(2);
+  }
+  keyEnv = nummerCfg.keyEnv;
+  const heeft360 = !!(process.env[keyEnv] || '').trim();
   if (args.apply && !heeft360) {
-    console.error('--apply vereist D360_API_KEY_HOOFDNUMMER in de env.');
+    console.error(`--apply vereist ${keyEnv} in de env.`);
     process.exit(2);
   }
   const db = createClient(url, key, { auth: { persistSession: false } });
@@ -222,20 +299,11 @@ async function main() {
     if (!bronnen.has(n)) bronnen.set(n, new Set());
     bronnen.get(n).add(bron);
   };
-  for (const [flow, namen] of Object.entries(VASTE_TEMPLATES)) for (const n of namen) voegToe(n, 'vast:' + flow);
+  for (const [flow, namen] of Object.entries(nummerCfg.vast)) for (const n of namen) voegToe(n, 'vast:' + flow);
 
   const fouten = [];
-  const { data: sjablonen, error: sErr } = await db.from('onderhoud_sjablonen').select('meta_template').not('meta_template', 'is', null);
-  if (sErr) fouten.push('onderhoud_sjablonen: ' + sErr.message);
-  for (const r of sjablonen || []) voegToe(r.meta_template, 'onderhoud_sjablonen');
-
-  const { data: autos, error: aErr } = await db.from('event_automations').select('steps');
-  if (aErr) fouten.push('event_automations: ' + aErr.message);
-  for (const a of autos || []) for (const s of (Array.isArray(a.steps) ? a.steps : [])) voegToe(s?.config?.template_name, 'event_automations');
-
-  const { data: jobs, error: jErr } = await db.from('leadsonderhoud_bulk_jobs').select('template_name').not('template_name', 'is', null);
-  if (jErr) fouten.push('leadsonderhoud_bulk_jobs: ' + jErr.message);
-  for (const j of jobs || []) voegToe(j.template_name, 'bulk-historie');
+  if (args.nummer === 'klantnummer') await verzamelKlantBronnen(db, voegToe, fouten);
+  else await verzamelLeadBronnen(db, voegToe, fouten);
 
   let namen = [...bronnen.keys()].sort();
   if (args.only) namen = namen.filter((n) => args.only.has(n));
@@ -321,7 +389,7 @@ async function main() {
 
 function printDryRun(plan, fouten, heeft360) {
   console.log('DRY-RUN — er wordt NIETS ingediend en NIETS geschreven.');
-  console.log(heeft360 ? '360dialog-key aanwezig: bestaande templates zijn gecontroleerd.' : 'Geen D360_API_KEY_HOOFDNUMMER: niet gecontroleerd wat al bij 360dialog staat.');
+  console.log(heeft360 ? '360dialog-key aanwezig: bestaande templates zijn gecontroleerd.' : `Geen ${keyEnv}: niet gecontroleerd wat al bij 360dialog staat.`);
   if (fouten.length) console.log('Leesfouten: ' + fouten.join(' · '));
   const telling = plan.reduce((m, p) => { m[p.actie] = (m[p.actie] || 0) + 1; return m; }, {});
   console.log('Samenvatting: ' + Object.entries(telling).map(([k, v]) => `${k} ${v}`).join(' · ') + ` (totaal ${plan.length})\n`);

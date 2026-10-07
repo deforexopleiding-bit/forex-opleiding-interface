@@ -26,7 +26,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { verwerkWhatsAppWebhookBody } from './inbox-webhook.js';
-import { actieveNummers, nummerOpSleutel, nummerOpTelefoon, phoneNumberIdUitEnv, webhookTokenVan } from './_lib/wa-nummers.js';
+import { actieveNummers, apiKeyVan, nummerOpSleutel, nummerOpTelefoon, phoneNumberIdUitEnv, webhookTokenVan } from './_lib/wa-nummers.js';
 
 // Raw body zelf lezen (zelfde als inbox-webhook.js) — geen afhankelijkheid van Vercel's parser.
 export const config = { api: { bodyParser: false } };
@@ -54,11 +54,11 @@ function gelijk(a, b) {
   try { return timingSafeEqual(x, y); } catch { return false; }
 }
 
-/** Welk nummer bedient deze URL? ?nummer=<sleutel>, of het enige actieve 360dialog-nummer. */
+/** Welk nummer bedient deze URL? ?nummer=<sleutel>, of het enige actieve 360dialog-nummer met een API-key. */
 export function kiesNummer(query = {}) {
   const sleutel = typeof query.nummer === 'string' ? query.nummer.trim() : '';
   if (sleutel) return nummerOpSleutel(sleutel);
-  const d360 = actieveNummers().filter((n) => n.provider === '360dialog');
+  const d360 = actieveNummers().filter((n) => n.provider === '360dialog' && apiKeyVan(n));
   return d360.length === 1 ? d360[0] : null;
 }
 
@@ -139,7 +139,7 @@ export default async function handler(req, res) {
         } else if (verwachtPnId !== pnId) {
           console.warn(`[whatsapp-360-webhook] ${nummer.sleutel}: phone_number_id ${pnId} wijkt af van ${nummer.phone_number_id_env}=${verwachtPnId}`);
         }
-        if (md.display_phone_number && nummerOpTelefoon(md.display_phone_number) !== nummer) {
+        if (nummer.e164 && md.display_phone_number && nummerOpTelefoon(md.display_phone_number) !== nummer) {
           console.warn(`[whatsapp-360-webhook] ${nummer.sleutel}: display_phone_number ${md.display_phone_number} hoort niet bij ${nummer.e164}`);
         }
       }

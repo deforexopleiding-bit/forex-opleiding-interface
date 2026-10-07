@@ -64,7 +64,7 @@ test('rijkeuze: APPROVED gaat voor, daarna de meest recente', () => {
 });
 
 test('argumenten: standaard dry-run; --apply alleen expliciet; --only', () => {
-  assert.deepEqual({ ...leesArgs([]), only: null }, { apply: false, dryRun: true, only: null, json: false });
+  assert.deepEqual({ ...leesArgs([]), only: null }, { apply: false, dryRun: true, only: null, json: false, nummer: 'hoofdnummer' });
   assert.equal(leesArgs(['--apply']).apply, true);
   assert.equal(leesArgs(['--apply', '--dry-run']).apply, false);
   assert.deepEqual([...leesArgs(['--only=a,b']).only], ['a', 'b']);
@@ -73,7 +73,8 @@ test('argumenten: standaard dry-run; --apply alleen expliciet; --only', () => {
 test('vaste lijst = de 22 namen uit PR #1729; geen sleutels in de code', () => {
   assert.equal(Object.values(VASTE_TEMPLATES).flat().length, 22);
   const src = readFileSync(new URL('../scripts/360-templates-upload.mjs', import.meta.url), 'utf8');
-  assert.match(src, /process\.env\.D360_API_KEY_HOOFDNUMMER/);
+  assert.match(src, /keyEnv: 'D360_API_KEY_HOOFDNUMMER'/);
+  assert.match(src, /process\.env\[keyEnv\]/);
   assert.doesNotMatch(src, /eyJ[A-Za-z0-9_-]{10,}/);          // geen JWT/service-key
   assert.doesNotMatch(src, /D360-API-KEY['"]?\s*:\s*['"][A-Za-z0-9]/);
 });
