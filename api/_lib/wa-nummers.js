@@ -81,9 +81,9 @@ export const WA_NUMMERS = Object.freeze([
     label: 'Klantnummer (onboarding + finance)',
     // 2026-10-07: zelfde 360dialog-account als het hoofdnummer, maar eigen channel,
     // API-key en WABA. Meta's phone_number_id: 1399327383258229 (Vercel-env).
-    e164: null,         // TODO: het telefoonnummer invullen (alleen voor de webhook-controle; mismatch = waarschuwing)
+    e164: '+31644606876',
     provider: '360dialog',
-    channel_id: null,   // TODO: channel-ID uit de 360dialog-hub (alleen referentie)
+    channel_id: '1399327383258229',   // zoals opgegeven op 2026-10-07 (alleen referentie, functioneel niet gebruikt)
     api_key_env: 'D360_API_KEY_KLANTNUMMER',
     phone_number_id_env: 'D360_PHONE_NUMBER_ID_KLANTNUMMER',
     webhook_token_env: 'D360_WEBHOOK_TOKEN_KLANTNUMMER',

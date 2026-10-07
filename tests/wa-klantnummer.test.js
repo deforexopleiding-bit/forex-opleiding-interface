@@ -105,6 +105,9 @@ test('registry: klantnummer bedient onboarding/finance/dunning, nooit lead-modul
   const h = N.nummerOpSleutel('hoofdnummer');
   for (const m of ['onboarding', 'finance', 'dunning']) assert.equal(N.moduleMagViaNummer(m, h), false, m);
   assert.equal(k.inkomend_resolver, 'klant');
+  assert.equal(k.e164, '+31644606876');
+  assert.equal(N.nummerOpTelefoon('31644606876'), k);
+  assert.equal(N.nummerOpTelefoon('+31 6 44562426'), h);
   assert.deepEqual([...k.vervangt_phone_number_ids].sort(), [OUD_FIN, OUD_ONB].sort());
 });
 
