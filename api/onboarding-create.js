@@ -223,7 +223,10 @@ export default async function handler(req, res) {
     // een klant zonder mail is herstelbaar, een mislukte aanmelding niet.
     // De grendel op uitnodiging_verstuurd_op zit in de helper zelf.
     let dfoLmsUitnodiging = null;
-    if (dfoLms && dfoLms.ok === true && dfoLms.email) {
+    // Via de CONTACTPERSOON van een bedrijf gekoppeld (7 okt 2026)? Dan geen
+    // automatische uitnodiging: die student bestond al, en deze koppeling mag
+    // niets nieuws naar een klant sturen.
+    if (dfoLms && dfoLms.ok === true && dfoLms.email && dfoLms.reason !== 'bestond-al-via-contactpersoon') {
       try {
         dfoLmsUitnodiging = await stuurLmsUitnodiging({ email: dfoLms.email });
       } catch (e) {

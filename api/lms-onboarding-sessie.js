@@ -15,6 +15,7 @@
 //   POST { actie: 'notitie',          onboarding_id, tekst, door_email }
 //   POST { actie: 'handmatig_afronden', onboarding_id, reden, door_email }  (6 okt 2026)
 //   POST { actie: 'naar_incasso',       onboarding_id, reden, door_email }       (6 okt 2026)
+//   POST { actie: 'koppel_student',     onboarding_id, student_id, door_email }  (7 okt 2026)
 //   POST { actie: 'terug_activeren',    onboarding_id, start_datum, door_email } (6 okt 2026)
 // Die lopen door DEZELFDE functies als de CRM-schermen
 // (api/_lib/onboarding-acties.js): dezelfde controles, dezelfde meldingen aan
@@ -43,6 +44,7 @@
 //
 // Antwoordvorm, altijd: { ok, code, message, data } — programmeer op `code`.
 
+import { koppelOnboardingAanStudent } from './_lib/onboarding-koppel-student.js';
 import { supabaseAdmin } from './supabase.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { geheimKlopt } from './_lib/lms-agenda-brug.js';
@@ -63,7 +65,7 @@ import { zetNaarIncasso, activeerUitIncasso } from './_lib/onboarding-incasso.js
 import { crmMentorVoorLmsId, crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
 
 /** De acties die op een onboarding-id werken (en niet op een student-id). */
-export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie', 'handmatig_afronden', 'naar_incasso', 'terug_activeren']);
+export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie', 'handmatig_afronden', 'naar_incasso', 'terug_activeren', 'koppel_student']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -106,7 +108,7 @@ export default async function handler(req, res) {
   const onboardingId = String(body?.onboarding_id || '').trim();
   if (actie !== 'sessie_afgerond' && !ONBOARDING_ACTIES.has(actie)) {
     return antwoord(res, 400, false, 'ongeldige_actie',
-      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie, handmatig_afronden, naar_incasso of terug_activeren.');
+      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie, handmatig_afronden, naar_incasso, terug_activeren of koppel_student.');
   }
   // DE ONBOARDING-ACTIES: op onboarding-id. `startdatum` met een student-id
   // blijft de oude weg (start later op, PR6).
@@ -302,6 +304,15 @@ async function onboardingActie(res, actie, onboardingId, body) {
       const startDatum = String(body?.start_datum || '').trim().slice(0, 10);
       uitkomst = await activeerUitIncasso({
         onboardingId, startDatum, door: (door?.full_name || doorEmail || 'onbekend') + ' ' + viaLms, doorUserId,
+      });
+    } else if (actie === 'koppel_student') {
+      //  Een bedrijf (of elke onboarding) met de hand aan zijn LMS-student
+      //  koppelen (7 okt 2026). Verstuurt niets naar de student.
+      uitkomst = await koppelOnboardingAanStudent({
+        onboardingId,
+        studentId: typeof body?.student_id === 'string' ? body.student_id.trim() : '',
+        door: (door?.full_name || doorEmail || 'onbekend') + ' ' + viaLms,
+        doorUserId,
       });
     } else if (actie === 'handmatig_afronden') {
       const reden = typeof body?.reden === 'string' ? body.reden.trim().slice(0, 1000) : '';

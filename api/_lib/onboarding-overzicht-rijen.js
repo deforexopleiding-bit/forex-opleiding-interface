@@ -16,6 +16,7 @@ import { wizardVoltooid, onboardingAfgesloten, afgeslotenOp, afgeslotenDoor } fr
 import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { alGestartBewijs } from './onboarding-al-gestart.js';
+import { lmsStudentNamen } from './onboarding-koppel-student.js';
 import { telefoonsVoorOnboardings } from './onboarding-telefoon.js';
 import { supabaseAdmin } from '../supabase.js';
 import { deriveIntakeStatus, intakeStatusRank } from './intake-status.js';
@@ -102,6 +103,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       bewijsByStudent,
       faseByKlant,
       annuleringByOb,
+      studentNaamById,
     ] = await Promise.all([
       // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
       (async () => {
@@ -272,6 +274,10 @@ export async function bouwOverzichtRijen(opts = {}) {
           return null;
         }
       })(),
+      // ── 12) De naam van de gekoppelde LMS-student (7 okt 2026): bij een
+      //     bedrijf is dat de contactpersoon ("ER Schilderwerken — student:
+      //     Emile Rabaut"). Faalzacht (null).
+      lmsStudentNamen(list.map((r) => r.dfo_lms_student_id)),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -387,6 +393,11 @@ export async function bouwOverzichtRijen(opts = {}) {
         // In incasso-opvolging (6 okt 2026): NIET geannuleerd, wel uit de
         // actieve lijsten. `incasso` = null als hij er niet (meer) in staat.
         annulering:           annuleringByOb ? (annuleringByOb.get(r.id) || null) : null,
+        // De gekoppelde LMS-student (7 okt 2026). `lms_student_naam` null =
+        // geen koppeling of niet gelezen; `lms_student_gelezen` zegt welke.
+        lms_student_naam:     (studentNaamById && r.dfo_lms_student_id)
+          ? (studentNaamById.get(String(r.dfo_lms_student_id)) || null) : null,
+        lms_student_gelezen:  studentNaamById !== null,
         in_incasso:           inIncasso(r),
         incasso:              inIncasso(r) ? {
           op: r.incasso_op, door: r.incasso_door || null, reden: r.incasso_reden || null,

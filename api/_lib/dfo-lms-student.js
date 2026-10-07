@@ -226,6 +226,37 @@ async function zoekBestaandeStudent(lms, { onboardingId, email }) {
   return { rij: null, via: null };
 }
 
+/**
+ * De e-mailadressen van de contactpersonen van een bedrijf
+ * (`customers.company_customer_id = bedrijf`). Leeg = geen contactpersoon.
+ */
+export async function contactpersoonEmails(bedrijfId, db = supabaseAdmin) {
+  if (!bedrijfId) return [];
+  const { data, error } = await db.from('customers')
+    .select('email').eq('company_customer_id', bedrijfId);
+  if (error) throw new Error('contactpersonen lezen: ' + error.message);
+  return [...new Set((data || [])
+    .map((r) => String(r?.email || '').trim().toLowerCase())
+    .filter(Boolean))];
+}
+
+/**
+ * Precies één LMS-student onder het adres van een contactpersoon, die nog
+ * aan geen ANDERE onboarding hangt? Dan die rij; anders null. PURE regel op
+ * gelezen data: twee treffers is een vraag, geen koppeling.
+ */
+export async function studentViaContactpersoon(lms, bedrijfId, onboardingId, db = supabaseAdmin) {
+  const emails = await contactpersoonEmails(bedrijfId, db);
+  const treffers = new Map();
+  for (const e of emails) {
+    const { rij } = await zoekBestaandeStudent(lms, { onboardingId: '00000000-0000-0000-0000-000000000000', email: e });
+    if (rij) treffers.set(rij.id, { ...rij, email: e });
+  }
+  const lijst = [...treffers.values()]
+    .filter((r) => !r.crm_onboarding_id || r.crm_onboarding_id === onboardingId);
+  return lijst.length === 1 && treffers.size === 1 ? lijst[0] : null;
+}
+
 /** dfo_lms_student_id + vlaggen wegschrijven op de onboarding. */
 async function markeerGekoppeld(onboardingId, studentId) {
   const { error } = await supabaseAdmin
@@ -331,7 +362,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
   try {
     const { data, error } = await supabaseAdmin
       .from('customers')
-      .select('id, first_name, last_name, email, phone')
+      .select('id, first_name, last_name, email, phone, is_company')
       .eq('id', onboarding.customer_id)
       .maybeSingle();
     if (error) throw new Error('customers: ' + error.message);
@@ -343,7 +374,32 @@ export async function provisionDfoLmsStudent(onboardingId) {
     return { ok: false, error: msg };
   }
 
-  const email = String(customer?.email || '').trim().toLowerCase();
+  let email = String(customer?.email || '').trim().toLowerCase();
+  // EEN BEDRIJF (7 okt 2026, ER Schilderwerken ↔ Emile Rabaut): de student is
+  // de CONTACTPERSOON, niet de zaak. Staat de student in het LMS onder het
+  // adres van een gekoppelde contactpersoon, dan koppelen we aan die rij -
+  // maar alleen bij precies één treffer. Nooit iets aanmaken op die weg.
+  if (customer?.is_company === true && !onboarding.dfo_lms_student_id) {
+    try {
+      const viaPersoon = await studentViaContactpersoon(lms, customer.id, onboardingId);
+      if (viaPersoon) {
+        await markeerGekoppeld(onboardingId, viaPersoon.id);
+        if (!viaPersoon.crm_onboarding_id) {
+          const { error } = await lms.from('hlms_student')
+            .update({ crm_onboarding_id: onboardingId })
+            .eq('id', viaPersoon.id).is('crm_onboarding_id', null);
+          if (error) throw new Error('hlms_student koppelen: ' + error.message);
+        }
+        return succesResultaat({
+          studentId: viaPersoon.id, email: viaPersoon.email, adopted: true,
+          reason: 'bestond-al-via-contactpersoon',
+        });
+      }
+    } catch (e) {
+      // Faalzacht: dan gaat het gewone pad verder (op het adres van de zaak).
+      console.warn('[dfo-lms-student] contactpersoon-koppeling:', e?.message || e);
+    }
+  }
   if (!email) {
     const msg = 'Klant zonder e-mail — kan geen studentrij in dfo-lms aanmaken';
     await schrijfFout(onboardingId, msg);
