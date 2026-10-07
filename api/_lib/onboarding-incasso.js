@@ -13,7 +13,10 @@
 //   - de onboarding verdwijnt uit de actieve lijsten: de spiegel naar het LMS
 //     haalt hem weg (geen Klaar-kaart meer), de intake-pot zet hem op
 //     'vervallen', en het overzicht toont hem in een eigen groep "Incasso";
-//   - een regel op de tijdlijn.
+//   - een regel op de tijdlijn;
+//   - een kaart voor de administratie (Dave) in het LMS, soort
+//     `incasso_opvolging` (7 okt 2026, onboarding-incasso-kaart.js); terug
+//     actief sluit die kaart.
 // ── WAT HET NIET DOET ────────────────────────────────────────────────────
 //   - NIET annuleren: status, facturen, abonnementen, offertes, Bubble- en
 //     LMS-toegang blijven zoals ze zijn;
@@ -46,11 +49,11 @@ async function tijdlijn(db, onboardingId, note, doorUserId) {
  * Zet een onboarding in incasso-opvolging. Idempotent.
  * @returns {Promise<{status: number, body: object}>}
  */
-export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = null, db = supabaseAdmin }) {
+export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = null, db = supabaseAdmin, kaart = null }) {
   const r = String(reden || '').trim();
   if (r.length < 5) return { status: 400, body: { error: 'Geef een reden (minstens 5 tekens).', code: 'reden_verplicht' } };
   const { data: ob, error } = await db.from('onboardings')
-    .select('id, status, archived_at').eq('id', onboardingId).maybeSingle();
+    .select('id, status, archived_at, customer_name, dfo_lms_student_id').eq('id', onboardingId).maybeSingle();
   if (error) return { status: 500, body: { error: 'Onboarding lezen: ' + error.message } };
   if (!ob) return { status: 404, body: { error: 'Onboarding niet gevonden.' } };
   const s = String(ob.status || '').toLowerCase();
@@ -75,16 +78,21 @@ export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = n
     + ' — niet geannuleerd: facturen, toegang en aanmaningen blijven zoals ze zijn.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'naar-incasso');
-  return { status: 200, body: { ok: true, incasso_op: nu } };
+  // De kaart voor Dave (bak admin in het LMS), fail-soft.
+  const open = kaart?.open || (await import('./onboarding-incasso-kaart.js')).openIncassoKaart;
+  const incasso_kaart = await open({
+    onboardingId, studentId: ob.dfo_lms_student_id || null, naam: ob.customer_name || null, reden: r, door,
+  });
+  return { status: 200, body: { ok: true, incasso_op: nu, incasso_kaart } };
 }
 
 /**
  * Terug actief, met een nieuwe startdatum (via de bestaande startdatum-route).
  * @returns {Promise<{status: number, body: object}>}
  */
-export async function activeerUitIncasso({ onboardingId, startDatum, door, doorUserId = null, db = supabaseAdmin, zetStartdatum = null }) {
+export async function activeerUitIncasso({ onboardingId, startDatum, door, doorUserId = null, db = supabaseAdmin, zetStartdatum = null, kaart = null }) {
   const { data: ob, error } = await db.from('onboardings')
-    .select('id, status, archived_at').eq('id', onboardingId).maybeSingle();
+    .select('id, status, archived_at, customer_name, dfo_lms_student_id').eq('id', onboardingId).maybeSingle();
   if (error) return { status: 500, body: { error: 'Onboarding lezen: ' + error.message } };
   if (!ob) return { status: 404, body: { error: 'Onboarding niet gevonden.' } };
   await vulIncassoAan(db, ob);
@@ -105,5 +113,8 @@ export async function activeerUitIncasso({ onboardingId, startDatum, door, doorU
     'Terug actief uit incasso-opvolging, gezet door ' + (door || 'onbekend') + '. Nieuwe startdatum: ' + startDatum + '.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'uit-incasso');
-  return { status: 200, body: { ok: true, start_date: startDatum, incasso_terug_op: nu } };
+  // Dave's incasso-kaart gaat dicht, fail-soft.
+  const sluit = kaart?.sluit || (await import('./onboarding-incasso-kaart.js')).sluitIncassoKaart;
+  const incasso_kaart = await sluit({ onboardingId, studentId: ob.dfo_lms_student_id || null, startDatum, door });
+  return { status: 200, body: { ok: true, start_date: startDatum, incasso_terug_op: nu, incasso_kaart } };
 }
