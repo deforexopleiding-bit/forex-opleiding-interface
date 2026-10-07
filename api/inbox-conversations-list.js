@@ -25,7 +25,9 @@
 //
 // Response: { items: [{ id, phone_number, display_name, customer_id, customer_name,
 //                       status, last_message_at, last_message_preview, unread_count,
-//                       last_inbound_at, can_send_text, brief_sent, brief_sent_at }],
+//                       last_inbound_at, can_send_text, brief_sent, brief_sent_at,
+//                       categorie, categorie_label, categorie_tags }],
+//   categorie* = afgeleid uit de CRM-status (api/_lib/inbox-categorie.js), null bij fout.
 //              total, configured, module, vlaggen: { gesprekken_v2 } }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -34,6 +36,7 @@ import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel, inBlokken, isVandaag, metWerkstand } from './_lib/gesprekken-werkstand.js';
 import { filterGesprekkenOpKlantModule } from './_lib/klant-module.js';
+import { voegCategorieToe } from './_lib/inbox-categorie.js';
 // NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
 // per ontwerp is de onboarding-inbox gedeeld voor iedereen met
 // onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
@@ -486,6 +489,13 @@ export default async function handler(req, res) {
         console.warn('[inbox-conversations-list] werkstand overgeslagen:', wEx?.message || wEx);
       }
     }
+
+    // Categorie per gesprek (2026-10-07), afgeleid uit de HUIDIGE CRM-status
+    // van de persoon — nooit opgeslagen. Batched per signaal, fail-soft: lukt
+    // het niet, dan blijft categorie null en toont het scherm geen label.
+    await voegCategorieToe(supabaseAdmin, items, (it) => ({
+      sleutel: it.id, telefoon: it.phone_number, customer_id: it.customer_id, attendee_id: it.attendee_id,
+    }));
 
     // Server-side sort op last_activity_at DESC. Sinds fetchRange = limit
     // (geen dubbele-page-heuristiek meer), is een expliciete slice niet meer

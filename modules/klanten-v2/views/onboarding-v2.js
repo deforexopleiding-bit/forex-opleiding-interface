@@ -719,6 +719,7 @@
   const _onbInb = {
     convs:    { loading: false, fetched: false, error: null, items: [] },
     sel:      null,      // conversation_id
+    cat:      'alles',   // categorie-filter (2026-10-07), zie modules/shared/inbox-categorie.js
     thread: {
       convId: null, src: 'ob', items: [], loading: false, error: null,
       _paintedFor: null, _markedFor: null,
@@ -1259,7 +1260,7 @@
         <div style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>
         <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx)}</div>
         <div class="onb-inb-tagrow" style="margin-top:6px;display:flex;gap:6px;align-items:center">
-          <span style="font-size:10.5px;padding:2px 7px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)">Onboarding</span>
+          ${(window.INBOX_CATEGORIE && window.INBOX_CATEGORIE.badge(row)) || '<span style="font-size:10.5px;padding:2px 7px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)">Onboarding</span>'}
           ${nw ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : ''}
         </div>
       </div>
@@ -1345,7 +1346,9 @@
       queueMicrotask(_onbInbFetchConvs);
     }
     // Selected row → thread-load + post-render paint.
-    const rows = asArr(_onbInb.convs.items);
+    const alleRows = asArr(_onbInb.convs.items);
+    const IC = window.INBOX_CATEGORIE;
+    const rows = IC ? alleRows.filter((r) => IC.past(r, _onbInb.cat)) : alleRows;
     const sel  = rows.find(r => String(r.id) === String(_onbInb.sel)) || rows[0] || null;
     if (sel && _onbInb.thread.convId !== sel.id && !_onbInb.thread.loading) {
       queueMicrotask(() => _onbInbLoadThread(sel.id));
@@ -1359,7 +1362,9 @@
           <div style="height:11px;width:85%;background:var(--surface-2);border-radius:4px"></div></div>`).join('')
       : rows.length
         ? rows.map(_onbInbRenderRow).join('')
-        : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Alles afgehandeld 🎉</div>`;
+        : alleRows.length
+          ? `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Geen gesprekken in deze categorie.</div>`
+          : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Alles afgehandeld 🎉</div>`;
 
     return `<div class="onb-inb-split" style="display:flex;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
       <div id="onbInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
@@ -1367,6 +1372,7 @@
           <span>Onboarding-conversaties</span>
           <span>${rows.length} items</span>
         </div>
+        ${IC && alleRows.length ? `<div style="padding:8px 14px;border-bottom:1px solid var(--border)">${IC.chips(alleRows, _onbInb.cat, '__onbInbCat')}</div>` : ''}
         ${_onbInb.convs.error ? `<div style="padding:16px;color:var(--rose);font-size:12.5px">⚠ ${esc(_onbInb.convs.error)}</div>` : ''}
         ${listHtml}
       </div>
@@ -1375,6 +1381,12 @@
         : `<div class="onb-inb-right" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Selecteer een conversatie</div>`}
     </div>`;
   }
+
+  // Categorie-chip in de inbox (2026-10-07).
+  window.__onbInbCat = (val) => {
+    _onbInb.cat = String(val || 'alles');
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
 
   window.DFO.VIEWS['onboarding/Actief']  = actiefView;
   window.DFO.VIEWS['onboarding/Archief'] = archiefView;

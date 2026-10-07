@@ -3199,6 +3199,8 @@
     // G5-deels, alleen actief achter GESPREKKEN_V2. 'geen' = de lijst zoals
     // hij altijd was; een gekozen stand versmalt of vervangt 'em.
     focusFilter:   'geen',
+    // Categorie-filter (2026-10-07): 'alles' of een sleutel uit INBOX_CATEGORIE.
+    catFilter:     'alles',
     autoOpenedFirst: false,            // SURFACE A: auto-open first conv na eerste fetch
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
@@ -3314,7 +3316,7 @@
   // de gesprekken toont die de wanbetaler-poort wegfiltert: zonder deze
   // volgorde zou een zoekterm daar niets doen en zag je resultaten die er niet
   // bij horen.
-  function _selectVisibleInboxItems(items, { negeerFocus = false } = {}) {
+  function _selectVisibleInboxItems(items, { negeerFocus = false, negeerCategorie = false } = {}) {
     const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
     const alle = q
       ? items.filter((c) => (
@@ -3351,6 +3353,10 @@
     const gv = negeerFocus ? null : _gv2();
     const focusModus = gv ? (_ui.inbox.focusFilter || 'geen') : 'geen';
     if (gv && focusModus !== 'geen') out = gv.focusFilter(alle, out, focusModus);
+    // Categorie (afgeleid uit de CRM-status, server-side). `negeerCategorie`
+    // voor de tellers op de chips zelf.
+    const IC = window.INBOX_CATEGORIE;
+    if (IC && !negeerCategorie) out = out.filter((c) => IC.past(c, _ui.inbox.catFilter));
 
     const mode = _ui.inbox.sortMode || 'unread_first';
     out = out.slice().sort((a, b) => {
@@ -3668,6 +3674,12 @@
     if (!gv) return;                       // knop bestaat niet zonder de vlag
     const gewenst = gv.leesFocus(val);
     _ui.inbox.focusFilter = (_ui.inbox.focusFilter === gewenst) ? 'geen' : gewenst;
+    _ui.inbox.selectedConv = null;
+    _ui.inbox.autoOpenedFirst = false;
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+  window.__wbxInboxCat = (val) => {
+    _ui.inbox.catFilter = String(val || 'alles');
     _ui.inbox.selectedConv = null;
     _ui.inbox.autoOpenedFirst = false;
     try { window.DFO?.render?.(); } catch (_) {}
@@ -4426,6 +4438,8 @@
       const eigenaarBadge = (_gv2() && c.toegewezen_naam)
         ? `<span title="Toegewezen aan ${esc(c.toegewezen_naam)}" style="font-size:9px;padding:1px 4px;border-radius:4px;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-weight:700;margin-left:4px">${esc(_initialen(c.toegewezen_naam))}</span>`
         : '';
+      // Categorie-label (afgeleid uit de CRM-status; leeg zonder het gedeelde script).
+      const catBadge = window.INBOX_CATEGORIE ? window.INBOX_CATEGORIE.badge(c) : '';
       // BROK WB-FIDELITY-1 goedkoop: avatar-initialen cirkel links.
       const initials = _wbxInitialsFor(name);
       const bg = active
@@ -4440,7 +4454,7 @@
             <div style="font-size:10.5px;color:${unread > 0 ? 'var(--rose)' : 'var(--text-3)'};white-space:nowrap;font-weight:${unread > 0 ? '600' : '400'}">${esc(when)}</div>
           </div>
           <div style="font-size:11.5px;color:${unread > 0 ? 'var(--text-1)' : 'var(--text-3)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-weight:${unread > 0 ? '500' : '400'}">${esc(preview)}</div>
-          ${unread > 0 ? `<div style="margin-top:3px"><span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span></div>` : ''}
+          ${(unread > 0 || catBadge) ? `<div style="margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap">${unread > 0 ? `<span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span>` : ''}${catBadge}</div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -5066,6 +5080,16 @@
       </div>`;
     }
 
+    // Categorie-chips: tellers over de lijst ZONDER categoriefilter.
+    let catRij = '';
+    if (window.INBOX_CATEGORIE) {
+      const basisCat = _selectVisibleInboxItems(asArr(_live.inbox.convs.items), { negeerCategorie: true });
+      catRij = `<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:9.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Categorie</span>
+        ${window.INBOX_CATEGORIE.chips(basisCat, _ui.inbox.catFilter, '__wbxInboxCat')}
+      </div>`;
+    }
+
     return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
       <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
         <div style="width:320px;min-width:260px;max-width:38%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
@@ -5083,6 +5107,7 @@
               ${sortBtn('latest', 'Laatste bericht')}
             </div>
             ${focusRij}
+            ${catRij}
           </div>
           <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
         </div>

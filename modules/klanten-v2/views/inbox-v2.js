@@ -847,6 +847,9 @@
       nw: (c.unread_count || 0) > 0,
       kan: 'WhatsApp',
       ctx: c.customer?.email || c.phone_number || '',
+      // Categorie (2026-10-07), server-side afgeleid uit de CRM-status.
+      categorie: c.categorie || null,
+      categorie_tags: c.categorie_tags || [],
       _raw: c,
     };
   }
@@ -1046,6 +1049,9 @@
     }
   }
 
+  // Categorie-chip (2026-10-07): filter per sessie via de gedeelde DFO-filters.
+  window.__ibCat = (v) => DFO.setF('cat', String(v || 'alles'));
+
   /* ── VIEW ─────────────────────────────────────────────────────────── */
   function inboxView() {
     // Pre-src hint uit sessionStorage (zie Onboarding "Inbox is verhuisd"-tab).
@@ -1060,10 +1066,15 @@
     const q = (F('q', '') || '').toLowerCase();
     const filtered = q ? rows.filter(r => r.van.toLowerCase().includes(q) || (r.t || '').toLowerCase().includes(q)) : rows;
     const flOnlyNw = F('fl', 'all') === 'nw';
-    const list = flOnlyNw ? filtered.filter(r => r.nw) : filtered;
-    const c = list.find(r => r.id === ibSel) || list[0] || null;
+    const naNieuw = flOnlyNw ? filtered.filter(r => r.nw) : filtered;
     const srcInfo = IB_SRC.find(x => x[0] === ibSrc) || IB_SRC[0];
     const [, srcName, srcIc, srcCol, srcKind, srcMod] = srcInfo;
+    // Categorie-filter (2026-10-07) — alleen bij de WhatsApp-bronnen.
+    const IC = window.INBOX_CATEGORIE;
+    const metCat = !!IC && srcKind === 'wa' && naNieuw.some(r => r.categorie);
+    const catF = metCat ? F('cat', 'alles') : 'alles';
+    const list = metCat ? naNieuw.filter(r => IC.past(r, catF)) : naNieuw;
+    const c = list.find(r => r.id === ibSel) || list[0] || null;
 
     // Trigger thread-load voor conversation-kinds (WA/Lisa) zodra er een
     // geselecteerde row is en de convId van _thread nog niet matcht.
@@ -1107,6 +1118,7 @@
             <button class="chip ${!flOnlyNw ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="DFO.setF('fl','all')">Alles</button>
             <button class="chip ${flOnlyNw ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="DFO.setF('fl','nw')">Nieuw</button>
             <span style="font-size:12px;color:var(--text-3);margin-left:auto">${_live.loading && !list.length ? 'laden…' : list.length + ' items'}</span></div>
+          ${metCat ? `<div style="margin-top:7px">${IC.chips(naNieuw, catF, '__ibCat')}</div>` : ''}
         </div>
         ${_live.loading && !list.length
           ? renderSkeletonRows(6)
@@ -1140,6 +1152,7 @@
           <span style="font-size:13.5px;font-weight:${i.nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(i.van)}</span>
           <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:10px;height:10px')}${_esc(n)}</span>
           ${i.nw ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--rose);flex-shrink:0"></span>' : ''}
+          ${i.categorie && window.INBOX_CATEGORIE ? `<span style="flex-shrink:0">${window.INBOX_CATEGORIE.badge(i, { tags: false })}</span>` : ''}
           <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${_esc(i.tijd)}</span></div>
         <div class="ib-tp">${i.t ? `<span class="ib-tp-t">${_esc(i.t)}</span>` : ''}${i.t && i.p ? ' — ' : ''}${_esc(i.p)}</div>
       </div></div>`;

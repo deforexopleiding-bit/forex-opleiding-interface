@@ -17,7 +17,8 @@
 //
 // Response: { configured, wa_configured, module, label, postvak,
 //   items:[{ lead_id, naam, phone_number, email, last_activity_at, last_preview,
-//            unread, can_send_text, has_wa, has_mail, afspraak_op }] }
+//            unread, can_send_text, has_wa, has_mail, afspraak_op,
+//            categorie, categorie_label, categorie_tags }] }   (zie api/_lib/inbox-categorie.js)
 //
 // v=6 fixes (BROK 2):
 //   FIX 3: has_mail was altijd false voor leads waar wij WEL mail naartoe stuurden
@@ -29,6 +30,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { voegCategorieToe } from './_lib/inbox-categorie.js';
 // BP2 v3 (2026-09-01): setter-scope VERWIJDERD — Romy doet alle gesprekken.
 import {
   haalLijn, leadsInTraject, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
@@ -96,7 +98,7 @@ export default async function handler(req, res) {
     if (lijn.phoneNumberId) {
       const { data: convs } = await supabaseAdmin
         .from('whatsapp_conversations')
-        .select('id, phone_number, last_message_at, last_message_preview, unread_count, last_inbound_at')
+        .select('id, phone_number, customer_id, attendee_id, last_message_at, last_message_preview, unread_count, last_inbound_at')
         .eq('phone_number_id', lijn.phoneNumberId)
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(500);
@@ -282,6 +284,19 @@ export default async function handler(req, res) {
 
     items.sort((a, b) => b._t - a._t);
     const schoon = items.map(({ _t, ...rest }) => rest);
+
+    // Categorie per rij (2026-10-07), afgeleid uit de huidige CRM-status;
+    // zie api/_lib/inbox-categorie.js. Fail-soft.
+    const convOpId = new Map(convsAll.map((c) => [c.id, c]));
+    await voegCategorieToe(supabaseAdmin, schoon, (it) => {
+      const conv = it.conversation_id ? convOpId.get(it.conversation_id) : null;
+      return {
+        sleutel: it.conversation_id || ('lead:' + it.lead_id),
+        telefoon: it.phone_number,
+        customer_id: conv?.customer_id || null,
+        attendee_id: conv?.attendee_id || null,
+      };
+    });
 
     return res.status(200).json({
       configured: true,
