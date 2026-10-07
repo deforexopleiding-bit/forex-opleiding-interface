@@ -10,6 +10,7 @@
 //   IC.badge(row)                         → html van het label (+ kleine tags)
 //   IC.chips(rows, actief, '__xxxCat')    → html van de chiprij (Alles + per categorie, met aantallen)
 //   rows.filter((r) => IC.past(r, actief)) → filter
+//   IC.voorLeadInbox(rows)                → zonder Wanbetaler/Onboarding (lead-inboxen)
 // Ontbreekt dit script, dan tekent de view zoals voorheen (alle aanroepen zijn optioneel).
 (function () {
   'use strict';
@@ -64,6 +65,22 @@
     return html;
   }
 
+  // Lead-inboxen (Events, Leadsonderhoud) gaan niet over wanbetalers of
+  // onboarding: gesprekken met DIE HOOFDcategorie horen daar niet (2026-10-07).
+  // Precies dezelfde `categorie` als het label — geen eigen logica. Zonder
+  // categorie (server kon 'm niet bepalen) blijft het gesprek zichtbaar.
+  var VERBORGEN_IN_LEAD_INBOX = ['wanbetaler', 'onboarding'];
+
+  /** Hoort dit gesprek in een lead-inbox? */
+  function hoortInLeadInbox(row) {
+    return !(row && VERBORGEN_IN_LEAD_INBOX.indexOf(row.categorie) >= 0);
+  }
+
+  /** De gesprekken die in een lead-inbox thuishoren. */
+  function voorLeadInbox(rows) {
+    return (rows || []).filter(hoortInLeadInbox);
+  }
+
   /** Aantal gesprekken per categorie. */
   function telling(rows) {
     var m = {};
@@ -102,5 +119,6 @@
 
   window.INBOX_CATEGORIE = Object.freeze({
     VOLGORDE: VOLGORDE, LABELS: LABELS, badge: badge, chips: chips, past: past, telling: telling,
+    VERBORGEN_IN_LEAD_INBOX: VERBORGEN_IN_LEAD_INBOX, hoortInLeadInbox: hoortInLeadInbox, voorLeadInbox: voorLeadInbox,
   });
 })();

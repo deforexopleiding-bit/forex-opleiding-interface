@@ -864,6 +864,14 @@
     return { conversation_id: conv ? conv.conversation_id : null };
   }
 
+  // Leadsonderhoud › Gesprekken gaat niet over wanbetalers of onboarding
+  // (2026-10-07): wie als HOOFDcategorie Wanbetaler of Onboarding heeft, valt hier
+  // al bij binnenkomst weg — uit de lijst, de chips en alle tellers. Zelfde
+  // server-berekende categorie als het label (modules/shared/inbox-categorie.js).
+  function _lsInbAlleenLeadGesprekken(items) {
+    return window.INBOX_CATEGORIE ? window.INBOX_CATEGORIE.voorLeadInbox(items) : items;
+  }
+
   /* ── Fetchers ────────────────────────────────────────────────────────── */
   async function _lsInbFetchConvs() {
     const st = _lsInb.convs;
@@ -876,7 +884,7 @@
     if (seq !== st._seq) return;
     st.loading = false;
     if (!j) { st.error = 'Kon gesprekken niet laden'; }
-    else { st.items = asArr(j.items); st.fetched = true; }
+    else { st.items = _lsInbAlleenLeadGesprekken(asArr(j.items)); st.fetched = true; }
     _lsInbSafeRender();
   }
   function _lsInbResetThread() {
@@ -1648,7 +1656,7 @@
       const preHash = _lsInbConvsHash();
       const jList = await tryFetch('ls-poll-convs', '/api/leadsonderhoud-gesprekken');
       if (jList && Array.isArray(jList.items)) {
-        _lsInb.convs.items = jList.items;
+        _lsInb.convs.items = _lsInbAlleenLeadGesprekken(jList.items);
         _lsInb.convs.fetched = true;
         _lsInb.convs.error = null;
         const postHash = _lsInbConvsHash();
