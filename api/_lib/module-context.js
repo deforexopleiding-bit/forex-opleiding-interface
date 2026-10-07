@@ -53,8 +53,13 @@ const MODULE_CONTEXT_SELECT =
  *                                   afdeling_ondertekenaar, is_active }
  *                                   of null als geen exacte match in
  *                                   whatsapp_module_config (geen finance-failover meer).
+ * @param {{ customerId?: string|null, module?: string|null }} [opts] - 2026-10-07:
+ *   `module` = de caller weet de module al (wint als die rij op dit nummer staat);
+ *   `customerId` = op een nummer met `inkomend_resolver: 'klant'` (klantnummer:
+ *   onboarding + finance) kiest de klant de module (api/_lib/klant-module.js).
+ *   Zonder beide → `inkomend_module` van het nummer.
  */
-export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumberId) {
+export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumberId, opts = {}) {
   if (!supabaseAdmin) {
     // eslint-disable-next-line no-console
     console.warn('[module-context] supabaseAdmin ontbreekt - return null');
@@ -89,7 +94,7 @@ export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumber
       const { huidigeLijnId } = await import('./meta-whatsapp.js');
       const huidig = await huidigeLijnId(phoneNumberId);
       if (huidig && huidig !== String(phoneNumberId)) {
-        return getModuleContextByPhoneNumberId(supabaseAdmin, huidig);
+        return getModuleContextByPhoneNumberId(supabaseAdmin, huidig, opts);
       }
     }
     // Geen rij -> ongeconfigureerd nummer; caller beslist (in de praktijk:
@@ -98,6 +103,16 @@ export async function getModuleContextByPhoneNumberId(supabaseAdmin, phoneNumber
     if (lijst.length <= 1) return lijst[0] || null;
     const { d360NummerVoorPhoneNumberId } = await import('./meta-whatsapp.js');
     const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
+    // Caller weet de module al (bv. onboarding-send vanaf het gedeelde nummer).
+    const gevraagd = opts?.module && lijst.find((r) => r.module === opts.module);
+    if (gevraagd) return gevraagd;
+    // Gedeeld klantnummer: de klant bepaalt onboarding vs finance.
+    if (nummer?.inkomend_resolver === 'klant' && opts?.customerId) {
+      const { bepaalKlantModule } = await import('./klant-module.js');
+      const gekozen = await bepaalKlantModule(supabaseAdmin, opts.customerId);
+      const rij = lijst.find((r) => r.module === gekozen);
+      if (rij) return rij;
+    }
     const eigenaar = nummer && lijst.find((r) => r.module === nummer.inkomend_module);
     if (eigenaar) return eigenaar;
     // eslint-disable-next-line no-console

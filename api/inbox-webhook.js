@@ -1752,7 +1752,8 @@ export async function verwerkWhatsAppWebhookBody(req, body, ctx = {}) {
             try {
               if (insRes.inserted && insRes.messageId && insRes.type === 'text') {
                 // Module + joost_config: éénmalige lookup voor beide paden.
-                const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId);
+                // Op het gedeelde klantnummer kiest de klant onboarding vs finance.
+                const moduleCtx = await getModuleContextByPhoneNumberId(supabaseAdmin, recvPhoneNumberId, { customerId: conv.customerId });
                 // FASE 0 Joost-gate-hardening: GEEN silent-failover.
                 // Een null/onbekende/non-finance/inactive module -> Joost
                 // wordt NOOIT getriggerd. Conversation blijft persisted in

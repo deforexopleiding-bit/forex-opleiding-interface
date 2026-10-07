@@ -215,7 +215,7 @@ export async function runSimoneSuggest({
   // events-conversations. Reactieve webhook-pad gaat al door isEventsLijn-gate;
   // manual-knop op events.html werkt alleen op events-conv; finance-conv die
   // per ongeluk doorgegeven wordt → expliciete afwijzing.
-  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id);
+  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id, { customerId: conv.customer_id });
   if (moduleCtx?.module !== 'events') {
     return {
       status: 422,

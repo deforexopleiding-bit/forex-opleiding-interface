@@ -60,7 +60,23 @@ async function countWaUnread(moduleKey) {
     .eq('status', 'open')
     .gt('unread_count', 0);
   if (error) throw new Error(`whatsapp[${moduleKey}]: ${error.message}`);
-  return { count: count || 0 };
+  if (!count) return { count: 0 };
+  // Gedeeld klantnummer (onboarding + finance op één lijn): per klant tellen,
+  // anders telt hetzelfde gesprek in beide modules mee.
+  const { d360NummerVoorPhoneNumberId } = await import('./_lib/meta-whatsapp.js');
+  const nummer = await d360NummerVoorPhoneNumberId(pnId).catch(() => null);
+  if (nummer?.inkomend_resolver !== 'klant') return { count };
+  const { data: rijen, error: rErr } = await supabaseAdmin
+    .from('whatsapp_conversations')
+    .select('id, customer_id')
+    .eq('phone_number_id', pnId)
+    .eq('status', 'open')
+    .gt('unread_count', 0)
+    .limit(2000);
+  if (rErr) throw new Error(`whatsapp[${moduleKey}]: ${rErr.message}`);
+  const { filterGesprekkenOpKlantModule } = await import('./_lib/klant-module.js');
+  const { rows } = await filterGesprekkenOpKlantModule(supabaseAdmin, rijen, pnId, moduleKey);
+  return { count: rows.length };
 }
 
 // Leadsonderhoud kan via een andere module-key lopen — fallback op 'onboarding'

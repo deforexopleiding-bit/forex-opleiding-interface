@@ -87,9 +87,9 @@ function nepFetch(antwoorden) {
 // 1 · Registry + routering
 // ════════════════════════════════════════════════════════════════════════════
 
-test('registry: één actief nummer, +31 6 44562426, geen geheimen in code', () => {
-  const [n] = N.actieveNummers();
-  assert.equal(N.actieveNummers().length, 1);
+test('registry: hoofdnummer (+31 6 44562426) + klantnummer, geen geheimen in code', () => {
+  assert.deepEqual(N.actieveNummers().map((x) => x.sleutel), ['hoofdnummer', 'klantnummer']);
+  const n = N.nummerOpSleutel('hoofdnummer');
   assert.equal(n.e164, '+31644562426');
   assert.equal(n.api_key_env, 'D360_API_KEY_HOOFDNUMMER');
   assert.equal(N.nummerOpTelefoon('31644562426'), n);
@@ -97,14 +97,15 @@ test('registry: één actief nummer, +31 6 44562426, geen geheimen in code', () 
   assert.doesNotMatch(src, /D360-API-KEY['"]?\s*:\s*['"][A-Za-z0-9]/);
 });
 
-test('routering: lead-modules → hoofdnummer; onboarding/finance/dunning nooit; geen standaardnummer', () => {
+test('routering: lead-modules → hoofdnummer; onboarding/finance/dunning → klantnummer, nooit het hoofdnummer; geen standaardnummer', () => {
   const h = N.nummerOpSleutel('hoofdnummer');
+  const k = N.nummerOpSleutel('klantnummer');
   for (const m of ['leadsonderhoud', 'welkom', 'events', 'opvolging']) {
     assert.equal(N.nummerVoorModule(m), h, m);
     assert.equal(N.moduleMagViaNummer(m, h), true, m);
   }
   for (const m of ['onboarding', 'finance', 'dunning']) {
-    assert.equal(N.nummerVoorModule(m), null, m);
+    assert.equal(N.nummerVoorModule(m), k, m);
     assert.equal(N.moduleMagViaNummer(m, h), false, m);
   }
   assert.equal(N.standaardNummer(), null);

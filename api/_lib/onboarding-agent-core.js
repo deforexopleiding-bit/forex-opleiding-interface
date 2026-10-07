@@ -228,7 +228,7 @@ export async function runOnboardingSuggest({
   // Onboarding-agent opereert ALLEEN op onboarding-conversations (gespiegeld
   // aan Simone's events-only guard). Voorkomt dat een finance/events-conv
   // hier per ongeluk binnenkomt door een misgerouteerde caller.
-  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id);
+  const moduleCtx = await getModuleContextByPhoneNumberId(supabase, conv.phone_number_id, { customerId: conv.customer_id });
   if (moduleCtx?.module !== 'onboarding') {
     return {
       status: 422,

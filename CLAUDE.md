@@ -45,7 +45,12 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
   `D360_PHONE_NUMBER_ID_<NUMMER>` (Meta's phone_number_id, optioneel: anders opgevraagd
   via /health_status) en `D360_WEBHOOK_TOKEN_<NUMMER>` (sensitive, gedeeld geheim voor
   `/api/whatsapp-360-webhook?nummer=<sleutel>`). Nu: `HOOFDNUMMER` (+31 6 44562426, phone_number_id 1273723375834177; tot 2026-10-06 +31 6 57210825,
-  lead-modules). Transport kiest per bericht 360dialog/Meta in `metaPostMessage`.
+  lead-modules) en `KLANTNUMMER` (phone_number_id 1399327383258229, eigen WABA:
+  onboarding + finance + dunning; vervangt de oude finance- en onboarding-lijn).
+  Een nummer ZONDER API-key doet niets (oude pad blijft). Op het klantnummer kiest
+  de KLANT de module (`api/_lib/klant-module.js`): actieve onboarding zonder open
+  aanmaning → onboarding, anders finance/Joost — via `getModuleContextByPhoneNumberId(sb,
+  pnId, { customerId })`. Transport kiest per bericht 360dialog/Meta in `metaPostMessage`.
   Onboarding NOOIT via het hoofdnummer (`module:'onboarding'` → WaGeenNummerError);
   e-mail-fallback achter `ONBOARDING_MAIL_FALLBACK=true` (default uit).
 - DFO_LMS_AGENDA_SECRET in env vars (sensitive — server-side only): gedeeld geheim (header `x-dfo-secret`) voor de agendabrug `/api/lms-agenda-events` met het LMS; ontbreekt → route dicht (503). Zie docs/lms-agenda-brug.md.
