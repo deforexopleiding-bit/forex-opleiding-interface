@@ -137,6 +137,7 @@
     suggestionHidden:{},     // [convId] = true
     // Client-side zoek op gesprekkenlijst
     inboxSearchQ:  '',
+    inboxCat:      'alles',           // categorie-filter (2026-10-07), zie modules/shared/inbox-categorie.js
     // Simone-poll timer voor open conv (module-scope, herstart per conv-select)
     _simonePollTimer: null,
     _simonePollConvId: null,
@@ -2815,14 +2816,9 @@
       return _inboxSimoneStatusBar() + emptyBlk('Nog geen gesprekken', 'Zodra een klant de events-lijn appt of mailt verschijnt de conversatie hier.');
     }
 
-    // Client-side filter op naam / telefoon / e-mail (case-insensitive).
+    // Client-side filter op naam / telefoon / e-mail + categorie.
     const q = String(_ui.inboxSearchQ || '').trim().toLowerCase();
-    const filtered = q ? items.filter((c) => {
-      const naam  = (c.customer_name || c.display_name || '').toLowerCase();
-      const phone = String(c.phone_number || '').toLowerCase();
-      const email = String(c.customer_email || '').toLowerCase();
-      return naam.includes(q) || phone.includes(q) || email.includes(q);
-    }) : items;
+    const filtered = _evInboxZichtbaar(items);
 
     // Auto-select bovenste (gefilterde) conv als huidige actieve niet zichtbaar is.
     const activeVisible = _ui.inboxConvId && filtered.some((c) => c.id === _ui.inboxConvId);
@@ -2862,6 +2858,7 @@
               onsearch="window.__evInboxSearch(this.value)"
             />
             ${q ? `<div class="ev-inbox-search-count">${filtered.length} van ${items.length}</div>` : ''}
+            ${window.INBOX_CATEGORIE ? `<div style="margin-top:6px">${window.INBOX_CATEGORIE.chips(items, _ui.inboxCat, 'window.__evInboxCat')}</div>` : ''}
           </div>
           <div class="ev-inbox-rows" id="ev-inbox-rows">
             ${filtered.length === 0
@@ -2877,6 +2874,26 @@
       ${_globalOverlays()}`;
   }
 
+  // Eén filter voor de drie plekken die de lijst tekenen (view, zoeken, live
+  // verversen): zoekterm op naam / telefoon / e-mail + categorie (2026-10-07).
+  function _evInboxZichtbaar(items) {
+    const q = String(_ui.inboxSearchQ || '').trim().toLowerCase();
+    const IC = window.INBOX_CATEGORIE;
+    return items.filter((c) => {
+      if (IC && !IC.past(c, _ui.inboxCat)) return false;
+      if (!q) return true;
+      const naam  = (c.customer_name || c.display_name || '').toLowerCase();
+      const phone = String(c.phone_number || '').toLowerCase();
+      const email = String(c.customer_email || '').toLowerCase();
+      return naam.includes(q) || phone.includes(q) || email.includes(q);
+    });
+  }
+  // Categorie-chip: volledige render (geen typefocus om te bewaren).
+  window.__evInboxCat = (val) => {
+    _ui.inboxCat = String(val || 'alles');
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+
   // Zoek-handler: surgical re-render van alleen de left list (rows-container).
   // Full DFO.render zou de textarea onder focus verliezen op elke keystroke.
   window.__evInboxSearch = (val) => {
@@ -2884,12 +2901,7 @@
     // Herbereken filtered lijst
     const items = asArr(_live.inbox.data);
     const q = _ui.inboxSearchQ.trim().toLowerCase();
-    const filtered = q ? items.filter((c) => {
-      const naam  = (c.customer_name || c.display_name || '').toLowerCase();
-      const phone = String(c.phone_number || '').toLowerCase();
-      const email = String(c.customer_email || '').toLowerCase();
-      return naam.includes(q) || phone.includes(q) || email.includes(q);
-    }) : items;
+    const filtered = _evInboxZichtbaar(items);
     const rowsEl = document.querySelector('#ev-inbox-rows');
     if (rowsEl) {
       rowsEl.innerHTML = filtered.length === 0
@@ -3067,6 +3079,7 @@
       const chanBadge = lastCh === 'email'
         ? `<span class="ev-chan-badge email" title="Laatste bericht: E-mail">✉</span>`
         : `<span class="ev-chan-badge wa" title="Laatste bericht: WhatsApp">W</span>`;
+      const catBadge = window.INBOX_CATEGORIE ? window.INBOX_CATEGORIE.badge(c) : '';
       return `<div class="ev-inbox-row${c.id === activeId ? ' active' : ''}" data-conv-id="${esc(c.id)}" onclick="window.__evInboxSelect('${esc(c.id)}')">
         ${H.av(naam, 36)}
         <div class="r-body">
@@ -3076,7 +3089,7 @@
             <div class="r-time">${esc(timeShort)}</div>
           </div>
           <div class="r-preview">${esc(preview)}</div>
-          ${unread > 0 ? `<div class="r-badges"><span style="background:var(--pink);color:white;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;min-width:16px;text-align:center">${unread}</span></div>` : ''}
+          ${(unread > 0 || catBadge) ? `<div class="r-badges">${unread > 0 ? `<span style="background:var(--pink);color:white;font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;min-width:16px;text-align:center">${unread}</span>` : ''}${catBadge}</div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -4033,12 +4046,7 @@
       const rowsEl = document.querySelector('#ev-inbox-rows');
       if (rowsEl) {
         const q = String(_ui.inboxSearchQ || '').trim().toLowerCase();
-        const filtered = q ? newItems.filter((c) => {
-          const naam  = (c.customer_name || c.display_name || '').toLowerCase();
-          const phone = String(c.phone_number || '').toLowerCase();
-          const email = String(c.customer_email || '').toLowerCase();
-          return naam.includes(q) || phone.includes(q) || email.includes(q);
-        }) : newItems;
+        const filtered = _evInboxZichtbaar(newItems);
         rowsEl.innerHTML = filtered.length === 0
           ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px">Geen gesprekken gevonden${q ? ' voor "' + esc(q) + '"' : ''}.</div>`
           : _inboxLeftList(filtered, _ui.inboxConvId);

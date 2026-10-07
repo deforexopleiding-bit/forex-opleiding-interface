@@ -542,6 +542,7 @@
   const _lsInb = {
     convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0 },
     sel:      null,      // lead_id (uuid)
+    cat:      'alles',   // categorie-filter (2026-10-07), zie modules/shared/inbox-categorie.js
     thread: {
       leadId: null, items: [], loading: false, error: null,
       conversation: null,
@@ -747,6 +748,12 @@
       </div>
     </div>`;
   }
+  // Categorie-filter (2026-10-07), client-side, geen refetch en geen auto-select
+  // (zie de v=20-fix: een filterklik mag nooit een thread openen/gelezen zetten).
+  window.__lsInbSetCat = (v) => {
+    _lsInb.cat = String(v || 'alles');
+    if (window.DFO?.render) window.DFO.render();
+  };
   // v=19: gesprekken-filter setter (client-side, geen refetch).
   window.__lsInbSetFilter = (v) => {
     _lsInb.filter = String(v || 'all');
@@ -1708,6 +1715,8 @@
       ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--teal-soft);color:var(--teal);font-weight:600">WA</span>`
       : '';
     const mailBadge = '';
+    // Categorie-label (2026-10-07), afgeleid uit de CRM-status; zie modules/shared/inbox-categorie.js.
+    const catBadge = window.INBOX_CATEGORIE ? window.INBOX_CATEGORIE.badge(row) : '';
     // FEAT-2: duidelijke ongelezen-styling + toggle-knop op de rij.
     // Ongelezen: linker rose-strip (4px), primary background-tint, dikke
     // vette naam. Gelezen: gedempt (opacity), naam normaal-gewicht.
@@ -1745,7 +1754,7 @@
         <div style="font-size:12.5px;color:${nw ? 'var(--text-1)' : 'var(--text-2)'};font-weight:${nw ? '500' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>
         <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx)}</div>
         <div class="ls-inb-tagrow" style="margin-top:6px;display:flex;gap:5px;align-items:center">
-          ${waBadge} ${mailBadge}
+          ${waBadge} ${mailBadge} ${catBadge}
           ${toggleBtn}
         </div>
       </div>
@@ -2094,14 +2103,18 @@
     // v=19: client-side gelezen/ongelezen-filter over item.unread.
     // Zoek + filter zijn onafhankelijk stapelbaar; teller-chips reflecteren
     // altijd het zoekresultaat (na search, vóór unread/read-filter).
+    // Categorie (2026-10-07): na de zoekterm, vóór gelezen/ongelezen. De
+    // categorie-chips tellen over het zoekresultaat.
+    const IC = window.INBOX_CATEGORIE;
+    const rowsAfterCat = IC ? rowsAfterSearch.filter((r) => IC.past(r, _lsInb.cat)) : rowsAfterSearch;
     const flt = _lsInb.filter || 'all';
     const rows = flt === 'unread'
-      ? rowsAfterSearch.filter(r => (r.unread || 0) > 0)
+      ? rowsAfterCat.filter(r => (r.unread || 0) > 0)
       : flt === 'read'
-        ? rowsAfterSearch.filter(r => (r.unread || 0) === 0)
-        : rowsAfterSearch;
-    const unreadCnt = rowsAfterSearch.filter(r => (r.unread || 0) > 0).length;
-    const readCnt   = rowsAfterSearch.length - unreadCnt;
+        ? rowsAfterCat.filter(r => (r.unread || 0) === 0)
+        : rowsAfterCat;
+    const unreadCnt = rowsAfterCat.filter(r => (r.unread || 0) > 0).length;
+    const readCnt   = rowsAfterCat.length - unreadCnt;
     // v=20 KRITIEKE FIX: GEEN auto-select fallback op rows[0] bij filter-switch.
     // Voorheen ontstond een cascade: filter=unread → _lsInb.sel valt buiten
     // rows → sel=rows[0] → _lsInbLoadThread(sel) → mark_as_read=true → conv
@@ -2141,10 +2154,11 @@
           ${_lsInb.search ? `<button type="button" onclick="window.__lsInbSetSearch('')" title="Wissen" style="background:none;border:none;color:var(--text-3);font-size:16px;cursor:pointer;padding:2px 6px;line-height:1">×</button>` : ''}
         </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:5px;flex-wrap:wrap">
-          ${filterChip('all', 'Alle', rowsAfterSearch.length)}
+          ${filterChip('all', 'Alle', rowsAfterCat.length)}
           ${filterChip('unread', 'Ongelezen', unreadCnt)}
           ${filterChip('read', 'Gelezen', readCnt)}
         </div>
+        ${IC && rowsAfterSearch.length ? `<div style="padding:8px 12px;border-bottom:1px solid var(--border)">${IC.chips(rowsAfterSearch, _lsInb.cat, 'window.__lsInbSetCat')}</div>` : ''}
         ${_lsInb.convs.error ? `<div style="padding:16px;color:var(--rose);font-size:12.5px">⚠ ${esc(_lsInb.convs.error)}</div>` : ''}
         ${listHtml}
       </div>
