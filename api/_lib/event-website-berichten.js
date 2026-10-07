@@ -12,6 +12,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventMail } from '../mailer.js';
 import { sendEventWhatsAppTemplate } from './events-send.js';
+import { templateStatusOpLijn } from './meta-whatsapp.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
 export const SOORTEN = {
@@ -50,6 +51,28 @@ export async function markeerVerstuurd(attendeeId, eventId, soort, kanaal) {
 }
 
 /**
+ * Staat event_vervolg_herinnering ook APPROVED op de WABA van de events-lijn?
+ * De CRM-tabel kent alleen de oude WABA; sinds de overstap naar 360dialog
+ * (2026-10-06) bestond de template daar wel en op het nieuwe account niet →
+ * elke 2u/24u-herinnering faalde met 132001. Kan de lijn het niet zeggen
+ * (geen 360dialog-lijn) → true, zoals vroeger. Lukt de controle niet → false
+ * (veilig: de fallback-template is zeker goedgekeurd).
+ */
+async function vervolgTemplateOpEventsLijn() {
+  const { data: cfg } = await supabaseAdmin
+    .from('whatsapp_module_config')
+    .select('phone_number_id').eq('module', 'events').eq('is_active', true).maybeSingle();
+  if (!cfg?.phone_number_id) return false;
+  const status = await templateStatusOpLijn(cfg.phone_number_id, 'event_vervolg_herinnering', 'nl');
+  if (status === null) return true;
+  if (status !== 'APPROVED') {
+    console.warn('[event-website-berichten] event_vervolg_herinnering op de events-lijn:', status, '→ terugval op event_vragenlijst_definitief');
+    return false;
+  }
+  return true;
+}
+
+/**
  * Kies dynamisch het WhatsApp-template voor de vervolg-herinnering:
  * 'event_vervolg_herinnering' ZODRA dat bestaat en APPROVED is; anders val
  * terug op het al goedgekeurde 'event_vragenlijst_definitief'. Zo hoeft er
@@ -61,7 +84,8 @@ export async function kiesVervolgTemplate() {
     const { data } = await supabaseAdmin
       .from('whatsapp_meta_templates')
       .select('status').eq('name', 'event_vervolg_herinnering').maybeSingle();
-    if (String(data?.status || '').toUpperCase() === 'APPROVED') {
+    if (String(data?.status || '').toUpperCase() === 'APPROVED'
+        && await vervolgTemplateOpEventsLijn()) {
       return { template: 'event_vervolg_herinnering', mapping: { body: { 1: 'attendee.voornaam', 2: 'event.titel', 3: 'attendee.vervolg_link' } } };
     }
   } catch (e) {

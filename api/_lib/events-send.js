@@ -56,6 +56,43 @@ function escHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+// ── Fout-indeling voor de send ──────────────────────────────────────────────
+// 360dialog limiteert per afzendernummer ("Too many requests for one number",
+// HTTP 429). Twee sends in dezelfde seconde over hetzelfde kanaal (bv. de
+// uitnodiging bij een event-aanmelding + de nieuwe-lead-melding) liepen daarop
+// stuk — en omdat elke 4xx als permanent gold, werd er nooit opnieuw geprobeerd.
+export const TIJDELIJK_WACHT_MS = 7000;
+// Meta-codes die "even te veel" betekenen: 4/80007 rate limit, 130429
+// throughput, 131056 pair rate limit (te veel naar één ontvanger).
+const TIJDELIJKE_CODES = [4, 80007, 130429, 131056];
+// 132000 num-of-params mismatch, 132001 component-format / onbekende template,
+// 132005 translated_text, 132007 template_paused_or_disabled, 132012 param-format,
+// 132068 template_disabled, 131008 required_param_missing, 131026
+// message_undeliverable, 131051 message_type_unsupported.
+const PERMANENT_CODES = [132000, 132001, 132005, 132007, 132012, 132068, 131008, 131026, 131051];
+
+/**
+ * 'tijdelijk' | 'permanent' | 'onbekend' voor een send-fout. PURE.
+ * Tijdelijk: HTTP 429 of 5xx, een tijdelijke Meta-code, of de 360dialog-tekst
+ * "Too many requests". Permanent: een bekende permanente code, of een andere 4xx.
+ */
+export function soortSendFout(e) {
+  const msg = String(e?.message || '');
+  const httpStatus = Number(e && (e.status || e.httpStatus)) || null;
+  const codeFromMsg = Number((msg.match(/Meta API (\d{3,6})/) || msg.match(/#(\d{3,6})/) || [])[1]) || null;
+  const metaCode = Number(e && (e.metaCode || (e.meta && e.meta.code))) || codeFromMsg;
+  if (httpStatus === 429 || metaCode === 429 || (httpStatus && httpStatus >= 500)
+      || TIJDELIJKE_CODES.includes(metaCode) || /too many requests/i.test(msg)) {
+    return 'tijdelijk';
+  }
+  if ((metaCode && PERMANENT_CODES.includes(metaCode)) || (httpStatus && httpStatus >= 400 && httpStatus < 500)) {
+    return 'permanent';
+  }
+  return 'onbekend';
+}
+
+const wacht = (ms) => new Promise((ok) => setTimeout(ok, Math.max(0, Number(ms) || 0)));
+
 // ── 1. WhatsApp template-send (events phone-line) ───────────────────────────
 //
 // Verplaatst de volledige logica van sendInviteWhatsApp uit
@@ -74,6 +111,11 @@ export async function sendEventWhatsAppTemplate({
   // geven dit niet mee → gedrag exact ongewijzigd. Voorkomt dat een template
   // met {{N}}-body maar zonder DB-mapping als 0 params naar Meta gaat (132000).
   paramMappingOverride = null,
+  // Herhaalpogingen bij een TIJDELIJKE fout (429 / 5xx / throughput). Directe
+  // sends (uitnodiging bij aanmelding, website-cron) gebruiken de default; de
+  // automation-engine geeft 1 mee — die plant zelf een retry op een volgende tick.
+  pogingen = 3,
+  wachtMs = TIJDELIJK_WACHT_MS,
 } = {}) {
   if (!templateName) {
     return { ok: false, skipped: true, reason: 'no-template-name' };
@@ -172,46 +214,52 @@ export async function sendEventWhatsAppTemplate({
     .sort((a, b) => Number(a) - Number(b));
   const variables = sortedKeys.map((k) => String(resolvedVariables[k] ?? '').slice(0, MAX_VAR_VALUE));
 
-  // 6) Send via Meta.
+  // 6) Send via Meta / 360dialog, met herhaalpogingen bij TIJDELIJKE fouten.
+  //    429 ("Too many requests for one number"), 5xx en Meta's throughput-
+  //    codes zijn tijdelijk: na een korte pauze lukt dezelfde send gewoon. Echte
+  //    4xx (template-fout, ongeldig nummer, …) blijven permanent → geen retry.
+  //    Alleen deze ene call wordt herhaald; conv-upsert en resolve niet.
   let metaResult;
-  try {
-    metaResult = await sendTemplate({
-      to            : phone.replace(/^\+/, ''),
-      templateName,
-      languageCode,
-      variables,
-      phoneNumberId : eventsPnId,
-    });
-  } catch (e) {
-    if (e instanceof MetaNotConfiguredError) {
+  const maxPogingen = Math.max(1, Math.trunc(Number(pogingen)) || 1);
+  for (let poging = 1; ; poging++) {
+    try {
+      metaResult = await sendTemplate({
+        to            : phone.replace(/^\+/, ''),
+        templateName,
+        languageCode,
+        variables,
+        phoneNumberId : eventsPnId,
+      });
+      break;
+    } catch (e) {
+      if (e instanceof MetaNotConfiguredError) {
+        return {
+          ok: false, skipped: true,
+          reason: 'Meta-config ontbreekt: ' + (e.missing || []).join(', '),
+        };
+      }
+      const msg = String(e?.message || 'unknown');
+      const soort = soortSendFout(e);
+      if (soort === 'tijdelijk' && poging < maxPogingen) {
+        console.warn(`[events-send] tijdelijke fout (poging ${poging}/${maxPogingen}), opnieuw over ${wachtMs} ms:`, msg);
+        await wacht(wachtMs);
+        continue;
+      }
+      if (soort === 'permanent') {
+        // De engine ziet result.permanent en markeert de stap als afgerond
+        // i.p.v. opnieuw te proberen (dezelfde payload geeft dezelfde fout).
+        console.error('[events-send] Meta permanent error (no retry):', msg);
+        return { ok: false, permanent: true, error: 'Meta send failed (permanent): ' + msg };
+      }
+      // Tijdelijk en de pogingen zijn op (of onbekend): NIET permanent, zodat
+      // de engine het op een volgende tick opnieuw probeert.
+      console.error(`[events-send] Meta send (na ${poging} poging${poging === 1 ? '' : 'en'}):`, msg);
       return {
-        ok: false, skipped: true,
-        reason: 'Meta-config ontbreekt: ' + (e.missing || []).join(', '),
+        ok: false,
+        tijdelijk: soort === 'tijdelijk',
+        error: 'Meta send failed' + (soort === 'tijdelijk' ? ` (tijdelijk, ${poging}x geprobeerd)` : '') + ': ' + msg,
       };
     }
-    // Permanente Meta-errors (HTTP 4xx of bekende validatie-codes) → retry zinloos:
-    // dezelfde payload geeft dezelfde error. De engine ziet result.permanent en
-    // markeert de stap als afgerond i.p.v. opnieuw te proberen.
-    const msg = String(e?.message || 'unknown');
-    const httpStatus = e && (e.status || e.httpStatus);
-    const metaCode = e && (e.metaCode || (e.meta && e.meta.code));
-    // 132000 num-of-params mismatch, 132001 component-format, 132005 translated_text,
-    // 132007 template_paused_or_disabled, 132012 param-format, 132068 template_disabled,
-    // 131008 required_param_missing, 131026 message_undeliverable, 131051 message_type_unsupported.
-    const PERMANENT_CODES = [132000, 132001, 132005, 132007, 132012, 132068, 131008, 131026, 131051];
-    // Meta-helper gooit "Meta API <code>: <msg> (subcode=...)" zonder rijke
-    // properties. Parse code uit de message als fallback.
-    const codeFromMsg = (msg.match(/Meta API (\d{3,6})/) || msg.match(/#(\d{3,6})/) || [])[1];
-    const isPermanent =
-      (httpStatus && httpStatus >= 400 && httpStatus < 500) ||
-      (metaCode && PERMANENT_CODES.includes(Number(metaCode))) ||
-      (codeFromMsg && PERMANENT_CODES.includes(Number(codeFromMsg)));
-    if (isPermanent) {
-      console.error('[events-send] Meta permanent error (no retry):', msg);
-      return { ok: false, permanent: true, error: 'Meta send failed (permanent): ' + msg };
-    }
-    console.error('[events-send] Meta send:', msg);
-    return { ok: false, error: 'Meta send failed: ' + msg };
   }
   const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
 

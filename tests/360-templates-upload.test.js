@@ -70,8 +70,9 @@ test('argumenten: standaard dry-run; --apply alleen expliciet; --only', () => {
   assert.deepEqual([...leesArgs(['--only=a,b']).only], ['a', 'b']);
 });
 
-test('vaste lijst = de 22 namen uit PR #1729; geen sleutels in de code', () => {
-  assert.equal(Object.values(VASTE_TEMPLATES).flat().length, 22);
+test('vaste lijst = de 22 namen uit PR #1729 + event_vervolg_herinnering; geen sleutels in de code', () => {
+  assert.equal(Object.values(VASTE_TEMPLATES).flat().length, 23);
+  assert.ok(VASTE_TEMPLATES.events.includes('event_vervolg_herinnering'));
   const src = readFileSync(new URL('../scripts/360-templates-upload.mjs', import.meta.url), 'utf8');
   assert.match(src, /keyEnv: 'D360_API_KEY_HOOFDNUMMER'/);
   assert.match(src, /process\.env\[keyEnv\]/);
