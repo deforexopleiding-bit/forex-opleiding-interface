@@ -1186,6 +1186,10 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             // precies het gedrag van vóór deze regel. Geen enkele bestaande
             // stap verandert dus, alleen een stap die het veld zet.
             paramMappingOverride: stapMapping,
+            // Eén poging per tick: een tijdelijke fout (429/5xx) komt terug als
+            // niet-permanent en de engine plant zelf de retry (RETRY_BACKOFF_MS).
+            // Wachten binnen de cron zou de 60s-grens van de hele batch opeten.
+            pogingen: 1,
           });
           // FIX 4 — log idem als bij sendEmail.
           try {

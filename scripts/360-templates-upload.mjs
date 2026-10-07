@@ -55,7 +55,8 @@ export const VASTE_TEMPLATES = Object.freeze({
     'reminder_toegang_48u_v3', 'dag6_checkin_a', 'dag6_checkin_b'],
   leadsonderhoud: ['toegang_verlengd_nl'],
   opvolging: ['agenda_doorsturen_v1', 'agenda_herinnering_v1'],
-  events: ['events_keuze_link', 'vragenlijst_herinnering_v3', 'event_vragenlijst_definitief'],
+  // event_vervolg_herinnering: 2026-10-07 toegevoegd — ontbrak op de nieuwe WABA (132001).
+  events: ['events_keuze_link', 'vragenlijst_herinnering_v3', 'event_vragenlijst_definitief', 'event_vervolg_herinnering'],
   intern: ['interne_nieuwe_afspraak_nl', 'nieuwe_lead'],
 });
 
@@ -81,6 +82,7 @@ export const VOORBEELD_OVERRIDES = Object.freeze({
   bevestig_toegang_a: ['Jeffrey', 'dinsdag 9 september om 11:30'],
   interne_nieuwe_afspraak_nl: ['Bram Jansen', 'dinsdag 9 september om 11:30', '7-daagse'],
   reminder_toegang_48u_v3: ['Jeffrey'],
+  event_vervolg_herinnering: ['Jeffrey', 'Forex Masterclass Gent', 'https://www.deforexopleiding.nl/vervolg?t=voorbeeld'],
 });
 
 // ── Categorie ───────────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ const UTILITY_NAMEN = [
   [/^(bevestig_toegang|reminder_toegang|toegang_verlengd)/, 'toegang tot de aangevraagde cursus'],
   [/^dag6_checkin/, 'check-in binnen de aangevraagde 7-daagse'],
   [/^agenda_(doorsturen|herinnering)/, 'agenda-link na een gesprek'],
-  [/^(events_keuze_link|vragenlijst_herinnering|event_vragenlijst)/, 'inschrijving/vragenlijst event'],
+  [/^(events_keuze_link|vragenlijst_herinnering|event_vragenlijst|event_vervolg_herinnering)/, 'inschrijving/vragenlijst event'],
   [/^(interne_|nieuwe_lead$)/, 'interne melding aan het team'],
   [/^(aanmaning_|meerdere_facturen_|betaalherinnering)/, 'herinnering aan een openstaande factuur'],
   [/^(opvolging_geen_reactie|joost_reminder)/, 'opvolging van een lopend betaalgesprek'],

@@ -228,6 +228,54 @@ export async function d360NummerVoorPhoneNumberId(pnId) {
   return null;
 }
 
+// Templates per 360dialog-nummer, kort gecachet (sleutel → { tot, statusOp }).
+const TEMPLATE_CACHE_MS = 10 * 60 * 1000;
+const _templateCache = new Map();
+
+/**
+ * Status van een template op de WABA van de lijn waarover verstuurd wordt.
+ * De CRM-tabel whatsapp_meta_templates zegt alleen iets over de OUDE WABA;
+ * na de overstap naar 360dialog kan een template daar APPROVED staan en op
+ * het nieuwe account niet bestaan (→ 132001 bij versturen).
+ *
+ * @returns {Promise<string|null>}
+ *   null        — geen 360dialog-lijn met key: niet te controleren (caller
+ *                 valt terug op de CRM-tabel, zoals vroeger)
+ *   'ONBEKEND'  — 360dialog-lijn, maar de lijst was niet op te halen
+ *   'ONTBREEKT' — staat niet op deze WABA
+ *   anders de 360dialog-status ('APPROVED', 'PENDING', 'REJECTED', …)
+ */
+export async function templateStatusOpLijn(phoneNumberId, naam, taal = 'nl') {
+  const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
+  if (!nummer || nummer.provider !== '360dialog' || !apiKeyVan(nummer)) return null;
+  let entry = _templateCache.get(nummer.sleutel);
+  if (!entry || entry.tot < Date.now()) {
+    try {
+      const statusOp = new Map();
+      let pad = '/message_templates?limit=200';
+      for (let i = 0; i < 20 && pad; i++) {
+        const res = await d360Fetch(nummer, pad);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const j = await res.json();
+        for (const t of (j.waba_templates || j.data || [])) {
+          statusOp.set(`${t.name}|${t.language}`, String(t.status || '').toUpperCase());
+        }
+        const na = j.paging?.cursors?.after;
+        pad = j.paging?.next && na ? `/message_templates?limit=200&after=${encodeURIComponent(na)}` : null;
+      }
+      entry = { tot: Date.now() + TEMPLATE_CACHE_MS, statusOp };
+      _templateCache.set(nummer.sleutel, entry);
+    } catch (e) {
+      console.warn('[360dialog] templatelijst ophalen mislukt voor', nummer.sleutel, e?.message || e);
+      return 'ONBEKEND';
+    }
+  }
+  return entry.statusOp.get(`${naam}|${taal}`) || 'ONTBREEKT';
+}
+
+/** Alleen voor tests: templatecache leegmaken. */
+export function _resetTemplateCache() { _templateCache.clear(); }
+
 /**
  * De HUIDIGE lijn-ID voor een (mogelijk oude) lijn-ID: een vervangen lijn →
  * het phone_number_id van de opvolger; anders ongewijzigd. Lukt het opvragen
