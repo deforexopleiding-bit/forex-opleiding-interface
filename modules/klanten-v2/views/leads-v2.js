@@ -104,8 +104,14 @@
     'website':                 'Website',
     '7-daagse-v1':             'Funnel 7d v1',
     '7-daagse-v2':             'Funnel 7d v2',
+    '7-daagse-v3':             'Funnel 7d v3 (A)',
+    '7-daagse-v4':             'Funnel 7d v4 (B)',
     'kennismakingscursus-v1':  'Mini v1',
     'kennismakingscursus-v2':  'Mini v2',
+    'kennismakingscursus-v3':  'Mini v3',
+    'kennismakingscursus-v4':  'Mini v4',
+    'kennismakingscursus-v5':  'Mini v5 (A)',
+    'kennismakingscursus-v6':  'Mini v6 (B)',
     'funnel':                  'Funnel',
     'meta':                    'Meta',
     'handmatig':               'Handmatig',
@@ -660,8 +666,14 @@
           <option value="website"                 ${fBron === 'website' ? 'selected' : ''}>website</option>
           <option value="7-daagse-v1"             ${fBron === '7-daagse-v1' ? 'selected' : ''}>7-daagse-v1</option>
           <option value="7-daagse-v2"             ${fBron === '7-daagse-v2' ? 'selected' : ''}>7-daagse-v2</option>
+          <option value="7-daagse-v3"             ${fBron === '7-daagse-v3' ? 'selected' : ''}>7-daagse-v3</option>
+          <option value="7-daagse-v4"             ${fBron === '7-daagse-v4' ? 'selected' : ''}>7-daagse-v4</option>
           <option value="kennismakingscursus-v1"  ${fBron === 'kennismakingscursus-v1' ? 'selected' : ''}>kennismakingscursus-v1</option>
           <option value="kennismakingscursus-v2"  ${fBron === 'kennismakingscursus-v2' ? 'selected' : ''}>kennismakingscursus-v2</option>
+          <option value="kennismakingscursus-v3"  ${fBron === 'kennismakingscursus-v3' ? 'selected' : ''}>kennismakingscursus-v3</option>
+          <option value="kennismakingscursus-v4"  ${fBron === 'kennismakingscursus-v4' ? 'selected' : ''}>kennismakingscursus-v4</option>
+          <option value="kennismakingscursus-v5"  ${fBron === 'kennismakingscursus-v5' ? 'selected' : ''}>kennismakingscursus-v5</option>
+          <option value="kennismakingscursus-v6"  ${fBron === 'kennismakingscursus-v6' ? 'selected' : ''}>kennismakingscursus-v6</option>
           <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
           <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
           <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>

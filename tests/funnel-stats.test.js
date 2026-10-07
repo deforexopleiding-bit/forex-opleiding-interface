@@ -7,7 +7,7 @@
 //      periode, onbekende variant/event genegeerd, lead-resultaat + dekking;
 //   2. endpoint met een nep-databank (alleen lezen): 401/403/400, fail-soft
 //      als funnel_events nog niet bestaat, keyset-paging over >1000 rijen;
-//   3. registry bevat de zes varianten;
+//   3. registry bevat de tien varianten (v3/v4 7-daagse en v5/v6 mini sinds 2026-10-07);
 //   4. het scherm (vm-context): kaarten per groep, inactief-banner, afhaken
 //      uitklappen, periode-presets in Amsterdam-tijd.
 
@@ -156,7 +156,7 @@ test('aggregatie: deling door nul geeft null, nooit NaN/Infinity', () => {
   }
   // Lege dataset: alles 0 / null.
   const leeg = C.aggregeerFunnelStats({ start: START, eindExclusief: EIND });
-  assert.equal(Object.keys(leeg.per_variant).length, 6);
+  assert.equal(Object.keys(leeg.per_variant).length, 10);
   assert.equal(leeg.per_variant['7-daagse-v2'].lead_resultaat.toegang_pct, null);
 });
 
@@ -349,7 +349,7 @@ test('endpoint: fail-soft als funnel_events niet bestaat → 200, tracking_actie
   assert.equal(r.body.meta.tracking_actief, false);
   assert.equal(r.body.meta.tabel_bestaat, false);
   assert.match(r.body.meta.blinde_vlekken.join(' '), /tracking nog niet actief \(migratie funnel_events niet gedraaid\)/i);
-  assert.equal(r.body.varianten.length, 6);
+  assert.equal(r.body.varianten.length, 10);
   const v = r.body.per_variant['kennismakingscursus-v2'];
   assert.equal(v.funnel, null);
   assert.equal(v.lead_resultaat.leads, 1);       // verwijderde lead telt niet
@@ -422,9 +422,10 @@ test('endpoint: bron-code schrijft nooit en gebruikt geen rpc', () => {
 // 3 · REGISTRY
 // ════════════════════════════════════════════════════════════════════════════
 
-test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de zes varianten', () => {
+test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de tien varianten', () => {
   const zes = ['kennismakingscursus-v1', 'kennismakingscursus-v2', 'kennismakingscursus-v3',
-    'kennismakingscursus-v4', '7-daagse-v1', '7-daagse-v2'];
+    'kennismakingscursus-v4', 'kennismakingscursus-v5', 'kennismakingscursus-v6',
+    '7-daagse-v1', '7-daagse-v2', '7-daagse-v3', '7-daagse-v4'];
   assert.deepEqual([...C.FUNNEL_VARIANTEN].sort(), [...zes].sort());
   const src = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
   const blok = src.slice(src.indexOf('const FUNNEL_REGISTRY = ['), src.indexOf('];', src.indexOf('const FUNNEL_REGISTRY = [')));
@@ -485,7 +486,7 @@ function nepPayload({ actief }) {
   };
 }
 
-test('scherm: haalt /api/funnel-stats op en tekent 6 kaarten in 2 groepen', async () => {
+test('scherm: haalt /api/funnel-stats op en tekent 10 kaarten in 2 groepen', async () => {
   const { window, taken, calls } = laadScherm(nepPayload({ actief: true }));
   const D = window.DFOFunnelDashboard;
   let html = D.render([]);
@@ -495,10 +496,10 @@ test('scherm: haalt /api/funnel-stats op en tekent 6 kaarten in 2 groepen', asyn
   assert.equal(calls.length, 1);
   assert.match(calls[0], /^\/api\/funnel-stats\?van=\d{4}-\d{2}-\d{2}&tot=\d{4}-\d{2}-\d{2}$/);
   html = D.render([{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }]);
-  assert.equal((html.match(/class="fd-kaart"/g) || []).length, 6);
+  assert.equal((html.match(/class="fd-kaart"/g) || []).length, 10);
   assert.match(html, /data-groep="kmc"/);
   assert.match(html, /data-groep="7-daagse"/);
-  assert.equal((html.match(/class="fd-fase"/g) || []).length, 6 * 8);
+  assert.equal((html.match(/class="fd-fase"/g) || []).length, 10 * 8);
   assert.match(html, /href="https:\/\/deforexopleiding\.nl\/kennismakingscursus-v3"/);
   assert.doesNotMatch(html, /fd-inactief/);
   assert.doesNotMatch(html, /fd-afhaken/);
@@ -516,7 +517,7 @@ test('scherm: tracking niet actief → duidelijke banner, lead-resultaat blijft'
   assert.match(html, /class="fd-inactief"/);
   assert.match(html, /Tracking nog niet actief \(migratie funnel_events niet gedraaid\)/);
   assert.match(html, /Nog geen trackingdata/);
-  assert.equal((html.match(/class="fd-leads"/g) || []).length, 6);
+  assert.equal((html.match(/class="fd-leads"/g) || []).length, 10);
   assert.doesNotMatch(html, /Afhaken per vraag/);
 });
 

@@ -34,8 +34,12 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   'kennismakingscursus-v2',
   'kennismakingscursus-v3',
   'kennismakingscursus-v4',
+  'kennismakingscursus-v5',
+  'kennismakingscursus-v6',
   '7-daagse-v1',
   '7-daagse-v2',
+  '7-daagse-v3',
+  '7-daagse-v4',
 ]);
 
 export const VARIANT_INFO = Object.freeze({
@@ -43,8 +47,14 @@ export const VARIANT_INFO = Object.freeze({
   'kennismakingscursus-v2': { label: 'Mini-cursus (v2)', groep: 'kmc' },
   'kennismakingscursus-v3': { label: 'Mini-cursus (v3)', groep: 'kmc' },
   'kennismakingscursus-v4': { label: 'Mini-cursus (v4)', groep: 'kmc' },
+  // 2026-10-07: nieuwe varianten volgens de goedgekeurde prototypes (A = formulier
+  // meteen in beeld, B = belofte + beeld + knop, formulier lager).
+  'kennismakingscursus-v5': { label: 'Mini-cursus (v5 · A)', groep: 'kmc' },
+  'kennismakingscursus-v6': { label: 'Mini-cursus (v6 · B)', groep: 'kmc' },
   '7-daagse-v1':            { label: '7-daagse (v1)',    groep: '7-daagse' },
   '7-daagse-v2':            { label: '7-daagse (v2)',    groep: '7-daagse' },
+  '7-daagse-v3':            { label: '7-daagse (v3 · A)', groep: '7-daagse' },
+  '7-daagse-v4':            { label: '7-daagse (v4 · B)', groep: '7-daagse' },
 });
 
 // Vaste fase-volgorde. `match` bepaalt welk event de fase vult.

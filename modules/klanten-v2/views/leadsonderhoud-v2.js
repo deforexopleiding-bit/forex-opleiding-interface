@@ -4403,10 +4403,14 @@
   const FUNNEL_REGISTRY = [
     { bron: '7-daagse-v1',            naam: '7-daagse (v1)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v1',            status: 'actief' },
     { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
+    { bron: '7-daagse-v3',            naam: '7-daagse (v3 · A)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v3',            status: 'actief' },
+    { bron: '7-daagse-v4',            naam: '7-daagse (v4 · B)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v4',            status: 'actief' },
     { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
     { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
     { bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v3', status: 'actief' },
     { bron: 'kennismakingscursus-v4', naam: 'Mini-cursus (v4)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v4', status: 'actief' },
+    { bron: 'kennismakingscursus-v5', naam: 'Mini-cursus (v5 · A)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v5', status: 'actief' },
+    { bron: 'kennismakingscursus-v6', naam: 'Mini-cursus (v6 · B)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v6', status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {
