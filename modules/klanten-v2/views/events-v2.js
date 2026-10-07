@@ -318,12 +318,19 @@
       if (window.DFO?.render) window.DFO.render();
     }
   }
+  // Events › Inbox gaat niet over wanbetalers of onboarding (2026-10-07): wie
+  // als HOOFDcategorie Wanbetaler of Onboarding heeft, valt hier al bij binnenkomst
+  // weg — dus ook uit de lijst, de chips, de tellers en de auto-selectie. Zelfde
+  // server-berekende categorie als het label (modules/shared/inbox-categorie.js).
+  function _evAlleenEventGesprekken(items) {
+    return window.INBOX_CATEGORIE ? window.INBOX_CATEGORIE.voorLeadInbox(items) : items;
+  }
   async function fetchInbox() {
     const st = _live.inbox; if (st.loading || st.data) return;
     st.loading = true; st.error = null;
     const j = await tryFetch('inbox', '/api/inbox-conversations-list?module=events&limit=100');
     st.loading = false;
-    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items);
+    if (j && j.__error) st.error = j.__error; else st.data = _evAlleenEventGesprekken(asArr(j?.items));
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchAutos() {
@@ -4037,7 +4044,7 @@
     try {
       const j = await window.KV.authedJson('/api/inbox-conversations-list?module=events&limit=100');
       if (!j || j.__error || j.error) return;
-      const newItems = asArr(j?.items);
+      const newItems = _evAlleenEventGesprekken(asArr(j?.items));
       const prevSig = JSON.stringify(asArr(_live.inbox.data).map((c) => [c.id, c.last_message_at, c.unread_count]));
       const newSig  = JSON.stringify(newItems.map((c) => [c.id, c.last_message_at, c.unread_count]));
       if (prevSig === newSig) return;

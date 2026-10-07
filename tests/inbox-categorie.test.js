@@ -200,3 +200,39 @@ test('lijst-endpoints en views gebruiken de categorie; index laadt het gedeelde 
   const shared = html.indexOf('../shared/inbox-categorie.js');
   assert.ok(shared > 0 && shared < html.indexOf('views/inbox-v2.js'), 'gedeeld script vóór de views');
 });
+
+// ── 6. Zichtbaarheid in de lead-inboxen (2026-10-07) ────────────────────────
+test('voorLeadInbox: verbergt hoofdcategorie Wanbetaler/Onboarding, op de server-categorie', async () => {
+  const vm = await import('node:vm');
+  const ctx = { window: {} };
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync(new URL('../modules/shared/inbox-categorie.js', import.meta.url), 'utf8'), ctx);
+  const IC = ctx.window.INBOX_CATEGORIE;
+  const rows = [
+    { id: 1, categorie: 'wanbetaler' },
+    { id: 2, categorie: 'onboarding', categorie_tags: ['events'] },
+    { id: 3, categorie: 'events', categorie_tags: ['wanbetaler'] }, // alleen een TAG → blijft
+    { id: 4, categorie: 'leadsonderhoud' },
+    { id: 5, categorie: 'klant' },
+    { id: 6, categorie: null },                                    // geen categorie → blijft
+  ];
+  assert.deepEqual(IC.voorLeadInbox(rows).map((r) => r.id), [3, 4, 5, 6]);
+  assert.deepEqual([...IC.VERBORGEN_IN_LEAD_INBOX], ['wanbetaler', 'onboarding']);
+  // Chips tellen over de zichtbare set: Wanbetaler/Onboarding komen er niet in voor.
+  const chips = IC.chips(IC.voorLeadInbox(rows), 'alles', '__x');
+  assert.doesNotMatch(chips, /Wanbetaler|Onboarding/);
+  assert.match(chips, /Alles <span class="cnt">4<\/span>/);
+});
+
+test('alleen Events- en Leadsonderhoud-inbox filteren; hub, Wanbetalers en Onboarding niet', () => {
+  const lees = (f) => readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  const ev = lees('modules/klanten-v2/views/events-v2.js');
+  assert.match(ev, /st\.data = _evAlleenEventGesprekken\(asArr\(j\?\.items\)\)/, 'eerste load');
+  assert.match(ev, /const newItems = _evAlleenEventGesprekken\(asArr\(j\?\.items\)\)/, 'live verversen');
+  const ls = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
+  assert.match(ls, /st\.items = _lsInbAlleenLeadGesprekken\(asArr\(j\.items\)\)/, 'eerste load');
+  assert.match(ls, /_lsInb\.convs\.items = _lsInbAlleenLeadGesprekken\(jList\.items\)/, 'poll');
+  for (const v of ['inbox-v2', 'wanbetalers-v2', 'onboarding-v2']) {
+    assert.doesNotMatch(lees(`modules/klanten-v2/views/${v}.js`), /voorLeadInbox|hoortInLeadInbox/, v);
+  }
+});
