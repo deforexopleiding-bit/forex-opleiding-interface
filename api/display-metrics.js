@@ -6,7 +6,7 @@
 // 30/60s per IP. Alle tijd-velden = ISO-8601 met tijdzone (UTC 'Z').
 //
 // Bronnen (allemaal server-side, geen self-HTTP):
-//   leads   → computeLeadsByTraject (_lib/leads-per-traject-compute)  — total_incl_afwijzer + by_traject_incl_afwijzer, matcht v2-dashboard
+//   leads   → computeLeadsByTraject (_lib/leads-per-traject-compute)  — total_incl_afwijzer + by_traject_incl_afwijzer (+ heraanmeldingen via funnel_events, alleen hier), verder gelijk aan v2-dashboard
 //   sales   → computeSignedDealsTotal (_lib/sales-signed-deals-compute) met recent_ids voor bling
 //   calls   → follow_up_appointments: geboekt (created_at) + afgeronde Zoom-calls (status='completed')
 //   opvolging → opvolging_pogingen (bedrijfsbreed, NL-vandaag, richting='uit')
@@ -209,7 +209,9 @@ export default async function handler(req, res) {
 
     // Primaire bronnen — allSettled. Falen → placeholder.
     const results = await Promise.allSettled([
-      /* 0 */ computeLeadsByTraject({ supabaseAdmin, range: { start: dayStart, endExclusive: dayEnd }, skipAllLabels: true }),
+      /* 0 */ // heraanmeldingen: ook bestaande leads die zich vandaag opnieuw via een funnel
+              // aanmeldden (upsert_lead houdt 'aangemaakt' op de oude datum). 2026-10-08.
+              computeLeadsByTraject({ supabaseAdmin, range: { start: dayStart, endExclusive: dayEnd }, skipAllLabels: true, heraanmeldingen: true }),
       /* 1 */ computeSignedDealsTotal({ supabaseAdmin, since: sinceStr, until: untilStr, includeRecentIds: true }),
       /* 2 */ supabaseAdmin.from('follow_up_appointments').select('id', { count: 'exact', head: true })
                 .gte('scheduled_at', dayStartIso).lt('scheduled_at', dayEndIso)
@@ -378,7 +380,7 @@ export default async function handler(req, res) {
       return fallback;
     };
 
-    const leadsCompute       = pick(0,  { total_incl_afwijzer: null, by_traject_incl_afwijzer: {}, excluded: {} });
+    const leadsCompute       = pick(0,  { total_incl_afwijzer: null, by_traject_incl_afwijzer: {}, excluded: {}, heraanmeldingen: [] });
     const salesCompute       = pick(1,  { total_incl_vat: null, count: null, recent_ids: [] });
     const callsTodayRes      = pick(2,  { count: null });
     const callsNextRes       = pick(3,  { data: [] });
@@ -610,6 +612,17 @@ export default async function handler(req, res) {
       feed.push({
         ts: new Date(l.aangemaakt).toISOString(), type: 'lead',
         text: `Nieuwe lead: ${naam}${bron ? ' · ' + bron : ''}`,
+      });
+    }
+    // Heraanmeldingen van vandaag (bestaande lead, opnieuw via een funnel) — zitten
+    // ook in de hero-telling, dus ook in de feed. Tijdstip = de inzending.
+    for (const l of (leadsCompute.heraanmeldingen || [])) {
+      if (isFeedTestEmail(l.email)) continue;
+      const naam = [l.voornaam, l.achternaam].filter(Boolean).join(' ').trim() || '—';
+      const bron = leadBron(l.traject, l.soort);
+      feed.push({
+        ts: new Date(l.ingediend_op).toISOString(), type: 'lead',
+        text: `Nieuwe lead: ${naam}${bron ? ' · ' + bron : ''} (opnieuw aangemeld)`,
       });
     }
     for (const s of feedSalesClean) feed.push({
