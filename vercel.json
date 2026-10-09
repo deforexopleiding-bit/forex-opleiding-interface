@@ -159,6 +159,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron-webinar",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron-meta-ads-sync",
       "schedule": "*/30 * * * *"
     },

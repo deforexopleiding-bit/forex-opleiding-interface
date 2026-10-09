@@ -44,6 +44,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { buildComponents, extractBodyVarIndices } from '../api/_lib/wa-template-components.js';
 import { getExampleForKey } from '../api/_lib/template-variables.js';
+import { WEBINAR_TEMPLATES } from '../api/_lib/webinar-templates.js';
 
 const D360 = 'https://waba-v2.360dialog.io';
 
@@ -58,6 +59,8 @@ export const VASTE_TEMPLATES = Object.freeze({
   // event_vervolg_herinnering: 2026-10-07 toegevoegd — ontbrak op de nieuwe WABA (132001).
   events: ['events_keuze_link', 'vragenlijst_herinnering_v3', 'event_vragenlijst_definitief', 'event_vervolg_herinnering'],
   intern: ['interne_nieuwe_afspraak_nl', 'nieuwe_lead'],
+  // 2026-10-09: webinar fase 1 (api/_lib/webinar-templates.js).
+  webinar: ['webinar_bevestiging', 'webinar_reminder_dag', 'webinar_reminder_uur', 'webinar_live'],
 });
 
 // Klantnummer (onboarding + finance/dunning). De DB-bronnen vullen aan; deze
@@ -103,6 +106,7 @@ const UTILITY_NAMEN = [
   [/^(aanmaning_|meerdere_facturen_|betaalherinnering)/, 'herinnering aan een openstaande factuur'],
   [/^(opvolging_geen_reactie|joost_reminder)/, 'opvolging van een lopend betaalgesprek'],
   [/^welkom_onboarding/, 'start van de gekochte opleiding'],
+  [/^webinar_(bevestiging|reminder_|live)/, 'aanmelding voor het webinar (datum + Zoom-link)'],
 ];
 const PROMO = [
   [/\bplan\b[^.!?\n]{0,40}\bopstartsessie\b/i, 'spoort aan een opstartsessie (salesgesprek) in te plannen'],
@@ -140,6 +144,17 @@ export function leesArgs(argv) {
     else if (x.startsWith('--only=')) a.only = new Set(x.slice(7).split(',').map((s) => s.trim()).filter(Boolean));
   }
   return a;
+}
+
+// Templates die in code gedefinieerd zijn (zelfde rij-vorm als whatsapp_meta_templates).
+// Gebruikt als er voor die naam (nog) geen DB-rij is — zodat nieuwe flows niet eerst
+// een handmatige rij nodig hebben. Een DB-rij gaat altijd voor.
+export const CODE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES });
+/** DB-varianten, of anders de code-definitie (als 1 rij). PURE. */
+export function variantenVoor(naam, dbVarianten) {
+  if (dbVarianten && dbVarianten.length) return { varianten: dbVarianten, uitCode: false };
+  const code = CODE_TEMPLATES[naam];
+  return code ? { varianten: [{ ...code, status: null, meta_param_mapping: null, updated_at: null }], uitCode: true } : { varianten: [], uitCode: false };
 }
 
 /** Beste rij per naam: APPROVED eerst, dan meest recent bijgewerkt. */
@@ -331,8 +346,8 @@ async function main() {
   // 4. Plan per template.
   const plan = [];
   for (const naam of namen) {
-    const varianten = perNaam.get(naam) || [];
-    const bron = [...bronnen.get(naam)];
+    const { varianten, uitCode } = variantenVoor(naam, perNaam.get(naam));
+    const bron = [...bronnen.get(naam)].concat(uitCode ? ['code'] : []);
     if (!varianten.length) { plan.push({ naam, bron, actie: 'ONTBREEKT', reden: 'niet in whatsapp_meta_templates — handmatig aanmaken' }); continue; }
     const rij = kiesRij(varianten);
     const andereTeksten = new Set(varianten.map((v) => v.body_text)).size > 1;

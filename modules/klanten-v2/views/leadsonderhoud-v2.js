@@ -4411,6 +4411,8 @@
     { bron: 'kennismakingscursus-v4', naam: 'Mini-cursus (v4)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v4', status: 'actief' },
     { bron: 'kennismakingscursus-v5', naam: 'Mini-cursus (v5 · A)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v5', status: 'actief' },
     { bron: 'kennismakingscursus-v6', naam: 'Mini-cursus (v6 · B)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v6', status: 'actief' },
+    { bron: 'webinar-v1',            naam: 'Webinar (v1 · A)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v1',             status: 'actief' },
+    { bron: 'webinar-v2',            naam: 'Webinar (v2 · B)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v2',             status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {
