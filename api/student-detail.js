@@ -5,7 +5,8 @@
 // Permission: students.all.view (manager / super_admin). 401/403/400.
 //
 // Query:
-//   ?bubble_student_id=<text>  (vereist; anders 400)
+//   ?lms_student_id=<uuid>     (hlms_student.id; voor de sessies)
+//   ?student_id=<text>         (studentsleutel; alternatief als lms-id ontbreekt)
 //   ?email=<text>              (optioneel; voor klant-match, CI)
 //
 // Drie verzamel-blokken — elk fail-soft:
@@ -15,15 +16,16 @@
 //                  open_count / overdue_count / open_total; per item een
 //                  display_status (zelfde definitie als finance-invoices).
 //                  Geen klant → leeg.
-//   3. calls     — Bubble 1-1-session waar member_user = bubble_student_id
-//                  (cap 100, nieuwste eerst). Per item { date, done, noshow,
-//                  time? }.
+//   3. calls     — LMS hlms_sessie van deze student (cap 100, nieuwste
+//                  eerst; sinds 9 okt 2026, was Bubble). Per item
+//                  { date, done, noshow, time? }. Een onleesbaar LMS geeft
+//                  calls_error in plaats van stil een lege lijst.
 //
 // Response 200: { ok, customer, financial, calls }.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList } from './_lib/bubble.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 
 const ILIKE_CHUNK = 100;
 
@@ -38,16 +40,7 @@ function isSafeForIlikeOr(s) {
     && !s.includes(',') && !s.includes('(') && !s.includes(')');
 }
 
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) if (u[k] !== undefined) return u[k];
-  return undefined;
-}
-function asBool(v) {
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'string')  return v.toLowerCase() === 'true';
-  return false;
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Afgeleide weergave-status — identiek aan finance-invoices.displayStatus.
 function deriveDisplayStatus(inv, td) {
@@ -74,9 +67,10 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (students.all.view)' });
   }
 
-  const bubbleStudentId = typeof req.query?.bubble_student_id === 'string'
-    ? req.query.bubble_student_id.trim() : '';
-  if (!bubbleStudentId) return res.status(400).json({ error: 'bubble_student_id vereist' });
+  const lmsStudentIdRaw = typeof req.query?.lms_student_id === 'string' ? req.query.lms_student_id.trim() : '';
+  const studentSleutel  = typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
+  if (!lmsStudentIdRaw && !studentSleutel) return res.status(400).json({ error: 'lms_student_id of student_id vereist' });
+  if (lmsStudentIdRaw && !UUID_RE.test(lmsStudentIdRaw)) return res.status(400).json({ error: 'lms_student_id (uuid) ongeldig' });
 
   const emailRaw = typeof req.query?.email === 'string' ? req.query.email.trim() : '';
   const emailLc = emailRaw ? emailRaw.toLowerCase() : '';
@@ -164,33 +158,42 @@ export default async function handler(req, res) {
     result.financial = { open_count: 0, overdue_count: 0, open_total: 0, items: [], error: String(e?.message || e) };
   }
 
-  // ── 3) Calls — Bubble 1-1-session waar member_user = bubble_student_id ─────
+  // ── 3) Calls — LMS hlms_sessie van deze student ──────────────────────────
   try {
-    const constraints = [
-      { key: 'member_user', constraint_type: 'equals', value: bubbleStudentId },
-    ];
-    const { results } = await bubbleList('1-1-session', constraints, { limit: 100 });
-    const rows = Array.isArray(results) ? results : [];
-    // Map + sort op datum DESC.
-    const mapped = rows.map((s) => {
-      const sd     = readFirst(s, ['starting_date_date', 'starting date']) || null;
-      const done   = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-      const noshow = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-      // Tijd: probeer een dedicated tijd-veld; anders extract uit ISO-datetime.
-      let time = null;
-      const tRaw = readFirst(s, ['slot_time', 'time_text', 'time']);
-      if (tRaw) time = String(tRaw).trim() || null;
-      else if (sd && /T\d{2}:\d{2}/.test(String(sd))) {
-        const m = String(sd).match(/T(\d{2}:\d{2})/);
-        if (m) time = m[1];
-      }
-      return { date: sd, done, noshow, time };
-    }).filter((c) => c.date)
-      .sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
-    result.calls = mapped;
+    const lms = getDfoLmsClient();
+    if (!lms) throw new Error('LMS-koppeling niet geconfigureerd');
+    let lmsId = lmsStudentIdRaw || null;
+    if (!lmsId) {
+      // Studentsleutel → hlms_student.id (oud id of al een LMS-id).
+      let q = lms.from('hlms_student').select('id').limit(2);
+      q = UUID_RE.test(studentSleutel)
+        ? q.or(`id.eq.${studentSleutel},bubble_user_id.eq.${studentSleutel}`)
+        : q.eq('bubble_user_id', studentSleutel);
+      const { data: hits, error: hErr } = await q;
+      if (hErr) throw new Error('hlms_student: ' + hErr.message);
+      if ((hits || []).length === 1) lmsId = hits[0].id;
+    }
+    if (lmsId) {
+      const { data: rows, error: sErr } = await lms
+        .from('hlms_sessie')
+        .select('start_tijd, status')
+        .eq('student_id', lmsId)
+        .order('start_tijd', { ascending: false })
+        .limit(100);
+      if (sErr) throw new Error('hlms_sessie: ' + sErr.message);
+      const tijd = new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Brussels', hour: '2-digit', minute: '2-digit' });
+      result.calls = (rows || []).filter((r) => r.start_tijd).map((r) => ({
+        date:   r.start_tijd,
+        done:   r.status === 'afgerond',
+        noshow: r.status === 'no_show',
+        status: r.status || null,
+        time:   tijd.format(new Date(r.start_tijd)),
+      }));
+    }
   } catch (e) {
     console.warn('[student-detail] calls faalde:', e?.message || e);
     result.calls = [];
+    result.calls_error = String(e?.message || e);
   }
 
   return res.status(200).json(result);

@@ -1,42 +1,32 @@
 // api/mentor-student-detail.js
 //
-// GET ?student_id=<bubble-id> → sessies + taken + progress voor één student.
-// Dual-gate (zelfde patroon als mentor-my-students).
+// GET ?student_id=<studentsleutel> → sessies + taken + voortgang voor één
+// student. Dual-gate (zelfde patroon als mentor-my-students).
 //
-// OWNERSHIP-CHECK: bubbleGet('user', student_id) en valideer dat
-// student.mentor === caller's bubble_user_id. Anders 403 (voorkomt dat
-// een mentor andermans studenten kan inzien). Bij admin-pad geldt dat
-// `caller's bubble_user_id` de bubble_user_id van de admin-target-mentor
-// is — admin kan dus alleen meekijken naar studenten van die specifieke
-// mentor, niet zomaar willekeurige bubble-IDs.
-//
-// Velden uit bubble:
-//   - 1-1-session: member, isDone, NoShow, completed date, starting date,
-//                  Agenda, stage.
-//   - student-task: member, progress, due_date, end_date, Task Item, type_of_task.
-//
-// Progress: we kiezen pragmatisch het MAXIMUM van student-task.progress
-// (over alle taken). Reden: progress kan per task-rij worden bijgehouden,
-// en de "verste" task representeert de huidige fase het beste. Gemiddelde
-// zou een student onevenredig laag scoren als 'ie meerdere oude taken op 0
-// heeft staan. Documenteer dit zodat de UI weet dat 't een snapshot is.
+// BRON: het LMS (sinds 9 okt 2026, was Bubble).
+//   - OWNERSHIP-CHECK: hlms_student.mentor_id moet het hlms_personeel-id van
+//     de (effectieve) mentor zijn — isStudentVanMentor in
+//     api/_lib/mentorStudents.js. Anders 403. Bij het admin-pad is dat de
+//     target-mentor: een admin kijkt mee naar die mentor zijn studenten.
+//   - sessies: hlms_sessie van deze student (nieuwste eerst, max 50).
+//   - taken:   hlms_sessie_taak van die sessies.
+//   - voortgang: gebruikte sessies / trajecttotaal (zoals de LMS-teller).
 //
 // Response 200:
 //   { ok, scope, student_id,
-//     sessions: [{ date, is_done, no_show, agenda, stage }],
+//     sessions: [{ date, is_done, no_show, agenda, stage, status }],
 //     tasks: [{ id, progress, due_date, end_date, items: [...], type_of_task }],
 //     progress: <0..100>|null,
 //     contact: { email, phone } }
 //
-// contact: telefoon + e-mail van de klant. Bubble houdt geen phone bij, dus
-// we matchen de student-email (via bubbleUserDisplay — de standaard nested-
-// email-conventie) case-insensitief tegen customers.email. Bij geen match
-// wordt phone=null en valt email terug op de Bubble-email. Fail-soft: een
-// falende customers-lookup doet de detail-response niet mislukken.
+// contact: e-mail + telefoon uit het LMS; ontbreekt de telefoon daar, dan
+// zoeken we de klant op e-mail (case-insensitief) in customers. Fail-soft.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList, bubbleGet, bubbleUserDisplay } from './_lib/bubble.js';
+import {
+  isStudentVanMentor, vereisLms, telSessiesPerStudent, mapLmsStudentRow, httpStatusVoor,
+} from './_lib/mentorStudents.js';
 
 // Ilike-safe helpers (spiegel van mentor-students-invoice-status.js): PostgREST
 // .or() interpreteert ',' en ')' als delimiters; die zitten niet in geldige
@@ -54,48 +44,8 @@ function escapeIlikePattern(s) {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// Bubble IDs zijn typisch 32+ chars met underscores/letters/cijfers;
-// we accepteren defensief alfanumeriek met underscores/streepjes/punten.
-const BUBBLE_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
-
-function asBool(v) {
-  if (v === true || v === false) return v;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (['true','yes','ja','1'].includes(s)) return true;
-    if (['false','no','nee','0'].includes(s)) return false;
-  }
-  return !!v;
-}
-
-function pickOption(v) {
-  if (v == null) return null;
-  if (typeof v === 'string') return v.trim() || null;
-  if (typeof v === 'object') {
-    const d = v.display || v.text || v.value || null;
-    return d ? String(d).trim() || null : null;
-  }
-  return null;
-}
-
-function pickTaskItems(v) {
-  if (Array.isArray(v)) {
-    return v.map((x) => (typeof x === 'string' ? x : (x?.display || x?.text || ''))).filter(Boolean);
-  }
-  if (typeof v === 'string' && v.trim()) return [v.trim()];
-  return [];
-}
-
-// Eerste niet-undefined waarde uit een lijst van kandidaat-keys.
-// Voor Bubble suffix-conventie (key_text / key_number / key_boolean) met
-// bare-name fallback voor pre-conventie data.
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) {
-    if (u[k] !== undefined) return u[k];
-  }
-  return undefined;
-}
+// Studentsleutel: oud id (cijfers + 'x') of een LMS-uuid.
+const STUDENT_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -132,93 +82,96 @@ export default async function handler(req, res) {
   }
 
   const studentId = typeof req.query?.student_id === 'string' ? req.query.student_id.trim() : '';
-  if (!studentId || !BUBBLE_ID_RE.test(studentId)) {
+  if (!studentId || !STUDENT_ID_RE.test(studentId)) {
     return res.status(400).json({ error: 'student_id vereist' });
   }
 
   try {
-    // Resolve mentor.bubble_user_id voor ownership-check.
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('bubble_user_id, is_active')
-      .eq('user_id', effectiveUserId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
-      return res.status(403).json({ error: 'Mentor heeft geen bubble-koppeling' });
+    const eigen = await isStudentVanMentor(effectiveUserId, studentId);
+    if (!eigen.ok) {
+      const nietGevonden = /niet gevonden/.test(eigen.reden || '');
+      return res.status(nietGevonden ? 404 : 403).json({ error: eigen.reden || 'Student valt niet onder jouw mentorschap' });
+    }
+    const lmsId = eigen.student.lms_student_id;
+    const lms = vereisLms();
+
+    const { data: sesRows, error: sErr } = await lms
+      .from('hlms_sessie')
+      .select('id, start_tijd, status, agenda')
+      .eq('student_id', lmsId)
+      .order('start_tijd', { ascending: false })
+      .limit(50);
+    if (sErr) {
+      const e = new Error('hlms_sessie lezen: ' + sErr.message);
+      e.code = 'DFO_LMS_ONBEREIKBAAR';
+      throw e;
+    }
+    const sessions = (sesRows || []).map((r) => ({
+      date:    r.start_tijd || null,
+      is_done: r.status === 'afgerond',
+      no_show: r.status === 'no_show',
+      agenda:  r.agenda || null,
+      stage:   null,
+      status:  r.status || null,
+    }));
+
+    // Taken van die sessies. Fail-soft: zonder taken blijft de rest staan.
+    let tasks = [];
+    const sesIds = (sesRows || []).map((r) => r.id).filter(Boolean);
+    if (sesIds.length > 0) {
+      const { data: taakRows, error: tErr } = await lms
+        .from('hlms_sessie_taak')
+        .select('id, titel, omschrijving, afgevinkt, afgevinkt_op, aangemaakt_op')
+        .in('sessie_id', sesIds)
+        .order('aangemaakt_op', { ascending: false })
+        .limit(100);
+      if (tErr) {
+        console.warn('[mentor-student-detail] hlms_sessie_taak:', tErr.message);
+      } else {
+        tasks = (taakRows || []).map((t) => ({
+          id:           t.id,
+          progress:     t.afgevinkt ? 100 : 0,
+          due_date:     null,
+          end_date:     t.afgevinkt_op || null,
+          items:        t.omschrijving ? [String(t.omschrijving)] : [],
+          type_of_task: t.titel || 'Taak',
+        }));
+      }
     }
 
-    // OWNERSHIP-CHECK: haal de student-user op en valideer mentor-koppeling.
-    // Suffix-conventie: 'mentor_user' (User-link). Bare-name 'mentor' als
-    // fallback voor evt. pre-conventie data.
-    const studentUser = await bubbleGet('user', studentId);
-    if (!studentUser) return res.status(404).json({ error: 'Student niet gevonden' });
-    const ownerMentor = String(readFirst(studentUser, ['mentor_user', 'mentor']) || '').trim();
-    if (!ownerMentor || ownerMentor !== tm.bubble_user_id) {
-      return res.status(403).json({ error: 'Student valt niet onder jouw mentorschap' });
+    // Voortgang = gebruikte sessies / trajecttotaal.
+    let progress = null;
+    {
+      const { data: stu } = await lms
+        .from('hlms_student')
+        .select('id, calls_gedaan, calls_startsaldo, calls_totaal, email, telefoon')
+        .eq('id', lmsId)
+        .maybeSingle();
+      if (stu) {
+        const telling = await telSessiesPerStudent([lmsId]);
+        const v = mapLmsStudentRow(stu, telling ? (telling.get(String(lmsId)) || { afgerond: 0, noShow: 0 }) : null);
+        if (v.calls_1on1_total > 0) {
+          progress = Math.max(0, Math.min(100, Math.round((v.calls_1on1_done / v.calls_1on1_total) * 100)));
+        }
+      }
     }
-
-    // Sessies + taken parallel ophalen. Constraint-keys: 'member_user'
-    // (suffix-conventie, User-link), met 'member' als fallback indien Bubble
-    // het constraint-veld ooit bare-name accepteerde.
-    const [sessionResp, taskResp] = await Promise.all([
-      bubbleList('1-1-session', [{ key: 'member_user', constraint_type: 'equals', value: studentId }], { limit: 500 }),
-      bubbleList('student-task', [{ key: 'member_user', constraint_type: 'equals', value: studentId }], { limit: 500 }),
-    ]);
-    const sessionRows = sessionResp?.results || [];
-    const taskRows    = taskResp?.results    || [];
-
-    const sessions = sessionRows.map((s) => {
-      const date = readFirst(s, ['starting_date_date', 'starting date', 'completed_date_date', 'completed date']) || null;
-      const agendaRaw = readFirst(s, ['agenda_text', 'Agenda']);
-      const agenda = (typeof agendaRaw === 'string') ? agendaRaw : (agendaRaw?.display || null);
-      return {
-        date,
-        is_done : asBool(readFirst(s, ['isdone_boolean', 'isDone'])),
-        no_show : asBool(readFirst(s, ['noshow_boolean', 'NoShow'])),
-        agenda,
-        stage   : pickOption(readFirst(s, ['stage_text', 'stage'])),
-      };
-    }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-
-    const tasks = taskRows.map((t) => {
-      const progressRaw = readFirst(t, ['progress_number', 'progress']);
-      const items = pickTaskItems(readFirst(t, ['task_item_list_custom_task_item', 'Task Item']));
-      return {
-        id           : String(t._id || ''),
-        progress     : Number.isFinite(Number(progressRaw)) ? Number(progressRaw) : 0,
-        due_date     : readFirst(t, ['due_date_date', 'due_date']) || null,
-        end_date     : readFirst(t, ['end_date_date', 'end_date']) || null,
-        type_of_task : pickOption(readFirst(t, ['type_of_task_option_os___type_of_task', 'type_of_task'])),
-        items,
-      };
-    });
-
-    const progress = tasks.length
-      ? Math.max(0, Math.min(100, tasks.reduce((m, t) => Math.max(m, t.progress || 0), 0)))
-      : null;
 
     // ── Contact (fail-soft) ────────────────────────────────────────────────
-    // Student-email uit Bubble (nested authentication.email.email of email-
-    // varianten) → customers.email case-insensitief. phone komt uit customers.
-    // De OWNERSHIP-CHECK boven beschermt deze data al: alleen de eigen mentor
-    // (of admin-scope-mentor) komt hier ooit.
-    const bubbleEmailLc = (bubbleUserDisplay(studentUser)?.email) || null;
-    let contact = { email: bubbleEmailLc, phone: null };
-    if (bubbleEmailLc && isSafeForIlikeOr(bubbleEmailLc)) {
+    const emailLc = eigen.student.email || null;
+    let contact = { email: emailLc, phone: eigen.student.telefoon || null };
+    if (!contact.phone && emailLc && isSafeForIlikeOr(emailLc)) {
       try {
         const { data: custRows, error: cErr } = await supabaseAdmin
           .from('customers')
           .select('email, phone')
-          .ilike('email', escapeIlikePattern(bubbleEmailLc))
+          .ilike('email', escapeIlikePattern(emailLc))
           .limit(1);
         if (cErr) {
           console.warn('[mentor-student-detail] customers lookup:', cErr.message);
         } else if (custRows && custRows.length > 0) {
           const c = custRows[0];
           contact = {
-            email: (c.email && String(c.email).trim()) || bubbleEmailLc,
+            email: (c.email && String(c.email).trim()) || emailLc,
             phone: (c.phone && String(c.phone).trim()) || null,
           };
         }
@@ -238,12 +191,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[mentor-student-detail]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
-    return res.status(500).json({ error: e?.message || 'Interne fout' });
+    return res.status(httpStatusVoor(e)).json({ error: e?.message || 'Interne fout' });
   }
 }

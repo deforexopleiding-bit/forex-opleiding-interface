@@ -7,7 +7,7 @@
 // Query (alle optioneel; geen filter = alles):
 //   ?mentor_user_id=<uuid>
 //   ?month=YYYY-MM
-//   ?student_id=<bubble-id>
+//   ?student_id=<studentsleutel>
 //
 // Response 200:
 //   { ok, rows: [ {
@@ -20,7 +20,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const BUBBLE_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
+const STUDENT_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
 
 function normalizeMonthStart(s) {
@@ -62,8 +62,8 @@ export default async function handler(req, res) {
 
   const filterStudent = typeof req.query?.student_id === 'string'
     ? req.query.student_id.trim() : '';
-  if (filterStudent && !BUBBLE_ID_RE.test(filterStudent)) {
-    return res.status(400).json({ error: 'student_id (bubble-id) ongeldig' });
+  if (filterStudent && !STUDENT_ID_RE.test(filterStudent)) {
+    return res.status(400).json({ error: 'student_id ongeldig' });
   }
 
   try {

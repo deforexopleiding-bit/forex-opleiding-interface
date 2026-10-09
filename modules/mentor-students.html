@@ -508,17 +508,17 @@
   // student-signals (modal via window.StudentSignals). 1-op-1 toekomst- en
   // no-show-data uit /api/mentor-1on1-sessions.
   const _overdueByEmail   = new Map(); // lowercased email → aantal te-late facturen
-  const _assessments      = new Map(); // bubble_student_id → assessment-rij
-  const _fundedCerts      = new Map(); // bubble_student_id → cert-rij
-  const _signalsByStudent = new Map(); // bubble_student_id → active signal
+  const _assessments      = new Map(); // student_id → assessment-rij
+  const _fundedCerts      = new Map(); // student_id → cert-rij
+  const _signalsByStudent = new Map(); // student_id → active signal
   const _nextCallByStudent = new Map(); // member_user → eerstvolgende starts_at (ISO)
   const _noshowByStudent   = new Map(); // member_user → laatste-no-show ISO
   const _completedByMember = new Map(); // member_user → vroegste-completed starts_at (ISO)
-  const _stDetailCache    = new Map(); // bubble_student_id → mentor-student-detail payload
+  const _stDetailCache    = new Map(); // student_id → mentor-student-detail payload
   const _openCardId       = { sid: null };
   // Toekomst-tab state: cache op onboarding_id en uitgeklapte kaart.
   // Per-student admin_note-badges: gevuld uit /api/notifications-list (PR6a).
-  const _unreadByBubbleUser = new Map(); // onboarding_bubble_user_id → count
+  const _unreadByStudent = new Map(); // onboarding_student_id → count
 
   const _FUNDED_MAX_BYTES = 10 * 1024 * 1024;
   const _FUNDED_ACCEPT    = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
@@ -574,7 +574,7 @@
     if (overdueN > 0) {
       return { key: 'overdue', label: 'Betaalachterstand', cls: 'ss-pill-red', icon: 'ti-receipt' };
     }
-    const sid = String(s.bubble_student_id || '');
+    const sid = String(s.student_id || '');
     const lastNoshowIso = sid ? _noshowByStudent.get(sid) : null;
     if (lastNoshowIso) {
       const days = (Date.now() - new Date(lastNoshowIso).getTime()) / (24 * 60 * 60 * 1000);
@@ -691,7 +691,7 @@
       wrap.innerHTML = `
         <div class="empty-state">
           <i class="ti ti-link-off"></i>
-          Je account is nog niet gekoppeld aan een bubble-mentor — vraag een admin om de koppeling te leggen via Admin > Integraties > Mentor↔Bubble.
+          Je account is nog niet gekoppeld aan het LMS — je e-mailadres in het CRM moet precies één keer voorkomen bij het personeel in het LMS. Vraag een admin om dat recht te zetten.
         </div>`;
       return;
     }
@@ -720,8 +720,8 @@
         return factor * ((Number(a.no_shows) || 0) - (Number(b.no_shows) || 0));
       case 'nextcall': {
         // Studenten zónder geplande call: ALTIJD onderaan (ongeacht dir).
-        const sa = String(a.bubble_student_id || '');
-        const sb = String(b.bubble_student_id || '');
+        const sa = String(a.student_id || '');
+        const sb = String(b.student_id || '');
         const ta = _nextCallByStudent.get(sa);
         const tb = _nextCallByStudent.get(sb);
         if (ta && !tb) return -1;
@@ -798,7 +798,7 @@
   }
 
   function _studentCardHtml(s, aw) {
-    const sid       = String(s.bubble_student_id || '');
+    const sid       = String(s.student_id || '');
     const sidAttr   = esc(sid);
     const name      = esc(s.name || s.email || '(geen naam)');
     const rawName   = String(s.name || s.email || '');
@@ -834,7 +834,7 @@
         <div class="student-head" data-stu-toggle="${sidAttr}">
           <div class="student-avatar">${esc(_avatarInitial(rawName))}</div>
           <div>
-            <div class="student-name">${name} ${program} ${flagHtml}${_unreadAdminBadgeForBubble(sid)}</div>
+            <div class="student-name">${name} ${program} ${flagHtml}${_unreadAdminBadgeFor(sid)}</div>
             <div class="student-meta">
               <span><i class="ti ti-phone"></i>${callsLbl}</span>
               ${nextLbl}
@@ -853,7 +853,7 @@
   }
 
   function _studentBodyHtml(s, aw) {
-    const sid       = String(s.bubble_student_id || '');
+    const sid       = String(s.student_id || '');
     const sidAttr   = esc(sid);
     const callsTot  = Number(s.calls_1on1_total) || 0;
     const callsDone = Number(s.calls_1on1_done) || 0;
@@ -1184,9 +1184,9 @@
     const name  = card.dataset.stuName || '';
     const email = card.dataset.stuEmail || '';
     window.StudentSignals.openCreate(
-      { bubble_student_id: sid, name: name, email: email },
+      { student_id: sid, name: name, email: email },
       (signal) => {
-        _signalsByStudent.set(String(signal.bubble_student_id), signal);
+        _signalsByStudent.set(String(signal.student_id), signal);
         _applyStudentFilter(document.getElementById('msSearch')?.value || '');
         _toggleStudentCard(sid, true);
       }
@@ -1350,7 +1350,7 @@
           return `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--border);font-size:12.5px"><div style="flex:1"><strong>${esc(t.type_of_task || 'Taak')}</strong>${items}</div><span style="font-size:11px;color:var(--text-faint);font-variant-numeric:tabular-nums">${Math.round(Number(t.progress) || 0)}%</span></div>`;
         }).join('')}</div>`;
     // Klantgegevens uit customers (telefoon + e-mail) — bovenaan voor
-    // makkelijk contact opnemen. Bubble houdt geen phone bij; de backend
+    // makkelijk contact opnemen. De backend
     // matcht student-email → customers.
     const contact = (d && d.contact) ? d.contact : { email: null, phone: null };
     const cEmail  = contact.email && String(contact.email).trim();
@@ -1696,17 +1696,17 @@
 
   // ── Fase 3a — Meldingen ─────────────────────────────────────────────────
   // _unreadAdminBadgeForOnb is verhuisd naar /modules/mentor-onboarding.html
-  // (instroom-pijplijn). Mijn-studenten heeft alleen de per-bubble badge nodig.
-  function _unreadAdminBadgeForBubble(bubbleId) {
-    if (!bubbleId) return '';
-    const n = _unreadByBubbleUser.get(String(bubbleId)) || 0;
+  // (instroom-pijplijn). Mijn-studenten heeft alleen de per-student badge nodig.
+  function _unreadAdminBadgeFor(studentId) {
+    if (!studentId) return '';
+    const n = _unreadByStudent.get(String(studentId)) || 0;
     if (n <= 0) return '';
     return ' <span class="badge" style="background:#dc2626;color:#fff;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700" title="Ongelezen update van management">●</span>';
   }
   // Per-student admin_note-badges lezen uit het unified notifications-systeem
   // (/api/notifications-list). Filter server-side op type='onboarding.admin_note';
-  // server enrich't onboarding-rijen met onboarding_bubble_user_id zodat we die
-  // als map-key kunnen gebruiken (student cards zijn keyed op bubble_student_id).
+  // server enrich't onboarding-rijen met onboarding_student_id zodat we die
+  // als map-key kunnen gebruiken (student cards zijn keyed op student_id).
   // De oude /api/mentor-notifications-list en de oude per-pagina bel zijn sinds
   // PR6b verwijderd — de sidebar-bel toont alle meldingen platform-breed.
   async function loadAdminNoteBadges() {
@@ -1717,14 +1717,14 @@
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       const items = Array.isArray(d?.notifications) ? d.notifications : [];
-      _unreadByBubbleUser.clear();
+      _unreadByStudent.clear();
       for (const n of items) {
         if (n.read_at != null) continue;
         if (n.type !== 'onboarding.admin_note') continue; // defense
-        const bid = n.onboarding_bubble_user_id;
+        const bid = n.onboarding_student_id;
         if (bid) {
           const k = String(bid);
-          _unreadByBubbleUser.set(k, (_unreadByBubbleUser.get(k) || 0) + 1);
+          _unreadByStudent.set(k, (_unreadByStudent.get(k) || 0) + 1);
         }
       }
       try {

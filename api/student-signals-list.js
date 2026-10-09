@@ -12,7 +12,7 @@
 //                    'all' = geen filter; anders comma-separated lijst.
 //
 // Response 200: { signals: [...] } — nieuwste eerst.
-// Per signal: id, bubble_student_id, student_name, student_email, phone?,
+// Per signal: id, student_id, student_name, student_email, phone?,
 //             type, toelichting, mentor_user_id, mentor_name?, status,
 //             uitkomst_type, uitkomst, handled_at, created_at.
 
@@ -68,16 +68,18 @@ export default async function handler(req, res) {
   try {
     let query = supabaseAdmin
       .from('student_signals')
-      .select('id, bubble_student_id, student_name, student_email, type, source, toelichting, mentor_user_id, status, uitkomst_type, uitkomst, handled_at, reason_given_at, created_at')
+      .select('id, student_id:bubble_student_id, student_name, student_email, type, source, toelichting, mentor_user_id, status, uitkomst_type, uitkomst, handled_at, reason_given_at, created_at')
       .order('created_at', { ascending: false })
       .limit(1000);
     if (statusFilter) query = query.in('status', statusFilter);
     if (!isAdmin)     query = query.eq('mentor_user_id', user.id); // mentor: hard self-filter
     // Optioneel: filter per student (admin én mentor — voor mentor irrelevant
     // want self-scope is al hard, maar geen reden om het te verbieden).
-    const bubbleStudentFilter = typeof req.query?.bubble_student_id === 'string'
-      ? req.query.bubble_student_id.trim() : '';
-    if (bubbleStudentFilter) query = query.eq('bubble_student_id', bubbleStudentFilter);
+    // student_id = de studentsleutel (api/_lib/mentorStudents.js); in de tabel
+    // heet de kolom historisch bubble_student_id.
+    const studentFilter = typeof req.query?.student_id === 'string'
+      ? req.query.student_id.trim() : '';
+    if (studentFilter) query = query.eq('bubble_student_id', studentFilter);
 
     const { data: signals, error } = await query;
     if (error) throw new Error('signals fetch: ' + error.message);

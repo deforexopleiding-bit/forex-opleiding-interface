@@ -5,17 +5,14 @@
 // endpoints. Geen writes; notities zijn read-only.
 //
 // Endpoints:
-//   GET  /api/mentor-my-students                      (Bubble-proxy)
+//   GET  /api/mentor-my-students                      (LMS: hlms_student)
 //        ?mentor_user_id=<uuid>  → admin-override
 //   GET  /api/mentor-students-invoice-status          (invoices via customer-email)
 //   GET  /api/mentor-1on1-sessions                    (per-mentor 1-op-1 sessies)
 //   GET  /api/mentor-assessments-self                 (read-only bestaande notitie)
 //
-// LMS-deep-link: Bubble-app-root is https://dashboard.deforexopleiding.nl.
-// Exacte student-detail-URL is code-side niet vindbaar (BUBBLE_API_ROOT
-// geeft alleen de /api/1.1/obj-basis, niet het app-page-patroon). We linken
-// naar de LMS-root + tonen de student-email in de tooltip; kan later via
-// env-var opgeplust worden zodra Dave/Jeffrey het pattern aanreikt.
+// LMS-deep-link: het LMS (lms.deforexopleiding.nl). Met een LMS-student-id
+// linken we naar /admin/hlms-studenten/detail/?id=<id>, anders naar de LMS-root.
 //
 // Dormant — 'studenten' NIET in V2_ACTIVE_ALLOWLIST. Preview via
 // ?v2preview=studenten (rol mentor). Admin test: ?v2preview=studenten
@@ -29,8 +26,8 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-  // Bubble LMS-root; geen deep-link-patroon bekend → root openen.
-  const LMS_ROOT_URL = 'https://dashboard.deforexopleiding.nl/';
+  // LMS-root (dfo-lms).
+  const LMS_ROOT_URL = 'https://lms.deforexopleiding.nl/';
 
   /* ── State ──────────────────────────────────────────────────────────── */
   const _live = {
@@ -49,17 +46,14 @@
     statusFilter: 'all',       // 'all' | 'op_schema' | 'aandacht' | 'nieuw'
     searchQ:      '',          // state-only tijdens typen (focus-behoud)
     _searchTimer: null,
-    selectedId:   null,        // bubble_student_id
+    selectedId:   null,        // student_id
     detailTab:    'Overzicht', // 'Overzicht' | 'Sessies' | 'Facturen' | 'Notities'
     // v=3 BROK 2: per-student notitie/beoordeling edit-state. Prefill uit
     // _live.notes.byId[id] bij eerste render van de Notities-tab.
     // Shape: { status, score, active_tasks_done, note, saving, savedAt, error, _prefilled }
     noteEdit:     {},
   };
-  // v=11: beoordeling-write DEFERRED tot nieuw LMS. Bubble-koppeling is
-  // tijdelijk; nieuwe beoordelingen komen straks via het nieuwe LMS. Zolang
-  // de write niet browser-verifieerbaar is zonder wegwerp-Bubble-test parken
-  // we hem. Read-kant (assessments-self voor historie) blijft volledig live.
+  // v=11: beoordeling-write DEFERRED — nieuwe beoordelingen horen in het LMS. Read-kant (assessments-self voor historie) blijft volledig live.
   // ONE-TOGGLE re-enable: zet dit op true om de write-UI + handler weer aan
   // te zetten (endpoint /api/mentor-assessment-save blijft ongewijzigd achter
   // deze vlag zodat het nieuwe LMS de code kan hergebruiken).
@@ -171,7 +165,7 @@
     const st = _live.mentors;
     if (st.loading || st.fetched) return;
     st.loading = true; st.error = null;
-    const j = await tryFetch('mentors-picker', '/api/team-members-bubble-status');
+    const j = await tryFetch('mentors-picker', '/api/mentor-admin-list');
     st.loading = false; st.fetched = true;
     if (!j || j.error) { st.error = j?.error || 'load-fail'; if (window.DFO?.render) window.DFO.render(); return; }
     st.list = asArr(j.mentors).filter(m => m.user_id).map(m => ({ user_id: m.user_id, name: m.name, email: m.email }))
@@ -259,7 +253,7 @@
     const map = {};
     const items = asArr(j.items || j.assessments);
     for (const a of items) {
-      const sid = a.student_id || a.bubble_student_id || a.id;
+      const sid = a.student_id || a.id;
       if (!sid) continue;
       map[String(sid)] = a;
     }
@@ -429,7 +423,7 @@
     const ns = _noteState(id);
     if (ns.saving) return;
     const rows = asArr(_live.students.data);
-    const s = rows.find((x) => String(x.bubble_student_id || x.id) === String(id));
+    const s = rows.find((x) => String(x.student_id || x.id) === String(id));
     if (!s) return;
     const name = s.name || s.email || '';
     if (!name) { ns.error = 'Student-naam ontbreekt — kan niet opslaan.'; _repaintDetailPane(); return; }
@@ -446,7 +440,7 @@
       payload.active_tasks_done = !!ns.active_tasks_done;
     }
     // v=4 FIX 1: admin-override doorsturen. Zonder dit valt de server
-    // terug op auth.uid() → 403 'Mentor heeft geen bubble-koppeling' voor
+    // terug op auth.uid() → 403 'niet gekoppeld aan het LMS' voor
     // admin/super_admin die met __stMentorOverride namens een mentor test.
     // Reads gebruikten al _mentorOverrideParam(); nu writes ook.
     const overrideRaw = String(window.__stMentorOverride || '').trim();
@@ -487,11 +481,9 @@
     }
   };
 
-  window.__stOpenLms = (email) => {
-    // Deep-link: LMS-root openen; email in query voor context (bubble
-    // admin-search accepteert dit). Als het exacte user-detail-URL-patroon
-    // beschikbaar komt via env, kan dit hier opgeplust worden.
-    const url = LMS_ROOT_URL + (email ? '?email=' + encodeURIComponent(email) : '');
+  window.__stOpenLms = (lmsId) => {
+    // Deep-link naar de student in het LMS; zonder id de LMS-root.
+    const url = lmsId ? (LMS_ROOT_URL + 'admin/hlms-studenten/detail/?id=' + encodeURIComponent(lmsId)) : LMS_ROOT_URL;
     try { window.open(url, '_blank', 'noopener'); } catch (_) {}
   };
 
@@ -524,7 +516,7 @@
     const counter = document.getElementById('stListCount');
     if (counter) counter.textContent = rows.length + ' student' + (rows.length === 1 ? '' : 'en');
     // Bij verlies van selectie in de nieuwe filter: reset selectedId + detail.
-    if (_ui.selectedId && !rows.some((r) => String(r.bubble_student_id || r.id) === String(_ui.selectedId))) {
+    if (_ui.selectedId && !rows.some((r) => String(r.student_id || r.id) === String(_ui.selectedId))) {
       _ui.selectedId = null;
       _repaintDetailPane();
     }
@@ -533,7 +525,7 @@
     const pane = document.getElementById('stDetailPane');
     if (!pane) return;
     const rows = asArr(_live.students.data);
-    const s = _ui.selectedId ? rows.find((x) => String(x.bubble_student_id || x.id) === String(_ui.selectedId)) : null;
+    const s = _ui.selectedId ? rows.find((x) => String(x.student_id || x.id) === String(_ui.selectedId)) : null;
     if (!s) { pane.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Selecteer een student</div>`; return; }
     pane.innerHTML = _renderDetail(s);
   }
@@ -616,7 +608,7 @@
   }
 
   function _renderStudentRow(s, inv) {
-    const id = String(s.bubble_student_id || s.id || '');
+    const id = String(s.student_id || s.id || '');
     const name = s.name || s.email || 'Onbekend';
     const program = s.program || s.membership || '—';
     // v=6 FIX 1: groep-progressie volledig verwijderd (Jeffrey wil geen
@@ -648,7 +640,7 @@
 
   /* ── Detail-pane ───────────────────────────────────────────────────── */
   function _renderDetail(s) {
-    const id = String(s.bubble_student_id || s.id || '');
+    const id = String(s.student_id || s.id || '');
     const name = s.name || s.email || 'Onbekend';
     const email = s.email || '';
     const program = s.program || '—';
@@ -685,10 +677,10 @@
       else if (st.error && !st.data) body = `<div style="padding:14px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12.5px">⚠ ${esc(st.error)} <button class="btn btn-ghost btn-sm" onclick="__stRetry('sessions')" style="margin-left:8px">Opnieuw</button></div>`;
       else {
         const all = asArr(st.data);
-        // Filter op deze student via email of bubble_student_id.
+        // Filter op deze student via email of student_id.
         const mine = all.filter((sess) => {
           const sEmail = String(sess.student_email || sess.email || '').toLowerCase();
-          const sId    = String(sess.bubble_student_id || sess.student_id || '');
+          const sId    = String(sess.student_id || '');
           return (email && sEmail === email.toLowerCase()) || (id && sId === id);
         });
         if (!mine.length) body = `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen 1-op-1 sessies gevonden voor deze student.</div>`;
@@ -840,7 +832,7 @@
             </div>
             <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(email || '—')}</div>
           </div>
-          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__stOpenLms('${esc(email || '')}')" title="Open student in Bubble LMS (dashboard.deforexopleiding.nl)">Open in LMS →</button>
+          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__stOpenLms('${esc(s.lms_student_id || '')}')" title="Open student in het LMS">Open in LMS →</button>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">${tabBtns}</div>
       </div>
@@ -910,7 +902,7 @@
     }
 
     // v=12: oversight-rol-detectie MOET vóór de linked=false-check gebeuren.
-    // Anders clobbert de "Nog niet gekoppeld aan Bubble"-lege-staat de picker
+    // Anders clobbert de "Nog niet gekoppeld aan het LMS"-lege-staat de picker
     // waarmee een admin juist een mentor kiest (catch-22 uit final verify).
     // OVERSIGHT_ROLES = 1-op-1 met app-shell.js studenten-module oversight-roles.
     if (!_live.session.fetched && !_live.session.loading) queueMicrotask(_fetchSessionRole);
@@ -923,13 +915,13 @@
     if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
     const currentOverride = String(window.__stMentorOverride || '').trim();
 
-    // Nog niet gekoppeld aan Bubble.
+    // Nog niet gekoppeld aan het LMS.
     // v=12: split lege-staat op oversight vs echte mentor.
     // - Oversight (admin/manager/super_admin) als zichzelf zonder selectie:
     //   render header MÉT picker, body = "kies een mentor" (semantisch juist,
     //   admin hoort niet gekoppeld te zijn).
     // - Echte mentor OF admin-als-mentor-simulatie zonder link: bestaande
-    //   "Nog niet gekoppeld aan Bubble"-melding.
+    //   "Nog niet gekoppeld aan het LMS"-melding.
     if (_live.students.data && _live.students.linked === false) {
       if (isPickerRole) {
         // Render dezelfde header als de data-staat (met picker), maar body =
@@ -938,8 +930,8 @@
       }
       return `<div class="pad" style="padding:32px 20px">
         <div style="padding:22px 20px;background:var(--amber-soft);border:1px solid var(--amber-line, var(--amber));color:var(--amber);border-radius:var(--r);font-size:13px;line-height:1.55">
-          <div style="font-weight:600;margin-bottom:4px">Nog niet gekoppeld aan Bubble</div>
-          Er is nog geen <code>bubble_user_id</code> op je mentor-profiel. Vraag een admin om de koppeling te maken (Admin-module → Mentor-koppeling). Zodra dat gedaan is verschijnen je studenten hier automatisch.
+          <div style="font-weight:600;margin-bottom:4px">Nog niet gekoppeld aan het LMS</div>
+          Je e-mailadres in het CRM komt niet (precies één keer) voor bij het personeel in het LMS. Vraag een admin om dat recht te zetten; daarna verschijnen je studenten hier automatisch.
         </div>
       </div>`;
     }
@@ -1017,8 +1009,8 @@
           }</div>
         </div>
         <div id="stDetailPane" style="flex:1;display:flex;flex-direction:column;min-width:0">
-          ${_ui.selectedId && filtered.find((r) => String(r.bubble_student_id || r.id) === String(_ui.selectedId))
-            ? _renderDetail(filtered.find((r) => String(r.bubble_student_id || r.id) === String(_ui.selectedId)))
+          ${_ui.selectedId && filtered.find((r) => String(r.student_id || r.id) === String(_ui.selectedId))
+            ? _renderDetail(filtered.find((r) => String(r.student_id || r.id) === String(_ui.selectedId)))
             : `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Selecteer een student</div>`}
         </div>
       </div>

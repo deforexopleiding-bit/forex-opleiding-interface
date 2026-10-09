@@ -12,7 +12,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
-import { getStudentMentorMap } from './_lib/bubbleStudentMentors.js';
+import { getStudentMentorNaamMap } from './_lib/mentorStudents.js';
 
 // PostgREST slikt lange IN-lijsten stil af op de URL-lengte-limiet.
 // chunkedIn splitst een grote ids-set in batches van 200 en concat't de
@@ -203,15 +203,14 @@ export default async function handler(req, res) {
       for (const p of (data || [])) mentorById[p.id] = p.full_name;
     }
 
-    // Bulk-fetch klant-e-mail → Bubble-mentor. Fail-soft: bij Bubble-fout is
-    // de map leeg en tonen we alsnog de profile-based fallback (of "Niet
-    // toegewezen"). getStudentMentorMap zelf catcht al z'n eigen errors
-    // en logt een warning; het extra try/catch hier is defense-in-depth.
-    let bubbleMentorMap = new Map();
+    // Bulk-fetch klant-e-mail → LMS-mentor (hlms_student.mentor_id →
+    // hlms_personeel.naam). Fail-soft: bij een LMS-fout is de map leeg en
+    // tonen we de profile-based fallback (of "Niet toegewezen").
+    let lmsMentorMap = new Map();
     try {
-      bubbleMentorMap = await getStudentMentorMap();
+      lmsMentorMap = await getStudentMentorNaamMap();
     } catch (e) {
-      console.warn('[sales-retention] bubble mentors fail-soft:', e?.message || e);
+      console.warn('[sales-retention] LMS-mentors fail-soft:', e?.message || e);
     }
 
     let items = groups.map((g) => {
@@ -219,12 +218,12 @@ export default async function handler(req, res) {
       const dept = g.maxDeal?.tl_department_id || null;
       const vId  = g.maxDeal?.traject_variant_id || null;
       const activeSubs = g.subs.filter((s) => s.status === 'active').length;
-      // Mentor: primair uit Bubble (email → mentorName), fallback op de
+      // Mentor: primair uit het LMS (email → mentorName), fallback op de
       // lokale profile (customers.mentor_user_id → profiles.full_name).
       const emailLc = c.email ? String(c.email).trim().toLowerCase() : '';
-      const bubbleMentor = emailLc ? bubbleMentorMap.get(emailLc) : null;
+      const lmsMentor    = emailLc ? lmsMentorMap.get(emailLc) : null;
       const localMentor  = c.mentor_user_id ? (mentorById[c.mentor_user_id] || null) : null;
-      const mentorName   = bubbleMentor || localMentor || null;
+      const mentorName   = lmsMentor || localMentor || null;
       return {
         customer_id: g.customer_id,
         customer_name: customerDisplayName(c, '—'),

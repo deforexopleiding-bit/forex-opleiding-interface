@@ -92,9 +92,6 @@
     .ap-contact a { color:var(--brand-primary,#093d54); text-decoration:none; margin-right:6px; }
     .ap-contact a:hover { text-decoration:underline; }
     /* F2 — Archief */
-    .so-archive-btn { padding:4px 8px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text-dim); cursor:pointer; font-family:inherit; }
-    .so-archive-btn:not(:disabled):hover { background:var(--bg-elev); color:#991b1b; border-color:#991b1b; }
-    .so-archive-btn:disabled { cursor:not-allowed; opacity:0.5; }
     .so-restore-btn { padding:4px 10px; font-size:11.5px; font-weight:600; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--brand-primary,#093d54); cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:4px; }
     .so-restore-btn:not(:disabled):hover { background:rgba(9,61,84,0.08); }
     .so-restore-btn:disabled { cursor:not-allowed; opacity:0.5; }
@@ -174,7 +171,7 @@
       .so-mentor-edit { padding: 6px 8px; font-size: 13px; }
 
       /* Archive/restore buttons bereikbaar */
-      .so-archive-btn, .so-restore-btn { min-height: 36px; padding: 8px 12px; font-size: 12px; }
+      .so-restore-btn { min-height: 36px; padding: 8px 12px; font-size: 12px; }
 
       /* Modal .so-mb → fullscreen op smal + dvh */
       .so-mb { padding: 0; align-items: stretch; }
@@ -305,7 +302,7 @@
               <th>Beoordeling</th>
               <th>No-shows</th>
               <th>Te late facturen</th>
-              <th>Actie</th>
+              <th>LMS</th>
             </tr>
           </thead>
           <tbody id="arTbody">
@@ -393,22 +390,6 @@
   </div>
 </div>
 
-<!-- F2.1 — Archiveer-bevestigingsdialog -->
-<div id="arcMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="arcMbTitle">
-  <div class="so-mw" style="width:min(420px,92vw)">
-    <div class="so-mh">
-      <div class="so-mh-title" id="arcMbTitle"><i class="ti ti-archive"></i> Student archiveren</div>
-      <button type="button" class="so-mh-close" id="arcMbClose" aria-label="Sluiten">×</button>
-    </div>
-    <div class="so-mc">
-      <div id="arcMbText" style="font-size:13px;color:var(--text)">Weet je zeker?</div>
-    </div>
-    <div class="so-mf">
-      <button type="button" class="so-btn" id="arcMbCancel">Annuleren</button>
-      <button type="button" class="so-btn primary" id="arcMbConfirm" style="background:#991b1b;border-color:transparent"><i class="ti ti-archive"></i> Archiveren</button>
-    </div>
-  </div>
-</div>
 
 <!-- D — Beoordelingshistorie-modal (admin-only, lazy-loaded) -->
 <div id="ahMb" class="so-mb" role="dialog" aria-modal="true" aria-labelledby="ahMbTitle">
@@ -506,16 +487,13 @@ const state = {
   apHandleBusy   : false,
   // D — Beoordelingshistorie (admin-only)
   canAssessHistory : false,     // RBAC.canSync('students.all.view')
-  ahCache          : new Map(), // bubble_student_id -> { history } cache
+  ahCache          : new Map(), // student_id -> { history } cache
   ahCurrentSid     : null,      // huidige open student in modal
   // F2 — Archief
-  canArchive       : false,     // RBAC.canSync('students.all.view')
-  archiveBusy      : new Set(), // bubble_student_id-set, voorkomt dubbele klikken
-  archivePending   : null,      // row waarvoor de bevestigingsdialog open staat
   // G — Student-detail-modal
   sdCurrentRow     : null,      // huidige rij in modal
   sdActiveTab      : 'persoonlijk',
-  sdCache          : new Map(), // bubble_student_id -> { persoonlijk?, financieel?, calls?, beoordelingen?, signals? }
+  sdCache          : new Map(), // student_id -> { persoonlijk?, financieel?, calls?, beoordelingen?, signals? }
 };
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -619,7 +597,7 @@ function applySort() {
 
 function renderTable() {
   const tbody = document.getElementById('soTbody');
-  const cols = state.canArchive ? 9 : 8;
+  const cols = 8;
   if (state.view.length === 0) {
     tbody.innerHTML = '<tr><td colspan="' + cols + '" class="so-empty">Geen studenten gevonden met deze filters.</td></tr>';
     updateSortIndicators();
@@ -627,7 +605,7 @@ function renderTable() {
   }
   tbody.innerHTML = state.view.map((r, i) => {
     r._viewIdx = i; // gebruikt door renderMentorCell voor de Wijzig-knop-wireup
-    const href = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(r.bubble_student_id || '');
+    const href = '/modules/mentor-dashboard.html#student=' + encodeURIComponent(r.student_id || '');
     const callsTotal = Number(r.calls_1on1_total) || 0;
     const callsDone  = Number(r.calls_1on1_done)  || 0;
     const noShows    = Number(r.no_shows) || 0;
@@ -642,9 +620,6 @@ function renderTable() {
       '<td>' + renderAssessCell(r, assess) + '</td>' +
       '<td>' + (noShows > 0 ? '<span class="so-noshow">' + noShows + '</span>' : noShows) + '</td>' +
       '<td>' + (overdue > 0 ? '<span class="so-overdue">' + overdue + '</span>' : '0') + '</td>' +
-      (state.canArchive
-        ? ('<td><button type="button" class="so-archive-btn" data-row-idx="' + r._viewIdx + '" title="Archiveren"><i class="ti ti-archive"></i></button></td>')
-        : '') +
       '</tr>';
   }).join('');
   // Click → open student-detail-modal (negeer kliks op actie-knoppen).
@@ -652,23 +627,11 @@ function renderTable() {
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('.so-mentor-edit'))    return;
       if (ev.target.closest('.so-assess-history')) return;
-      if (ev.target.closest('.so-archive-btn'))    return;
       const idx = Number(tr.dataset.rowIdx);
       const row = state.view[idx];
       if (row) openStudentDetail(row);
     });
   });
-  // Wire de Archiveer-knoppen (alleen voor admins) — opent bevestigingsdialog.
-  if (state.canArchive) {
-    tbody.querySelectorAll('.so-archive-btn[data-row-idx]').forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        const idx = Number(btn.dataset.rowIdx);
-        const row = state.view[idx];
-        if (row) openArchiveConfirm(row);
-      });
-    });
-  }
   // Wire de Beoordelings-historie-triggers (alleen voor admins).
   if (state.canAssessHistory) {
     tbody.querySelectorAll('.so-assess-history[data-row-idx]').forEach((el) => {
@@ -958,9 +921,10 @@ async function loadData() {
     state.canAssessHistory = !!(window.RBAC?.canSync && window.RBAC.canSync('students.all.view'));
   } catch (e) { state.canAssessHistory = false; }
   if (state.canAssessHistory) wireAssessHistoryHandlers();
-  // F2 — Archief-acties (zelfde gate als history; server-side enforced).
-  state.canArchive = state.canAssessHistory;
-  if (state.canArchive) wireArchiveConfirmHandlers();
+  // F2 — Archief: sinds 9 okt 2026 ALLEEN-LEZEN. "Gearchiveerd" = de
+  // LMS-toegang is verlopen (hlms_student.eind_datum vóór vandaag). Het
+  // archiveren zelf liep via Bubble en is uitgefaseerd; toegang beëindigen
+  // gebeurt in het LMS.
   // G — Student-detail-modal handlers (rij-click triggert openStudentDetail).
   wireSdHandlers();
 
@@ -1011,8 +975,8 @@ function fmtUpdatedAt(iso) {
 }
 
 async function openAssessHistory(row) {
-  if (!state.canAssessHistory || !row || !row.bubble_student_id) return;
-  const sid = String(row.bubble_student_id);
+  if (!state.canAssessHistory || !row || !row.student_id) return;
+  const sid = String(row.student_id);
   state.ahCurrentSid = sid;
   document.getElementById('ahMbTitle').innerHTML =
     '<i class="ti ti-history"></i> Beoordelingshistorie — ' + esc(row.name || row.email || '—');
@@ -1134,8 +1098,8 @@ function renderArchiveTable() {
     const overdue = Number(r.overdue_count) || 0;
     const programCell = r.program ? ('<span class="so-prog">' + esc(r.program) + '</span>') : '—';
     const mentorCell  = r.mentor_name ? esc(r.mentor_name) : '<span class="so-mentor-none">geen mentor</span>';
-    const actionCell  = state.canArchive
-      ? ('<button type="button" class="so-restore-btn" data-ar-idx="' + idx + '" title="Terugzetten"><i class="ti ti-arrow-back-up"></i> Terugzetten</button>')
+    const actionCell  = r.lms_student_id
+      ? ('<a class="so-restore-btn" href="https://lms.deforexopleiding.nl/admin/hlms-studenten/detail/?id=' + encodeURIComponent(r.lms_student_id) + '" target="_blank" rel="noopener" title="Toegang beheren in het LMS"><i class="ti ti-external-link"></i> In LMS</a>')
       : '—';
     return '<tr>' +
       '<td><div class="so-name">' + esc(r.name || '—') + '</div></td>' +
@@ -1148,85 +1112,11 @@ function renderArchiveTable() {
       '<td>' + actionCell + '</td>' +
       '</tr>';
   }).join('');
-  if (state.canArchive) {
-    tbody.querySelectorAll('.so-restore-btn[data-ar-idx]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.dataset.arIdx);
-        const r = sorted[idx];
-        if (r) postArchive(r, 'restore');
-      });
-    });
-  }
-}
-
-async function postArchive(row, action) {
-  if (!row || !row.bubble_student_id) return;
-  const sid = row.bubble_student_id;
-  if (state.archiveBusy.has(sid)) return;
-  state.archiveBusy.add(sid);
-  try {
-    const r = await window.AgentShared.apiFetch('/api/student-archive', {
-      method  : 'POST',
-      headers : { 'Content-Type': 'application/json' },
-      body    : JSON.stringify({ bubble_student_id: sid, action: action }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      showToast('err', d?.error || ('Fout: HTTP ' + r.status));
-      return;
-    }
-    // Lokale state update: zet archived-flag in rowsAll en hersplits.
-    const raw = state.rowsAll.find((x) => x && x.bubble_student_id === sid);
-    if (raw) raw.archived = (action === 'archive');
-    state.rows        = state.rowsAll.filter((x) => x && x.archived !== true);
-    state.archiveRows = state.rowsAll.filter((x) => x && x.archived === true);
-    renderKPIs();
-    populateFilters();
-    applyFilters();
-    renderArchiveTable();
-    updateArchiveTabCount();
-    showToast('ok', action === 'archive' ? 'Student gearchiveerd' : 'Student teruggezet');
-  } catch (e) {
-    showToast('err', e?.message || 'Onbekende fout');
-  } finally {
-    state.archiveBusy.delete(sid);
-  }
-}
-// showToast() bestaat al elders in dit file (reassign-flow) en hergebruikt #soToast.
-
-/* ── F2.1 — Archiveer-bevestigingsdialog ───────────────────────────────── */
-function openArchiveConfirm(row) {
-  if (!row) return;
-  state.archivePending = row;
-  document.getElementById('arcMbText').innerHTML =
-    'Weet je zeker dat je <strong>' + esc(row.name || row.email || '—') + '</strong> wilt archiveren?'
-    + '<br/><br/><span style="color:var(--text-dim);font-size:12px">De student verdwijnt uit de actieve lijst en uit de mentor-lijst. Je kunt de student later terugzetten via het Archief-tabblad.</span>';
-  document.getElementById('arcMb').classList.add('show');
-}
-function closeArchiveConfirm() {
-  document.getElementById('arcMb').classList.remove('show');
-  state.archivePending = null;
-}
-async function confirmArchive() {
-  const row = state.archivePending;
-  closeArchiveConfirm();
-  if (row) await postArchive(row, 'archive');
-}
-function wireArchiveConfirmHandlers() {
-  document.getElementById('arcMbClose').addEventListener('click', closeArchiveConfirm);
-  document.getElementById('arcMbCancel').addEventListener('click', closeArchiveConfirm);
-  document.getElementById('arcMbConfirm').addEventListener('click', confirmArchive);
-  document.getElementById('arcMb').addEventListener('click', (ev) => {
-    if (ev.target === ev.currentTarget) closeArchiveConfirm();
-  });
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && document.getElementById('arcMb').classList.contains('show')) closeArchiveConfirm();
-  });
 }
 
 /* ── G — Student-detail modal ──────────────────────────────────────────── */
 function openStudentDetail(row) {
-  if (!row || !row.bubble_student_id) return;
+  if (!row || !row.student_id) return;
   state.sdCurrentRow = row;
   state.sdActiveTab = 'persoonlijk';
   document.getElementById('sdMbTitle').innerHTML =
@@ -1270,7 +1160,7 @@ function wireSdHandlers() {
 async function renderSdTab(tab) {
   const row = state.sdCurrentRow;
   if (!row) return;
-  const sid = row.bubble_student_id;
+  const sid = row.student_id;
   if (!state.sdCache.has(sid)) state.sdCache.set(sid, {});
   const cache = state.sdCache.get(sid);
 
@@ -1280,7 +1170,7 @@ async function renderSdTab(tab) {
     let detail = cache.detail;
     if (!detail) {
       try {
-        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const r = await window.AgentShared.apiFetch('/api/student-detail?student_id=' + encodeURIComponent(sid) + (row.lms_student_id ? '&lms_student_id=' + encodeURIComponent(row.lms_student_id) : '') + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
         detail = d;
@@ -1299,7 +1189,7 @@ async function renderSdTab(tab) {
     if (!detail) {
       // Persoonlijk hadn't been loaded yet; fetch detail nu.
       try {
-        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const r = await window.AgentShared.apiFetch('/api/student-detail?student_id=' + encodeURIComponent(sid) + (row.lms_student_id ? '&lms_student_id=' + encodeURIComponent(row.lms_student_id) : '') + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
         detail = d;
@@ -1317,7 +1207,7 @@ async function renderSdTab(tab) {
     let detail = cache.detail;
     if (!detail) {
       try {
-        const r = await window.AgentShared.apiFetch('/api/student-detail?bubble_student_id=' + encodeURIComponent(sid) + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
+        const r = await window.AgentShared.apiFetch('/api/student-detail?student_id=' + encodeURIComponent(sid) + (row.lms_student_id ? '&lms_student_id=' + encodeURIComponent(row.lms_student_id) : '') + (row.email ? '&email=' + encodeURIComponent(row.email) : ''));
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
         detail = d;
@@ -1353,7 +1243,7 @@ async function renderSdTab(tab) {
     let list = cache.signals;
     if (!list) {
       try {
-        const r = await window.AgentShared.apiFetch('/api/student-signals-list?status=all&bubble_student_id=' + encodeURIComponent(sid));
+        const r = await window.AgentShared.apiFetch('/api/student-signals-list?status=all&student_id=' + encodeURIComponent(sid));
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
         list = Array.isArray(d?.signals) ? d.signals : [];

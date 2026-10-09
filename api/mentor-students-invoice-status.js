@@ -6,10 +6,10 @@
 // SCOPE-ALIGNMENT (fix t.o.v. PR #445):
 //   Eerder gebruikte dit endpoint getMentorCustomerIds (onboardings.
 //   mentor_user_id). Dat gaf een ANDERE studentenset dan
-//   mentor-my-students (team_members.bubble_user_id → Bubble user.mentor_user)
-//   — studenten zonder onboarding-rij verschenen wél in de lijst maar
-//   kregen geen badge. Deze versie gebruikt EXACT dezelfde dual-gate en
-//   Bubble-resolutie als mentor-my-students via _lib/mentorStudents.js.
+//   mentor-my-students — studenten zonder onboarding-rij verschenen wél in
+//   de lijst maar kregen geen badge. Deze versie gebruikt EXACT dezelfde
+//   dual-gate en studentresolutie (LMS, hlms_student.mentor_id) als
+//   mentor-my-students via _lib/mentorStudents.js.
 //
 // AUTH + GATE (gespiegeld van mentor-my-students):
 //   Default self (auth.uid()) → requirePermission('mentor.module.access').
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 3. Studenten-e-mails via DEZELFDE Bubble-resolutie als
+    // 3. Studenten-e-mails via DEZELFDE LMS-resolutie als
     //    mentor-my-students (getMentorStudentEmails wraps de gedeelde
     //    helpers). Lowercased + getrimd + gededupliceerd.
     const { linked, emails } = await getMentorStudentEmails(effectiveUserId);
@@ -176,13 +176,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ byEmail });
   } catch (e) {
     console.error('[mentor-students-invoice-status]', e?.message || e);
-    // Bubble-fouten apart melden voor diagnose (zoals mentor-my-students).
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

@@ -142,7 +142,7 @@
     // Drie sub-buckets: all_time (2020-01-01→vandaag), this_month (1e→vandaag),
     // ytd (1-jan→vandaag). Elk cachet zijn eigen coaching-grand_total apart
     // van de Coaching-tab (die kan een vrije aangepast-range hebben) zodat de
-    // trage all-time Bubble-call niet elke Overzicht-open opnieuw hoeft. TTL
+    // trage all-time call niet elke Overzicht-open opnieuw hoeft. TTL
     // 10 min stale-while-revalidate; hard-refresh triggert nieuwe fetch.
     overviewCoaching: {
       all_time:   { loading: false, error: null, data: null, fetched_at: 0 },
@@ -278,7 +278,7 @@
       ? `/api/mentor-coaching-earnings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
       : '/api/mentor-coaching-earnings';
     // v=9 (2026-08-25): 45s timeout ipv de default 8s. mentor-coaching-earnings
-    // doet live Bubble-fetch (bubbleList '1-1-session' + 'team-training' + funded)
+    // doet live LMS-fetch (sessies + teamtrainingen + funded)
     // met FETCH_CAP=3000 per typename. All-time (2020→nu, 5+ jaar) duurt
     // structureel >8s → v2 timeout-en → UI viel op €0. v1 mentor-home
     // (AgentShared.apiFetch) heeft geen timeout → wachtte gewoon. Vandaar
@@ -327,7 +327,7 @@
   // stale-while-revalidate: als er data < TTL is → geen refetch. Deelt met
   // Coaching-tab wanneer die exact dezelfde from/to aanhoudt (zeldzaam, want
   // Coaching-tab default = huidige maand). Timeout 45s zoals de Coaching-tab
-  // (all-time Bubble-fetch kan structureel > 10 s duren).
+  // (all-time fetch kan structureel > 10 s duren).
   function _overviewRangeFor(kind) {
     const pad = (n) => String(n).padStart(2, '0');
     const fmt = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -466,9 +466,9 @@
   window.__verdCertCloseUpload = () => { _ui.certUpload = null; render(); };
   window.__verdCertPickStudent = (studentId) => {
     if (!_ui.certUpload) return;
-    const stu = asArr(_live.myStudents.data?.students).find((s) => String(s.bubble_student_id) === String(studentId));
+    const stu = asArr(_live.myStudents.data?.students).find((s) => String(s.student_id) === String(studentId));
     if (!stu) return;
-    _ui.certUpload.studentId = String(stu.bubble_student_id);
+    _ui.certUpload.studentId = String(stu.student_id);
     _ui.certUpload.studentName = String(stu.name || stu.email || 'Student');
     _ui.certUpload.step = 'upload';
     render();
@@ -1467,13 +1467,13 @@
       } else if (_live.myStudents.error && !_live.myStudents.data) {
         body = `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r);font-size:13px;margin-bottom:12px">⚠ ${esc(_live.myStudents.error)}</div><button class="btn btn-ghost btn-sm" onclick="window.__verdRetryMyStudents()">Opnieuw</button>`;
       } else if (_live.myStudents.data && _live.myStudents.data.linked === false) {
-        body = `<div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:var(--r);font-size:13px">Je account is nog niet aan Bubble gekoppeld. Neem contact op met kantoor.</div>`;
+        body = `<div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:var(--r);font-size:13px">Je account is nog niet aan het LMS gekoppeld. Neem contact op met kantoor.</div>`;
       } else {
         const students = asArr(_live.myStudents.data?.students);
         body = `
           <div style="padding:8px 0 14px;font-size:12.5px;color:var(--text-2)">Kies de student van wie je de funded-cert claimt. €100 bonus wordt in het maandrapport van ${fmtMonth(currentMonthKey() + '-01')} bijgeschreven.</div>
           ${students.length ? `<div style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)">
-            ${students.map((s) => `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer" onclick="window.__verdCertPickStudent('${esc(s.bubble_student_id)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+            ${students.map((s) => `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer" onclick="window.__verdCertPickStudent('${esc(s.student_id)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
               <div><div style="font-size:13px;font-weight:600">${esc(s.name || s.email || 'Student')}</div><div style="font-size:11.5px;color:var(--text-3)">${esc(s.email || '')}</div></div>
               <button class="btn btn-primary btn-sm">Kiezen →</button>
             </div>`).join('')}

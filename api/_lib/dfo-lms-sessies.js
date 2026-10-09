@@ -177,8 +177,14 @@ export async function haalSessiesInVenster({ vanIso, totIso, limiet = STANDAARD_
  * No-shows sinds een watermerk, met de gegevens die een signaal nodig heeft.
  *
  * Voor api/cron/noshow-detect.js. Geeft per sessie zowel de student (inclusief
- * `bubble_user_id`, de brug naar het CRM) als het e-mailadres van de mentor,
- * want daarmee wordt de CRM-mentor opgezocht.
+ * `student_sleutel`, de sleutel waaronder het CRM signalen bewaart) als het
+ * e-mailadres van de mentor, want daarmee wordt de CRM-mentor opgezocht.
+ *
+ * STUDENTSLEUTEL (9 okt 2026): het historische id (hlms_student.bubble_user_id)
+ * als de student dat heeft, anders hlms_student.id — dezelfde regel als
+ * api/_lib/mentorStudents.js. Voorheen viel een student zonder historisch id
+ * af; na het sluiten van Bubble zou dat ELKE nieuwe student zijn.
+ * `zonder_historisch_id` telt die studenten nog (informatief, niet overgeslagen).
  *
  * Zelfde regel als hierboven: 'gelezen' met nul rijen betekent ECHT nul.
  *
@@ -187,7 +193,7 @@ export async function haalSessiesInVenster({ vanIso, totIso, limiet = STANDAARD_
 export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, client = null }) {
   const leeg = {
     bron_status: BRON_ONBEREIKBAAR, sessies: [],
-    totaal: 0, zonder_bubble_koppeling: 0, zonder_mentor: 0, fout: null,
+    totaal: 0, zonder_historisch_id: 0, zonder_mentor: 0, fout: null,
   };
 
   const lms = client || getDfoLmsClient();
@@ -255,12 +261,13 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
     const stu = studentById.get(String(r.student_id)) || null;
     const men = r.mentor_id ? (mentorById.get(String(r.mentor_id)) || null) : null;
     const brug = String(stu?.bubble_user_id || '').trim();
-    if (!brug)  { zonderBrug++;   continue; }
+    if (!brug) zonderBrug++;
     if (!men?.email) { zonderMentor++; continue; }
     sessies.push({
       id: String(r.id),
       start_tijd: r.start_tijd,
       student_id: String(r.student_id),
+      student_sleutel: brug || String(r.student_id),
       bubble_user_id: brug || null,
       email: String(stu?.email || '').trim().toLowerCase() || null,
       voornaam: stu?.voornaam || null,
@@ -273,7 +280,7 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
   return {
     bron_status: BRON_GELEZEN, sessies,
     totaal: rijen.length,
-    zonder_bubble_koppeling: zonderBrug,
+    zonder_historisch_id: zonderBrug,
     zonder_mentor: zonderMentor,
     fout: null,
   };

@@ -478,7 +478,7 @@
     nog_te_benaderen: 4, call_ingepland: 5, gestart: 9,
   };
   function _intakeState(s) {
-    const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
+    const bu = s.student_id ? String(s.student_id) : null;
     if (bu && _completedByMember.has(bu))      return 'gestart';
     const ms = s.mentor_intake_status || null;
     if (ms === 'wil_niet')                     return 'wil_niet';
@@ -512,14 +512,14 @@
     const kleur = f.ernst === 'oranje' ? ' style="color:var(--amber)"' : (f.ernst === 'grijs' || f.ernst === 'neutraal' ? ' style="color:var(--text-faint)"' : '');
     return '<i class="ti ' + ico + '"' + kleur + ' title="' + esc(f.label) + '"></i>';
   }
-  function _bubbleCell(s) {
-    if (s.bubble_provisioned) {
-      return '<i class="ti ti-circle-check-filled ico-ok" title="Bubble-account aangemaakt' + (s.bubble_provisioned_at ? ' op ' + esc(fmtDateNL(s.bubble_provisioned_at)) : '') + '"></i>';
+  function _lmsCell(s) {
+    if (s.dfo_lms_student_id) {
+      return '<i class="ti ti-circle-check-filled ico-ok" title="In het LMS' + (s.dfo_lms_provisioned_at ? ' sinds ' + esc(fmtDateNL(s.dfo_lms_provisioned_at)) : '') + '"></i>';
     }
-    if (s.bubble_provision_error) {
-      return '<i class="ti ti-alert-triangle-filled ico-bad" title="Bubble-aanmaak mislukt: ' + esc(String(s.bubble_provision_error).slice(0, 120)) + '"></i>';
+    if (s.dfo_lms_provision_error) {
+      return '<i class="ti ti-alert-triangle-filled ico-bad" title="LMS: ' + esc(String(s.dfo_lms_provision_error).slice(0, 120)) + '"></i>';
     }
-    return '<i class="ti ti-circle-dashed ico-mute" title="Bubble nog niet aangemaakt"></i>';
+    return '<i class="ti ti-circle-dashed ico-mute" title="Nog niet in het LMS"></i>';
   }
   function _bedenktijdCell(bt) {
     if (!bt || bt.status === 'onbekend') return '<span class="ico-mute">—</span>';
@@ -641,7 +641,7 @@
           <td>${_trajectCell(s)}</td>
           <td>${s.start_date ? esc(fmtDateNL(s.start_date)) : '<span class="ico-mute">—</span>'}</td>
           <td>${_paidCell(s.factuur)}</td>
-          <td>${_bubbleCell(s)}</td>
+          <td>${_lmsCell(s)}</td>
           <td>${_bedenktijdCell(s.bedenktijd || null)}</td>
           <td>${_wizardCell(s)}</td>
           <td>${_availCell(s.availability)}</td>
@@ -658,7 +658,7 @@
               <th>Traject</th>
               <th>Start</th>
               <th>Betaald</th>
-              <th>Bubble</th>
+              <th>LMS</th>
               <th>Bedenktijd</th>
               <th>Onboarding</th>
               <th>Beschikb.</th>
@@ -677,7 +677,7 @@
   function _buildTimeline(s) {
     const events = [];
     if (s.created_at) events.push({ at: s.created_at, label: 'Toegewezen aan jou' });
-    const bu = s.bubble_user_id ? String(s.bubble_user_id) : null;
+    const bu = s.student_id ? String(s.student_id) : null;
     if (bu) {
       const planned = _nextCallByStudent.get(bu);
       if (planned) events.push({ at: planned, label: 'Call ingepland' });
@@ -770,28 +770,23 @@
       ? '<a href="mailto:' + esc(s.customer_email) + '">' + esc(s.customer_email) + '</a>'
       : '<span class="ico-mute">—</span>';
 
-    // Bubble-account
-    let bubbleLine = '';
-    if (s.bubble_provisioned) {
-      bubbleLine = '<i class="ti ti-circle-check-filled ico-ok"></i> Aangemaakt'
-        + (s.bubble_provisioned_at ? ' op ' + esc(fmtDateNL(s.bubble_provisioned_at)) : '');
-    } else if (s.bubble_provision_error) {
-      bubbleLine = '<i class="ti ti-alert-triangle-filled ico-bad"></i> Mislukt — '
-        + '<span style="color:var(--text-dim);font-size:12px">' + esc(String(s.bubble_provision_error).slice(0, 200)) + '</span>';
+    // LMS-account
+    let lmsLine = '';
+    if (s.dfo_lms_student_id) {
+      lmsLine = '<i class="ti ti-circle-check-filled ico-ok"></i> In het LMS'
+        + (s.dfo_lms_provisioned_at ? ' sinds ' + esc(fmtDateNL(s.dfo_lms_provisioned_at)) : '');
     } else {
-      bubbleLine = '<i class="ti ti-circle-dashed ico-mute"></i> Nog niet aangemaakt';
+      lmsLine = '<i class="ti ti-circle-dashed ico-mute"></i> Nog niet in het LMS';
     }
-    const credsLine = s.credentials_email_sent_at
-      ? 'Inloggegevens-mail verzonden op ' + esc(fmtDateNL(s.credentials_email_sent_at))
-      : 'Inloggegevens-mail nog niet verzonden';
-    // Resend-credentials: knop tijdelijk verborgen — Bubble-side
-    // reset_student_password-workflow nog niet betrouwbaar; we laten 'm
-    // bewust uit de UI tot dat opgelost is. Endpoint
-    // /api/onboarding-credentials-reset + ownership-gate blijven
-    // ongewijzigd zodat de knop later 1-op-1 terug kan. Wire-handler
-    // (_resetCredentials) staat hieronder nog wel, maar zonder render-
-    // target doet de querySelector een no-op.
-    const credsHelp = '';
+    const lmsMelding = s.dfo_lms_provision_error
+      ? '<div style="font-size:12px;color:#b91c1c;margin-bottom:8px">' + esc(String(s.dfo_lms_provision_error).slice(0, 240)) + '</div>'
+      : '';
+    // LMS-uitnodiging opnieuw sturen (nieuw wachtwoord) — vervangt sinds
+    // 9 okt 2026 de Bubble-wachtwoordreset. Alleen met een LMS-student.
+    const credsHelp = s.dfo_lms_student_id
+      ? '<button type="button" class="mo-btn" data-mo-creds-reset><i class="ti ti-mail-forward"></i> LMS-uitnodiging opnieuw sturen</button>'
+        + ' <span data-mo-creds-status style="font-size:12.5px;margin-left:6px"></span>'
+      : '';
 
     // Instroom-blok
     const trajectLabel = s.traject_label ? esc(s.traject_label) : '—';
@@ -900,9 +895,9 @@
 
     const accountPane = `
       <div class="mo-section">
-        <div class="mo-section-h">Bubble-account</div>
-        <div style="font-size:13px;margin-bottom:8px">${bubbleLine}</div>
-        <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:8px">${credsLine}</div>
+        <div class="mo-section-h">LMS-account</div>
+        <div style="font-size:13px;margin-bottom:8px">${lmsLine}</div>
+        ${lmsMelding}
         ${credsHelp}
       </div>
 
@@ -936,7 +931,7 @@
     return `
       <div class="mo-tabs" role="tablist">
         <button type="button" class="mo-tab active" data-mo-tab="overview"  role="tab">Overzicht</button>
-        <button type="button" class="mo-tab"        data-mo-tab="account"   role="tab">Account &amp; Bubble</button>
+        <button type="button" class="mo-tab"        data-mo-tab="account"   role="tab">Account &amp; LMS</button>
         <button type="button" class="mo-tab"        data-mo-tab="form"      role="tab">Vragenlijst</button>
         <button type="button" class="mo-tab"        data-mo-tab="timeline"  role="tab">Tijdlijn</button>
       </div>
@@ -948,7 +943,7 @@
   }
 
   function _wireModalHandlers(s) {
-    // Tab-switch (Overzicht / Account & Bubble / Vragenlijst / Tijdlijn)
+    // Tab-switch (Overzicht / Account & LMS / Vragenlijst / Tijdlijn)
     document.querySelectorAll('.mo-tab[data-mo-tab]').forEach((tab) => {
       tab.addEventListener('click', () => {
         const key = tab.getAttribute('data-mo-tab');
@@ -999,7 +994,8 @@
         if (!_openId) return;
         const email = (s && s.customer_email) ? s.customer_email : '';
         const ok = confirm(
-          'Nieuw wachtwoord genereren en mailen naar ' + (email || 'de student') + '?'
+          'LMS-uitnodiging opnieuw sturen naar ' + (email || 'de student') + '?\n\n'
+          + 'De student krijgt een nieuw wachtwoord; het oude werkt daarna niet meer.'
         );
         if (!ok) return;
         await _resetCredentials();
@@ -1034,22 +1030,18 @@
       if (!r.ok) {
         const msg = (d?.error || ('HTTP ' + r.status));
         if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ ' + msg; }
-        try { toast('Inloggegevens versturen mislukt: ' + msg, 'error'); } catch {}
+        try { toast('LMS-uitnodiging mislukt: ' + msg, 'error'); } catch {}
         if (btn) btn.disabled = false;
         return;
       }
       if (d && d.ok === true && d.sent === true) {
         if (status) { status.style.color = '#15803d'; status.textContent = '✓ Mail verstuurd'; }
-        try { toast('Inloggegevens opnieuw verstuurd', 'success'); } catch {}
-        // Cache bijwerken zodat de modal de nieuwe stamp toont na refresh.
-        const cached = _byId.get(_openId);
-        if (cached && d.email_sent_at) cached.credentials_email_sent_at = d.email_sent_at;
-        _refreshModal();
+        try { toast('LMS-uitnodiging opnieuw verstuurd', 'success'); } catch {}
         return;
       }
       const errMsg = (d?.error || 'Onbekende fout');
       if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ ' + errMsg; }
-      try { toast('Inloggegevens versturen mislukt: ' + errMsg, 'error'); } catch {}
+      try { toast('LMS-uitnodiging mislukt: ' + errMsg, 'error'); } catch {}
       if (btn) btn.disabled = false;
     } catch (e) {
       console.error('[mentor-onboarding] creds-reset:', e?.message || e);

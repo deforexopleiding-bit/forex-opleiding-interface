@@ -6,14 +6,16 @@
 // Auth: createUserClient(req).auth.getUser() → user.id. 401 zonder.
 //
 // SECURITY / ownership:
-//   - Eigen studenten via getMentorStudents(user.id) — getMentorBubbleId +
-//     fetchBubbleStudents → bubble_student_id moet bij de mentor horen,
-//     anders 403. Geen ?email / ?name / mentor_user_id client-input
-//     wordt vertrouwd.
+//   - Eigen studenten via getMentorStudents(user.id) (LMS: hlms_student.
+//     mentor_id) → student_id moet bij de mentor horen, anders 403. Geen
+//     ?email / ?name / mentor_user_id client-input wordt vertrouwd.
 //   - student_name + student_email (lowercased) komen UIT die resolutie,
-//     niet van de client. Body alleen: bubble_student_id, type, toelichting.
+//     niet van de client. Body alleen: student_id, type, toelichting.
 //
-// Body : { bubble_student_id (text), type ('eerste_call' | 'reageert_niet'
+// student_id = de studentsleutel uit api/_lib/mentorStudents.js. In de tabel
+// staat hij in de (historisch genoemde) kolom student_signals.bubble_student_id.
+//
+// Body : { student_id (text), type ('eerste_call' | 'reageert_niet'
 //          | 'niet_bereikbaar' | 'geen_reactie_bellen' | 'anders'),
 //          toelichting? (text) }
 // Insert: status='open', mentor_user_id=user.id.
@@ -21,7 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getMentorStudents } from './_lib/mentorStudents.js';
+import { getMentorStudents, httpStatusVoor } from './_lib/mentorStudents.js';
 import { createNotification } from './_lib/notify.js';
 
 const TYPES = new Set([
@@ -48,8 +50,8 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : null;
   if (!body) return res.status(400).json({ error: 'Body ontbreekt' });
 
-  const bubbleStudentId = typeof body.bubble_student_id === 'string' ? body.bubble_student_id.trim() : '';
-  if (!bubbleStudentId) return res.status(400).json({ error: 'bubble_student_id vereist' });
+  const studentId = typeof body.student_id === 'string' ? body.student_id.trim() : '';
+  if (!studentId) return res.status(400).json({ error: 'student_id vereist' });
 
   const type = typeof body.type === 'string' ? body.type.trim() : '';
   if (!TYPES.has(type)) return res.status(400).json({ error: 'type ongeldig' });
@@ -64,24 +66,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ownership-check via gedeelde Bubble-resolutie.
-    const { linked, students } = await getMentorStudents(user.id);
+    // Ownership-check via de gedeelde LMS-resolutie.
+    const { linked, reden, students } = await getMentorStudents(user.id, { metTelling: false });
     if (!linked) {
-      return res.status(403).json({ error: 'Mentor heeft geen Bubble-koppeling' });
+      return res.status(403).json({ error: 'Mentor is niet gekoppeld aan het LMS (' + reden + ')' });
     }
-    const owned = students.find((s) => s && s.bubble_student_id === bubbleStudentId);
+    const owned = students.find((s) => s && s.student_id === studentId);
     if (!owned) {
       return res.status(403).json({ error: 'Student hoort niet bij deze mentor' });
     }
 
-    // student_name + student_email SERVER-SIDE uit Bubble-row, niet client.
+    // student_name + student_email SERVER-SIDE uit de LMS-rij, niet client.
     const studentName  = (owned.name  || '').trim() || null;
     const studentEmail = owned.email ? String(owned.email).trim().toLowerCase() : null;
 
     const { data, error } = await supabaseAdmin
       .from('student_signals')
       .insert({
-        bubble_student_id : bubbleStudentId,
+        bubble_student_id : studentId,   // historische kolomnaam
         student_name      : studentName,
         student_email     : studentEmail,
         type              : type,
@@ -119,12 +121,7 @@ export default async function handler(req, res) {
     return res.status(201).json({ ok: true, id: data.id });
   } catch (e) {
     console.error('[student-signals-create]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

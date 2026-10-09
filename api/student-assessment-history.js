@@ -8,7 +8,7 @@
 // Permission: students.all.view — alleen super_admin (via '*') + manager
 // (via migratie 016) zien deze historie. 401 zonder sessie, 403 zonder gate.
 //
-// Query: ?student_id=<bubble_student_id>  (vereist; anders 400).
+// Query: ?student_id=<studentsleutel>  (vereist; anders 400).
 //
 // Response 200:
 //   { ok: true, student_id, history: [{

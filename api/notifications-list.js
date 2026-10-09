@@ -21,7 +21,7 @@
 //   notifications: [{
 //     id, type, title, body, link_url, entity_type, entity_id,
 //     priority, created_at, read_at,
-//     onboarding_bubble_user_id  // aanvullend voor entity_type='onboarding'
+//     onboarding_student_id      // aanvullend voor entity_type='onboarding'
 //                                 // (best-effort enrichment; null bij lookup-fail).
 //   }],
 //   unread_count
@@ -66,8 +66,8 @@ export default async function handler(req, res) {
     if (listErr) throw new Error('notifications fetch: ' + listErr.message);
 
     // Best-effort enrichment: voor entity_type='onboarding' rijen erbij
-    // opzoeken van onboardings.bubble_user_id, zodat clients (mentor-students)
-    // een bubble_user_id → count map kunnen bouwen zonder extra endpoint.
+    // opzoeken van de studentsleutel van de onboarding, zodat clients (mentor-students)
+    // een studentsleutel → count map kunnen bouwen zonder extra endpoint.
     // Fail-soft: bij lookup-fout worden de velden simpelweg null.
     const enriched = Array.isArray(rows) ? rows.slice() : [];
     const onboardingIds = Array.from(new Set(
@@ -79,18 +79,20 @@ export default async function handler(req, res) {
       try {
         const { data: obRows, error: obErr } = await supabaseAdmin
           .from('onboardings')
-          .select('id, bubble_user_id')
+          .select('id, bubble_user_id, dfo_lms_student_id')
           .in('id', onboardingIds);
         if (obErr) {
           console.warn('[notifications-list] onboarding enrich fail:', obErr.message);
         } else {
-          const bubbleByOnb = new Map();
+          // De studentsleutel (api/_lib/mentorStudents.js): het historische
+          // id als de student dat heeft, anders het LMS-id.
+          const sleutelByOnb = new Map();
           for (const row of (obRows || [])) {
-            if (row && row.id) bubbleByOnb.set(row.id, row.bubble_user_id || null);
+            if (row && row.id) sleutelByOnb.set(row.id, row.bubble_user_id || row.dfo_lms_student_id || null);
           }
           for (const n of enriched) {
             if (n && n.entity_type === 'onboarding' && n.entity_id) {
-              n.onboarding_bubble_user_id = bubbleByOnb.get(n.entity_id) || null;
+              n.onboarding_student_id = sleutelByOnb.get(n.entity_id) || null;
             }
           }
         }
