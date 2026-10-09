@@ -522,21 +522,6 @@
             </div>
           </div>
 
-          <!-- PR2a — Mentor ↔ Bubble-koppeling. Admin-tool om team_members.bubble_user_id
-               te zetten/wissen. Toont elke actieve mentor (rol mentor, team_member
-               actief) met huidige koppeling-status + actie-knop voor de picker. -->
-          <div class="integration-card" id="card-mentor-bubble" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
-            <div style="display:flex;align-items:flex-start;gap:14px">
-              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-link"></i></div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:15px;font-weight:700">Mentor ↔ Bubble-koppeling</div>
-                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Koppel een mentor aan een bubble.io-User zodat het mentor-dashboard later z'n studenten + calls uit Bubble kan tonen.</div>
-                <div id="mentorBubbleListWrap" style="display:flex;flex-direction:column;gap:6px;font-size:13px"></div>
-                <div id="mentorBubbleHint" style="font-size:11.5px;color:var(--text-faint);margin-top:8px"></div>
-              </div>
-            </div>
-          </div>
-
           <div class="integration-card" id="card-webflow-auto-publish" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
             <div style="display:flex;align-items:flex-start;gap:14px">
               <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-world-www"></i></div>
@@ -550,32 +535,6 @@
                 <div id="wfAutoPublishMeta" style="font-size:11.5px;color:var(--text-faint);margin-bottom:12px"></div>
                 <div id="wfAutoPublishActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"></div>
                 <div id="wfAutoPublishErr" style="font-size:12px;color:var(--danger);margin-top:8px;display:none"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Bubble-schema-diagnostiek — read-only super_admin probe.
-               Roept /api/bubble-schema-probe aan en toont uitsluitend
-               field_keys + field_types (geen PII). Card altijd zichtbaar
-               voor admin-tab-bezoekers; endpoint zelf gate't 403 voor
-               niet-super_admins en de UI toont die foutmelding netjes. -->
-          <div class="integration-card" id="card-bubble-schema" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
-            <div style="display:flex;align-items:flex-start;gap:14px">
-              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-flask"></i></div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:15px;font-weight:700">Bubble-schema (diagnostiek)</div>
-                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">
-                  Vraag 1 record op van een Bubble-objecttype en bekijk welke property-keys + JS-typen aanwezig zijn.
-                  <strong>Geen waarden/PII</strong> — uitsluitend keys + types. Alleen super_admin.
-                </div>
-                <div id="bubbleProbeActions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-                  <button class="btn btn-sm" type="button" id="bubbleProbeUserBtn"><i class="ti ti-user"></i> Haal User-velden op</button>
-                  <button class="btn btn-sm" type="button" id="bubbleProbeSessionBtn"><i class="ti ti-clock"></i> Haal Session-velden op</button>
-                  <button class="btn btn-sm" type="button" id="bubbleProbeOptionsBtn"><i class="ti ti-tags"></i> Haal option-waarden op</button>
-                  <button class="btn btn-sm" type="button" id="bubbleProbeCopyBtn" disabled style="margin-left:auto"><i class="ti ti-copy"></i> Kopieer</button>
-                </div>
-                <div id="bubbleProbeStatus" style="font-size:12px;color:var(--text-dim);margin-bottom:8px"></div>
-                <pre id="bubbleProbeOut" style="background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.45;overflow:auto;max-height:340px;margin:0;display:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace"></pre>
               </div>
             </div>
           </div>
@@ -921,7 +880,6 @@
     <div class="modal-body">
       <input type="hidden" id="euUserId" />
       <input type="hidden" id="euTeamMemberId" />
-      <input type="hidden" id="euInitialBubbleId" />
       <div class="form-group">
         <label class="form-label">Volledige naam</label>
         <input type="text" id="euFullName" class="form-input" autocomplete="off" />
@@ -956,13 +914,8 @@
           <button type="button" class="btn" id="euMentorEnsureBtn" onclick="euCreateMentorProfile()" style="padding:8px 12px">
             <i class="ti ti-user-plus"></i> Mentor-profiel aanmaken
           </button>
-          <span style="font-size:11.5px;color:var(--text-dim)" id="euMentorEnsureMsg">Deze user heeft de mentor-rol maar nog geen team_members-rij — pas dan verschijnt de Mentor↔Bubble-koppeling.</span>
+          <span style="font-size:11.5px;color:var(--text-dim)" id="euMentorEnsureMsg">Deze user heeft de mentor-rol maar nog geen team_members-rij. De koppeling met het LMS loopt via het e-mailadres.</span>
         </div>
-      </div>
-      <div class="form-group" id="euBubbleRow" style="display:none">
-        <label class="form-label">Mentor &harr; Bubble-koppeling</label>
-        <input type="text" id="euBubbleId" class="form-input" placeholder="bubble_user_id (leeg = ontkoppelen)" autocomplete="off" />
-        <div style="font-size:11px;color:var(--text-faint);margin-top:4px">Alleen voor mentors met een team_members-rij.</div>
       </div>
       <div class="form-error hidden" id="euError"></div>
     </div>
@@ -1343,7 +1296,7 @@ function switchAdminTab(name) {
   const inviteBtn = document.querySelector('.page-header .btn-primary');
   if (inviteBtn) inviteBtn.style.display = name === 'gebruikers' ? '' : 'none';
   if (name === 'rechten' && !rbacLoaded) loadPermissionsMatrix();
-  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); loadMentorBubbleSection(); wireBubbleProbe(); wireWaRegister(); }
+  if (name === 'integraties') { loadTlStatus(); loadWebhooks(); loadTemplateSetting(); loadWebflowAutoPublishState(); wireWaRegister(); }
   if (name === 'approval-queue') {
     wireApprovOnce();
     loadApprovalQueue();
@@ -2049,146 +2002,8 @@ function handleTlReturnBanner() {
   history.replaceState(null, '', location.pathname);
 }
 
-// ── PR2a · Mentor ↔ Bubble-koppeling ─────────────────────────────────────────
-const _mb = { mentors: [], bubbleUsers: [], activeRowId: null };
-
-function _mbEsc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-}
-
-// ── Bubble-schema-probe (super_admin diagnostiek) ───────────────────────────
-// Roept /api/bubble-schema-probe?type=<...> aan via AgentShared.apiFetch
-// (Bearer-JWT wordt automatisch geinjecteerd). Endpoint zelf gate't op
-// super_admin + is_active; bij 403 toont de UI de fout-string netjes.
-//
-// Output: { type, count, field_keys[], field_types{} } in een <pre>.
-// Geen waarden in de response — alleen keys + types, dus geen PII-risico
-// in de UI-state of clipboard.
-let _bubbleProbeWired = false;
-function wireBubbleProbe() {
-  if (_bubbleProbeWired) return;
-  _bubbleProbeWired = true;
-  const userBtn   = document.getElementById('bubbleProbeUserBtn');
-  const sesBtn    = document.getElementById('bubbleProbeSessionBtn');
-  const optBtn    = document.getElementById('bubbleProbeOptionsBtn');
-  const copyBtn   = document.getElementById('bubbleProbeCopyBtn');
-  if (userBtn) userBtn.addEventListener('click', () => _runBubbleProbe('user'));
-  if (sesBtn)  sesBtn.addEventListener('click',  () => _runBubbleProbe('one-on-one-session'));
-  if (optBtn)  optBtn.addEventListener('click',  () => _runBubbleProbe('user', { options: true }));
-  if (copyBtn) copyBtn.addEventListener('click', _copyBubbleProbe);
-}
-
-async function _runBubbleProbe(probeType, opts) {
-  const optionsMode = !!(opts && opts.options);
-  const status = document.getElementById('bubbleProbeStatus');
-  const out    = document.getElementById('bubbleProbeOut');
-  const copy   = document.getElementById('bubbleProbeCopyBtn');
-  const userBt = document.getElementById('bubbleProbeUserBtn');
-  const sesBt  = document.getElementById('bubbleProbeSessionBtn');
-  const optBt  = document.getElementById('bubbleProbeOptionsBtn');
-  if (!status || !out) return;
-  // Disable knoppen tijdens fetch zodat dubbele klik niet meerdere round-trips
-  // veroorzaakt.
-  if (userBt) userBt.disabled = true;
-  if (sesBt)  sesBt.disabled  = true;
-  if (optBt)  optBt.disabled  = true;
-  if (copy)   copy.disabled   = true;
-  status.style.color = 'var(--text-dim)';
-  status.textContent = optionsMode
-    ? 'Ophalen van option-waarden voor "' + probeType + '"…'
-    : 'Ophalen van Bubble-schema voor "' + probeType + '"…';
-  out.style.display = 'none';
-  out.textContent = '';
-  try {
-    const url = '/api/bubble-schema-probe?type=' + encodeURIComponent(probeType) +
-      (optionsMode ? '&options=1' : '');
-    const r = await window.AgentShared.apiFetch(url);
-    let body = null;
-    try { body = await r.json(); } catch {}
-    if (r.status === 401) {
-      status.style.color = 'var(--danger,#b91c1c)';
-      status.textContent = '✗ Niet (meer) ingelogd — log opnieuw in.';
-      return;
-    }
-    if (r.status === 403) {
-      status.style.color = 'var(--danger,#b91c1c)';
-      status.textContent = '✗ Geen rechten — alleen super_admin (' + (body?.error || 'Forbidden') + ')';
-      return;
-    }
-    if (r.status === 502 || r.status === 503) {
-      status.style.color = 'var(--danger,#b91c1c)';
-      status.textContent = '✗ Bubble onbereikbaar: ' + (body?.error || ('HTTP ' + r.status)) +
-        (body?.detail ? ' — ' + body.detail : '');
-      return;
-    }
-    if (!r.ok) {
-      status.style.color = 'var(--danger,#b91c1c)';
-      status.textContent = '✗ Fout: ' + (body?.error || ('HTTP ' + r.status));
-      return;
-    }
-    // Success — render JSON ingesprongen.
-    const formatted = JSON.stringify(body, null, 2);
-    out.textContent = formatted;
-    out.style.display = '';
-    status.style.color = 'var(--text-dim)';
-    if (optionsMode) {
-      const sampled = Number(body?.sampled) || 0;
-      const vals = body?.option_values || {};
-      const fldCount = Object.keys(vals).length;
-      let totalDistinct = 0;
-      for (const k of Object.keys(vals)) {
-        if (Array.isArray(vals[k])) totalDistinct += vals[k].length;
-      }
-      status.textContent = '✓ Option-waarden opgehaald — ' + sampled + ' record' +
-        (sampled === 1 ? '' : 's') + ' gesampled, ' + fldCount + ' veld' +
-        (fldCount === 1 ? '' : 'en') + ', ' + totalDistinct + ' distinct waarde' +
-        (totalDistinct === 1 ? '' : 'n') + ' totaal.';
-    } else {
-      const count = Number(body?.count) || 0;
-      const keyCount = Array.isArray(body?.field_keys) ? body.field_keys.length : 0;
-      status.textContent = '✓ Schema opgehaald — ' + count + ' record' + (count === 1 ? '' : 's') +
-        ', ' + keyCount + ' veld' + (keyCount === 1 ? '' : 'en') + ' gevonden.';
-    }
-    if (copy) copy.disabled = false;
-  } catch (e) {
-    console.error('[bubble-schema-probe]', e);
-    status.style.color = 'var(--danger,#b91c1c)';
-    status.textContent = '✗ Onverwachte fout: ' + (e?.message || e);
-  } finally {
-    if (userBt) userBt.disabled = false;
-    if (sesBt)  sesBt.disabled  = false;
-    if (optBt)  optBt.disabled  = false;
-  }
-}
-
-async function _copyBubbleProbe() {
-  const out  = document.getElementById('bubbleProbeOut');
-  const copy = document.getElementById('bubbleProbeCopyBtn');
-  if (!out || !out.textContent) return;
-  const txt = out.textContent;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(txt);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = txt;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    if (copy) {
-      const orig = copy.innerHTML;
-      copy.innerHTML = '<i class="ti ti-check"></i> Gekopieerd';
-      setTimeout(() => { copy.innerHTML = orig; }, 1600);
-    }
-  } catch (e) {
-    console.error('[bubble-schema-probe copy]', e);
-  }
-}
-
 // ── WhatsApp-nummer registreren (super_admin, éénmalig per nieuw nummer) ──
-// Wire-pattern gespiegeld aan wireBubbleProbe: idempotent guard zodat
+// Idempotent guard zodat
 // switchAdminTab('integraties') 'm meermaals mag aanroepen zonder dubbele
 // listeners.
 let _waRegWired = false;
@@ -2298,159 +2113,6 @@ async function _runWaRegister() {
   } finally {
     btn.disabled = false;
   }
-}
-
-async function loadMentorBubbleSection() {
-  const wrap = document.getElementById('mentorBubbleListWrap');
-  const hint = document.getElementById('mentorBubbleHint');
-  if (!wrap) return;
-  wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px">Mentoren laden&hellip;</div>';
-  if (hint) hint.textContent = '';
-  try {
-    const r = await window.AgentShared.apiFetch('/api/team-members-bubble-status');
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error || 'load failed');
-    _mb.mentors = Array.isArray(data.mentors) ? data.mentors : [];
-    renderMentorBubbleList();
-  } catch (e) {
-    wrap.innerHTML = '<div style="color:var(--danger);font-size:12.5px">Mentoren ophalen mislukt: ' + _mbEsc(e?.message || e) + '</div>';
-  }
-}
-
-function renderMentorBubbleList() {
-  const wrap = document.getElementById('mentorBubbleListWrap');
-  if (!wrap) return;
-  if (!_mb.mentors.length) {
-    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px">Nog geen actieve mentoren met user-koppeling.</div>';
-    return;
-  }
-  wrap.innerHTML = _mb.mentors.map((m) => {
-    const linked = !!m.bubble_user_id;
-    const status = linked
-      ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Gekoppeld</span> ' +
-        '<code style="font-size:11px;color:var(--text-dim)">' + _mbEsc(m.bubble_user_id) + '</code>'
-      : '<span style="background:var(--slate-soft);color:var(--slate);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Niet gekoppeld</span>';
-    const actionBtn = linked
-      ? '<button class="btn btn-sm" onclick="openMentorBubblePicker(\'' + _mbEsc(m.id) + '\')">Wijzigen</button> ' +
-        '<button class="btn btn-sm" style="color:var(--danger)" onclick="unlinkMentorBubble(\'' + _mbEsc(m.id) + '\')">Ontkoppelen</button>'
-      : '<button class="btn btn-sm btn-primary" onclick="openMentorBubblePicker(\'' + _mbEsc(m.id) + '\')">Koppelen</button>';
-    return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">' +
-      '<div style="flex:1;min-width:160px">' +
-        '<div style="font-weight:600">' + _mbEsc(m.name || '?') + '</div>' +
-        '<div style="font-size:11.5px;color:var(--text-faint)">' + _mbEsc(m.email || '—') + '</div>' +
-      '</div>' +
-      '<div style="font-size:12px">' + status + '</div>' +
-      '<div style="display:flex;gap:6px">' + actionBtn + '</div>' +
-    '</div>';
-  }).join('');
-}
-
-async function openMentorBubblePicker(teamMemberId) {
-  _mb.activeRowId = teamMemberId;
-  const mentor = _mb.mentors.find((x) => x.id === teamMemberId);
-  if (!mentor) return;
-  let modal = document.getElementById('mentorBubbleModal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'mentorBubbleModal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px';
-    modal.innerHTML =
-      '<div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">' +
-          '<div><div style="font-weight:700;font-size:15px">Bubble-User kiezen</div><div id="mbModalSub" style="font-size:12px;color:var(--text-dim)"></div></div>' +
-          '<button class="btn btn-sm" onclick="closeMentorBubblePicker()" aria-label="Sluiten">&times;</button>' +
-        '</div>' +
-        '<div style="padding:12px 18px;border-bottom:1px solid var(--border)">' +
-          '<input id="mbSearch" type="text" placeholder="Zoeken op naam of e-mail..." class="form-input" style="width:100%" oninput="filterMentorBubbleResults()" />' +
-        '</div>' +
-        '<div id="mbResults" style="overflow-y:auto;padding:8px 12px;flex:1;min-height:240px"></div>' +
-      '</div>';
-    document.body.appendChild(modal);
-  }
-  document.getElementById('mbModalSub').textContent = 'Voor ' + (mentor.name || mentor.email || '?');
-  document.getElementById('mbSearch').value = '';
-  const results = document.getElementById('mbResults');
-  results.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px">Bubble-mentoren laden&hellip;</div>';
-  modal.style.display = 'flex';
-  try {
-    const r = await window.AgentShared.apiFetch('/api/bubble-mentors-list');
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error || 'bubble-list failed');
-    _mb.bubbleUsers = Array.isArray(data.mentors) ? data.mentors : [];
-    renderMentorBubbleResults('');
-  } catch (e) {
-    results.innerHTML = '<div style="color:var(--danger);font-size:12.5px;padding:14px">Ophalen mislukt: ' + _mbEsc(e?.message || e) + '</div>';
-  }
-}
-
-function filterMentorBubbleResults() {
-  const q = (document.getElementById('mbSearch')?.value || '').trim().toLowerCase();
-  renderMentorBubbleResults(q);
-}
-
-function renderMentorBubbleResults(q) {
-  const results = document.getElementById('mbResults');
-  if (!results) return;
-  const linkedIds = new Set(_mb.mentors.filter((m) => m.bubble_user_id).map((m) => m.bubble_user_id));
-  const list = (_mb.bubbleUsers || []).filter((u) => {
-    if (!q) return true;
-    return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
-  });
-  if (!list.length) {
-    results.innerHTML = '<div style="color:var(--text-faint);font-size:12.5px;padding:14px">Geen resultaten.</div>';
-    return;
-  }
-  results.innerHTML = list.map((u) => {
-    const alreadyLinked = linkedIds.has(u.bubble_user_id);
-    return '<button type="button" class="btn" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;padding:10px 12px" ' +
-        (alreadyLinked ? 'disabled title="Al gekoppeld aan een andere mentor"' : 'onclick="confirmMentorBubbleLink(\'' + _mbEsc(u.bubble_user_id) + '\')"') + '>' +
-      '<span><span style="font-weight:600">' + _mbEsc(u.name || '?') + '</span>' +
-      '<span style="display:block;font-size:11.5px;color:var(--text-faint)">' + _mbEsc(u.email || '—') + '</span></span>' +
-      '<span style="font-size:11px;color:var(--text-faint)">' + (alreadyLinked ? 'Al gekoppeld' : _mbEsc(u.bubble_user_id)) + '</span>' +
-    '</button>';
-  }).join('');
-}
-
-async function confirmMentorBubbleLink(bubbleUserId) {
-  const tmId = _mb.activeRowId;
-  if (!tmId) return;
-  try {
-    const r = await window.AgentShared.apiFetch('/api/mentor-bubble-link', {
-      method: 'POST',
-      body: JSON.stringify({ team_member_id: tmId, bubble_user_id: bubbleUserId }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error || 'link failed');
-    window.AgentShared?.showToast?.('Bubble-koppeling opgeslagen', 'success');
-    closeMentorBubblePicker();
-    await loadMentorBubbleSection();
-  } catch (e) {
-    window.AgentShared?.showToast?.('Koppelen mislukt: ' + (e?.message || e), 'error');
-  }
-}
-
-async function unlinkMentorBubble(teamMemberId) {
-  const mentor = _mb.mentors.find((x) => x.id === teamMemberId);
-  if (!mentor) return;
-  if (!confirm('Bubble-koppeling van ' + (mentor.name || 'mentor') + ' wissen?')) return;
-  try {
-    const r = await window.AgentShared.apiFetch('/api/mentor-bubble-link', {
-      method: 'POST',
-      body: JSON.stringify({ team_member_id: teamMemberId, bubble_user_id: null }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data?.error || 'unlink failed');
-    window.AgentShared?.showToast?.('Bubble-koppeling gewist', 'success');
-    await loadMentorBubbleSection();
-  } catch (e) {
-    window.AgentShared?.showToast?.('Wissen mislukt: ' + (e?.message || e), 'error');
-  }
-}
-
-function closeMentorBubblePicker() {
-  const m = document.getElementById('mentorBubbleModal');
-  if (m) m.style.display = 'none';
-  _mb.activeRowId = null;
 }
 
 // Cache van de laatst-geladen users-lijst; gebruikt door openEditUserModal om
@@ -2811,22 +2473,12 @@ function openEditUserModal(userId) {
 
   document.getElementById('euUserId').value          = u.id;
   document.getElementById('euTeamMemberId').value    = u.team_member_id || '';
-  document.getElementById('euInitialBubbleId').value = u.bubble_user_id || '';
   document.getElementById('euFullName').value        = u.full_name || '';
   document.getElementById('euEmail').value           = u.email || '';
   document.getElementById('euPassword').value        = '';
   document.getElementById('euPhone').value           = u.phone || '';
   document.getElementById('euIsActive').value        = u.is_active ? 'true' : 'false';
 
-  // Bubble-rij alleen tonen als deze user een team_members-rij heeft.
-  const bubbleRow = document.getElementById('euBubbleRow');
-  if (u.team_member_id) {
-    document.getElementById('euBubbleId').value = u.bubble_user_id || '';
-    bubbleRow.style.display = '';
-  } else {
-    document.getElementById('euBubbleId').value = '';
-    bubbleRow.style.display = 'none';
-  }
   // Mentor-profiel-ensure: zichtbaar als user de mentor-rol heeft maar nog
   // GEEN team_members-rij. Verberg zodra team_member_id gezet is.
   const ensureRow = document.getElementById('euMentorEnsureRow');
@@ -2877,28 +2529,24 @@ async function euCreateMentorProfile() {
     const r = await apiRequest('POST', '/api/team-member-ensure', { user_id: userId });
     if (r && r.error) throw new Error(r.error);
 
-    // Sluit + herlaad lijst → heropen modal voor dezelfde user, zodat de
-    // Mentor↔Bubble-koppeling-rij nu zichtbaar wordt (team_member_id is gezet).
+    // Sluit + herlaad lijst → heropen modal voor dezelfde user.
     closeEditUserModal();
     await loadUsers();
     openEditUserModal(userId);
   } catch (e) {
     if (btn) btn.disabled = false;
-    if (msgEl) msgEl.textContent = 'Deze user heeft de mentor-rol maar nog geen team_members-rij — pas dan verschijnt de Mentor↔Bubble-koppeling.';
+    if (msgEl) msgEl.textContent = 'Deze user heeft de mentor-rol maar nog geen team_members-rij. De koppeling met het LMS loopt via het e-mailadres.';
     _euShowError(e?.message || String(e));
   }
 }
 
 async function submitEditUser() {
   const userId         = document.getElementById('euUserId').value;
-  const teamMemberId   = document.getElementById('euTeamMemberId').value || '';
-  const initialBubble  = document.getElementById('euInitialBubbleId').value || '';
   const fullName       = document.getElementById('euFullName').value.trim();
   const email          = document.getElementById('euEmail').value.trim();
   const password       = document.getElementById('euPassword').value; // GEEN trim
   const phone          = document.getElementById('euPhone').value.trim();
   const isActiveStr    = document.getElementById('euIsActive').value;
-  const newBubbleRaw   = document.getElementById('euBubbleId').value.trim();
 
   if (!userId) { _euShowError('Geen userId.'); return; }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -2925,16 +2573,6 @@ async function submitEditUser() {
   try {
     const r = await apiRequest('PATCH', '/api/admin-users?id=' + encodeURIComponent(userId), body);
     if (r && r.error) throw new Error(r.error);
-
-    // Bubble-koppeling apart: alleen verzenden als gewijzigd ÉN er is een team_member_id.
-    if (teamMemberId && newBubbleRaw !== initialBubble) {
-      const linkBody = {
-        team_member_id: teamMemberId,
-        bubble_user_id: newBubbleRaw === '' ? null : newBubbleRaw,
-      };
-      const lr = await apiRequest('POST', '/api/mentor-bubble-link', linkBody);
-      if (lr && lr.error) throw new Error('Bubble-koppeling: ' + lr.error);
-    }
 
     closeEditUserModal();
     await loadUsers();

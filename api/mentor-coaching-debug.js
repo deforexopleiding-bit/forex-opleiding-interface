@@ -1,10 +1,14 @@
 // api/mentor-coaching-debug.js
 //
-// Diagnostic — toont de 1-op-1 sessie-telling voor (mentor, maand) zoals de
-// payout-generate-core die ziet. Het blok `lms` bevat de bronnen + tellers van
-// api/_lib/coaching-earnings.js (LMS + Bubble vóór oktober 2026) — dat is
-// wat het rapport rekent. De rest is de oudere Bubble-diagnose. Helpt te bepalen waarom het maandtotaal van
-// een mentor afwijkt: laat keys + datums + booleans zien zonder PII.
+// Diagnostic — toont de coaching-telling voor (mentor, maand) zoals de
+// payout-generate-core die ziet: het blok `lms` bevat de bronnen + tellers
+// van api/_lib/coaching-earnings.js (alleen het LMS). Helpt te bepalen
+// waarom het maandtotaal van een mentor afwijkt.
+//
+// Sinds 9 okt 2026 zonder Bubble (dicht). Voor een maand vóór oktober 2026
+// telt de helper alleen het LMS-deel; dan staan `melding` en `opgeslagen`
+// (de coachingregels van de opgeslagen uitbetaling, als die er is) erbij,
+// zodat te zien is wat er werkelijk is uitgerekend toen Bubble nog meetelde.
 //
 // Permission: mentor.payout.manage (super_admin / admin / manager).
 //
@@ -12,49 +16,14 @@
 //   ?mentor_user_id=<uuid>  (verplicht)
 //   ?period_month=YYYY-MM    (verplicht; dag wordt genegeerd)
 //
-// PRIVACY: ALLEEN keys, datums, booleans en interne bubble-IDs in de output.
-// Geen namen, e-mails of vrije-tekstvelden. De volledige Bubble-rij wordt
-// ALLEEN gebruikt om sessionSampleKeys (= Object.keys van eerste sessie) te
-// bouwen; de individuele rij gaat NIET mee.
+// Faalt nooit met 5xx op een bronfout: die komt als { error, code } in `lms`.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleList } from './_lib/bubble.js';
-import { computeCoachingEarnings } from './_lib/coaching-earnings.js';
+import { computeCoachingEarnings, OUDE_BRON_EINDE } from './_lib/coaching-earnings.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
-const IN_BATCH_LIMIT = 30;
-
-function asBool(v) {
-  if (v === true || v === false) return v;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (['true','yes','ja','1'].includes(s)) return true;
-    if (['false','no','nee','0'].includes(s)) return false;
-  }
-  return !!v;
-}
-
-// Bubble option-set veld → leesbare string. String blijft string; object met
-// .display/.text wordt geplat naar die waarde; alles anders → null.
-function pickOption(v) {
-  if (v == null) return null;
-  if (typeof v === 'string') return v.trim() || null;
-  if (typeof v === 'object') {
-    const d = v.display || v.text || v.value || null;
-    return d ? String(d).trim() || null : null;
-  }
-  return null;
-}
-
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) {
-    if (u[k] !== undefined) return u[k];
-  }
-  return undefined;
-}
 
 function dayStartMs(y, mo, d) {
   return Date.UTC(y, mo - 1, d);
@@ -86,13 +55,6 @@ function periodFromMonth(s) {
   };
 }
 
-function inRange(rawDate, fromMs, toMsInclusive) {
-  if (!rawDate) return false;
-  const t = (typeof rawDate === 'number') ? rawDate : new Date(String(rawDate)).getTime();
-  if (!Number.isFinite(t)) return false;
-  return t >= fromMs && t <= toMsInclusive;
-}
-
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -118,514 +80,64 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'period_month moet YYYY-MM zijn' });
   }
 
-  let lms = null;
+  let lms;
   try {
-    // Resolve bubble_user_id.
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('bubble_user_id, is_active')
-      .eq('user_id', mentorUserId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    const seppeBubbleId = tm?.bubble_user_id || null;
-
-    // ── lms — exact wat het rapport rekent (zelfde helper) ─────────────────
-    // Toont per bron waar elk getal vandaan komt. Een bronfout komt hier als
-    // { error, code } in beeld i.p.v. de hele debug te laten falen.
-    try {
-      const r = await computeCoachingEarnings({
-        bubbleUserId: seppeBubbleId,
-        mentorUserId,
-        from: period.from,
-        to  : period.to,
-      });
-      const m = r._meta || {};
-      lms = {
-        bronnen                           : m.bronnen,
-        venster                           : m.venster,
-        lms_sessies_gelezen               : m.lms_sessies_gelezen,
-        lms_zelfde_moment                 : m.lms_zelfde_moment,
-        lms_zonder_student                : m.lms_zonder_student,
-        lms_teamtraining                  : m.lms_teamtraining,
-        bubble_overgeslagen_dubbel_met_lms: m.bubble_overgeslagen_dubbel_met_lms,
-        breakdown                         : r.breakdown,
-        grand_total                       : r.grand_total,
-      };
-    } catch (e) {
-      lms = { error: e?.message || String(e), code: e?.code || null };
-    }
-
-    if (!seppeBubbleId) {
-      return res.status(200).json({
-        ok                    : true,
-        mentor_user_id        : mentorUserId,
-        seppeBubbleId         : null,
-        period_month          : period.monthStartIso,
-        from                  : period.from,
-        to                    : period.to,
-        linked                : false,
-        lms,
-        students_count        : 0,
-        sessions_fetched      : 0,
-        sessionSampleKeys     : [],
-        oneOnOne_count        : 0,
-        doneAndNoshow_in_range: 0,
-        counted               : [],
-      });
-    }
-
-    // Studenten ophalen — zelfde constraints als de helper.
-    const studentsConstraints = [
-      { key: 'mentor_user',            constraint_type: 'equals', value: seppeBubbleId },
-      { key: 'role_option_os___roles', constraint_type: 'equals', value: 'student' },
-    ];
-    const { results: studentRows } = await bubbleList('user', studentsConstraints, { limit: 500 });
-    const studentIds = (studentRows || []).map((u) => String(u._id || '')).filter(Boolean);
-
-    // 1-op-1 sessies ophalen — zelfde batching als de helper.
-    let sessionRows = [];
-    if (studentIds.length > 0) {
-      if (studentIds.length <= IN_BATCH_LIMIT) {
-        try {
-          const { results } = await bubbleList(
-            '1-1-session',
-            [{ key: 'member_user', constraint_type: 'in', value: studentIds }],
-            { limit: 2000 },
-          );
-          sessionRows = results || [];
-        } catch (e) {
-          console.warn('[mentor-coaching-debug] in-constraint sessions faalde, fallback per-student:', e?.message || e);
-          sessionRows = [];
-        }
-      }
-      if (sessionRows.length === 0 && studentIds.length > 0) {
-        for (let i = 0; i < studentIds.length; i += IN_BATCH_LIMIT) {
-          const batch = studentIds.slice(i, i + IN_BATCH_LIMIT);
-          const batchResults = await Promise.all(batch.map((sid) =>
-            bubbleList('1-1-session',
-              [{ key: 'member_user', constraint_type: 'equals', value: sid }],
-              { limit: 500 },
-            ).then((r) => r.results || []).catch(() => [])
-          ));
-          for (const arr of batchResults) sessionRows.push(...arr);
-        }
-      }
-    }
-
-    // Tellen — exact dezelfde regels als coaching-earnings.js.
-    let oneOnOne = 0;
-    let doneAndNoshow = 0;
-    const counted = [];
-    const MAX_COUNTED = 120;
-
-    // Learntype-verdeling: groepeer in-range sessies op learn_type1 option-set.
-    // Sleutel '(none)' voor sessies zonder lt-waarde zodat alles getelt blijft.
-    const byLearnType = {};
-    function ensureLt(key) {
-      if (!byLearnType[key]) {
-        byLearnType[key] = { done: 0, done_not_noshow: 0, noshow: 0 };
-      }
-      return byLearnType[key];
-    }
-    let total_done = 0;
-    let total_done_not_noshow = 0;
-    let total_noshow = 0;
-
-    // byDateField: vergelijk telling op completed_date vs starting_date over
-    // ALLE opgehaalde sessies (niet alleen de in-range bucket hierboven).
-    const byDateField = {
-      completed_in_range: { done: 0, done_not_noshow: 0, noshow: 0 },
-      starting_in_range : { done: 0, done_not_noshow: 0, noshow: 0 },
-    };
-
-    for (const s of sessionRows) {
-      const done     = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-      const ns       = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-      const compDt   = readFirst(s, ['completed_date_date', 'completed date']);
-      const startDt  = readFirst(s, ['starting_date_date', 'starting date']);
-      const memberId = readFirst(s, ['member_user', 'member']);
-      const lt       = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
-      const cbVal    = readFirst(s, ['Created By', 'created_by']);
-      const inWin    = inRange(compDt,  period.fromMs, period.toMsIncl);
-      const inWinSt  = inRange(startDt, period.fromMs, period.toMsIncl);
-
-      if (done && inWin) {
-        oneOnOne += 1;
-        if (counted.length < MAX_COUNTED) {
-          counted.push({
-            c   : compDt  || null,
-            s   : startDt || null,
-            done: !!done,
-            ns  : !!ns,
-            m   : memberId ? String(memberId) : null,
-            lt  : lt,
-            cb  : cbVal ? String(cbVal) : null,
-          });
-        }
-        // byLearnType + totals — alleen voor in-range done sessies.
-        const cell = ensureLt(lt || '(none)');
-        cell.done += 1;
-        total_done += 1;
-        if (ns) {
-          cell.noshow += 1;
-          total_noshow += 1;
-        } else {
-          cell.done_not_noshow += 1;
-          total_done_not_noshow += 1;
-        }
-      }
-      if (done && ns && inWin) {
-        doneAndNoshow += 1;
-      }
-
-      // byDateField — alleen done sessies meetellen, gesplitst op datumveld
-      // dat in de maand valt. Onafhankelijk van counted/byLearnType.
-      if (done && inWin) {
-        byDateField.completed_in_range.done += 1;
-        if (ns) byDateField.completed_in_range.noshow          += 1;
-        else    byDateField.completed_in_range.done_not_noshow += 1;
-      }
-      if (done && inWinSt) {
-        byDateField.starting_in_range.done += 1;
-        if (ns) byDateField.starting_in_range.noshow          += 1;
-        else    byDateField.starting_in_range.done_not_noshow += 1;
-      }
-    }
-
-    const sessionSampleKeys = sessionRows[0] ? Object.keys(sessionRows[0]) : [];
-
-    // ── createdByProbe ────────────────────────────────────────────────────
-    // Fetch ALLE 1-1-sessions met starting_date_date binnen [monthStart, monthEnd),
-    // ZONDER student-filter. Doel: kunnen we via "Created By" zien dat de mentor
-    // sessies heeft aangemaakt die NIET in z'n huidige 36 student-bucket vallen?
-    // (bv. omdat een student van mentor-koppeling is veranderd).
-    //
-    // Bubble's 'greater than' / 'less than' op date-constraints zijn STRIKT;
-    // we sturen monthStart-1ms (zodat de 1e wél meedoet) en monthEnd+1d
-    // (zodat de laatste dag wél meedoet).
-    let createdByProbe = null;
-    try {
-      const PROBE_CAP = 3000;
-      const fromIsoStrict = new Date(period.fromMs - 1).toISOString();
-      const toIsoStrict   = new Date(period.toMsIncl + 1).toISOString();
-      const probeConstraints = [
-        { key: 'starting_date_date', constraint_type: 'greater than', value: fromIsoStrict },
-        { key: 'starting_date_date', constraint_type: 'less than',    value: toIsoStrict   },
-      ];
-      const { results: probeRows } = await bubbleList(
-        '1-1-session',
-        probeConstraints,
-        { limit: PROBE_CAP },
-      );
-      const probeArr = probeRows || [];
-      const fetched  = probeArr.length;
-      const capped   = fetched >= PROBE_CAP;
-
-      // cb_histogram: top-12 distinct Created By → count (desc).
-      const cbCount = new Map();
-      let seppeDoneNotNs = 0;
-      let seppeNoShow   = 0;
-      let seppeTotal    = 0;
-      const seppeStudentIdsSet = new Set();
-      const studentIdsSet      = new Set(studentIds);
-
-      // Per learn_type tellingen voor Seppe-sessies (alleen done in maand-range).
-      const seppe_by_learntype = {};
-      function ensureLtBucket(key) {
-        if (!seppe_by_learntype[key]) {
-          seppe_by_learntype[key] = { done_not_noshow: 0, noshow: 0, total: 0 };
-        }
-        return seppe_by_learntype[key];
-      }
-      // Alpha-only counters + dupe-detectie. Sleutel = `${member_user}|${day}`,
-      // waarde = array van starting_date_date strings (volgorde van fetch).
-      const seppe_alpha = { done_not_noshow: 0, noshow: 0 };
-      const alphaDupeMap = new Map();
-      // Per-student bucket voor Alpha: member_user → { calls, noshow, days }.
-      const alphaPerStudent = new Map();
-
-      for (const s of probeArr) {
-        const cb = readFirst(s, ['Created By', 'created_by']);
-        const cbKey = cb ? String(cb) : '(none)';
-        cbCount.set(cbKey, (cbCount.get(cbKey) || 0) + 1);
-
-        if (cb && String(cb) === seppeBubbleId) {
-          seppeTotal += 1;
-          const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-          const ns   = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-          const sd   = readFirst(s, ['starting_date_date', 'starting date']);
-          const inWinStart = inRange(sd, period.fromMs, period.toMsIncl);
-          if (done && inWinStart) {
-            if (ns) seppeNoShow    += 1;
-            else    seppeDoneNotNs += 1;
-
-            // Per-learntype + alpha-bucket en dupe-detectie alleen op done sessies
-            // in de maand (anders wordt het signaal vertroebeld met out-of-range).
-            const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
-            const ltKey = lt || '(none)';
-            const bucket = ensureLtBucket(ltKey);
-            bucket.total += 1;
-            if (ns) bucket.noshow          += 1;
-            else    bucket.done_not_noshow += 1;
-
-            if (ltKey === 'Alpha Program') {
-              if (ns) seppe_alpha.noshow          += 1;
-              else    seppe_alpha.done_not_noshow += 1;
-
-              // Per-student tellingen voor Alpha (calls = !ns; noshow = ns).
-              // Days alleen op !ns (same-day-dupes wegschrijven én days-array).
-              const member = readFirst(s, ['member_user', 'member']);
-              if (member) {
-                const memberStr = String(member);
-                let bucket = alphaPerStudent.get(memberStr);
-                if (!bucket) {
-                  bucket = { calls: 0, noshow: 0, days: [] };
-                  alphaPerStudent.set(memberStr, bucket);
-                }
-                if (ns) {
-                  bucket.noshow += 1;
-                } else {
-                  bucket.calls += 1;
-                  const day = sd ? String(sd).slice(0, 10) : null;
-                  if (day) {
-                    const k = `${memberStr}|${day}`;
-                    if (!alphaDupeMap.has(k)) alphaDupeMap.set(k, []);
-                    alphaDupeMap.get(k).push(String(sd));
-                  }
-                  if (sd) bucket.days.push(String(sd));
-                }
-              }
-            }
-          }
-          const m = readFirst(s, ['member_user', 'member']);
-          if (m) seppeStudentIdsSet.add(String(m));
-        }
-      }
-
-      const cb_histogram = Array.from(cbCount.entries())
-        .map(([cb, count]) => ({ cb, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 12);
-
-      const seppeStudentIds = Array.from(seppeStudentIdsSet);
-      const driftedStudents = seppeStudentIds.filter((sid) => !studentIdsSet.has(sid));
-
-      // Same-day dupes: groepen met >1 entry. dupe_extra = som van (size-1).
-      let dupe_groups = 0;
-      let dupe_extra  = 0;
-      const dupeSample = [];
-      for (const [key, times] of alphaDupeMap.entries()) {
-        if (times.length > 1) {
-          dupe_groups += 1;
-          dupe_extra  += (times.length - 1);
-          if (dupeSample.length < 15) {
-            const [member, day] = key.split('|');
-            dupeSample.push({ member_user: member, day, times });
-          }
-        }
-      }
-      const seppe_alpha_same_day_dupes = {
-        dupe_groups,
-        dupe_extra,
-        sample: dupeSample,
-      };
-
-      // ── Dedup-reconcile (strateeg-canoniek) ────────────────────────────
-      // Dedupe probeArr op session._id zodat een per ongeluk dubbel
-      // teruggekomen rij maar één keer telt. Herbereken vervolgens Alpha-bucket
-      // + per-student vanaf nul, zodat de som per_student gegarandeerd gelijk
-      // is aan seppe_alpha_dedup (reconcile-velden onderaan).
-      const seenIds = new Set();
-      const uniqueSessions = [];
-      for (const s of probeArr) {
-        const id = s && s._id ? String(s._id) : null;
-        if (!id) {
-          uniqueSessions.push(s); // geen id → kan niet dedupe'n; toch meenemen.
-          continue;
-        }
-        if (seenIds.has(id)) continue;
-        seenIds.add(id);
-        uniqueSessions.push(s);
-      }
-      const probe_fetched_raw = probeArr.length;
-      const probe_unique      = uniqueSessions.length;
-      const probe_dupe_count  = probe_fetched_raw - probe_unique;
-
-      let seppeAlphaCalls = 0;
-      let seppeAlphaNs    = 0;
-      const alphaPerStudentDedup = new Map(); // member → { calls, noshow }
-      for (const s of uniqueSessions) {
-        const cb = readFirst(s, ['Created By', 'created_by']);
-        if (!cb || String(cb) !== seppeBubbleId) continue;
-        const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
-        if (lt !== 'Alpha Program') continue;
-        const sd = readFirst(s, ['starting_date_date', 'starting date']);
-        if (!inRange(sd, period.fromMs, period.toMsIncl)) continue;
-        const done = asBool(readFirst(s, ['isdone_boolean', 'isDone']));
-        if (!done) continue;
-        const ns = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-
-        const member = readFirst(s, ['member_user', 'member']);
-        const memberStr = member ? String(member) : '(none)';
-        let bucket = alphaPerStudentDedup.get(memberStr);
-        if (!bucket) {
-          bucket = { calls: 0, noshow: 0 };
-          alphaPerStudentDedup.set(memberStr, bucket);
-        }
-        if (ns) { bucket.noshow += 1; seppeAlphaNs    += 1; }
-        else    { bucket.calls  += 1; seppeAlphaCalls += 1; }
-      }
-
-      const seppe_alpha_dedup = {
-        calls            : seppeAlphaCalls,
-        noshow           : seppeAlphaNs,
-        total            : seppeAlphaCalls + seppeAlphaNs,
-        students_distinct: alphaPerStudentDedup.size,
-      };
-
-      const seppe_alpha_per_student_dedup = [];
-      let perstudent_sum_calls   = 0;
-      let perstudent_sum_noshow  = 0;
-      let current_students_in_set = 0;
-      let drifted_students_in_set = 0;
-      for (const [memberStr, bucket] of alphaPerStudentDedup.entries()) {
-        const isCurrent = studentIdsSet.has(memberStr);
-        if (isCurrent) current_students_in_set += 1;
-        else           drifted_students_in_set += 1;
-        perstudent_sum_calls  += bucket.calls;
-        perstudent_sum_noshow += bucket.noshow;
-        seppe_alpha_per_student_dedup.push({
-          member_user: memberStr,
-          current    : isCurrent,
-          calls      : bucket.calls,
-          noshow     : bucket.noshow,
-        });
-      }
-      seppe_alpha_per_student_dedup.sort((a, b) => b.calls - a.calls);
-
-      const reconcile = {
-        perstudent_sum_calls,
-        perstudent_sum_noshow,
-        distinct_students         : alphaPerStudentDedup.size,
-        current_students_in_set,
-        drifted_students_in_set,
-      };
-
-      // ── seppe_alpha_split / per_student / drifted_detail ────────────────
-      // current = member ∈ huidige student-bucket (studentIdsSet); drifted = rest.
-      const seppe_alpha_split = {
-        current : { calls: 0, noshow: 0 },
-        drifted : { calls: 0, noshow: 0 },
-      };
-      const seppe_alpha_per_student = [];
-      const seppe_drifted_detail   = [];
-      for (const [memberStr, bucket] of alphaPerStudent.entries()) {
-        const isCurrent = studentIdsSet.has(memberStr);
-        const target = isCurrent ? seppe_alpha_split.current : seppe_alpha_split.drifted;
-        target.calls  += bucket.calls;
-        target.noshow += bucket.noshow;
-
-        seppe_alpha_per_student.push({
-          member_user: memberStr,
-          current    : isCurrent,
-          calls      : bucket.calls,
-          noshow     : bucket.noshow,
-        });
-
-        if (!isCurrent) {
-          // days normaliseren naar YYYY-MM-DD, dedup + sort ascending.
-          const daysSet = new Set();
-          for (const d of bucket.days) {
-            if (!d) continue;
-            const ymd = String(d).slice(0, 10);
-            if (ymd) daysSet.add(ymd);
-          }
-          const days = Array.from(daysSet).sort();
-          seppe_drifted_detail.push({
-            member_user: memberStr,
-            calls      : bucket.calls,
-            noshow     : bucket.noshow,
-            days,
-          });
-        }
-      }
-      seppe_alpha_per_student.sort((a, b) => b.calls - a.calls);
-
-      createdByProbe = {
-        fetched,
-        capped,
-        month_total_all  : fetched,
-        probe_fetched_raw,
-        probe_unique,
-        probe_dupe_count,
-        cb_histogram,
-        seppe_match: {
-          done_not_noshow: seppeDoneNotNs,
-          noshow         : seppeNoShow,
-          total          : seppeTotal,
-        },
-        seppe_by_learntype,
-        seppe_alpha,
-        seppe_alpha_split,
-        seppe_alpha_per_student,
-        seppe_drifted_detail,
-        seppe_alpha_same_day_dupes,
-        seppe_alpha_dedup,
-        seppe_alpha_per_student_dedup,
-        reconcile,
-        seppe_students_count      : seppeStudentIds.length,
-        drifted_students_count    : driftedStudents.length,
-        drifted_students          : driftedStudents.slice(0, 50),
-      };
-    } catch (e) {
-      console.warn('[mentor-coaching-debug] createdByProbe faalde:', e?.message || e);
-      createdByProbe = { error: e?.message || String(e) };
-    }
-
-    return res.status(200).json({
-      ok                    : true,
-      mentor_user_id        : mentorUserId,
-      seppeBubbleId,
-      period_month          : period.monthStartIso,
-      from                  : period.from,
-      to                    : period.to,
-      linked                : true,
-      lms,
-      students_count        : studentIds.length,
-      sessions_fetched      : sessionRows.length,
-      sessionSampleKeys,
-      oneOnOne_count        : oneOnOne,
-      doneAndNoshow_in_range: doneAndNoshow,
-      byLearnType,
-      byDateField,
-      total_done,
-      total_done_not_noshow,
-      total_noshow,
-      counted,
-      createdByProbe,
+    const r = await computeCoachingEarnings({
+      mentorUserId,
+      from: period.from,
+      to  : period.to,
     });
+    const m = r._meta || {};
+    lms = {
+      bronnen             : m.bronnen,
+      venster             : m.venster,
+      melding             : m.melding || null,
+      lms_sessies_gelezen : m.lms_sessies_gelezen,
+      lms_zelfde_moment   : m.lms_zelfde_moment,
+      lms_zonder_student  : m.lms_zonder_student,
+      lms_teamtraining    : m.lms_teamtraining,
+      breakdown           : r.breakdown,
+      grand_total         : r.grand_total,
+    };
   } catch (e) {
-    console.error('[mentor-coaching-debug]', e?.message || e);
-    // Bubble-diagnose faalde (Bubble is sinds oktober 2026 geen bron meer)
-    // maar het lms-blok is er al: toon dat, met de Bubble-fout ernaast.
-    if (lms) {
-      return res.status(200).json({
-        ok            : true,
-        mentor_user_id: mentorUserId,
-        period_month  : period.monthStartIso,
-        from          : period.from,
-        to            : period.to,
-        lms,
-        bubble_diagnose_fout: e?.message || String(e),
-      });
-    }
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
-    return res.status(500).json({ error: e?.message || 'Interne fout' });
+    lms = { error: e?.message || String(e), code: e?.code || null };
   }
+
+  // Oude maand: de opgeslagen coachingregels erbij. Faalzacht.
+  let opgeslagen = null;
+  if (period.monthStartIso < OUDE_BRON_EINDE) {
+    try {
+      const { data: pay, error: pErr } = await supabaseAdmin
+        .from('mentor_payouts')
+        .select('id, status, coaching_total')
+        .eq('mentor_user_id', mentorUserId)
+        .eq('period_month', period.monthStartIso)
+        .maybeSingle();
+      if (pErr) throw new Error(pErr.message);
+      if (pay) {
+        const { data: regels, error: rErr } = await supabaseAdmin
+          .from('mentor_payout_lines')
+          .select('kind, label, qty, unit_incl, amount_incl')
+          .eq('payout_id', pay.id);
+        if (rErr) throw new Error(rErr.message);
+        opgeslagen = {
+          status        : pay.status,
+          coaching_total: pay.coaching_total,
+          regels        : (regels || []).filter((x) => String(x.kind || '').startsWith('coaching_')),
+        };
+      }
+    } catch (e) {
+      opgeslagen = { error: e?.message || String(e) };
+    }
+  }
+
+  return res.status(200).json({
+    ok            : true,
+    mentor_user_id: mentorUserId,
+    period_month  : period.monthStartIso,
+    from          : period.from,
+    to            : period.to,
+    lms,
+    opgeslagen,
+  });
 }

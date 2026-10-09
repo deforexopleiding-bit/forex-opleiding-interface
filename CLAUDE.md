@@ -679,7 +679,15 @@ gesynchroniseerd via de TL API.
 - TeamLeader Focus — CRM + facturatie + abonnementen, **backend-only via OAuth**
   (zie sectie hierboven). UI niet door Jeffrey gebruikt; alleen Rogier read-only.
 - Mollie API — voor betalingen (Aron's payment tools wachten hierop, niet geïntegreerd)
-- Bubble LMS — student management (niet geïntegreerd)
+- Bubble — het OUDE LMS. Sinds 9 okt 2026 (beslissing Maxim) staat er GEEN Bubble-code meer in het
+  CRM: geen provisioning, geen schrijfacties, geen leesroutes. Het LMS (dfo-lms, `hlms_*`, via
+  `api/_lib/dfo-lms-db.js`) is de bron voor studenten, mentoren en sessies. Mentor → LMS via
+  `team_members.email` ↔ `hlms_personeel.email`; studenten op `hlms_student.mentor_id`.
+  Studentsleutel (`student_id` in de API) = `hlms_student.bubble_user_id` als die er is, anders
+  `hlms_student.id` (zie `api/_lib/mentorStudents.js`) — de kolommen `bubble_user_id` /
+  `bubble_student_id` blijven bestaan als historische DB-sleutel, niets gedropt. Coaching vóór
+  1 okt 2026: alleen LMS-deel + opgeslagen uitbetalingen (`payout-generate-core` rekent die maanden
+  niet opnieuw). `tests/geen-bubble.test.js` bewaakt dat er geen Bubble-aanroep terugkomt.
 - e-boekhouden — boekhouding (Rogier extern; eigen bank-balans endpoint
   `api/finance-bank-balance.js` blijft default-source voor backward-compat)
 - GoHighLevel — marketing automation + Lisa AI agent (geïntegreerd via

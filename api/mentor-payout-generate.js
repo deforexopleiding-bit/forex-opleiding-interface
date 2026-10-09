@@ -80,7 +80,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Sequentieel: LMS/Bubble + Supabase niet overbelasten, leesbare logs.
+    // Sequentieel: LMS + Supabase niet overbelasten, leesbare logs.
     const results = [];
     for (const mid of mentorUserIds) {
       try {
@@ -135,9 +135,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[mentor-payout-generate]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

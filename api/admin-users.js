@@ -209,13 +209,13 @@ export default async function handler(req, res) {
     (roleRows || []).forEach((r) => { (rolesByUser[r.user_id] ||= []).push(r.role); });
 
     // Team-member-koppeling per user: nodig voor de Bewerken-modal (mentor↔Bubble).
-    // Eén query, geen N+1. Onbestaand → team_member_id + bubble_user_id blijven null.
+    // Eén query, geen N+1. Onbestaand → team_member_id blijft null.
     const userIds = (users || []).map((u) => u.id).filter(Boolean);
     const tmByUser = {};
     if (userIds.length > 0) {
       const { data: tmRows } = await supabaseAdmin
         .from('team_members')
-        .select('id, user_id, bubble_user_id')
+        .select('id, user_id')
         .in('user_id', userIds);
       (tmRows || []).forEach((t) => {
         if (t && t.user_id && !tmByUser[t.user_id]) tmByUser[t.user_id] = t;
@@ -228,7 +228,6 @@ export default async function handler(req, res) {
         ...u,
         all_roles:      rolesByUser[u.id] || (u.role ? [u.role] : []),
         team_member_id: tm ? tm.id : null,
-        bubble_user_id: tm ? (tm.bubble_user_id || null) : null,
       };
     });
 

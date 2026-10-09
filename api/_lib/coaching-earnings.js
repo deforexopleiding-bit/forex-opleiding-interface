@@ -7,7 +7,7 @@
 // Door dezelfde helper te gebruiken matcht het rapport exact wat de mentor zelf ziet.
 //
 // Input:
-//   { mentorUserId: uuid (verplicht), bubbleUserId?: string,
+//   { mentorUserId: uuid (verplicht),
 //     from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' (inclusief) }
 //
 // Output (incl btw — tarieven 35/50/25/100):
@@ -15,36 +15,37 @@
 //       elke cel: { count (= eenheden), rate, total, afspraken, meervoudig,
 //                   meervoudig_per_eenheden },
 //     students_count, sessions_fetched, team_count_raw,
-//     _meta: { bronnen: { lms, bubble }, lms_zelfde_moment,
-//              bubble_overgeslagen_dubbel_met_lms, lms_teamtraining, ... } }
+//     _meta: { bronnen: { lms, oud_lms }, melding?, lms_zelfde_moment,
+//              lms_teamtraining, ... } }
 //
 // Zie docs/mentorrapport-bron-lms.md voor de volledige uitleg.
 //
-// ─── Twee bronnen ────────────────────────────────────────────────────────
-// 1) LMS (dfo-lms, ALTIJD): hlms_sessie met mentor_id = mentorUserId en
-//    status afgerond (€35) / no_show (€25), start_tijd in het venster.
-//    Attributie op de mentor_id van de SESSIE (wie de call deed). Geen
-//    leertype-filter. Eén afspraak = eenhedenVan(duur_minuten) sessies van
-//    45 min (90 min = 2), exact zoals de studentteller in het LMS; de mentor
-//    krijgt €35/€25 per eenheid. Elke rij telt — ook rijen met dezelfde
-//    student + start_tijd + mentor; die worden alleen gesignaleerd in
-//    _meta.lms_zelfde_moment. Teamtraining (€50): hlms_teamtraining met
-//    trainer personeel_id = mentorUserId en status 'gegeven'.
-// 2) Bubble (ALLEEN vóór BUBBLE_EINDE): de oude regels, ongewijzigd —
-//    1-1-session op Created By + Alpha Program + isdone, call vereist
-//    member_user; team-training via tutor_user op completeddate. Een
-//    Bubble-sessie telt NIET als dezelfde student (member_user ↔
-//    hlms_student.bubble_user_id) die Brusselse kalenderdag een afgeronde of
-//    no-show sessie in het LMS heeft (bij welke mentor ook). Bubble kent
-//    geen duur: elke Bubble-sessie = 1 eenheid.
+// ─── Bron ────────────────────────────────────────────────────────────────
+// LMS (dfo-lms): hlms_sessie met mentor_id = mentorUserId en status afgerond
+// (€35) / no_show (€25), start_tijd in het venster. Attributie op de
+// mentor_id van de SESSIE (wie de call deed). Geen leertype-filter. Eén
+// afspraak = eenhedenVan(duur_minuten) sessies van 45 min (90 min = 2),
+// exact zoals de studentteller in het LMS; de mentor krijgt €35/€25 per
+// eenheid. Elke rij telt — ook rijen met dezelfde student + start_tijd +
+// mentor; die worden alleen gesignaleerd in _meta.lms_zelfde_moment.
+// Teamtraining (€50): hlms_teamtraining met trainer personeel_id =
+// mentorUserId en status 'gegeven'.
 //
+// BUBBLE IS DICHT (9 okt 2026, Maxim). Tot oktober 2026 telde hier ook een
+// Bubble-tak mee (1-1-session / team-training). Die bestaat niet meer: er
+// gaat geen enkele aanroep meer naar Bubble. Voor een venster dat (deels)
+// vóór OUDE_BRON_EINDE (1 okt 2026) ligt, telt dit dus ALLEEN het LMS-deel;
+// _meta.melding zegt dat, en _meta.bronnen.oud_lms.status = 'gesloten'. Het
+// volledige bedrag van die maanden staat in de opgeslagen uitbetalingen
+// (mentor_payouts / mentor_payout_lines) — payout-generate-core rekent
+// zulke maanden daarom niet opnieuw uit (zie daar).
+
 // ─── Venster ─────────────────────────────────────────────────────────────
 // [from 00:00 Europe/Brussels, (to+1) 00:00 Europe/Brussels) — DST-correct.
 // Geldt voor beide bronnen.
 //
 // ─── Faalgedrag ──────────────────────────────────────────────────────────
 // Een onbereikbare bron wordt NOOIT stil 0. LMS niet geconfigureerd of
-// onbereikbaar → throw. Bubble nodig (venster vóór BUBBLE_EINDE) en
 // onbereikbaar → throw. Funded-telling (CRM) faalt → throw. Enige benoemde
 // uitzondering: de kolom hlms_teamtraining.status bestaat nog niet →
 // team_lms = 0 met _meta.lms_teamtraining = 'stand-kolom-ontbreekt'.
@@ -62,7 +63,6 @@
 // uitzondering op "nooit stil 0": zolang hlms_intake.sql niet gedraaid is,
 // bestaat de tabel niet → intake 0 met _meta.lms_intake = 'tabel-ontbreekt'.
 
-import { bubbleList as bubbleListDefault } from './bubble.js';
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 
@@ -83,8 +83,14 @@ export function isGoedkeuringKolomOntbreekt(error) {
     && /goedgekeurd_op/.test(String(error?.message || ''));
 }
 
-// Eerste dag (Brusselse tijd) waarop Bubble NIET meer bevraagd wordt.
-export const BUBBLE_EINDE = '2026-10-01';
+// Eerste dag (Brusselse tijd) waarop de oude leeromgeving niet meer meetelde.
+// Vensters die daarvóór beginnen zijn met deze helper alleen voor het
+// LMS-deel te berekenen — zie de kop.
+export const OUDE_BRON_EINDE = '2026-10-01';
+export const MELDING_OUDE_BRON =
+  'Perioden vóór 1 oktober 2026 zijn deels in de oude leeromgeving (Bubble) gegeven, '
+  + 'die gesloten is. Dit toont alleen het LMS-deel; het volledige bedrag van die '
+  + 'maanden staat in de opgeslagen uitbetaling.';
 
 export const LMS_TEAMTRAINING_KOLOM_ONTBREEKT = 'stand-kolom-ontbreekt';
 
@@ -140,41 +146,9 @@ function plusDagen(ymd, n) {
 
 // ─── Kleine helpers ──────────────────────────────────────────────────────
 
-function asBool(v) {
-  if (v === true || v === false) return v;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (['true','yes','ja','1'].includes(s)) return true;
-    if (['false','no','nee','0'].includes(s)) return false;
-  }
-  return !!v;
-}
 
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) {
-    if (u[k] !== undefined) return u[k];
-  }
-  return undefined;
-}
 
-// Bubble option-set → leesbare string ('Alpha Program' etc).
-function pickOption(v) {
-  if (v == null) return null;
-  if (typeof v === 'string') return v.trim() || null;
-  if (typeof v === 'object') {
-    const d = v.display || v.text || v.value || null;
-    return d ? String(d).trim() || null : null;
-  }
-  return null;
-}
 
-function inRange(rawDate, fromMs, toMsExclusive) {
-  if (!rawDate) return false;
-  const t = (typeof rawDate === 'number') ? rawDate : new Date(String(rawDate)).getTime();
-  if (!Number.isFinite(t)) return false;
-  return t >= fromMs && t < toMsExclusive;
-}
 
 function chunks(arr, n) {
   const out = [];
@@ -372,138 +346,11 @@ async function lmsIntakes(lms, mentorUserId, vanIso, totIso) {
   throw lmsFout(`hlms_intake: meer dan ${LMS_PAGINA * LMS_MAX_PAGINAS} rijen — venster te groot`);
 }
 
-// Set van `${bubble_user_id}|${brusselsDag}` voor alle afgeronde/no-show
-// LMS-sessies (bij welke mentor ook) van de gegeven Bubble-studenten.
-async function lmsDagenVanBubbleStudenten(lms, bubbleIds, vanIso, totIso) {
-  const set = new Set();
-  if (bubbleIds.length === 0) return set;
-  const bubbleVanStudent = new Map();
-  for (const deel of chunks(bubbleIds, IN_CHUNK)) {
-    const { data, error } = await lms
-      .from('hlms_student')
-      .select('id, bubble_user_id')
-      .in('bubble_user_id', deel);
-    if (error) throw lmsFout(`hlms_student: ${error.message || error.code || 'onbekende fout'}`);
-    for (const s of (data || [])) {
-      if (s?.id && s?.bubble_user_id) bubbleVanStudent.set(String(s.id), String(s.bubble_user_id));
-    }
-  }
-  const studentIds = Array.from(bubbleVanStudent.keys());
-  for (const deel of chunks(studentIds, IN_CHUNK)) {
-    const rijen = await lmsAlles(() => lms
-      .from('hlms_sessie')
-      .select('id, student_id, start_tijd, status')
-      .in('student_id', deel)
-      .in('status', ['afgerond', 'no_show'])
-      .gte('start_tijd', vanIso)
-      .lt('start_tijd', totIso)
-      .order('id', { ascending: true }), 'hlms_sessie (ontdubbeling)');
-    for (const r of rijen) {
-      const bid = bubbleVanStudent.get(String(r.student_id));
-      const dag = brusselsDag(r.start_tijd);
-      if (bid && dag) set.add(`${bid}|${dag}`);
-    }
-  }
-  return set;
-}
-
-// ─── Bubble-tak ──────────────────────────────────────────────────────────
-
-async function bubbleTak({ bubbleList, lms, bubbleUserId, vanMs, totMs }) {
-  // Bubble greater-than/less-than op date-constraints zijn strikt.
-  const dateConstraints = [
-    { key: 'starting_date_date', constraint_type: 'greater than', value: new Date(vanMs - 1).toISOString() },
-    { key: 'starting_date_date', constraint_type: 'less than',    value: new Date(totMs).toISOString() },
-  ];
-  const cbConstraint = { key: 'Created By', constraint_type: 'equals', value: bubbleUserId };
-
-  // Probeer eerst server-side filter op Created By; fallback date-only. Faalt
-  // ook die → throw (nooit stil 0).
-  const FETCH_CAP = 3000;
-  const fetchPaths = [];
-  let sessionRows;
-  let cbConstraintApplied = false;
-  try {
-    const { results } = await bubbleList('1-1-session', [...dateConstraints, cbConstraint], { limit: FETCH_CAP });
-    sessionRows = results || [];
-    cbConstraintApplied = true;
-    fetchPaths.push('date+cb');
-  } catch (e) {
-    console.warn('[coaching-earnings] Created-By server-constraint faalde, fallback date-only:', e?.message || e);
-    try {
-      const { results } = await bubbleList('1-1-session', dateConstraints, { limit: FETCH_CAP });
-      sessionRows = results || [];
-      fetchPaths.push('date-only');
-    } catch (e2) {
-      const err = new Error('Bubble onbereikbaar (1-1-session): ' + (e2?.message || e2));
-      err.code = e2?.code || 'BUBBLE_ONBEREIKBAAR';
-      throw err;
-    }
-  }
-
-  // Kandidaten volgens de ongewijzigde Bubble-regels.
-  const kandidaten = [];
-  let afterCbFilter = 0;
-  let orphanCallsSkipped = 0;
-  for (const s of sessionRows) {
-    const cb = readFirst(s, ['Created By', 'created_by']);
-    if (!cb || String(cb) !== bubbleUserId) continue;
-    afterCbFilter += 1;
-    const lt = pickOption(readFirst(s, ['learn_type1_option_os___learning_type']));
-    if (lt !== 'Alpha Program') continue;
-    if (!asBool(readFirst(s, ['isdone_boolean', 'isDone']))) continue;
-    const sd = readFirst(s, ['starting_date_date', 'starting date']);
-    if (!inRange(sd, vanMs, totMs)) continue;
-    const ns = asBool(readFirst(s, ['noshow_boolean', 'NoShow']));
-    const member = readFirst(s, ['member_user']);
-    const memberStr = (member && String(member).trim()) ? String(member).trim() : null;
-    if (!ns && !memberStr) { orphanCallsSkipped += 1; continue; }
-    kandidaten.push({ ns, member: memberStr, dag: brusselsDag(sd) });
-  }
-
-  // Ontdubbelen tegen het LMS (zelfde student + zelfde Brusselse dag).
-  const memberIds = Array.from(new Set(kandidaten.map((k) => k.member).filter(Boolean)));
-  const lmsDagen = await lmsDagenVanBubbleStudenten(
-    lms, memberIds, new Date(vanMs).toISOString(), new Date(totMs).toISOString());
-  let calls = 0, noShow = 0, overgeslagen = 0;
-  for (const k of kandidaten) {
-    if (k.member && k.dag && lmsDagen.has(`${k.member}|${k.dag}`)) { overgeslagen += 1; continue; }
-    if (k.ns) noShow += 1; else calls += 1;
-  }
-
-  // Team-trainingen via tutor_user op completeddate.
-  let teamRows;
-  try {
-    const { results } = await bubbleList(
-      'team-training',
-      [{ key: 'tutor_user', constraint_type: 'equals', value: bubbleUserId }],
-      { limit: 1000 },
-    );
-    teamRows = results || [];
-  } catch (e) {
-    const err = new Error('Bubble onbereikbaar (team-training): ' + (e?.message || e));
-    err.code = e?.code || 'BUBBLE_ONBEREIKBAAR';
-    throw err;
-  }
-  let team = 0;
-  for (const tt of teamRows) {
-    const done = asBool(readFirst(tt, ['isdone_boolean', 'isDone']));
-    const dt   = readFirst(tt, ['completeddate_date', 'completedDate']);
-    if (done && inRange(dt, vanMs, totMs)) team += 1;
-  }
-
-  return {
-    calls, no_show: noShow, team, overgeslagen,
-    sessions_fetched: sessionRows.length, team_count_raw: teamRows.length,
-    afterCbFilter, orphanCallsSkipped, cbConstraintApplied, fetchPaths,
-  };
-}
-
 // ─── Hoofdfunctie ────────────────────────────────────────────────────────
 //
-// `deps` is er alleen voor tests: { lmsClient, bubbleList, crmClient }.
+// `deps` is er alleen voor tests: { lmsClient, crmClient }.
 // Laat 'm weg in productie.
-export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from, to }, deps = {}) {
+export async function computeCoachingEarnings({ mentorUserId, from, to }, deps = {}) {
   if (!mentorUserId) throw new Error('coaching-earnings: mentorUserId vereist');
   if (!DATE_RE.test(String(from || '')) || !DATE_RE.test(String(to || ''))) {
     throw new Error('coaching-earnings: from/to moeten YYYY-MM-DD zijn');
@@ -531,22 +378,8 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
     throw lmsFout(e?.message || String(e));
   }
 
-  // ── Bubble (alleen deel vóór BUBBLE_EINDE) ────────────────────────────
-  const bubbleEindeMs = brusselsMiddernachtMs(BUBBLE_EINDE);
-  const bubbleTotMs = Math.min(totMs, bubbleEindeMs);
-  let bubble = null;
-  let bubbleStatus;
-  if (vanMs >= bubbleEindeMs) {
-    bubbleStatus = 'niet-van-toepassing';
-  } else if (!bubbleUserId) {
-    bubbleStatus = 'geen-bubble-koppeling';
-  } else {
-    bubble = await bubbleTak({
-      bubbleList: deps.bubbleList || bubbleListDefault,
-      lms, bubbleUserId, vanMs, totMs: bubbleTotMs,
-    });
-    bubbleStatus = 'gelezen';
-  }
+  // ── Oude bron (vóór OUDE_BRON_EINDE) — gesloten ──────────────────────
+  const oudeBronGeraakt = vanMs < brusselsMiddernachtMs(OUDE_BRON_EINDE);
 
   // ── Funded (CRM) ──────────────────────────────────────────────────────
   const crm = deps.crmClient || supabaseAdmin;
@@ -559,12 +392,10 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
   if (fundedErr) throw new Error('funded-certificaten lezen mislukt: ' + fundedErr.message);
   const funded = Number(count) || 0;
 
-  // Eenheden per categorie. Bubble kent geen duur: elke Bubble-sessie = 1.
+  // Eenheden per categorie.
   const t1 = { ...lmsSessies.afgerond, per_eenheden: { ...lmsSessies.afgerond.per_eenheden } };
   const tn = { ...lmsSessies.no_show,  per_eenheden: { ...lmsSessies.no_show.per_eenheden } };
-  telAfspraak(t1, 1, bubble?.calls   || 0);
-  telAfspraak(tn, 1, bubble?.no_show || 0);
-  const team = lmsTeam.team + (bubble?.team || 0);
+  const team = lmsTeam.team;
 
   const cel = (count, rate, extra = {}) => ({
     count, rate, total: count * rate,
@@ -593,10 +424,11 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
     breakdown,
     grand_total,
     students_count   : 0,
-    sessions_fetched : lmsSessies.rijen + (bubble?.sessions_fetched || 0),
-    team_count_raw   : lmsTeam.rijen + (bubble?.team_count_raw || 0),
+    sessions_fetched : lmsSessies.rijen,
+    team_count_raw   : lmsTeam.rijen,
     _meta: {
-      venster: { van: vanIso, tot: totIso, tijdzone: TZ, bubble_einde: BUBBLE_EINDE },
+      venster: { van: vanIso, tot: totIso, tijdzone: TZ, oude_bron_einde: OUDE_BRON_EINDE },
+      ...(oudeBronGeraakt ? { melding: MELDING_OUDE_BRON } : {}),
       bronnen: {
         lms: {
           status  : 'gelezen',
@@ -613,11 +445,8 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
             no_show : lmsSessies.no_show.per_eenheden,
           },
         },
-        bubble: {
-          status : bubbleStatus,
-          calls  : bubble?.calls   || 0,
-          no_show: bubble?.no_show || 0,
-          team   : bubble?.team    || 0,
+        oud_lms: {
+          status: oudeBronGeraakt ? 'gesloten' : 'niet-van-toepassing',
         },
       },
       lms_sessies_gelezen               : lmsSessies.rijen,
@@ -625,15 +454,6 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
       lms_zonder_student                : lmsSessies.zonder_student,
       lms_teamtraining                  : lmsTeam.status,
       lms_intake                        : lmsIntake.status,
-      bubble_overgeslagen_dubbel_met_lms: bubble?.overgeslagen || 0,
-      // Bubble-diagnose (zelfde velden als vóór de LMS-omzetting).
-      fetchedRaw          : bubble?.sessions_fetched || 0,
-      afterCbFilter       : bubble?.afterCbFilter || 0,
-      alphaDone           : bubble?.calls || 0,
-      alphaNoshow         : bubble?.no_show || 0,
-      orphanCallsSkipped  : bubble?.orphanCallsSkipped || 0,
-      cbConstraintApplied : bubble?.cbConstraintApplied || false,
-      fetchPaths          : bubble?.fetchPaths || [],
     },
   };
 }

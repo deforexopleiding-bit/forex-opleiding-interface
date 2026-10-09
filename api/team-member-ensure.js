@@ -14,7 +14,7 @@
 // Schrijft audit-log naar agent_audit_log (zelfde patroon als admin-users.js).
 // Vangt unique-name-conflict (23505 op idx_team_members_name) → 409.
 //
-// Response 200: { team_member_id, name, bubble_user_id }
+// Response 200: { team_member_id, name }
 // 400/403/404/409/500 met { error }.
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
@@ -98,7 +98,7 @@ export default async function handler(req, res) {
   {
     const { data: existing, error: exErr } = await supabaseAdmin
       .from('team_members')
-      .select('id, name, bubble_user_id, is_active')
+      .select('id, name, is_active')
       .eq('user_id', userId)
       .maybeSingle();
     if (exErr) {
@@ -130,7 +130,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         team_member_id: existing.id,
         name:           existing.name,
-        bubble_user_id: existing.bubble_user_id || null,
       });
     }
   }
@@ -153,7 +152,7 @@ export default async function handler(req, res) {
   const { data: inserted, error: insErr } = await supabaseAdmin
     .from('team_members')
     .insert(insertRow)
-    .select('id, name, bubble_user_id')
+    .select('id, name')
     .single();
 
   if (insErr) {
@@ -194,6 +193,5 @@ export default async function handler(req, res) {
   return res.status(200).json({
     team_member_id: inserted.id,
     name:           inserted.name,
-    bubble_user_id: inserted.bubble_user_id || null,
   });
 }

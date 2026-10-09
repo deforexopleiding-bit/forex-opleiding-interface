@@ -927,9 +927,11 @@
     const cbA = _live.overviewCoaching.all_time;
     const cbM = _live.overviewCoaching.this_month;
     const cbY = _live.overviewCoaching.ytd;
-    const coachAll   = Number(cbA.data?.grand_total) || 0;
+    // _incl_historie: perioden vóór okt 2026 uit de opgeslagen uitbetalingen
+    // (Bubble is dicht; de helper telt daar alleen het LMS-deel).
+    const coachAll   = Number(cbA.data?.grand_total_incl_historie ?? cbA.data?.grand_total) || 0;
     const coachMonth = Number(cbM.data?.grand_total) || 0;
-    const coachYtd   = Number(cbY.data?.grand_total) || 0;
+    const coachYtd   = Number(cbY.data?.grand_total_incl_historie ?? cbY.data?.grand_total) || 0;
 
     // Klaar-check per tegel: loading/error/data. Fallback string bij loading.
     const combinedTotaal = (cbA.data ? eur(earnedTotal + coachAll)     : '⌛');
@@ -1053,6 +1055,7 @@
       <div style="padding:10px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12px;color:var(--text-3);margin-bottom:12px">
         Periode: <b>${esc(from)}</b> → <b>${esc(to)}</b> · schakelaar bovenaan om te wisselen (default = huidige maand).
       </div>
+      ${d.melding ? `<div style="padding:10px 14px;background:var(--amber-soft);color:var(--amber);border-radius:var(--r);font-size:12px;margin-bottom:12px">${esc(d.melding)}${Array.isArray(d.uitbetalingen) && d.uitbetalingen.length ? ' Opgeslagen: ' + d.uitbetalingen.map((u) => esc(String(u.period_month).slice(0, 7)) + ' ' + eur(Number(u.coaching_total) || 0) + ' (' + esc(u.status) + ')').join(' · ') + '.' : ''}</div>` : ''}
       ${dashCard('Subtotaal coaching', 'emerald', `
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:1px solid var(--border);color:var(--text-3);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em"><th style="text-align:left;padding:6px 0">Categorie</th><th style="text-align:right">Aantal</th><th style="text-align:right">Tarief</th><th style="text-align:right">Bedrag</th></tr></thead>

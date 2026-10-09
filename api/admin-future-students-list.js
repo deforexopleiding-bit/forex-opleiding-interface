@@ -14,9 +14,8 @@
 //   ?mentor_user_id=<uuid>   exacte mentor-filter (of 'none' voor no-mentor)
 //   ?traject_id=<uuid>       exacte traject-filter
 //
-// 1-op-1 status-afleiding wordt per UNIEKE mentor één keer uit Bubble gehaald
-// (niet per student) en gedeeld via api/_lib/bubble-1on1.js — exact dezelfde
-// classificatie als api/mentor-1on1-sessions.js.
+// 1-op-1 status-afleiding komt uit het LMS (lazy, via
+// api/onboarding-intake-status.js) — geen Bubble meer.
 //
 // Bedenktijd + waiver: gebatchte deals-lookup per uniek customer_id (mirror
 // van onboardings-admin-list.js). Wizard-structuur 1× per request.

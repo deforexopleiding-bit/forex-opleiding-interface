@@ -631,9 +631,11 @@
           `LMS (${b.lms?.status || '?'}): ${b.lms?.afgerond ?? 0} eenheden afgerond (${b.lms?.afspraken?.afgerond ?? '?'} afspraken) · ${b.lms?.no_show ?? 0} eenheden no-show (${b.lms?.afspraken?.no_show ?? '?'} afspraken) · ${b.lms?.team ?? 0} teamtraining${l.lms_teamtraining && l.lms_teamtraining !== 'gelezen' ? ' (' + l.lms_teamtraining + ')' : ''}`,
           `Meervoudige afspraken (1 eenheid = 45 min): afgerond ${fmtMeervoudig(b.lms?.meervoudig?.afgerond)} · no-show ${fmtMeervoudig(b.lms?.meervoudig?.no_show)}`,
           `Zelfde student + zelfde moment (elk geteld): ${fmtZelfdeMoment(l.lms_zelfde_moment)}`,
-          `Bubble (${b.bubble?.status || '?'}): ${b.bubble?.calls ?? 0} calls · ${b.bubble?.no_show ?? 0} no-show · ${b.bubble?.team ?? 0} team`,
-          `Bubble overgeslagen (zelfde student+dag in LMS): ${l.bubble_overgeslagen_dubbel_met_lms ?? 0}`,
-          `Funded: ${l.breakdown?.funded?.count ?? 0} · Totaal coaching: ${eur(l.grand_total || 0)}`,
+          `Funded: ${l.breakdown?.funded?.count ?? 0} · Totaal coaching (LMS): ${eur(l.grand_total || 0)}`,
+          ...(l.melding ? [`Let op: ${l.melding}`] : []),
+          ...(j.opgeslagen && !j.opgeslagen.error
+            ? [`Opgeslagen uitbetaling (${j.opgeslagen.status}): coaching ${eur(j.opgeslagen.coaching_total || 0)}`]
+            : []),
         ].join('\n');
     openConfirm(`Coaching-debug voor ${fmtMonth(month + '-01')}:\n\n${summary}\n\nZie console.log voor volledige dump.`, () => {
       console.log('[mentoren-v2] coaching-debug', j);

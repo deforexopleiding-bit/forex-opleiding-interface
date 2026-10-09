@@ -4,8 +4,8 @@
 // Borgt: Brusselse maandgrenzen, sessie-eenheden van 45 min (90 min = 2, zoals
 // de studentteller in het LMS), zelfde-moment-rijen tellen elk + signaal,
 // opeenvolgende sessies 2×,
-// Bubble-ontdubbeling tegen het LMS, geen Bubble vanaf oktober 2026, en
-// vooral: een onbereikbare bron wordt NOOIT stil 0.
+// geen Bubble meer (dicht sinds oktober 2026: vóór oktober alleen het
+// LMS-deel, mét melding), en vooral: een onbereikbare bron wordt NOOIT stil 0.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,7 +21,6 @@ import {
 
 const MENTOR = '11111111-1111-1111-1111-111111111111';
 const ANDER  = '22222222-2222-2222-2222-222222222222';
-const BUBBLE_MENTOR = 'bub-mentor-1';
 
 /**
  * Mini-nabootsing van een supabase-client die de filters ECHT toepast op
@@ -72,12 +71,10 @@ let _id = 0;
 const sessie = (o) => ({ id: 's' + (++_id), student_id: 'stu-1', mentor_id: MENTOR, status: 'afgerond', ...o });
 
 const crm = () => nepDb({ mentor_funded_certificates: [] });
-const geenBubble = async () => { throw new Error('Bubble mag hier niet bevraagd worden'); };
-
-async function reken({ lms, bubbleList = geenBubble, from = '2026-10-01', to = '2026-10-31', bubbleUserId = null }) {
+async function reken({ lms, from = '2026-10-01', to = '2026-10-31' }) {
   return computeCoachingEarnings(
-    { bubbleUserId, mentorUserId: MENTOR, from, to },
-    { lmsClient: lms, bubbleList, crmClient: crm() },
+    { mentorUserId: MENTOR, from, to },
+    { lmsClient: lms, crmClient: crm() },
   );
 }
 
@@ -265,77 +262,30 @@ test('LMS niet geconfigureerd → throw', async () => {
   }
 });
 
-test('Bubble nodig (september) en onbereikbaar → throw', async () => {
-  const lms = nepDb({ hlms_sessie: [], hlms_teamtraining_trainer: [], hlms_student: [] });
-  const kapot = async () => { const e = new Error('Bubble 500'); e.code = 'BUBBLE_HTTP_500'; throw e; };
-  await assert.rejects(
-    reken({ lms, bubbleList: kapot, bubbleUserId: BUBBLE_MENTOR, from: '2026-09-01', to: '2026-09-30' }),
-    /Bubble onbereikbaar/,
-  );
-});
+// ── Bubble is dicht ────────────────────────────────────────────────────
 
-// ── Bubble-tak ─────────────────────────────────────────────────────────
-
-test('oktober bevraagt Bubble niet, ook met bubble-koppeling', async () => {
-  let bevraagd = 0;
+test('oktober: geen melding, oude bron niet van toepassing', async () => {
   const lms = nepDb({ hlms_sessie: [sessie({ start_tijd: '2026-10-02T10:00:00.000Z' })], hlms_teamtraining_trainer: [] });
-  const r = await reken({ lms, bubbleUserId: BUBBLE_MENTOR, bubbleList: async () => { bevraagd++; return { results: [] }; } });
-  assert.equal(bevraagd, 0);
-  assert.equal(r._meta.bronnen.bubble.status, 'niet-van-toepassing');
+  const r = await reken({ lms });
+  assert.equal(r._meta.bronnen.oud_lms.status, 'niet-van-toepassing');
+  assert.equal(r._meta.melding, undefined);
   assert.equal(r.breakdown.one_on_one.count, 1);
 });
 
-function bubbleSessie(o) {
-  return {
-    'Created By': BUBBLE_MENTOR,
-    learn_type1_option_os___learning_type: 'Alpha Program',
-    isdone_boolean: true, noshow_boolean: false,
-    member_user: 'bub-stu-1', ...o,
-  };
-}
-
-test('september: Bubble telt mee, maar niet als dezelfde student die dag in het LMS staat', async () => {
-  const lms = nepDb({
-    hlms_sessie: [
-      // LMS-sessie van een ANDERE mentor op 5/9 voor bub-stu-1 → Bubble 5/9 vervalt.
-      sessie({ mentor_id: ANDER, student_id: 'lms-stu-1', start_tijd: '2026-09-05T08:00:00.000Z' }),
-      // Eigen LMS-sessie 20/9.
-      sessie({ student_id: 'lms-stu-2', start_tijd: '2026-09-20T08:00:00.000Z' }),
-    ],
-    hlms_student: [
-      { id: 'lms-stu-1', bubble_user_id: 'bub-stu-1' },
-      { id: 'lms-stu-2', bubble_user_id: 'bub-stu-2' },
-    ],
-    hlms_teamtraining_trainer: [],
-  });
-  const bubbleRows = [
-    bubbleSessie({ starting_date_date: '2026-09-05T14:00:00.000Z' }),                         // dubbel → overslaan
-    bubbleSessie({ starting_date_date: '2026-09-03T14:00:00.000Z' }),                         // telt
-    bubbleSessie({ starting_date_date: '2026-09-04T14:00:00.000Z', noshow_boolean: true, member_user: null }), // no-show zonder member telt
-    bubbleSessie({ starting_date_date: '2026-09-06T14:00:00.000Z', member_user: null }),      // orphan call telt niet
-    bubbleSessie({ starting_date_date: '2026-09-07T14:00:00.000Z', learn_type1_option_os___learning_type: 'Gamma' }), // telt niet
-    bubbleSessie({ starting_date_date: '2026-09-30T22:30:00.000Z' }),                         // 1/10 lokaal → buiten Bubble-venster
-  ];
-  const bubbleList = async (type) => (type === '1-1-session'
-    ? { results: bubbleRows }
-    : { results: [{ isdone_boolean: true, completeddate_date: '2026-09-10T10:00:00.000Z' }] });
-  const r = await reken({ lms, bubbleList, bubbleUserId: BUBBLE_MENTOR, from: '2026-09-01', to: '2026-09-30' });
-  assert.equal(r._meta.bubble_overgeslagen_dubbel_met_lms, 1);
-  assert.deepEqual(r._meta.bronnen.bubble, { status: 'gelezen', calls: 1, no_show: 1, team: 1 });
-  const l = r._meta.bronnen.lms;
-  assert.deepEqual([l.status, l.afgerond, l.no_show, l.team], ['gelezen', 1, 0, 0]);
-  assert.equal(r.breakdown.one_on_one.afspraken, 2, 'Bubble-sessie = 1 afspraak = 1 eenheid');
-  assert.equal(r.breakdown.one_on_one.count, 2);
-  assert.equal(r.breakdown.no_show.count, 1);
-  assert.equal(r.breakdown.team.count, 1);
-  assert.equal(r.grand_total, 2 * 35 + 25 + 50);
-});
-
-test('zonder bubble-koppeling: alleen LMS, ook in september', async () => {
+test('september: alleen het LMS-deel, mét melding — en NIETS naar Bubble', async () => {
   const lms = nepDb({ hlms_sessie: [sessie({ start_tijd: '2026-09-10T10:00:00.000Z' })], hlms_teamtraining_trainer: [] });
   const r = await reken({ lms, from: '2026-09-01', to: '2026-09-30' });
-  assert.equal(r._meta.bronnen.bubble.status, 'geen-bubble-koppeling');
+  assert.equal(r._meta.bronnen.oud_lms.status, 'gesloten');
+  assert.match(r._meta.melding, /vóór 1 oktober 2026/);
   assert.equal(r.breakdown.one_on_one.count, 1);
+  assert.equal(r._meta.bronnen.bubble, undefined);
+});
+
+test('de helper kent geen Bubble meer (geen import, geen aanroep)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../api/_lib/coaching-earnings.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /from '\.\/bubble\.js'/);
+  assert.doesNotMatch(src, /bubbleList|bubbleUserId/);
 });
 
 test('funded-telling faalt → throw (geen stille 0)', async () => {
@@ -355,7 +305,7 @@ test('payout-generate-core vangt coachingfouten niet meer af en rekent vóór el
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../api/_lib/payout-generate-core.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /coaching faalde/, 'oude catch → 0 is weg');
-  assert.doesNotMatch(src, /if \(bubbleUserId\) \{/, 'coaching niet meer afhankelijk van bubble-id');
+  assert.doesNotMatch(src, /bubbleUserId/, 'coaching niet meer afhankelijk van bubble-id');
   const coachIdx  = src.indexOf('await computeCoachingEarnings(');
   const unlinkIdx = src.indexOf(".update({ payout_id: null })");
   assert.ok(coachIdx > 0 && unlinkIdx > 0 && coachIdx < unlinkIdx, 'coaching vóór ledger-unlink');
@@ -416,4 +366,16 @@ test('intake: tabel bestaat nog niet → 0 met benoemde meta, geen crash', async
 test('intake: andere fout → throw (geen stille 0)', async () => {
   const lms = nepDb({ hlms_sessie: [], hlms_intake: { code: '57014', message: 'canceling statement due to statement timeout' } });
   await assert.rejects(() => reken({ lms }), (e) => e.code === 'LMS_ONBEREIKBAAR');
+});
+
+// ── Oude maanden in de payout: snapshot, nooit opnieuw rekenen ─────────
+
+test('payout-generate-core rekent maanden vóór oktober 2026 niet opnieuw uit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../api/_lib/payout-generate-core.js', import.meta.url), 'utf8');
+  const guard = src.indexOf('period.start < OUDE_BRON_EINDE');
+  const coach = src.indexOf('await computeCoachingEarnings(');
+  assert.ok(guard > 0 && guard < coach, 'eerst de oude-maand-check, dan pas rekenen');
+  assert.match(src, /err\.code = 'OUDE_PERIODE'/, 'zonder bestaand concept: duidelijke fout, geen te laag bedrag');
+  assert.match(src, /startsWith\('coaching_'\)/, 'met concept: de opgeslagen coachingregels hergebruiken');
 });
