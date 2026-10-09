@@ -344,3 +344,11 @@ test('bedrading: cron elke minuut, tab geregistreerd, bronlijsten, cache-busters
   assert.match(sql, /CREATE OR REPLACE VIEW public\.website_webinar_volgende AS\s+SELECT s\.id, r\.titel, s\.starts_at, s\.ends_at/);
   assert.doesNotMatch(sql.split('CREATE OR REPLACE VIEW')[1].split(';')[0], /zoom/i, 'view bevat geen Zoom-link');
 });
+
+test('templates: geen body begint of eindigt op een variabele (Meta: "Invalid parameter")', () => {
+  for (const t of Object.values(T.WEBINAR_TEMPLATES)) {
+    const body = t.body_text.trim();
+    assert.doesNotMatch(body, /^\{\{\d+\}\}/, t.name + ' begint met een variabele');
+    assert.doesNotMatch(body, /\{\{\d+\}\}[.!?]?$/, t.name + ' eindigt op een variabele');
+  }
+});

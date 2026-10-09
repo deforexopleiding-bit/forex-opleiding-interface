@@ -62,8 +62,10 @@ export const WEBINAR_TEMPLATES = Object.freeze({
     category: 'UTILITY',
     header_type: 'NONE',
     body_text:
+      // Meta weigert een body die op een variabele eindigt ("Invalid parameter").
       'Hoi {{1}}, we zijn live! Het webinar van De Forex Opleiding is net begonnen.\n\n'
-      + 'Doe mee via Zoom: {{2}}',
+      + 'Doe mee via Zoom: {{2}}\n\n'
+      + 'Tot zo in de sessie!',
     body_examples: { 1: 'Jeffrey', 2: 'https://us02web.zoom.us/j/12345678901' },
     footer_text: null,
     buttons: null,
