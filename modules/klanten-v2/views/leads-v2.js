@@ -112,6 +112,8 @@
     'kennismakingscursus-v4':  'Mini v4',
     'kennismakingscursus-v5':  'Mini v5 (A)',
     'kennismakingscursus-v6':  'Mini v6 (B)',
+    'webinar-v1':              'Webinar v1 (A)',
+    'webinar-v2':              'Webinar v2 (B)',
     'funnel':                  'Funnel',
     'meta':                    'Meta',
     'handmatig':               'Handmatig',
@@ -674,6 +676,8 @@
           <option value="kennismakingscursus-v4"  ${fBron === 'kennismakingscursus-v4' ? 'selected' : ''}>kennismakingscursus-v4</option>
           <option value="kennismakingscursus-v5"  ${fBron === 'kennismakingscursus-v5' ? 'selected' : ''}>kennismakingscursus-v5</option>
           <option value="kennismakingscursus-v6"  ${fBron === 'kennismakingscursus-v6' ? 'selected' : ''}>kennismakingscursus-v6</option>
+          <option value="webinar-v1"              ${fBron === 'webinar-v1' ? 'selected' : ''}>webinar-v1</option>
+          <option value="webinar-v2"              ${fBron === 'webinar-v2' ? 'selected' : ''}>webinar-v2</option>
           <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
           <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
           <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>

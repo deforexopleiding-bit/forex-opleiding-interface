@@ -18,6 +18,7 @@
   const GROEPEN = [
     { groep: 'kmc', titel: 'Mini-cursus (kennismakingscursus)' },
     { groep: '7-daagse', titel: '7-daagse' },
+    { groep: 'webinar', titel: 'Webinar (maandag 19:00)' },
   ];
 
   const PRESETS = [

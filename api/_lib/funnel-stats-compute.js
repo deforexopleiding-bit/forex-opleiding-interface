@@ -40,6 +40,9 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   '7-daagse-v2',
   '7-daagse-v3',
   '7-daagse-v4',
+  // 2026-10-09: gratis webinar (elke maandag 19:00) — A = formulier in beeld, B = belofte + knop.
+  'webinar-v1',
+  'webinar-v2',
 ]);
 
 export const VARIANT_INFO = Object.freeze({
@@ -55,6 +58,8 @@ export const VARIANT_INFO = Object.freeze({
   '7-daagse-v2':            { label: '7-daagse (v2)',    groep: '7-daagse' },
   '7-daagse-v3':            { label: '7-daagse (v3 · A)', groep: '7-daagse' },
   '7-daagse-v4':            { label: '7-daagse (v4 · B)', groep: '7-daagse' },
+  'webinar-v1':             { label: 'Webinar (v1 · A)', groep: 'webinar' },
+  'webinar-v2':             { label: 'Webinar (v2 · B)', groep: 'webinar' },
 });
 
 // Vaste fase-volgorde. `match` bepaalt welk event de fase vult.
