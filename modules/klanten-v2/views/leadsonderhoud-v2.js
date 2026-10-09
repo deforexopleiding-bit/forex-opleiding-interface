@@ -855,6 +855,18 @@
     const k = String(key);
     return _lsInb.convs.items.find(c => _lsInbRowKey(c) === k) || null;
   }
+  // 2026-10-09: draad-URL voor een rij. Lead-rij → lead_id + het conversation_id
+  // dat de lijst al kent (server zoekt het WA-gesprek dan niet meer zelf op —
+  // dat miste >50% → lege draad + "gelezen" sprong terug). Mail blijft via
+  // het lead-pad. Lead-loze rij (conv:) → ongewijzigd conversation_id-pad.
+  function _lsInbThreadUrl(rowKey, extra) {
+    const k = String(rowKey);
+    const basis = '/api/leadsonderhoud-gesprek-berichten?';
+    if (k.startsWith('conv:')) return basis + 'conversation_id=' + encodeURIComponent(k.slice(5)) + (extra || '');
+    const row = _lsInbRowByKey(k);
+    const conv = row && row.conversation_id ? '&conversation_id=' + encodeURIComponent(String(row.conversation_id)) : '';
+    return basis + 'lead_id=' + encodeURIComponent(k) + conv + (extra || '');
+  }
   // FASE 2: endpoint-identiteit voor een rij. Lead-rij → { lead_id }; lead-loze
   // conversatie → { conversation_id } (de Fase 0-endpointpaden). Compose-state
   // wordt daarentegen ALTIJD op de rowKey gesleuteld (zie _lsInbRowKey), zodat
@@ -914,10 +926,7 @@
     // e-mailmodule met rust). Idempotent: 1 poging per open-actie.
     const alreadyMarked = _lsInb.thread._markedFor === leadId;
     const markParam = alreadyMarked ? '' : '&mark_as_read=true';
-    const _isConv = String(leadId).startsWith('conv:');
-    const _threadUrl = _isConv
-      ? '/api/leadsonderhoud-gesprek-berichten?conversation_id=' + encodeURIComponent(String(leadId).slice(5)) + markParam
-      : '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(leadId) + markParam;
+    const _threadUrl = _lsInbThreadUrl(leadId, markParam);
     const j = await tryFetch('ls-thread ' + leadId, _threadUrl);
     if (seq !== _lsInb.thread._seq) return;
     if (_lsInb.thread.leadId !== leadId) return;
@@ -1668,10 +1677,7 @@
       }
       if (_lsInb.thread.leadId) {
         // FASE 1: thread.leadId is de rowKey; kies het endpoint-pad op vorm.
-        const _pk = String(_lsInb.thread.leadId);
-        const _pollUrl = _pk.startsWith('conv:')
-          ? '/api/leadsonderhoud-gesprek-berichten?conversation_id=' + encodeURIComponent(_pk.slice(5))
-          : '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(_pk);
+        const _pollUrl = _lsInbThreadUrl(_lsInb.thread.leadId);
         const j = await tryFetch('ls-poll-thread', _pollUrl);
         if (j && Array.isArray(j.items)) {
           const seen = new Set(_lsInb.thread.items.map(x => String(x.id)));
