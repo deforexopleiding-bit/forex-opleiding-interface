@@ -322,13 +322,26 @@ test('geen actieve reeks of alles overgeslagen → geenSessie', async () => {
   assert.deepEqual(await W.meldAan(db, { voornaam: 'X', email: 'x@example.com', bron: 'webinar-v1', nu: DONDERDAG }), { geenSessie: true });
 });
 
-test('bedrading: cron elke minuut, tab geregistreerd, bronlijsten, cache-busters, SQL', () => {
+test('bedrading: cron elke minuut, eigen module, bronlijsten, cache-busters, SQL', () => {
   const vercel = JSON.parse(lees('vercel.json'));
   assert.ok(vercel.crons.some((c) => c.path === '/api/cron-webinar' && c.schedule === '* * * * *'));
-  assert.match(lees('modules/shared/design-system/app-shell.js'), /tabs: \['Overzicht', 'Inbox', 'Inschrijvingen', 'Webinar', 'Statistieken'\]/);
-  assert.match(lees('modules/klanten-v2/views/webinar-v2.js'), /window\.DFO\.VIEWS\['events\/Webinar'\] = webinarView;/);
+  // Eigen module (sidebar direct onder Events, zelfde rollen); geen tab meer in Events.
+  const shell = lees('modules/shared/design-system/app-shell.js');
+  const ev = shell.indexOf("id: 'events'");
+  const wb = shell.indexOf("id: 'webinar'");
+  assert.ok(ev > 0 && wb > ev, 'webinar na events');
+  assert.ok(!shell.slice(ev + "id: 'events'".length, wb).includes("id: '"), 'direct onder Events (geen module ertussen)');
+  assert.match(shell, /\{ g: 'Leren & Events',\s+id: 'webinar',\s+naam: 'Webinar',\s+icon: I\.video,\s+color: 'pink',\s+roles: SAMSM,tabs: \[\] \}/);
+  assert.match(shell, /id: 'events',[^\n]*tabs: \['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'\] \}/);
+  assert.match(lees('modules/shared/design-system/icons.js'), /\n\s+video:\s+'<path/);
+  assert.match(lees('modules/klanten-v2/klanten-v2.js'), /const V2_ACTIVE_ALLOWLIST = new Set\(\[[^\]]*'webinar'/);
+  const view = lees('modules/klanten-v2/views/webinar-v2.js');
+  assert.match(view, /window\.DFO\.VIEWS\['webinar\/'\] = webinarView;/);
+  assert.match(view, /window\.KV_V2_ADD\('webinar'\)/);
+  assert.doesNotMatch(view, /VIEWS\['events\/Webinar'\]/);
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /<script src="views\/webinar-v2\.js\?v=1"><\/script>/);
+  assert.match(html, /<script src="views\/webinar-v2\.js\?v=2"><\/script>/);
+  for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e0'], ['klanten-v2', '1f5']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
   for (const [f, v] of [['leads-v2.js', 28], ['funnel-dashboard-v2.js', 3], ['leadsonderhoud-v2.js', 66]]) {
     assert.match(html, new RegExp(`views/${f.replace('.', '\\.')}\\?v=${v}"`), f);
   }
