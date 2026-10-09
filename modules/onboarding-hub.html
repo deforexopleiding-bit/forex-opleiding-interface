@@ -396,8 +396,8 @@
       <p style="margin:0 0 4px;color:var(--text-2);font-size:13.5px;line-height:1.55">
         De hersync hierboven geeft een nummer aan studenten <strong>met</strong> een onboarding.
         Deze knop doet het voor <strong>alle</strong> studenten in het LMS die nog geen nummer
-        hebben &mdash; ook de Bubble-imports. De student wordt aan een CRM-klant gekoppeld via
-        de onboarding, het Bubble-id of het e-mailadres, en het nummer komt uit dezelfde
+        hebben &mdash; ook de geïmporteerde studenten. De student wordt aan een CRM-klant gekoppeld via
+        de onboarding, het historische id of het e-mailadres, en het nummer komt uit dezelfde
         voorrang als in de spiegel: klantkaart, WhatsApp-gesprek, lead, geboekte call, wizard.
       </p>
       <p style="margin:0 0 14px;color:var(--text-2);font-size:13.5px;line-height:1.55">
@@ -865,7 +865,7 @@
       const g = d.gekoppeld || {};
       html += blok('Gekoppeld aan het CRM',
         tel(g.onboarding, 'via onboarding')
-        + tel(g.bubble, 'via Bubble-id')
+        + tel(g.bubble, 'via historisch id')
         + tel(g.email, 'via e-mail (klantkaart)')
         + tel(d.niet_gekoppeld, 'geen CRM-klant gevonden')
         + (d.email_dubbel ? '<span style="color:var(--amber)"><strong>' + d.email_dubbel

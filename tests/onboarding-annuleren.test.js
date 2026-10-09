@@ -1,6 +1,6 @@
 // tests/onboarding-annuleren.test.js — annuleren vanuit het LMS, met EXACT
 // dezelfde uitvoering als de CRM-knop (Maxim, 6 oktober 2026). Alles hier
-// draait tegen nep-databanken en nagebootste Teamleader/Bubble: er wordt nooit
+// draait tegen nep-databanken en een nagebootst Teamleader: er wordt nooit
 // een echte klant geannuleerd.
 
 import { test, mock } from 'node:test';
@@ -59,7 +59,7 @@ async function laad({ ob, lmsStudent = { id: 'st-1', eind_datum: '2027-06-30' } 
     onboarding_cancellations: [],
   });
   const lms = nepDb({ hlms_student: lmsStudent ? [lmsStudent] : [], hlms_signaal: [], hlms_signaal_gebeurtenis: [] });
-  const tl = []; const bubble = []; const meldingen = []; const spiegel = [];
+  const tl = []; const meldingen = []; const spiegel = [];
   mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: crm, createUserClient: () => ({}) } });
   mock.module(url('api/_lib/teamleader-token.js'), {
     namedExports: {
@@ -67,12 +67,11 @@ async function laad({ ob, lmsStudent = { id: 'st-1', eind_datum: '2027-06-30' } 
       getActiveToken: async () => 'token',
     },
   });
-  mock.module(url('api/_lib/bubble.js'), { namedExports: { bubblePatch: async (...a) => { bubble.push(a); } } });
   mock.module(url('api/_lib/notify.js'), { namedExports: { createNotification: async (m) => { meldingen.push(m); return { ok: true }; } } });
   mock.module(url('api/_lib/onboarding-spiegel.js'), { namedExports: { spiegelNaActie: async (id) => { spiegel.push(id); } } });
   mock.module(url('api/_lib/dfo-lms-db.js'), { namedExports: { getDfoLmsClient: () => lms } });
   const mod = await import(url('api/_lib/onboarding-annuleren.js') + '?t=' + Math.random());
-  return { mod, crm, lms, tl, bubble, meldingen, spiegel };
+  return { mod, crm, lms, tl, meldingen, spiegel };
 }
 
 const TESTKLANT = () => ({ id: OB, customer_id: 'k1', customer_name: 'Testklant Annuleren', mentor_user_id: 'm1',
@@ -89,9 +88,9 @@ test('DEZELFDE CASCADE + DE NIEUWE STAPPEN: automaties stop, LMS-toegang dicht, 
   // a-c) Teamleader: alleen de onbetaalde factuur, het abonnement, de offerte en de deal.
   assert.deepEqual(w.tl.map((c) => c.p).sort(), ['/deals.lose', '/invoices.credit', '/quotations.delete', '/subscriptions.deactivate']);
   assert.equal(w.tl.find((c) => c.p === '/invoices.credit').body.id, 'tl-f1');
-  // d) Bubble: vervallen (9 okt 2026) — er gaat NIETS meer naar Bubble.
-  assert.equal(w.bubble.length, 0);
+  // d) Bubble: vervallen (9 okt 2026) — er is geen Bubble-stap meer.
   assert.equal(body.steps.bubble_membership_end, undefined);
+  assert.doesNotMatch(lees('api/_lib/onboarding-annuleren.js'), /bubble\.js|bubblePatch/);
   // e) Status geannuleerd.
   assert.ok(w.crm.log.updates.some((u) => u.tabel === 'onboardings' && u.patch.status === 'geannuleerd'));
   // h) Alleen de LOPENDE automatie gestopt.

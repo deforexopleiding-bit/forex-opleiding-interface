@@ -291,8 +291,7 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
  * vorm die api/onboarding-intake-status.js nodig heeft, zodat dat endpoint
  * zijn sleutel (`onboardings.bubble_user_id`) niet hoeft te wijzigen.
  *
- * Per student drie tijdstippen, met dezelfde betekenis als de Bubble-versie
- * in api/_lib/bubble-1on1.js:
+ * Per student drie tijdstippen (zelfde betekenis als de vroegere Bubble-versie):
  *   next   eerstvolgende TOEKOMSTIGE, nog niet afgehandelde sessie
  *   done   VROEGSTE afgeronde sessie  (dat is de "eerste call voltooid")
  *   noshow LAATSTE no-show

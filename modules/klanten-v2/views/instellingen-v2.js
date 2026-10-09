@@ -207,7 +207,6 @@
     // en server-side gate op de endpoints blijft de laatste laag.
     { g: 'Systeem', items: [
       { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill', ic: I.settings, roles: ['super_admin'] },
-      { id: 'sys-bubble-schema',  n: 'Bubble-schema probe',   d: 'Lees keys+types van een Bubble-objecttype (read-only)', ic: I.settings, roles: ['super_admin'] },
       { id: 'sys-tv-board',       n: 'TV-bord · omzetdoelen', d: 'Week- en maanddoelen voor de meters op /display', ic: I.settings, roles: ['super_admin'] },
     ]},
   ];
@@ -3140,37 +3139,6 @@
     </div>`;
   }
 
-  /* Wave-2 · sys-bubble-schema — lazy op knop-klik (niet bij render).
-     Read-only super_admin diagnostiek.
-     Ronde-31 BLOK C: endpoint-param FIX (was `?objtype=` — endpoint eist `?type=`)
-     + nieuwe option-waarden probe (?type=user&options=1). */
-  const _bs = { busy: false, result: null, error: null, type: null, mode: null };
-  window.__setBsProbe = async (type, options) => {
-    if (_bs.busy) return;
-    _bs.busy = true; _bs.result = null; _bs.error = null; _bs.type = type; _bs.mode = options ? 'options' : 'schema'; if (render) render();
-    const suffix = options ? '&options=1' : '';
-    const j = await tryFetch('bubble-probe', '/api/bubble-schema-probe?type=' + encodeURIComponent(type) + suffix);
-    _bs.busy = false;
-    if (j?.__error || j?.error) _bs.error = j.__error || j.error;
-    else _bs.result = j;
-    if (render) render();
-  };
-  function bodyBubbleProbe() {
-    if (!isSuperAdmin()) return bodyAccessDenied();
-    const out = _bs.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px">${esc(_bs.error)}</div>`
-             : _bs.result ? `<pre style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11.5px;max-height:400px;overflow:auto;font-family:'IBM Plex Mono',monospace;margin:0">${esc(JSON.stringify(_bs.result, null, 2))}</pre>`
-             : `<div style="color:var(--text-3);font-size:12px">Klik een knop om het schema van dat objecttype op te halen.</div>`;
-    return `<div style="max-width:900px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">Sampled een set records van een Bubble-objecttype (default 200) en toont uitsluitend property-keys + JS-typen. Geen waarden/PII. Alleen super_admin.</div>
-      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user')">${_bs.busy && _bs.type === 'user' && _bs.mode === 'schema' ? 'Bezig…' : '👤 User-velden'}</button>
-        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('session')">${_bs.busy && _bs.type === 'session' ? 'Bezig…' : '⏱ Session-velden'}</button>
-        <button class="btn btn-ghost btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user', true)" title="Distinct waarden van option-set-velden op User (whitelist)">${_bs.busy && _bs.type === 'user' && _bs.mode === 'options' ? 'Bezig…' : '🏷 User-option-waarden'}</button>
-      </div>
-      ${out}
-    </div>`;
-  }
-
   /* Display-v2 · sys-tv-board — week/maand omzetdoelen voor /display.
      Schrijft app_settings.display_week_target + display_month_target
      (integer euro's, of null bij "leeg wissen"). Lege input = doel niet
@@ -3428,7 +3396,7 @@
       { name: 'Webflow',      env: 'WEBFLOW_API_TOKEN',        status: 'env-var', usedBy: 'CMS auto-publish' },
       { name: 'GoHighLevel',  env: 'GHL_* (meerdere)',         status: 'env-var', usedBy: 'Lisa + follow-up' },
       { name: 'Voys',         env: 'VOYS_API_TOKEN + VOYS_CLIENT_UUID', status: 'env-var', usedBy: 'Telefonie/call-outs' },
-      { name: 'Bubble',       env: 'BUBBLE_API_TOKEN',         status: 'env-var', usedBy: 'LMS-data' },
+      { name: 'LMS (dfo-lms)', env: 'DFO_LMS_SUPABASE_URL + _SERVICE_ROLE_KEY, DFO_LMS_PUSH_SECRET', status: 'env-var', usedBy: 'Studenten, sessies, uitnodigingen' },
       { name: 'Supabase',     env: 'SUPABASE_SERVICE_ROLE_KEY', status: 'env-var', usedBy: 'Server-side DB-writes' },
       { name: 'Strato IMAP',  env: 'STRATO_*_USER/_PASS × 4',  status: 'env-var', usedBy: 'Mail-sync (4 postvakken)' },
     ];
@@ -6528,62 +6496,32 @@
     </div>`;
   }
 
-  /* Wave-1 · team-mentoren ← Mentor↔Bubble-koppeling. Toont per actieve
-     mentor de huidige koppel-status + picker om te (ont)koppelen. Endpoints:
-     GET team-members-bubble-status (lijst), GET bubble-mentors-list (picker),
-     POST mentor-bubble-link (koppel), POST team-member-ensure (fallback als
-     mentor nog geen team_member-rij heeft). Custom confirm bij ontkoppel. */
-  const _mnt = { loading: false, fetched: false, error: null, mentors: [], bubbleList: [], bubbleFetched: false, pickerFor: null, pickerQ: '', busy: {} };
+  /* team-mentoren ← koppeling met het LMS. Bubble is dicht (okt 2026); de
+     koppeling is geen veld meer maar het e-mailadres: team_members.email ↔
+     hlms_personeel.email (precies één actieve match). Endpoint:
+     GET team-members-lms-status. Alleen-lezen: rechtzetten = het e-mailadres
+     in het CRM of het LMS aanpassen. */
+  const _mnt = { loading: false, fetched: false, error: null, mentors: [] };
   async function fetchMentoren() {
     if (_mnt.loading || _mnt.fetched) return;
     _mnt.loading = true; _mnt.error = null; if (render) render();
-    const j = await tryFetch('mnt-status', '/api/team-members-bubble-status');
+    const j = await tryFetch('mnt-status', '/api/team-members-lms-status');
     _mnt.loading = false; _mnt.fetched = true;
     if (j?.__error) _mnt.error = j.__error;
     else if (j?.error) _mnt.error = j.error;
     else _mnt.mentors = Array.isArray(j?.mentors) ? j.mentors : [];
     if (render) render();
   }
-  async function fetchBubbleList() {
-    if (_mnt.bubbleFetched) return;
-    const j = await tryFetch('mnt-bubble', '/api/bubble-mentors-list');
-    _mnt.bubbleFetched = true;
-    _mnt.bubbleList = Array.isArray(j?.mentors) ? j.mentors : [];
-    if (render) render();
-  }
-  window.__setMntOpenPicker = (teamMemberId) => {
-    _mnt.pickerFor = teamMemberId;
-    _mnt.pickerQ = '';
-    if (!_mnt.bubbleFetched) fetchBubbleList();
-    else if (render) render();
-  };
-  window.__setMntClosePicker = () => { _mnt.pickerFor = null; if (render) render(); };
-  window.__setMntPickerQ    = (v) => { _mnt.pickerQ = String(v || ''); if (render) render(); };
-  async function linkMentor(teamMemberId, bubbleUserId, label) {
-    _mnt.busy[teamMemberId] = true; if (render) render();
-    const j = await tryFetch('mnt-link', '/api/mentor-bubble-link', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ team_member_id: teamMemberId, bubble_user_id: bubbleUserId }),
-    });
-    _mnt.busy[teamMemberId] = false;
-    if (j?.__error || j?.error) showToast('Koppelen mislukt: ' + (j.__error || j.error), 'warn');
-    else { showToast(label || 'Koppeling bijgewerkt', 'ok'); _mnt.fetched = false; fetchMentoren(); }
-    _mnt.pickerFor = null;
-    if (render) render();
-  }
-  window.__setMntPickBubble = (bubbleUserId) => {
-    if (!_mnt.pickerFor) return;
-    linkMentor(_mnt.pickerFor, bubbleUserId, 'Gekoppeld aan Bubble');
-  };
-  window.__setMntUnlink = (teamMemberId, mentorName) => {
-    openConfirm(`Bubble-koppeling verbreken voor ${mentorName || 'deze mentor'}? Het mentor-dashboard verliest z'n Bubble-data-koppeling.`, () => {
-      linkMentor(teamMemberId, null, 'Bubble-koppeling verbroken');
-    }, 'warn');
+  const MNT_REDEN = {
+    'mentor-zonder-email':  'geen e-mailadres in het CRM',
+    'mentor-niet-in-lms':   'e-mailadres niet gevonden bij het LMS-personeel',
+    'meerdere-lms-mentors': 'e-mailadres komt meer dan één keer voor in het LMS',
+    'lms-onbereikbaar':     'LMS niet bereikbaar',
   };
   /* Ronde-31 BLOK B · team-mentoren — cash-vergoedingen sectie.
      Endpoints bestaan: mentor-cash-trajects-list / -status / -release.
      Permission: mentor.ledger.write. Motor: cron-mentor-cash-cron (niet aangeraakt).
-     Section wordt onder de Bubble-koppeling-tabel gerenderd. Read-first via list;
+     Section wordt onder de LMS-koppeling-tabel gerenderd. Read-first via list;
      status-actions per rij (pause/resume/delete) + globale Release-knop. */
   const _mnc = { loading: false, fetched: false, error: null, trajects: [], busy: {}, releasing: false, lastRelease: null };
   async function fetchMntCash() {
@@ -6697,63 +6635,26 @@
     if (_mnt.loading && !_mnt.mentors.length) return `<div style="padding:24px;color:var(--text-3)">Laden…</div>`;
     if (_mnt.error) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_mnt.error)}</div>`;
     const rows = _mnt.mentors.map(m => {
-      const busy = !!_mnt.busy[m.id];
-      const linked = !!m.bubble_user_id;
+      const linked = !!m.lms_id;
       return `<tr style="border-top:1px solid var(--border)">
         <td style="padding:8px 12px;font-size:12.5px">${esc(m.name || '—')}</td>
         <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(m.email || '—')}</td>
-        <td style="padding:8px 12px;font-size:11.5px">${linked ? `<span style="color:var(--emerald)">✓ ${esc(m.bubble_user_id).slice(0,10)}…</span>` : `<span style="color:var(--text-3)">niet gekoppeld</span>`}</td>
-        <td style="padding:8px 12px;text-align:right">
-          ${linked
-            ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMntUnlink('${m.id}', '${esc(m.name || '')}')" style="font-size:11px;color:var(--rose)">Ontkoppel</button>`
-            : `<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMntOpenPicker('${m.id}')" style="font-size:11px">Koppel Bubble…</button>`}
-        </td>
+        <td style="padding:8px 12px;font-size:11.5px">${linked ? `<span style="color:var(--emerald)">✓ gekoppeld</span>` : `<span style="color:var(--amber)">niet gekoppeld — ${esc(MNT_REDEN[m.reden] || m.reden || 'onbekend')}</span>`}</td>
       </tr>`;
     }).join('');
-    const picker = _mnt.pickerFor ? _renderMntPicker() : '';
-    // Polish C: mentoren-lijst komt uit /api/team-members-bubble-status die
-    // ALLE actieve mentoren (gekoppeld + niet) returnt via user_roles + is_active.
-    // Als telling afwijkt van de Mentoren-module (bv. 6 hier vs 7 daar), zit dat
-    // in test-mentor-filtering elders. Endpoint filtert alleen op is_active.
     return `<div style="max-width:1000px">
-      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_mnt.mentors.length} actieve mentor(en) — bron: /api/team-members-bubble-status</div>
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_mnt.mentors.length} actieve mentor(en). De koppeling met het LMS loopt via het e-mailadres; niet gekoppeld = het adres in het CRM en het LMS rechtzetten.</div>
       <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">E-mail</th>
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Bubble</th>
-            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Actie</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">LMS</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
       ${_mncCashBlock()}
-      ${picker}
-    </div>`;
-  }
-  function _renderMntPicker() {
-    const q = _mnt.pickerQ.toLowerCase().trim();
-    const filtered = q ? _mnt.bubbleList.filter(x => (x.name || '').toLowerCase().includes(q) || (x.email || '').toLowerCase().includes(q)) : _mnt.bubbleList;
-    const list = _mnt.bubbleFetched
-      ? (filtered.length
-          ? filtered.slice(0, 50).map(x => `<button onclick="window.__setMntPickBubble('${esc(x.bubble_user_id)}')" style="display:flex;flex-direction:column;padding:8px 12px;background:transparent;border:none;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;font:inherit;width:100%">
-              <span style="font-size:12.5px;font-weight:500;color:var(--text)">${esc(x.name || '—')}</span>
-              <span style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(x.email || '')} · ${esc(x.bubble_user_id).slice(0,12)}…</span>
-            </button>`).join('')
-          : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen resultaten</div>`)
-      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Bubble-lijst laden…</div>`;
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setMntClosePicker()">
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:14px;font-weight:600">Kies Bubble-user</div>
-          <button class="btn btn-ghost btn-sm" onclick="window.__setMntClosePicker()">✕</button>
-        </div>
-        <div style="padding:12px 18px;border-bottom:1px solid var(--border)">
-          <input type="text" placeholder="Zoek op naam of e-mail…" value="${esc(_mnt.pickerQ)}" oninput="window.__setMntPickerQ(this.value)" style="width:100%;padding:7px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box" />
-        </div>
-        <div style="overflow-y:auto;flex:1">${list}</div>
-      </div>
     </div>`;
   }
 
@@ -7083,7 +6984,6 @@
     if (cur.id === 'sales-offerte')      return bodySalesOfferte();
     if (cur.id === 'team-mentoren')      return bodyMentoren();
     if (cur.id === 'mk-webflow')         return bodyWebflow();
-    if (cur.id === 'sys-bubble-schema')  return bodyBubbleProbe();
     if (cur.id === 'sys-tv-board')       return bodyTvBoard();
     if (cur.id === 'fin-entiteiten')     return bodyEntiteiten();
     // Wave-3 · gevoelige secties
@@ -7103,7 +7003,7 @@
     if (cur.id === 'sales-bonus')        return bodySalesBonus();
     // v=74 opruim-ronde: ev-locaties verwijderd (locaties zijn vrije-tekst
     // per event, geen registry-tabel; wordt in Events beheerd).
-    if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
+    if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in het LMS (lms.deforexopleiding.nl); het CRM leest via de LMS-databank.', null);
     if (cur.id === 'mk-meta')            return bodyMkMeta();
     if (cur.id === 'mk-bronnen')         return bodyLeadBronnen();
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
@@ -8666,7 +8566,7 @@
       'wb-test-cockpit',
     ]);
     const READONLY = new Set([
-      'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
+      'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel',
       // v=75: mk-meta native READ-ONLY (WABA-status).
       'mk-meta',
       // Ronde-28 C1: mk-bronnen read-native (mapping-editor blijft brok).

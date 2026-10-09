@@ -6,7 +6,7 @@
 // nooit per ongeluk raken.
 //
 // LET OP — naamgeving. Er lopen drie systemen door dit repo:
-//   1. Bubble            — het oude LMS (api/_lib/bubble.js).
+//   1. Bubble            — het oude LMS (dicht sinds okt 2026; geen code meer).
 //   2. de trial-site     — 7-daagse / mini-cursus voor leads, met de
 //                          lms_gebruikers / lms_toegang / lms_producten-
 //                          tabellen IN het CRM-project en een koppeling
