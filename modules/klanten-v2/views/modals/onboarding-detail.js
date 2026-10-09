@@ -4,8 +4,9 @@
 // _openDetailModal (regel ~1500-1600). 4 sub-tabs:
 //   1. Overzicht — klant/status/mentor + acties (note, resolve, start-date,
 //      mentor-select, archive, cancel-preview-execute).
-//   2. Account & LMS — bubble-status, provision-retry, invite-send (WA) en
-//      de koppeling met het nieuwe LMS (dfo-lms / hlms_student).
+//   2. Account & LMS — invite-send en de koppeling met het LMS (dfo-lms /
+//      hlms_student), incl. 'LMS-uitnodiging opnieuw sturen'. Sinds
+//      9 okt 2026 zonder Bubble.
 //   3. Vragenlijst — beschikbaarheid + answers-jsonb.
 //   4. Tijdlijn — mentor_updates + status-events.
 //
@@ -19,7 +20,7 @@
 //   POST /api/onboarding-archive {onboarding_id, action:'archive'|'restore'}
 //   POST /api/onboarding-cancel {onboarding_id, preview:true}
 //                             / {onboarding_id, reason, confirm:true}
-//   POST /api/onboarding-provision-retry {onboarding_id}
+//   POST /api/onboarding-credentials-reset {onboarding_id}  (LMS-uitnodiging opnieuw)
 //   POST /api/onboarding-invite-send {onboarding_id, force?}
 //   POST /api/onboarding-intake-status {onboarding_ids:[uuid]}
 //   POST /api/onboarding-dfo-lms-provision {onboarding_id}
@@ -80,7 +81,7 @@ async function loadMentors() {
 // De drie call-velden (gepland / voltooid / no-show) komen NIET uit
 // /api/onboarding-detail — dat endpoint geeft ze sinds de perf-refactor
 // hardgecodeerd als null terug (zie api/onboarding-detail.js: "de traagste
-// externe Bubble-call is VERWIJDERD uit het kritieke pad"). De bedoeling was
+// externe call is VERWIJDERD uit het kritieke pad"). De bedoeling was
 // dat de frontend ze lazy bijhaalt via de sidecar; het lijstscherm doet dat
 // wel (onboarding-v2.js), deze modal deed dat niet. Gevolg: alle drie stonden
 // altijd op '—', wat leest als "er is nog niets gebeurd" terwijl het in
@@ -283,7 +284,7 @@ function renderOverzichtTab() {
         ${o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? (o.in_incasso
           ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-incasso-terug ${state.savingAction ? 'disabled' : ''} title="De klant start toch: kies een nieuwe startdatum.">${state.savingAction === 'incasso' ? 'Bezig…' : 'Terug activeren'}</button>`
           : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-incasso ${state.savingAction ? 'disabled' : ''} title="Niet annuleren: uit de actieve lijsten, facturen en aanmaningen lopen door. Vraagt een reden.">${state.savingAction === 'incasso' ? 'Bezig…' : 'Naar incasso-opvolging'}</button>`) : ''}
-        ${!afgesloten(o) && o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-handmatig ${state.savingAction ? 'disabled' : ''} title="Het traject loopt al (bv. calls in Bubble). Vraagt een reden.">
+        ${!afgesloten(o) && o.status !== 'geannuleerd' && o.status !== 'gearchiveerd' ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-handmatig ${state.savingAction ? 'disabled' : ''} title="Het traject loopt al (bv. calls al gestart). Vraagt een reden.">
           ${state.savingAction === 'handmatig' ? 'Bezig…' : 'Onboarding afronden (handmatig)'}
         </button>` : ''}
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-archive ${state.savingAction ? 'disabled' : ''}>
@@ -291,25 +292,18 @@ function renderOverzichtTab() {
         </button>
       </div>
       <div class="kv-onb-action-row" style="margin-top:14px">
-        <button type="button" class="ds-btn ds-btn-primary ds-btn-sm kv-onb-danger" data-kv-onb-cancel-preview ${state.savingAction || o.status === 'geannuleerd' ? 'disabled' : ''} title="${o.status === 'geannuleerd' ? 'Al geannuleerd' : 'Preview de cascade (crediteert facturen, deactiveert abo, Bubble-membership)'}">
+        <button type="button" class="ds-btn ds-btn-primary ds-btn-sm kv-onb-danger" data-kv-onb-cancel-preview ${state.savingAction || o.status === 'geannuleerd' ? 'disabled' : ''} title="${o.status === 'geannuleerd' ? 'Al geannuleerd' : 'Preview de cascade (crediteert facturen, deactiveert abo, sluit LMS-toegang)'}">
           ${state.savingAction === 'cancel-preview' ? 'Preview laden…' : 'Student annuleren'}
         </button>
       </div>
     </div>`;
 }
 
-// ── Sub-tab 2: Account & Bubble ────────────────────────────────────────────
+// ── Sub-tab 2: Account & LMS ───────────────────────────────────────────────
 function renderAccountTab() {
   const o = state.data;
-  const provOk = !!o.bubble_provisioned;
   return `
     <div class="kv-onb-meta">
-      <div class="kv-onb-meta-row"><span>Bubble-provisioning</span><span>${provOk ? '<span class="kv-onb-pill kv-onb-pill-ok">OK</span>' : (o.bubble_provision_error ? '<span class="kv-onb-pill kv-onb-pill-danger">Mislukt</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Nog niet</span>')}</span></div>
-      <div class="kv-onb-meta-row"><span>Bubble-user-id</span><span class="mono">${esc(o.bubble_user_id || '—')}</span></div>
-      <div class="kv-onb-meta-row"><span>Provisioned op</span><span>${fmtDT(o.bubble_provisioned_at)}</span></div>
-      ${o.bubble_provision_error ? `<div class="kv-onb-meta-row"><span>Fout</span><span style="color:var(--rose)">${esc(o.bubble_provision_error)}</span></div>` : ''}
-      <div class="kv-onb-meta-row"><span>Credentials-mail verstuurd</span><span>${fmtDT(o.credentials_email_sent_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Credentials-WA verstuurd</span><span>${fmtDT(o.credentials_wa_sent_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Invite verstuurd</span><span>${fmtDT(o.invite_sent_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Wizard-stap</span><span>${o.current_step != null ? String(o.current_step) : '—'}</span></div>
       <div class="kv-onb-meta-row"><span>Persoonlijke link</span><span>${o.token ? `<a href="/modules/onboarding.html?t=${esc(o.token)}" target="_blank" rel="noopener">Openen ↗</a>` : '—'}</span></div>
@@ -318,9 +312,6 @@ function renderAccountTab() {
     <div class="kv-onb-section">
       <div class="kv-onb-section-title">Acties</div>
       <div class="kv-onb-action-row">
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-provision ${state.savingAction ? 'disabled' : ''}>
-          ${state.savingAction === 'provision' ? 'Bezig…' : (provOk ? 'Provision opnieuw proberen' : 'Bubble provisionen')}
-        </button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-resend ${state.savingAction || !o.customer_id ? 'disabled' : ''} title="Verstuurt de welkomstmail met onboarding-link opnieuw">
           ${state.savingAction === 'resend' ? 'Versturen…' : 'Onboardingsuitnodiging opnieuw sturen'}
         </button>
@@ -431,6 +422,9 @@ function renderDfoLmsSection(o) {
         </button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-lmsinvite ${state.savingAction || !gekoppeld ? 'disabled' : ''} title="Verstuurt de welkomstmail van het LMS. Is er al eerder uitgenodigd, dan gebeurt er niets.">
           ${state.savingAction === 'lmsinvite' ? 'Versturen…' : 'LMS-uitnodiging versturen'}
+        </button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-lmsreinvite ${state.savingAction || !gekoppeld ? 'disabled' : ''} title="Nieuwe welkomstmail met een NIEUW wachtwoord. Het oude wachtwoord werkt daarna niet meer.">
+          ${state.savingAction === 'lmsreinvite' ? 'Versturen…' : 'Opnieuw sturen (nieuw wachtwoord)'}
         </button>
       </div>
       <div class="kv-onb-hint">${gekoppeld
@@ -637,7 +631,7 @@ function actMentor() {
   return callAction('mentor', '/api/onboarding-assign-mentor', { onboarding_id: state.id, mentor_user_id: v });
 }
 function actHandmatig() {
-  const reden = prompt('Waarom is deze onboarding al afgelopen? (bv. "traject loopt al, calls in Bubble")', '');
+  const reden = prompt('Waarom is deze onboarding al afgelopen? (bv. "traject loopt al, calls al gestart")', '');
   if (reden === null) return;
   if (reden.trim().length < 5) { alert('Geef een reden van minstens 5 tekens.'); return; }
   return callAction('handmatig', '/api/onboarding-handmatig-afronden', { onboarding_id: state.id, reden: reden.trim() });
@@ -680,8 +674,31 @@ async function actCancelPreview() {
     rerender();
   }
 }
-async function actProvision() {
-  await callAction('provision', '/api/onboarding-provision-retry', { onboarding_id: state.id });
+// Expliciet OPNIEUW sturen: vervangt sinds 9 okt 2026 de Bubble-wachtwoord-
+// reset. Het LMS maakt een nieuw wachtwoord en het oude vervalt — daarom een
+// bevestiging. Ook de uitweg bij 'Actie vereist — wachtwoord niet gezet'.
+async function actLmsReinvite() {
+  if (!confirm('LMS-uitnodiging opnieuw sturen?\n\nDe student krijgt een nieuw wachtwoord; het oude werkt daarna niet meer.')) return;
+  state.savingAction = 'lmsreinvite'; state.globalError = null; state.saveOk = null;
+  rerender();
+  let j = null;
+  try {
+    j = await K().authedJson('/api/onboarding-credentials-reset', {
+      method: 'POST',
+      body: JSON.stringify({ onboarding_id: state.id }),
+    });
+  } catch (e) {
+    j = { ok: false, error: e?.message || 'Versturen mislukt' };
+  }
+  state.savingAction = null;
+  try { state.data = await loadDetail(state.id); } catch (_) { /* bijzaak */ }
+  if (j && j.ok === true) {
+    state.saveOk = 'LMS-uitnodiging opnieuw verstuurd' + (j.verstuurd_naar ? ' naar ' + j.verstuurd_naar : '') + '.';
+  } else {
+    state.globalError = 'Opnieuw sturen mislukt: ' + ((j && j.error) || 'onbekende fout');
+  }
+  if (typeof state.onSuccess === 'function') state.onSuccess();
+  rerender();
 }
 
 // De uitnodiging is een APARTE knop en geen bijwerking van 'student aanmaken'.
@@ -786,7 +803,7 @@ async function actResend() {
 // ── Cancel-confirm sub-modal ───────────────────────────────────────────────
 // 2-step preview→confirm. Reden verplicht (min 10 chars), geen typ-CANCEL
 // meer — expliciete waarschuwing + destructieve knop-label is voldoende.
-const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande facturen worden gecrediteerd, actieve abonnementen worden gedeactiveerd, gekoppelde offertes worden op geannuleerd gezet en de Bubble-membership wordt beëindigd. Sinds 6 oktober ook: lopende onboarding-automaties stoppen (er gaat niets meer naar de klant) en de toegang tot het LMS gaat dicht (einddatum gisteren).';
+const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande facturen worden gecrediteerd, actieve abonnementen worden gedeactiveerd, gekoppelde offertes worden op geannuleerd gezet en de toegang tot het LMS gaat dicht (einddatum gisteren). Sinds 6 oktober ook: lopende onboarding-automaties stoppen (er gaat niets meer naar de klant).';
 
 let _cancelPreview = null;
 let _cancelReason  = '';
@@ -821,7 +838,7 @@ function cancelBody() {
         <div class="kv-onb-cancel-row"><b>${invoices.length}</b> facturen worden gecrediteerd</div>
         <div class="kv-onb-cancel-row"><b>${subs.length}</b> abonnementen worden gedeactiveerd${p.subscription_value != null ? ` <span style="color:var(--text-3)">(waarde ${p.subscription_value})</span>` : ''}</div>
         <div class="kv-onb-cancel-row"><b>${offs.length}</b> offertes gemarkeerd als geannuleerd</div>
-        <div class="kv-onb-cancel-row">Bubble-membership ${p.bubble_user_id ? '<b>wordt beëindigd</b>' : '— (geen Bubble-user)'}</div>
+        <div class="kv-onb-cancel-row">LMS-toegang ${p.lms_student_id ? '<b>wordt gesloten</b> (einddatum gisteren)' : '— (geen LMS-student gekoppeld)'}</div>
       </div>
       <div class="kv-edit-field">
         <label>Reden voor annulering <span class="kv-edit-req">*</span> <span style="color:var(--text-3);font-weight:400">(min. 10 tekens)</span></label>
@@ -887,7 +904,7 @@ function wire() {
   box.querySelector('[data-kv-onb-incasso]')?.addEventListener('click', actIncasso);
   box.querySelector('[data-kv-onb-incasso-terug]')?.addEventListener('click', actIncassoTerug);
   box.querySelector('[data-kv-onb-cancel-preview]')?.addEventListener('click', actCancelPreview);
-  box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
+  box.querySelector('[data-kv-onb-lmsreinvite]')?.addEventListener('click', actLmsReinvite);
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
   box.querySelector('[data-kv-onb-dfolms]')?.addEventListener('click', actDfoLms);
   box.querySelector('[data-kv-onb-lmsinvite]')?.addEventListener('click', actLmsInvite);
@@ -925,7 +942,7 @@ export async function openOnboardingDetailModal({ onboardingId, onSuccess } = {}
   }
   rerender();
 
-  // Sidecar NA het eerste render: de Bubble-call erachter is traag en mag de
+  // Sidecar NA het eerste render: de sessie-call erachter is traag en mag de
   // modal niet ophouden. Faalt 'ie, dan zegt fmtIntake eerlijk 'niet
   // opgehaald' in plaats van een streepje.
   if (state.data) {

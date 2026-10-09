@@ -3,16 +3,16 @@
 // POST — Annulering-orchestrator voor een student. Twee modi:
 //
 //   PREVIEW : { onboarding_id, preview:true }
-//     Voert GEEN TL/Bubble/DB-mutaties uit. Verzamelt en returnt:
+//     Voert GEEN TL/LMS/DB-mutaties uit. Verzamelt en returnt:
 //       customer_name, invoices[], subscriptions[], subscription_value (€),
-//       offertes[], bubble_user_id, already_cancelled.
+//       offertes[], lms_student_id, already_cancelled.
 //
 //   EXECUTE : { onboarding_id, reason, confirm:true }
 //     Draait de cascade. Volgorde:
 //       a) facturen crediteren (per non-paid + non-concept + niet-volledig-gecredite factuur)
 //       b) abonnement(en) deactiveren (TL subscriptions.deactivate + lokaal status='cancelled')
 //       c) offerte/deal annuleren (TL quotations.delete + deals.lose best-effort + lokaal archived_at)
-//       d) Bubble: membership_end_date_date = gisteren + login_student_boolean = false
+//       d) (vervallen 9 okt 2026 — Bubble gaat dicht; zie stap i)
 //       e) onboardings.status = 'geannuleerd'
 //       f) insert onboarding_cancellations (snapshot subscription_value + steps jsonb)
 //       g) mentor_notification (kind:'cancelled') — fail-soft
@@ -91,7 +91,7 @@ export default async function handler(req, res) {
         preview:             true,
         already_cancelled:   alreadyCancelled,
         customer_name:       ctx.ob.customer_name || null,
-        bubble_user_id:      ctx.ob.bubble_user_id || null,
+        lms_student_id:      ctx.ob.dfo_lms_student_id || null,
         invoices: ctx.invoices.map((i) => ({
           id:             i.id,
           tl_invoice_id:  i.tl_invoice_id,

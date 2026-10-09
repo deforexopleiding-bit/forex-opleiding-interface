@@ -160,7 +160,7 @@ async function fetchOnboardingsByCustomers(supabase, customerIds) {
     .select(
       'id, customer_id, status, current_step, token, ' +
       'started_at, completed_at, archived_at, created_at, ' +
-      'bubble_provisioned, ' +
+      'dfo_lms_student_id, ' +
       'traject:onboarding_trajecten(label, type, duur_maanden, calls)'
     )
     .in('customer_id', customerIds)
@@ -344,7 +344,7 @@ export async function runOnboardingSuggest({
       completed_at:       primary.completed_at,
       archived_at:        primary.archived_at,
       created_at:         primary.created_at,
-      bubble_provisioned: primary.bubble_provisioned === true,
+      lms_student:        !!primary.dfo_lms_student_id,
       traject_label:      primary.traject?.label  || null,
       traject_type:       primary.traject?.type   || null,
       traject_duur:       primary.traject?.duur_maanden || null,
@@ -394,7 +394,7 @@ export async function runOnboardingSuggest({
     if (primary.started_at)   ctxLines.push(`  - Gestart: ${fmtDateNL(primary.started_at)}`);
     if (primary.completed_at) ctxLines.push(`  - Afgerond: ${fmtDateNL(primary.completed_at)}`);
     if (primary.archived_at)  ctxLines.push(`  - Gearchiveerd: ${fmtDateNL(primary.archived_at)}`);
-    ctxLines.push(`  - Bubble-account aangemaakt: ${primary.bubble_provisioned ? 'ja' : 'nee'}`);
+    ctxLines.push(`  - LMS-account aangemaakt: ${primary.dfo_lms_student_id ? 'ja' : 'nee'}`);
     if (contextSnapshot.other_onboardings_count > 0) {
       ctxLines.push(`  - Aantal andere/historische onboardings: ${contextSnapshot.other_onboardings_count}`);
     }

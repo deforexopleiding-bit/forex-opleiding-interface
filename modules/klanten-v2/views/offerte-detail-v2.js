@@ -324,7 +324,7 @@
               <select id="odvObTraject" class="ib-input" disabled><option value="">Kies eerst een type</option></select>
               <span class="odv-mini-label" for="odvObStart">Startdatum</span>
               <input type="date" id="odvObStart" class="ib-input">
-              <div class="odv-hint">Minimaal vandaag + 3 kalenderdagen. Vooringevuld uit de offerte (clamped naar het minimum). De looptijd in Bubble loopt vanaf deze datum — toegang start direct.</div>
+              <div class="odv-hint">Minimaal vandaag + 3 kalenderdagen. Vooringevuld uit de offerte (clamped naar het minimum). De looptijd in het LMS loopt vanaf deze datum.</div>
               <div class="odv-err" id="odvObErr" hidden></div>
             </div>
             <div id="odvObDone" hidden></div>

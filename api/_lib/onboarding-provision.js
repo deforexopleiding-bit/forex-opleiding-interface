@@ -1,487 +1,95 @@
 // api/_lib/onboarding-provision.js
 //
-// Fase 2 — Bubble-provisioning voor een onboarding-student.
-// Aangeroepen vanuit /api/onboarding-create (na succesvolle insert) en
-// vanuit /api/onboarding-provision-retry (na een eerdere fail). Splitst
-// de flow in twee stappen:
+// Trial-site-toegang bij een nieuwe onboarding — ALLEEN wanneer de operator
+// het per-klant vinkje `onboardings.lms_provision` aanzette (v1-offerte-
+// detail). Dit is systeem (2) uit api/_lib/dfo-lms-db.js: de trial-site met
+// lms_gebruikers / lms_toegang in het CRM-project. NIET het nieuwe LMS
+// (dfo-lms / hlms_student) — dat doet api/_lib/dfo-lms-student.js, voor elke
+// onboarding.
 //
-//   STAP A — account: workflow 'create_student_basic' in Bubble. Verwacht
-//            response.user_id of response.response.user_id; bij ontbreken
-//            doen we een fallback-lookup op bubble user by email.
-//   STAP B — velden zetten via PATCH op het user-object: membership /
-//            learning_type / 1_call_alpha_total_number / login_boolean /
-//            role / onboarding_status + 3 datum-velden.
+// GESCHIEDENIS (9 okt 2026, Maxim): hier stond de Bubble-provisioning
+// (workflow create_student_basic + PATCH op het user-object). Onboarding naar
+// Bubble is gestopt; Bubble gaat dicht. Het trial-site-blok dat ná een
+// geslaagde Bubble-aanmaak draaide, staat hier nu op zichzelf, met één
+// verschil: er wordt GEEN wachtwoord meer gezet. Dat wachtwoord bestond
+// alleen voor de Bubble-inloggegevensmail (al sinds spoor A stap 1 gedoofd),
+// kwam dus nooit bij de klant aan, en overschreef bij een bestaand
+// trial-account het wachtwoord dat de klant wél kende.
 //
-// Alles fail-soft: gooit nooit door naar de caller. Bij fouten zetten we
-// onboardings.bubble_provision_error en returnen {ok:false, ...} zodat de
-// HTTP-respons van de signup niet kapot gaat door een Bubble-issue.
-//
-// Idempotent: al-provisioned (bubble_provisioned=true) → {ok:true, skipped}.
-// PATCH-fail na succesvolle account-aanmaak → bubble_user_id wordt sowieso
-// vastgelegd; bubble_provisioned blijft false zodat een retry alleen de
-// PATCH overdoet.
+// Fail-soft: gooit nooit. Een fout hier mag de aanmelding niet breken.
 
-import crypto from 'node:crypto';
 import { supabaseAdmin } from '../supabase.js';
-import {
-  bubbleWorkflow,
-  bubblePatch,
-  bubbleFindUserByEmail,
-} from './bubble.js';
-import { sendCredentialsEmail } from './onboarding-credentials.js';
-import { vindOfMaakAccount, zetGrant, zetWachtwoord } from './lms-provisioning.js';
+import { vindOfMaakAccount, zetGrant } from './lms-provisioning.js';
 import { addMonths } from './onboarding-window.js';
 
-// Bubble workflow-response kan op meerdere plaatsen het user-id zetten:
-// soms { user_id: '...' } direct, soms genest in { response: { user_id }}.
-// We ondersteunen beide.
-function extractUserIdFromWf(wfResponse) {
-  if (!wfResponse || typeof wfResponse !== 'object') return null;
-  if (typeof wfResponse.user_id === 'string' && wfResponse.user_id.trim()) {
-    return wfResponse.user_id.trim();
+/**
+ * Toegangsvenster: begin = start_date als die in de toekomst ligt, anders nu;
+ * einde = begin + duur_maanden. Zelfde rekenregel als voorheen.
+ * PURE — geëxporteerd voor tests.
+ */
+export function trialVenster(startDate, duurMaanden, nu = new Date()) {
+  let basis = nu;
+  if (startDate) {
+    const s = String(startDate);
+    const parsed = new Date(s + (s.includes('T') ? '' : 'T00:00:00Z'));
+    if (Number.isFinite(parsed.getTime()) && parsed.getTime() > nu.getTime()) basis = parsed;
   }
-  const r = wfResponse.response;
-  if (r && typeof r === 'object' && typeof r.user_id === 'string' && r.user_id.trim()) {
-    return r.user_id.trim();
-  }
-  return null;
-}
-
-// Idem voor het tijdelijke wachtwoord — Bubble-workflow stuurt 'm typisch
-// onder response.temp_password OF direct als temp_password. Returnt null
-// als beide ontbreken; in dat geval slaan we de credentials-mail/wa over.
-// Geëxporteerd zodat api/onboarding-credentials-reset.js dezelfde extractie
-// kan gebruiken op de reset_student_password-workflow-respons.
-export function extractTempPasswordFromWf(wfResponse) {
-  if (!wfResponse || typeof wfResponse !== 'object') return null;
-  if (typeof wfResponse.temp_password === 'string' && wfResponse.temp_password.trim()) {
-    return wfResponse.temp_password.trim();
-  }
-  const r = wfResponse.response;
-  if (r && typeof r === 'object' && typeof r.temp_password === 'string' && r.temp_password.trim()) {
-    return r.temp_password.trim();
-  }
-  return null;
-}
-
-async function writeProvisionError(onboardingId, msg) {
-  // Best-effort: een fail in de error-write mag het hoofd-fail-pad niet
-  // overschrijven. We loggen 'm alleen.
-  try {
-    await supabaseAdmin
-      .from('onboardings')
-      .update({ bubble_provision_error: String(msg || '').slice(0, 1000) })
-      .eq('id', onboardingId);
-  } catch (e) {
-    console.error('[onboarding-provision] write-error fail:', e?.message || e);
-  }
+  const duur = Number(duurMaanden);
+  const tot = (Number.isFinite(duur) && duur > 0) ? addMonths(basis, duur) : basis;
+  return { van: basis.toISOString(), tot: tot.toISOString() };
 }
 
 /**
  * @param {string} onboardingId
- * @returns {Promise<{ok:boolean, skipped?:boolean, bubble_user_id?:string, partial?:boolean, error?:string}>}
+ * @returns {Promise<{ok:boolean, skipped?:boolean, reason?:string, error?:string}>}
  */
-export async function provisionOnboardingStudent(onboardingId) {
+export async function provisionTrialSiteToegang(onboardingId) {
   if (!onboardingId || typeof onboardingId !== 'string') {
     return { ok: false, error: 'onboardingId ontbreekt' };
   }
-
-  // 1) Onboarding laden. lms_provision is het per-klant vinkje dat het
-  // LMS-blok verderop gate't. Defensief: als de migratie die de kolom
-  // toevoegt nog niet gedraaid is, faalt een select die de kolom bij naam
-  // noemt met een column-error. In dat geval doen we een fallback-select
-  // zonder de kolom en behandelen we lms_provision als false (LMS-deel
-  // wordt dan simpelweg overgeslagen — fail-soft).
-  let onboarding;
   try {
-    const { data, error } = await supabaseAdmin
+    const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date, lms_provision')
+      .select('id, customer_id, traject_id, start_date, lms_provision')
       .eq('id', onboardingId)
       .maybeSingle();
-    if (error) {
-      if (/lms_provision/i.test(error.message || '')) {
-        console.warn('[onboarding-provision] lms_provision-kolom ontbreekt nog — fallback-select zonder kolom (draai de migratie):', error.message);
-        const fb = await supabaseAdmin
-          .from('onboardings')
-          .select('id, customer_id, traject_id, status, bubble_provisioned, bubble_user_id, start_date')
-          .eq('id', onboardingId)
-          .maybeSingle();
-        if (fb.error) throw fb.error;
-        if (!fb.data) return { ok: false, error: 'Onboarding niet gevonden' };
-        onboarding = { ...fb.data, lms_provision: false };
-      } else {
-        throw error;
-      }
-    } else {
-      if (!data) return { ok: false, error: 'Onboarding niet gevonden' };
-      onboarding = data;
+    if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
+    if (!ob) return { ok: false, error: 'Onboarding niet gevonden' };
+    if (ob.lms_provision !== true) return { ok: true, skipped: true, reason: 'vinkje-uit' };
+
+    const [{ data: customer, error: cErr }, { data: traject, error: tErr }] = await Promise.all([
+      supabaseAdmin.from('customers').select('id, first_name, last_name, email').eq('id', ob.customer_id).maybeSingle(),
+      supabaseAdmin.from('onboarding_trajecten').select('id, duur_maanden').eq('id', ob.traject_id).maybeSingle(),
+    ]);
+    if (cErr) throw new Error('customer lookup: ' + cErr.message);
+    if (tErr) throw new Error('traject lookup: ' + tErr.message);
+    const email = String(customer?.email || '').trim().toLowerCase();
+    if (!email) return { ok: false, error: 'Klant zonder e-mail' };
+
+    const productSlug = (process.env.LMS_PROVISION_PRODUCT_SLUG || '1-op-1-coaching').trim();
+    const { data: product, error: prodErr } = await supabaseAdmin
+      .from('lms_producten')
+      .select('id, slug, actief')
+      .eq('slug', productSlug)
+      .maybeSingle();
+    if (prodErr) throw new Error('lms_producten lookup: ' + prodErr.message);
+    if (!product || product.actief !== true) {
+      console.warn('[onboarding-provision] trial-product ontbreekt of inactief:', productSlug);
+      return { ok: true, skipped: true, reason: 'product-inactief' };
     }
-  } catch (e) {
-    const msg = 'onboarding lookup: ' + (e?.message || e);
-    console.error('[onboarding-provision]', msg);
-    return { ok: false, error: msg };
-  }
 
-  if (onboarding.bubble_provisioned === true) {
-    return { ok: true, skipped: true, bubble_user_id: onboarding.bubble_user_id || null };
-  }
-
-  // 2) Customer + traject laden.
-  let customer, traject;
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('customers')
-      .select('id, first_name, last_name, email')
-      .eq('id', onboarding.customer_id)
-      .maybeSingle();
-    if (error) throw error;
-    customer = data;
-  } catch (e) {
-    const msg = 'customer lookup: ' + (e?.message || e);
-    console.error('[onboarding-provision]', msg);
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-  if (!customer || !customer.email || !String(customer.email).trim()) {
-    const msg = 'Klant zonder e-mail — kan Bubble-account niet aanmaken';
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('onboarding_trajecten')
-      .select('id, bubble_membership_option, bubble_learning_type, alpha_calls_total, type, duur_maanden')
-      .eq('id', onboarding.traject_id)
-      .maybeSingle();
-    if (error) throw error;
-    traject = data;
-  } catch (e) {
-    const msg = 'traject lookup: ' + (e?.message || e);
-    console.error('[onboarding-provision]', msg);
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-  if (!traject) {
-    const msg = 'Traject niet gevonden voor onboarding';
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-  if (!traject.bubble_membership_option || !traject.bubble_learning_type) {
-    const msg = 'Traject mist bubble_membership_option of bubble_learning_type';
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-
-  const firstName = String(customer.first_name || '').trim();
-  const lastName  = String(customer.last_name  || '').trim();
-  const email     = String(customer.email).trim().toLowerCase();
-
-  // STAP A — account via workflow. Idempotent aan Bubble-zijde: workflow
-  // hoort bij dubbele e-mail het bestaande user-id terug te geven, maar
-  // we hebben een fallback voor het geval de workflow geen id retourneert
-  // (oudere Bubble-versies stoppen na 'Sign up the user' en laten het
-  // returnen aan een latere stap die per ongeluk ontbreekt).
-  // Diagnostische capture: bewaar de ruwe workflow-respons + (eventueel)
-  // de gevangen error-shape. Wordt alleen mee-geserialiseerd in de
-  // bubble_provision_error wanneer ZOWEL workflow ALS e-mail-fallback geen
-  // user-id opleverden, zodat we Bubble's response kunnen debuggen zonder
-  // permanente noise. create_student_basic geeft alleen status + user_id
-  // terug (geen secrets/tokens), dus dit is veilig om kort te dumpen.
-  let bubbleUserId = null;
-  let wfRaw    = null;       // ruwe workflow-respons indien fetch slaagde
-  let wfError  = null;       // { code, message } indien workflow threw
-  // Tijdelijk wachtwoord uit Bubble — alleen in memory; NIET in DB persisten.
-  // Wordt na succesvolle provision gebruikt om sendCredentialsEmail aan
-  // te roepen. Bij ontbreken slaan we de credentials-mail over en logt
-  // de helper een 'reason'.
-  let tempPassword = null;
-  try {
-    // Gedeeld secret voor de publieke Bubble-workflow (BUBBLE_WF_SECRET).
-    // Bubble valideert dit straks server-side; vóór die check negeert
-    // Bubble de extra param. Lege string bij ontbrekende env zodat we
-    // nu niets breken; ná de Bubble-check is misconfig een terechte fail.
-    // NB: het secret zit ALLEEN in de outbound body — bubble.js noch onze
-    // diagnostics (wf_raw/wf_error) loggen de request-body, dus geen leak.
-    wfRaw = await bubbleWorkflow('create_student_basic', {
+    const { van, tot } = trialVenster(ob.start_date, traject?.duur_maanden);
+    const account = await vindOfMaakAccount({
       email,
-      first_name: firstName,
-      last_name : lastName,
-      secret    : (process.env.BUBBLE_WF_SECRET || ''),
+      voornaam:   String(customer.first_name || '').trim() || null,
+      achternaam: String(customer.last_name  || '').trim() || null,
+      van, tot,
     });
-    bubbleUserId = extractUserIdFromWf(wfRaw);
-    tempPassword = extractTempPasswordFromWf(wfRaw);
+    if (!account || !account.id) return { ok: false, error: 'trial-account niet aangemaakt' };
+    await zetGrant({ gebruikerId: account.id, productId: product.id, van, tot });
+    return { ok: true };
   } catch (e) {
-    wfError = {
-      code:    (e && e.code)    ? String(e.code)    : null,
-      message: (e && e.message) ? String(e.message) : String(e),
-    };
-    const msg = 'workflow create_student_basic: ' + (wfError.code || '') + ' ' + (wfError.message || '');
-    console.error('[onboarding-provision] WF fail:', msg);
-    // Workflow zelf faalde — accountcreatie onzeker. Probeer fallback-lookup;
-    // mogelijk bestaat de user al en heeft de workflow alleen op een latere
-    // stap een fout gegooid.
+    console.error('[onboarding-provision] trial-site-toegang fail (soft):', e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
   }
-
-  if (!bubbleUserId) {
-    // Fallback: zoek de user op email. Geen hit → account is écht niet
-    // aangemaakt, harde error.
-    try {
-      const u = await bubbleFindUserByEmail(email);
-      if (u && typeof u._id === 'string' && u._id.trim()) {
-        bubbleUserId = u._id.trim();
-      } else if (u && typeof u.id === 'string' && u.id.trim()) {
-        // Bubble Data API returnt meestal '_id'; defensieve fallback.
-        bubbleUserId = u.id.trim();
-      }
-    } catch (e) {
-      console.error('[onboarding-provision] find-by-email fail:', e?.message || e);
-    }
-  }
-
-  if (!bubbleUserId) {
-    // Voeg een veilige, beknopte JSON-dump van de workflow-respons (of de
-    // gevangen error-shape) toe zodat we Bubble's gedrag kunnen debuggen
-    // zonder een nieuwe code-deploy. Cap op 600 chars om DB-bloat te
-    // voorkomen.
-    let diag = '';
-    if (wfError) {
-      try { diag = ' | wf_error=' + JSON.stringify(wfError).slice(0, 600); } catch {}
-    } else if (wfRaw !== null && wfRaw !== undefined) {
-      try { diag = ' | wf_raw=' + JSON.stringify(wfRaw).slice(0, 600); } catch {}
-    }
-    const msg = 'Bubble-user kon niet worden aangemaakt of gevonden (' + email + ')' + diag;
-    await writeProvisionError(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
-
-  // STAP B — velden zetten. We bouwen het patch-object stapsgewijs op
-  // zodat niet-toepasselijke velden (alpha=0) gewoon weggelaten worden.
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const durationMonths = Number(traject.duur_maanden);
-
-  // Einddatum-basis: pak start_date als die in de toekomst ligt; anders now.
-  // Hiermee krijgt de klant de "gratis gap" tussen aanmelden en startdatum
-  // bovenop de volle looptijd. Geen start_date / verleden → identiek aan
-  // het oude gedrag (basis = now).
-  //
-  // onboardings.start_date is een Postgres date-kolom; supabaseAdmin geeft
-  // 'm terug als 'yyyy-mm-dd'-string. Parse naar UTC-midnight om timezone-
-  // verschuiving te voorkomen.
-  let basis = now;
-  const rawStart = onboarding && onboarding.start_date;
-  if (rawStart) {
-    const parsed = new Date(String(rawStart) + (String(rawStart).includes('T') ? '' : 'T00:00:00Z'));
-    if (Number.isFinite(parsed.getTime()) && parsed.getTime() > now.getTime()) {
-      basis = parsed;
-    }
-  }
-
-  const endIso = (Number.isFinite(durationMonths) && durationMonths > 0)
-    ? addMonths(basis, durationMonths).toISOString()
-    : basis.toISOString(); // Defensieve fallback: 0/NULL → einddatum gelijk aan basis.
-
-  // Membership-start (Bubble abbo-startdatum): stuur de door de user gekozen
-  // start_date 1-op-1 door. Fallback op nowIso als er geen start_date is
-  // (backward-compat met bestaand gedrag: create-endpoint accepteert dan
-  // start_date=null). onboarding-create dwingt start_date >= vandaag+3 af,
-  // dus de basis staat altijd in de toekomst wanneer 'ie is opgegeven.
-  //
-  // Waarom niet gewoon nowIso? Bubble past een payment-buffer toe die het
-  // membership-start-veld terug-shift; met nowIso als input belandt het abbo
-  // 3 dagen in het verleden. Door de gebruiker-gekozen (toekomstige) datum
-  // door te sturen, wordt de eindstand op Bubble = user-input.
-  const membershipStateIso = basis.toISOString();
-
-  const patch = {
-    name_text                                           : firstName,
-    last_name_text                                      : lastName,
-    membership_option_os___membership                   : traject.bubble_membership_option,
-    learning_type_option_os___learning_type             : traject.bubble_learning_type,
-    login_student_boolean                               : true,
-    role_option_os___roles                              : 'student',
-    onboarding_status_option_os___onboarding_status     : 'Onboarding niet klaar',
-    onboarding_date_date                                : nowIso,
-    membership_state_date_date                          : membershipStateIso,
-    membership_end_date_date                            : endIso,
-  };
-  const alpha = Number(traject.alpha_calls_total);
-  if (Number.isFinite(alpha) && alpha > 0) {
-    patch['1_call_alpha_total_number'] = alpha;
-  }
-
-  try {
-    await bubblePatch('user', bubbleUserId, patch);
-  } catch (e) {
-    // PATCH gefaald → account-id bewaren (zodat retry niet opnieuw probeert
-    // create) en error logging, maar bubble_provisioned blijft false.
-    const msg = 'patch user: ' + (e?.code || '') + ' ' + (e?.message || e);
-    console.error('[onboarding-provision] PATCH fail:', msg);
-    try {
-      await supabaseAdmin
-        .from('onboardings')
-        .update({
-          bubble_user_id        : bubbleUserId,
-          bubble_provisioned    : false,
-          bubble_provision_error: String(msg).slice(0, 1000),
-        })
-        .eq('id', onboardingId);
-    } catch (dbE) {
-      console.error('[onboarding-provision] partial-write fail:', dbE?.message || dbE);
-    }
-    return { ok: false, partial: true, bubble_user_id: bubbleUserId, error: msg };
-  }
-
-  // SUCCES.
-  try {
-    await supabaseAdmin
-      .from('onboardings')
-      .update({
-        bubble_user_id        : bubbleUserId,
-        bubble_provisioned    : true,
-        bubble_provisioned_at : nowIso,
-        bubble_provision_error: null,
-      })
-      .eq('id', onboardingId);
-  } catch (e) {
-    const msg = 'success-write: ' + (e?.message || e);
-    console.error('[onboarding-provision]', msg);
-    // Bubble-side is alles goed; DB-write faalde. Geef partial: caller weet
-    // dan dat het Bubble-deel klaar is.
-    return { ok: false, partial: true, bubble_user_id: bubbleUserId, error: msg };
-  }
-
-  // ── LMS-PROVISIONING (optioneel, additief, fail-soft) ──────────────────
-  // Parallel aan Bubble: maak — ALLEEN wanneer de operator het per-klant
-  // vinkje aanzette (onboarding.lms_provision === true) — ook een account
-  // aan in het nieuwe LMS (Supabase) en koppel toegang. Default/afwezig
-  // (of kolom nog niet gemigreerd) = false: dan verandert er niets aan de
-  // bestaande flow. ALLES hier is fail-soft: een fout in het LMS-deel mag
-  // NOOIT de Bubble-flow of de HTTP-respons breken. Bij succes leveren we
-  // een LMS-wachtwoord dat (samen met de LMS-inloglink) wordt meegestuurd in
-  // de credentials-mail. Het LMS-wachtwoord blijft alleen in memory: NOOIT
-  // loggen, NOOIT persisten. WELK product + inloglink blijft env-gestuurd
-  // (LMS_PROVISION_PRODUCT_SLUG / LMS_LOGIN_URL); OF het draait is nu de
-  // per-klant vlag.
-  let lmsPassword = null;
-  let lmsLoginUrl = null;
-  if (onboarding.lms_provision === true) {
-    try {
-      const productSlug = (process.env.LMS_PROVISION_PRODUCT_SLUG || '1-op-1-coaching').trim();
-
-      // Voorlopig 1 vast niet-trial LMS-product op slug. Ontbreekt het product
-      // of is het inactief → warning + LMS-deel overslaan (geen crash).
-      const { data: product, error: prodErr } = await supabaseAdmin
-        .from('lms_producten')
-        .select('id, slug, actief')
-        .eq('slug', productSlug)
-        .maybeSingle();
-      if (prodErr) throw new Error('lms_producten lookup: ' + prodErr.message);
-
-      if (!product || product.actief !== true) {
-        console.warn('[onboarding-provision] LMS-product ontbreekt of inactief:',
-          productSlug, '— LMS-deel overgeslagen');
-      } else {
-        // Traject-type: bij 'membership' geen mentor/calls-verwachting, bij 1op1
-        // wel. Het aantal calls (traject.alpha_calls_total 24/48/96) valt BUITEN
-        // scope van deze PR — het LMS-schema heeft daar nog geen kolom voor.
-        // TODO(LMS): calls-quota koppelen zodra het LMS een kolom heeft.
-        const isMembership = String(traject.type || '').toLowerCase() === 'membership';
-        if (isMembership) {
-          console.log('[onboarding-provision] LMS: membership-traject — geen mentor/calls-koppeling');
-        }
-
-        // Toegangsvenster identiek aan Bubble: begin = start_date-logica (basis),
-        // einde = addMonths(basis, duur_maanden) = endIso.
-        const lmsVan = basis.toISOString();
-        const lmsTot = endIso;
-
-        // Account (her)gebruiken/aanmaken via de gedeelde helper. Geen leadId
-        // in de onboarding-context. Match op customer.email (lowercase, trimmed).
-        const account = await vindOfMaakAccount({
-          email,
-          voornaam:   firstName || null,
-          achternaam: lastName  || null,
-          van: lmsVan,
-          tot: lmsTot,
-        });
-
-        if (!account || !account.authId) {
-          console.warn('[onboarding-provision] LMS-account zonder auth_id — wachtwoord/mail overgeslagen');
-        } else {
-          // Sterk willekeurig wachtwoord (18 bytes → 24 base64url-tekens, >=16).
-          // NOOIT loggen, NOOIT in de DB opslaan — alleen doorgeven aan de mail.
-          const pw = crypto.randomBytes(18).toString('base64url');
-          await zetWachtwoord({ authId: account.authId, wachtwoord: pw });
-          await zetGrant({ gebruikerId: account.id, productId: product.id, van: lmsVan, tot: lmsTot });
-
-          // Pas nu — na een volledig geslaagd account + wachtwoord + grant —
-          // markeren we het LMS-blok als verzendbaar in de credentials-mail.
-          lmsPassword = pw;
-          lmsLoginUrl = (process.env.LMS_LOGIN_URL || '').trim() || null;
-        }
-      }
-    } catch (e) {
-      // Fail-soft: alles vangen, doorgaan. Borg dat er geen half-af LMS-blok
-      // in de mail belandt door lmsPassword terug op null te zetten.
-      console.error('[onboarding-provision] LMS-provisioning fail (soft):', e?.message || e);
-      lmsPassword = null;
-      lmsLoginUrl = null;
-    }
-  }
-
-  // CREDENTIALS-MAIL — fail-soft, niet-blokkerend voor het ok:true-pad.
-  // Alleen versturen wanneer Bubble's workflow een temp_password meegaf.
-  // We persisten het wachtwoord NIET; alleen credentials_email_sent_at bij
-  // succes als idempotentie-marker / zichtbaarheid in de admin-UI.
-  // Het LMS-blok wordt ALLEEN meegestuurd als de LMS-provisioning hierboven
-  // daadwerkelijk een account + wachtwoord opleverde (lmsPassword gezet).
-  // ── BUBBLE-INLOGGEGEVENSMAIL: GEDOOFD (spoor A stap 1) ──────────────────
-  // De klant krijgt zijn inloggegevens voortaan van het LMS, niet van Bubble.
-  // Het Bubble-ACCOUNT blijft wél aangemaakt worden: dertig bestanden lezen
-  // bubble_user_id, en zonder dat id vallen de mentor-studentenlijsten, de
-  // Studenten-module en de archiveercron stil. Alleen de MAIL gaat uit, zodat
-  // de klant er één krijgt in plaats van twee en niet naar een systeem wordt
-  // gestuurd dat we aan het afbouwen zijn.
-  //
-  // Weg terug zonder code-wijziging: zet BUBBLE_CREDENTIALS_MAIL=on.
-  const bubbleMailAan = String(process.env.BUBBLE_CREDENTIALS_MAIL || '').trim().toLowerCase() === 'on';
-
-  if (tempPassword && !bubbleMailAan) {
-    console.log('[onboarding-provision] Bubble-inloggegevensmail gedoofd '
-      + '(spoor A stap 1) — de klant wordt door het LMS uitgenodigd');
-  }
-
-  if (tempPassword && bubbleMailAan) {
-    try {
-      const credEmailRes = await sendCredentialsEmail({
-        onboarding: { id: onboardingId },
-        customer,
-        tempPassword,
-        // loginUrl: default uit env BUBBLE_LOGIN_URL
-        ...(lmsPassword ? { lmsPassword, lmsLoginUrl } : {}),
-      });
-      if (credEmailRes && credEmailRes.sent === true) {
-        try {
-          await supabaseAdmin
-            .from('onboardings')
-            .update({ credentials_email_sent_at: nowIso })
-            .eq('id', onboardingId);
-        } catch (dbE) {
-          console.error('[onboarding-provision] cred-email mark fail:', dbE?.message || dbE);
-        }
-      } else {
-        console.warn('[onboarding-provision] cred-email niet verzonden:',
-          credEmailRes?.reason || 'unknown');
-      }
-    } catch (e) {
-      console.error('[onboarding-provision] cred-email exception:', e?.message || e);
-    }
-  } else if (!tempPassword) {
-    console.warn('[onboarding-provision] geen temp_password in WF-respons — credentials-mail geskipt');
-  }
-
-  return { ok: true, bubble_user_id: bubbleUserId };
 }

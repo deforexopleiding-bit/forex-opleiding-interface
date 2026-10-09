@@ -89,8 +89,9 @@ test('DEZELFDE CASCADE + DE NIEUWE STAPPEN: automaties stop, LMS-toegang dicht, 
   // a-c) Teamleader: alleen de onbetaalde factuur, het abonnement, de offerte en de deal.
   assert.deepEqual(w.tl.map((c) => c.p).sort(), ['/deals.lose', '/invoices.credit', '/quotations.delete', '/subscriptions.deactivate']);
   assert.equal(w.tl.find((c) => c.p === '/invoices.credit').body.id, 'tl-f1');
-  // d) Bubble: login uit.
-  assert.equal(w.bubble[0][2].login_student_boolean, false);
+  // d) Bubble: vervallen (9 okt 2026) — er gaat NIETS meer naar Bubble.
+  assert.equal(w.bubble.length, 0);
+  assert.equal(body.steps.bubble_membership_end, undefined);
   // e) Status geannuleerd.
   assert.ok(w.crm.log.updates.some((u) => u.tabel === 'onboardings' && u.patch.status === 'geannuleerd'));
   // h) Alleen de LOPENDE automatie gestopt.

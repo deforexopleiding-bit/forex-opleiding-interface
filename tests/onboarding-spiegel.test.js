@@ -94,10 +94,10 @@ test('CONTRACT: alle elf schrijfpunten spiegelen via de helper', () => {
     // verschijnt een net aangemaakte student pas de volgende ochtend.
     'api/onboarding-create.js',
     'api/onboarding-dfo-lms-provision.js',
-    // De twee archiveer-crons draaien om 02:30 en 03:30; de hersync pas om
-    // 07:20. Zonder deze aanroepen staat een gearchiveerde of geannuleerde
-    // student uren in het oppak-blok van zijn mentor.
-    'api/cron/archive-completed-onboardings.js',
+    // De archiveer-cron draait om 02:30; de hersync pas om 07:20. Zonder deze
+    // aanroep staat een geannuleerde student uren in het oppak-blok van zijn
+    // mentor. (archive-completed-onboardings las Bubble en is per 9 okt 2026
+    // uitgefaseerd — onboarding-eerste-sessie-afronden vervangt hem.)
     'api/cron-cancellation-cleanup.js',
   ];
   for (const kort of AANROEPERS) {

@@ -16,7 +16,6 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { MOMENTEN, bouwContext } from './_lib/afspraak-berichten.js';
 import { annuleringMail, verzetMail } from './_lib/afspraak-status-notify.js';
 import { mailBevestigingB } from './_lib/toegang-cron-mails.js';
-import { renderCredentialsEmail } from './_lib/onboarding-credentials.js';
 import { renderExtendAccessEmail } from './leadsonderhoud-extend-access.js';
 
 // Echte HTML-previews voor code-mails, gerenderd via de bestaande builders met
@@ -55,12 +54,6 @@ function codePreviews() {
     // Welkom/onboarding-cron: representatieve welkom/bevestigings-mail (variant B,
     // zonder geboekte call). De cron rendert 'm via dezelfde pure builder.
     welkom_onboarding_cron: html(() => mailBevestigingB('Paco Voorbeeld')),
-    // Onboarding-inloggegevens: exact zoals sendCredentialsEmail 'm verstuurt.
-    onboarding_credentials: html(() => renderCredentialsEmail({
-      customer: { first_name: 'Paco', email: 'paco@voorbeeld.nl' },
-      tempPassword: 'Tijdelijk-AB12',
-      loginUrl: 'https://dashboard.deforexopleiding.nl',
-    })),
     // Toegang verlengd: exact zoals leadsonderhoud-extend-access.js 'm verstuurt.
     leadsonderhoud_extend: html(() => renderExtendAccessEmail({
       voornaam: 'Paco',
@@ -91,8 +84,6 @@ const CODE_CATALOG = [
   { key: 'dunning_bulk',           categorie: 'wanbetalers',      naam: 'Dunning — bulk',                doel: 'Bulk wanbetalers (tekst uit dunning-templates)', trigger: 'cron-dunning-bulk-send',              mailbox: 'administratie@', bestand: 'api/cron-dunning-bulk-send.js' },
   { key: 'incasso_dossier',        categorie: 'wanbetalers',      naam: 'Incassodossier',                doel: 'Dossier naar incassobureau (PDF)', trigger: 'UI',                                               mailbox: 'info@',       bestand: 'api/incasso-dossier-email.js' },
   { key: 'welkom_onboarding_cron', categorie: 'funnels-toegang',  naam: 'Welkom / onboarding-cron',      doel: 'Welkom + laatste-dag',             trigger: 'cron-toegang-aanvragen',                           mailbox: 'welkom@',     bestand: 'api/cron-toegang-aanvragen.js' },
-  { key: 'onboarding_credentials', categorie: 'funnels-toegang',  naam: 'Onboarding — inloggegevens',    doel: 'Credentials-mail',                 trigger: 'onboarding-flow',                                  mailbox: 'onboarding@', bestand: 'api/_lib/onboarding-credentials.js' },
-  { key: 'first_call_payment',     categorie: 'funnels-toegang',  naam: 'Eerste-call betaalreminder',    doel: 'Betaalreminder 24u vóór 1e call',  trigger: 'cron/first-call-payment-reminder',                 mailbox: 'onboarding@', bestand: 'api/cron/first-call-payment-reminder.js' },
   { key: 'events_mails',           categorie: 'events',           naam: 'Events — invites/vragenlijst/automations', doel: 'Event-mails',           trigger: 'UI + cron-events-automations',                     mailbox: 'events@',     bestand: 'api/_lib/events-send.js' },
   { key: 'lead_melding',           categorie: 'overig',           naam: 'Interne nieuwe-lead-melding',   doel: 'Interne melding bij nieuwe lead',  trigger: 'api/lead-melding.js (na lead)',                    mailbox: 'welkom@',     bestand: 'api/lead-melding.js' },
   // Volledigheid-ronde: lead/klant-gerichte verzenders die eerder ontbraken.
