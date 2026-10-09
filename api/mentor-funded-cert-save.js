@@ -7,7 +7,7 @@
 // Permission: mentor.module.access.
 //
 // Body:
-//   { student_id    : string (bubble-ID),
+//   { student_id    : string (studentsleutel — zie api/_lib/mentorStudents.js),
 //     student_name  : string (cache voor UI),
 //     file_path     : string (Supabase Storage pad, MOET met `${auth.uid()}/` beginnen),
 //     file_name     : string (oorspronkelijke filename voor weergave) }
@@ -15,9 +15,9 @@
 // Veiligheid:
 //   1) Path-prefix-check: file_path MOET met `${auth.uid()}/` beginnen — een
 //      mentor kan zo geen pad in andermans map claimen.
-//   2) Eigenaarschap-check via bubble: studentUser.mentor_user moet gelijk
-//      zijn aan de bubble_user_id van de ingelogde mentor (zelfde patroon
-//      als mentor-student-detail.js).
+//   2) Eigenaarschap-check via het LMS (sinds 9 okt 2026, was Bubble):
+//      hlms_student.mentor_id van deze student moet het hlms_personeel-id
+//      van de ingelogde mentor zijn (e-mailbrug team_members ↔ hlms_personeel).
 //
 // UPSERT op (mentor_user_id, student_id):
 //   INSERT: funded_month = date_trunc('month', now())::date,
@@ -31,17 +31,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleGet } from './_lib/bubble.js';
+import { isStudentVanMentor } from './_lib/mentorStudents.js';
 
-const BUBBLE_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
-
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) {
-    if (u[k] !== undefined) return u[k];
-  }
-  return undefined;
-}
+// Studentsleutel: oud id (cijfers + 'x') of een LMS-uuid.
+const STUDENT_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -66,8 +59,8 @@ export default async function handler(req, res) {
   const filePath    = typeof body.file_path    === 'string' ? body.file_path.trim()    : '';
   const fileName    = typeof body.file_name    === 'string' ? body.file_name.trim()    : '';
 
-  if (!studentId || !BUBBLE_ID_RE.test(studentId)) {
-    return res.status(400).json({ error: 'student_id (bubble-id) vereist' });
+  if (!studentId || !STUDENT_ID_RE.test(studentId)) {
+    return res.status(400).json({ error: 'student_id vereist' });
   }
   if (!studentName) return res.status(400).json({ error: 'student_name vereist' });
   if (!filePath)    return res.status(400).json({ error: 'file_path vereist' });
@@ -81,24 +74,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 2) Resolve bubble_user_id voor eigenaarschap-check.
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('bubble_user_id, is_active')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
-      return res.status(403).json({ error: 'Mentor heeft geen bubble-koppeling' });
-    }
-
-    // OWNERSHIP-CHECK: bubbleGet('user', student_id) en valideer mentor.
-    const studentUser = await bubbleGet('user', studentId);
-    if (!studentUser) return res.status(404).json({ error: 'Student niet gevonden' });
-    const ownerMentor = String(readFirst(studentUser, ['mentor_user', 'mentor']) || '').trim();
-    if (!ownerMentor || ownerMentor !== tm.bubble_user_id) {
-      return res.status(403).json({ error: 'Student valt niet onder jouw mentorschap' });
+    // 2) OWNERSHIP-CHECK in het LMS: hoort deze student bij deze mentor?
+    const eigen = await isStudentVanMentor(user.id, studentId);
+    if (!eigen.ok) {
+      const nietGevonden = /niet gevonden/.test(eigen.reden || '');
+      return res.status(nietGevonden ? 404 : 403).json({ error: eigen.reden || 'Student valt niet onder jouw mentorschap' });
     }
 
     // 3) UPSERT. Eerst proberen we te INSERT'en met returning='representation'
@@ -170,12 +150,7 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[mentor-funded-cert-save]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

@@ -4,10 +4,10 @@
    admin-zijde (students-overview Aandachtspunten-tab) heeft eigen UI.
 
    API:
-     - StudentSignals.fetchActiveSignals()       → Map<bubble_student_id, signal>
+     - StudentSignals.fetchActiveSignals()       → Map<student_id, signal>
      - StudentSignals.ensureModalMounted()        → idempotent: voegt modal-DOM toe
      - StudentSignals.openCreate(student, onSuccess)
-         student = { bubble_student_id, name?, email? }
+         student = { student_id, name?, email? }
          onSuccess(signal) wordt aangeroepen na 201; signal = { id, status:'open', type, ... }
      - StudentSignals.badgeHtml()                 → '<span class="ss-badge">Gemeld</span>'
 
@@ -121,7 +121,7 @@
 
   function openCreate(student, onSuccess) {
     ensureModalMounted();
-    if (!student || !student.bubble_student_id) return;
+    if (!student || !student.student_id) return;
     _activeStudent = student;
     _activeOnSuccess = (typeof onSuccess === 'function') ? onSuccess : null;
     _busy = false;
@@ -149,7 +149,7 @@
         method  : 'POST',
         headers : { 'Content-Type': 'application/json' },
         body    : JSON.stringify({
-          bubble_student_id : _activeStudent.bubble_student_id,
+          student_id : _activeStudent.student_id,
           type              : type,
           toelichting       : toel || null,
         }),
@@ -162,7 +162,7 @@
       }
       const signal = {
         id                : d.id,
-        bubble_student_id : _activeStudent.bubble_student_id,
+        student_id : _activeStudent.student_id,
         type              : type,
         toelichting       : toel || null,
         status            : 'open',
@@ -188,8 +188,8 @@
       const d = await r.json().catch(() => ({}));
       const items = Array.isArray(d?.signals) ? d.signals : [];
       for (const s of items) {
-        if (s && s.bubble_student_id && !map.has(s.bubble_student_id)) {
-          map.set(s.bubble_student_id, s);
+        if (s && s.student_id && !map.has(s.student_id)) {
+          map.set(s.student_id, s);
         }
       }
     } catch (e) {

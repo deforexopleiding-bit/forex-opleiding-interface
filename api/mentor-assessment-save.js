@@ -18,26 +18,20 @@
 // - Bij overige statussen: score 1..10 verplicht; active_tasks_done boolean.
 //
 // Veiligheid:
-//   - Ownership via bubble: studentUser.mentor_user_text === mentor.bubble_user_id
-//     (met fallback 'mentor_user' / 'mentor' voor pre-conventie data).
+//   - Ownership via het LMS (sinds 9 okt 2026, was Bubble): hlms_student.mentor_id
+//     moet het hlms_personeel-id van de (effectieve) mentor zijn. student_id is
+//     de studentsleutel uit api/_lib/mentorStudents.js.
 //
 // Response 200: { ok, assessment }.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { bubbleGet } from './_lib/bubble.js';
+import { isStudentVanMentor } from './_lib/mentorStudents.js';
 
-const BUBBLE_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
+const STUDENT_ID_RE = /^[A-Za-z0-9_.\-x]{8,128}$/;
 const UUID_RE      = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUSES = new Set(['op_schema', 'aandacht', 'risico', 'niet_actief']);
 
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) {
-    if (u[k] !== undefined) return u[k];
-  }
-  return undefined;
-}
 
 function currentMonthStartUtc() {
   const n = new Date();
@@ -64,7 +58,7 @@ export default async function handler(req, res) {
   //   - aanwezig → admin (mentor.admin.view, die id).
   // Zonder deze gate zou een super_admin die vanuit de v2-studenten-module
   // met __stMentorOverride wil opslaan altijd 403 krijgen op team_members-
-  // lookup (geen bubble-koppeling op eigen admin-account).
+  // lookup (geen LMS-koppeling op eigen admin-account).
   const requestedMentorId = typeof body.mentor_user_id === 'string'
     ? body.mentor_user_id.trim() : '';
   let effectiveUserId;
@@ -94,8 +88,8 @@ export default async function handler(req, res) {
     ? null
     : (typeof noteRaw === 'string' ? noteRaw.trim() : null);
 
-  if (!studentId || !BUBBLE_ID_RE.test(studentId)) {
-    return res.status(400).json({ error: 'student_id (bubble-id) vereist' });
+  if (!studentId || !STUDENT_ID_RE.test(studentId)) {
+    return res.status(400).json({ error: 'student_id vereist' });
   }
   if (!studentName) return res.status(400).json({ error: 'student_name vereist' });
   if (!VALID_STATUSES.has(status)) {
@@ -120,30 +114,12 @@ export default async function handler(req, res) {
   const periodMonth = currentMonthStartUtc();
 
   try {
-    // Mentor bubble_user_id resolven voor ownership-check.
-    // Dual-gate: bij admin-scope lookup op de EFFECTIEVE mentor (target),
-    // niet de admin die de call doet. Self-scope: eigen user.id.
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('bubble_user_id, is_active')
-      .eq('user_id', effectiveUserId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    if (!tm?.bubble_user_id) {
-      return res.status(403).json({
-        error: scope === 'admin'
-          ? 'Deze mentor heeft geen bubble-koppeling'
-          : 'Mentor heeft geen bubble-koppeling',
-      });
-    }
-
-    // Ownership: bubble student → mentor_user_text (met fallback) moet matchen.
-    const studentUser = await bubbleGet('user', studentId);
-    if (!studentUser) return res.status(404).json({ error: 'Student niet gevonden' });
-    const ownerMentor = String(readFirst(studentUser, ['mentor_user_text', 'mentor_user', 'mentor']) || '').trim();
-    if (!ownerMentor || ownerMentor !== tm.bubble_user_id) {
-      return res.status(403).json({ error: 'Student valt niet onder jouw mentorschap' });
+    // Ownership in het LMS. Dual-gate: bij admin-scope op de EFFECTIEVE
+    // mentor (target), niet de admin die de call doet.
+    const eigen = await isStudentVanMentor(effectiveUserId, studentId);
+    if (!eigen.ok) {
+      const nietGevonden = /niet gevonden/.test(eigen.reden || '');
+      return res.status(nietGevonden ? 404 : 403).json({ error: eigen.reden || 'Student valt niet onder jouw mentorschap' });
     }
 
     // UPSERT op (mentor_user_id, student_id, period_month) — eerst lookup zodat
@@ -196,12 +172,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, assessment: inserted });
   } catch (e) {
     console.error('[mentor-assessment-save]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

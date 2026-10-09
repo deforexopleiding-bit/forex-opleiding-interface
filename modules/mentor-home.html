@@ -479,7 +479,7 @@
     // De badges worden post-render geïnjecteerd zodat een trage overdue-
     // fetch de studenten-render niet vertraagt.
     overdueByEmail: null,
-    // Map bubble_student_id -> first active signal (van
+    // Map student_id -> first active signal (van
     // /api/student-signals-list?status=open,opnieuw_opvolgen). null = nog
     // niet geladen. Bijbehorende "Gemeld"-badge via DOM-injection.
     signalsByStudent: null,
@@ -661,7 +661,7 @@
     const wrap = document.getElementById('mhStudents');
     if (!wrap) return;
     if (!payload?.linked) {
-      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-user-question"></i>Nog geen Bubble-koppeling — vraag een admin om je <code>team_members.bubble_user_id</code> te zetten.</div>';
+      wrap.innerHTML = '<div class="mh-empty"><i class="ti ti-user-question"></i>Nog niet gekoppeld aan het LMS — je e-mailadres in het CRM moet precies één keer voorkomen bij het personeel in het LMS. Vraag een admin om dat recht te zetten.</div>';
       return;
     }
     if (students.length === 0) {
@@ -678,7 +678,7 @@
       if (status && /wacht/i.test(status))  { badgeCls = 'waiting'; }
       else if (s.no_shows > 0)               { badgeCls = 'waiting'; badgeTxt = 'No-show ' + s.no_shows; }
       else if (status && /actief|live|onboarded/i.test(status)) { badgeCls = 'ok'; }
-      const sid = s.bubble_student_id || '';
+      const sid = s.student_id || '';
       // Studenten-tab is verhuisd naar /modules/mentor-students.html (Fase A2);
       // de #student=-anchor bestaat daar niet, dus we openen op Mijn studenten.
       const url = '/modules/mentor-students.html';
@@ -704,7 +704,7 @@
 
   /* ── Student-signals (Gemeld-badge + Melden-knop) ───────────────────────
      Loader fetcht actieve signals via shared helper; render-cyclus
-     plakt de badge in elke kaart waar de bubble_student_id matched.
+     plakt de badge in elke kaart waar de student_id matched.
      Click op de Melden-knop opent de shared signal-modal. */
   async function loadAndRenderSignals() {
     if (!window.StudentSignals) return;
@@ -742,12 +742,12 @@
         const card = btn.closest('.mh-student-card');
         if (!card) return;
         window.StudentSignals.openCreate({
-          bubble_student_id : card.dataset.studentId || '',
+          student_id : card.dataset.studentId || '',
           name              : card.dataset.studentName || '',
           email             : card.dataset.studentEmail || '',
         }, (signal) => {
           if (!state.signalsByStudent) state.signalsByStudent = new Map();
-          state.signalsByStudent.set(signal.bubble_student_id, signal);
+          state.signalsByStudent.set(signal.student_id, signal);
           applySignalBadges();
         });
       };

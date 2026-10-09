@@ -233,9 +233,9 @@ test('no-show levert student-brug én mentor-e-mail op', async () => {
   assert.equal(r.sessies[0].mentor_email, 'dave@deforexopleiding.nl', 'kleine letters voor de vergelijking');
 });
 
-test('no-show zonder student-brug valt af EN wordt geteld', async () => {
-  // Vier adminrijen en Wim hebben geen bubble_user_id (gemeten 7-9-2026).
-  // Zonder die waarde kan het signaal nergens aan hangen.
+test('no-show van een student ZONDER historisch id valt NIET af: sleutel = LMS-id', async () => {
+  // Sinds Bubble dicht is (okt 2026) heeft geen enkele nieuwe student nog een
+  // bubble_user_id. Die mogen niet stil uit de no-show-signalen vallen.
   const r = await haalNoShowsSinds({
     sindsIso: VAN,
     client: clientMet({
@@ -244,9 +244,22 @@ test('no-show zonder student-brug valt af EN wordt geteld', async () => {
       personeel: [mentor()],
     }),
   });
-  assert.equal(r.sessies.length, 0);
-  assert.equal(r.zonder_bubble_koppeling, 1);
-  assert.equal(r.bron_status, BRON_GELEZEN, 'gelezen — alleen onbruikbaar');
+  assert.equal(r.sessies.length, 1);
+  assert.equal(r.sessies[0].student_sleutel, 'stu-1');
+  assert.equal(r.zonder_historisch_id, 1, 'geteld, niet overgeslagen');
+  assert.equal(r.bron_status, BRON_GELEZEN);
+});
+
+test('no-show MET historisch id: sleutel = historisch id', async () => {
+  const r = await haalNoShowsSinds({
+    sindsIso: VAN,
+    client: clientMet({
+      sessies: [noshow()],
+      studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-99' })],
+      personeel: [mentor()],
+    }),
+  });
+  assert.equal(r.sessies[0].student_sleutel, 'bub-99');
 });
 
 test('no-show zonder mentor-e-mail valt af EN wordt geteld', async () => {

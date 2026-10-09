@@ -54,10 +54,10 @@
 // no-shows waren.
 //
 // ── DE TWEE KOPPELINGEN ──────────────────────────────────────────────────
-//   student → CRM : hlms_student.bubble_user_id (299 van de 304 rijen dragen
-//                   'm en die waarden zijn uniek; gemeten 7-9-2026). Die
-//                   waarde gaat in student_signals.bubble_student_id, dat
-//                   daardoor gewoon blijft werken.
+//   student → CRM : de studentsleutel (api/_lib/mentorStudents.js): het
+//                   historische id als de student dat heeft, anders
+//                   hlms_student.id. Die waarde gaat in de (historisch
+//                   genoemde) kolom student_signals.bubble_student_id.
 //   mentor  → CRM : op E-MAILADRES (hlms_personeel.email ↔ team_members.email),
 //                   want het LMS kent geen 'Created By' zoals Bubble. De
 //                   toerekening loopt daar via mentor_id, wat eerlijker is:
@@ -166,7 +166,7 @@ export default async function handler(req, res) {
     // Hoofdmentoren die bericht kregen over een gemiste eerste call, en
     // hoe vaak er NIEMAND te vinden was. Dat laatste mag nooit stil zijn.
     hoofdmentor_ontvangers: 0, eerste_call_zonder_ontvanger: 0,
-    zonder_bubble_koppeling: 0, zonder_mentor_koppeling: 0,
+    zonder_historisch_id: 0, zonder_mentor_koppeling: 0,
     errors: [],
   };
 
@@ -190,7 +190,7 @@ export default async function handler(req, res) {
     // geen enkel signaal meer — terwijl de cron elke ochtend gezond afsloot.
     const bron = await haalNoShowsSinds({ sindsIso: watermark, limiet: FETCH_CAP });
     result.bron_status              = bron.bron_status;
-    result.zonder_bubble_koppeling  = bron.zonder_bubble_koppeling;
+    result.zonder_historisch_id     = bron.zonder_historisch_id;
     result.zonder_mentor_koppeling  = bron.zonder_mentor;
 
     // MISLUKTE BEVRAGING IS GEEN LEGE UITKOMST. Stoppen zonder het watermerk
@@ -281,7 +281,7 @@ export default async function handler(req, res) {
         const sessionId    = row.id;
         const sd           = row.start_tijd || null;
         const sdMs         = isoToMs(sd);
-        const memberUser   = row.bubble_user_id;   // de brug naar het CRM
+        const memberUser   = row.student_sleutel;  // de sleutel in het CRM
         const studentEmail = row.email || null;
         const studentName  = [row.voornaam, row.achternaam].filter(Boolean).join(' ').trim() || null;
 
@@ -305,7 +305,7 @@ export default async function handler(req, res) {
         // 23505 (unique-violation) loggen we niet als error want het is
         // gewoon dedup-gedrag bij een herhaalde run.
         const insertRow = {
-          bubble_student_id : memberUser,
+          bubble_student_id : memberUser,   // historische kolomnaam
           student_name      : studentName,
           student_email     : studentEmail,
           // Eigen type voor een gemiste EERSTE call — zie de toelichting

@@ -1481,7 +1481,7 @@
     const wrap = document.getElementById('coachingWrap');
     if (!wrap) return;
     if (!payload || payload.linked === false) {
-      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-link-off"></i>Je account is nog niet gekoppeld aan een bubble-mentor — vraag een admin om de koppeling te leggen.</div>`;
+      wrap.innerHTML = `<div class="empty-state"><i class="ti ti-link-off"></i>Je account is nog niet gekoppeld aan het LMS — vraag een admin om je e-mailadres bij het LMS-personeel recht te zetten.</div>`;
       return;
     }
     const b = payload.breakdown || {};

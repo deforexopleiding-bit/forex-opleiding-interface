@@ -14,7 +14,7 @@
 //       paid, bedenktijd:{ status, vervalt_op, ... },
 //       availability,
 //       started_at, completed_at, created_at, start_date,
-//       bubble_user_id, bubble_provisioned, bubble_provisioned_at, bubble_provision_error,
+//       student_id (studentsleutel), dfo_lms_student_id, dfo_lms_provisioned_at, dfo_lms_provision_error,
 //       mentor_intake_status,
 //       credentials_email_sent_at,
 //       answers,
@@ -106,7 +106,7 @@ export default async function handler(req, res) {
                answers,
                started_at, completed_at, created_at, start_date,
                bubble_user_id, mentor_intake_status,
-               bubble_provisioned, bubble_provisioned_at, bubble_provision_error,
+               dfo_lms_student_id, dfo_lms_provisioned_at, dfo_lms_provision_error,
                credentials_email_sent_at, token,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('mentor_user_id', user.id)
@@ -270,10 +270,13 @@ export default async function handler(req, res) {
         start_date           : r.start_date || null,
         created_at           : r.created_at || null,
         token                : r.token || null,
-        bubble_user_id       : r.bubble_user_id || null,
-        bubble_provisioned     : r.bubble_provisioned === true,
-        bubble_provisioned_at  : r.bubble_provisioned_at || null,
-        bubble_provision_error : r.bubble_provision_error || null,
+        // Studentsleutel (api/_lib/mentorStudents.js): historisch id als de
+        // student dat heeft, anders het LMS-id — matcht member_user uit
+        // /api/mentor-1on1-sessions.
+        student_id           : r.bubble_user_id || r.dfo_lms_student_id || null,
+        dfo_lms_student_id     : r.dfo_lms_student_id || null,
+        dfo_lms_provisioned_at : r.dfo_lms_provisioned_at || null,
+        dfo_lms_provision_error: r.dfo_lms_provision_error || null,
         credentials_email_sent_at : r.credentials_email_sent_at || null,
         mentor_intake_status : r.mentor_intake_status || null,
         answers              : ans,

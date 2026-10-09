@@ -134,8 +134,7 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[mentor-student-overdue-invoices]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) return res.status(502).json({ error: e.message });
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }

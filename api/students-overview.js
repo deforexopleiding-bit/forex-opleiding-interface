@@ -4,6 +4,10 @@
 // Read-only, verrijkt met mentor-info, onboarding_id, assessment-status
 // (huidige maand) en aantal te late facturen.
 //
+// BRON: het LMS (hlms_student), sinds 9 okt 2026 — was Bubble. Studentsleutel
+// `student_id` en de mentor-brug: zie api/_lib/mentorStudents.js. Een LMS dat
+// niet te lezen is geeft 503, nooit een lege lijst.
+//
 // Permission: students.all.view (manager via migratie 016; super_admin
 // bypasst via '*'). 403 zonder. 401 zonder sessie.
 //
@@ -13,8 +17,11 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { fetchAllBubbleStudents, mapBubbleStudentRow } from './_lib/mentorStudents.js';
-import { bubbleUserDisplay } from './_lib/bubble.js';
+import {
+  fetchAlleLmsStudenten, mapLmsStudentRow, telSessiesPerStudent, personeelNamen,
+  vandaagBrussel,
+} from './_lib/mentorStudents.js';
+import { mentorenMetLmsId } from './_lib/lms-mentor-brug.js';
 
 const ILIKE_CHUNK = 100;
 
@@ -51,56 +58,63 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 2. Bubble: alle studenten org-breed via gedeelde helper. bubbleList
-    //    paginiert intern tot cap=2000; voldoende voor onze schaal.
-    const rawStudents = await fetchAllBubbleStudents();
-    const students   = rawStudents.map(mapBubbleStudentRow)
-      .filter((s) => s && s.bubble_student_id);
+    // 2. LMS: alle studenten org-breed + hun verbruikte sessies.
+    const rows = await fetchAlleLmsStudenten();
+    const telling = await telSessiesPerStudent(rows.map((r) => r.id));
+    const vandaag = vandaagBrussel();
+    const crmOnbByLms = new Map(); // hlms_student.id → crm_onboarding_id
+    const oudIdByLms  = new Map(); // hlms_student.id → historisch id
+    for (const r of rows) {
+      if (r.crm_onboarding_id) crmOnbByLms.set(String(r.id), String(r.crm_onboarding_id));
+      if (r.bubble_user_id)    oudIdByLms.set(String(r.id), String(r.bubble_user_id));
+    }
+    const students = rows
+      .map((r) => mapLmsStudentRow(r, telling ? (telling.get(String(r.id)) || { afgerond: 0, noShow: 0 }) : null, vandaag))
+      .filter((st) => st && st.student_id);
 
     if (students.length === 0) {
       return res.status(200).json({ students: [] });
     }
 
-    // 3. Mentor-resolutie: alle team_members → map bubble_user_id → { user_id, name }.
-    const mentorByBubble = new Map();
+    // 3. Mentor-resolutie: hlms_personeel.id → CRM-mentor (e-mailbrug) +
+    //    de naam uit het LMS als terugval. Faalzacht.
+    const mentorByLms = new Map();
     try {
-      const { data: tms } = await supabaseAdmin
-        .from('team_members')
-        .select('user_id, bubble_user_id, name, is_active')
-        .eq('is_active', true)
-        .not('bubble_user_id', 'is', null);
-      for (const tm of (tms || [])) {
-        if (tm && tm.bubble_user_id) {
-          mentorByBubble.set(String(tm.bubble_user_id), {
-            user_id: tm.user_id || null,
-            name   : tm.name || null,
-          });
-        }
+      const [crm, namen] = await Promise.all([mentorenMetLmsId(), personeelNamen()]);
+      for (const [lmsId, naam] of namen.entries()) mentorByLms.set(lmsId, { user_id: null, name: naam });
+      for (const m of crm) {
+        if (m.lms_id) mentorByLms.set(String(m.lms_id), { user_id: m.user_id || null, name: m.name || mentorByLms.get(String(m.lms_id))?.name || null });
       }
     } catch (e) {
       console.warn('[students-overview] mentor-resolve faalde:', e?.message || e);
-      // Lege map → mentor_name/mentor_user_id worden null op alle studenten.
     }
 
-    // 4. onboarding_id-mapping: bubble_user_id → onboardings.id.
-    //    A2 (her-toewijzen) heeft dit nodig; we leveren 'm al mee.
-    const onboardingByBubble = new Map();
+    // 4. onboarding_id per student: via onboardings.dfo_lms_student_id, dan
+    //    hlms_student.crm_onboarding_id, dan de historische sleutel.
+    const onboardingByLms = new Map();
     try {
-      const bubbleStudentIds = students.map((s) => s.bubble_student_id).filter(Boolean);
-      // Chunked .in() voor het geval er > ~1000 ids zijn.
+      const lmsIds = students.map((st) => st.lms_student_id).filter(Boolean);
+      const oudeIds = [...oudIdByLms.values()];
       const CHUNK = 500;
-      for (let i = 0; i < bubbleStudentIds.length; i += CHUNK) {
-        const slice = bubbleStudentIds.slice(i, i + CHUNK);
-        const { data: rows } = await supabaseAdmin
-          .from('onboardings')
-          .select('id, bubble_user_id')
-          .in('bubble_user_id', slice);
-        for (const r of (rows || [])) {
-          if (r && r.bubble_user_id && r.id) {
-            // Eén onboarding per student: bij multiple wint de laatste (
-            // geen voorgeschreven volgorde — A2 mag dit aanscherpen).
-            onboardingByBubble.set(String(r.bubble_user_id), r.id);
-          }
+      const lmsVoorOud = new Map([...oudIdByLms.entries()].map(([k, v]) => [v, k]));
+      for (let i = 0; i < lmsIds.length; i += CHUNK) {
+        const { data: obRows } = await supabaseAdmin
+          .from('onboardings').select('id, dfo_lms_student_id')
+          .in('dfo_lms_student_id', lmsIds.slice(i, i + CHUNK));
+        for (const r of (obRows || [])) {
+          if (r?.dfo_lms_student_id && r.id) onboardingByLms.set(String(r.dfo_lms_student_id), r.id);
+        }
+      }
+      for (const [lmsId, obId] of crmOnbByLms.entries()) {
+        if (!onboardingByLms.has(lmsId)) onboardingByLms.set(lmsId, obId);
+      }
+      for (let i = 0; i < oudeIds.length; i += CHUNK) {
+        const { data: obRows } = await supabaseAdmin
+          .from('onboardings').select('id, bubble_user_id')
+          .in('bubble_user_id', oudeIds.slice(i, i + CHUNK));
+        for (const r of (obRows || [])) {
+          const lmsId = r?.bubble_user_id ? lmsVoorOud.get(String(r.bubble_user_id)) : null;
+          if (lmsId && r.id && !onboardingByLms.has(lmsId)) onboardingByLms.set(lmsId, r.id);
         }
       }
     } catch (e) {
@@ -109,7 +123,7 @@ export default async function handler(req, res) {
 
     // 5. Beoordelingsstatus (huidige maand) — ALLE mentoren.
     const periodMonth = currentMonthStartUtc();
-    const assessmentByStudent = new Map(); // bubble_student_id → status
+    const assessmentByStudent = new Map(); // student_id → status
     try {
       const { data: rows } = await supabaseAdmin
         .from('mentor_student_assessments')
@@ -193,13 +207,14 @@ export default async function handler(req, res) {
     //    expliciet 0 weergeven zodat de filter 'heeft te late facturen'
     //    sluitend is).
     const out = students.map((s) => {
-      const mentor   = s.mentor_bubble_user_id ? mentorByBubble.get(String(s.mentor_bubble_user_id)) : null;
-      const onbId    = s.bubble_student_id ? (onboardingByBubble.get(String(s.bubble_student_id)) || null) : null;
-      const assess   = assessmentByStudent.get(String(s.bubble_student_id)) || 'open';
+      const mentor   = s.mentor_lms_id ? (mentorByLms.get(String(s.mentor_lms_id)) || null) : null;
+      const onbId    = s.lms_student_id ? (onboardingByLms.get(String(s.lms_student_id)) || null) : null;
+      const assess   = assessmentByStudent.get(String(s.student_id)) || 'open';
       const emailLc  = s.email ? String(s.email).trim().toLowerCase() : '';
       const overdue  = emailLc ? (overdueByEmail.get(emailLc) || 0) : 0;
       return {
-        bubble_student_id  : s.bubble_student_id,
+        student_id         : s.student_id,
+        lms_student_id     : s.lms_student_id,
         name               : s.name,
         email              : s.email,
         program            : s.program,
@@ -220,12 +235,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ students: out });
   } catch (e) {
     console.error('[students-overview]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
-    }
+    if (e?.code === 'DFO_LMS_ONBEREIKBAAR') return res.status(503).json({ error: e.message });
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }
