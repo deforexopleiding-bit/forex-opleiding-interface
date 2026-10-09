@@ -146,7 +146,14 @@ async function bel(url, { body = null } = {}) {
 /**
  * Stuur de LMS-uitnodiging voor één klant.
  *
- * @param {{ email: string }} arg
+ * `opnieuw: true` is de UITDRUKKELIJKE "opnieuw sturen"-knop (vervangt sinds
+ * 9 okt 2026 de Bubble-wachtwoordreset). Dan slaat de grendel NIET aan: het
+ * LMS stuurt een nieuwe welkomstmail met een nieuw wachtwoord en het oude
+ * vervalt — precies wat je wilt voor een student die niet kan inloggen, en
+ * de enige weg uit UITNODIGING_WACHTWOORD_NIET_GEZET. Nooit automatisch
+ * gebruiken: alleen na een klik van een mens.
+ *
+ * @param {{ email: string, opnieuw?: boolean }} arg
  * @returns {Promise<{
  *   ok: boolean,
  *   verstuurd?: boolean,        // stap 2 daadwerkelijk uitgevoerd
@@ -159,7 +166,7 @@ async function bel(url, { body = null } = {}) {
  *   fout?: string|null,
  * }>}
  */
-export async function stuurLmsUitnodiging({ email }) {
+export async function stuurLmsUitnodiging({ email, opnieuw = false }) {
   const mail = String(email || '').trim().toLowerCase();
   if (!mail) return { ok: false, fout: 'e-mailadres ontbreekt' };
   if (!geheim()) {
@@ -198,7 +205,7 @@ export async function stuurLmsUitnodiging({ email }) {
   // ── DE GRENDEL ──────────────────────────────────────────────────────────
   // Er is al eerder gemaild. Stap 2 nogmaals doen zou de student een tweede
   // mail bezorgen én zijn bestaande wachtwoord ongeldig maken.
-  if (alGemaild) {
+  if (alGemaild && opnieuw !== true) {
     return {
       ok: true, overgeslagen: true, verstuurd: false,
       student_id: studentId, uitnodiging_verstuurd_op: alGemaild, code: code1,

@@ -12,7 +12,8 @@
 //      volledig gecrediteerd) — ALLE facturen van de klant;
 //   b) abonnementen deactiveren (Teamleader + lokaal 'cancelled');
 //   c) offertes/deals: quotations.delete + deals.lose + lokaal gearchiveerd;
-//   d) Bubble: einddatum gisteren, login uit;
+//   d) (vervallen 9 okt 2026: Bubble-einddatum/login uit — Bubble gaat dicht;
+//      de toegang sluit nu alleen nog in het LMS, stap i);
 //   e) onboardings.status = 'geannuleerd';
 //   f) record in onboarding_cancellations (met alle stappen);
 //   g) interne meldingen (app, niet naar de klant);
@@ -32,7 +33,6 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch, getActiveToken } from './teamleader-token.js';
-import { bubblePatch } from './bubble.js';
 import { createNotification } from './notify.js';
 import { spiegelNaActie } from './onboarding-spiegel.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
@@ -59,12 +59,6 @@ function inclPerTerm(sub) {
   return (Number(sub.amount) || 0) * (1 + (Number(sub.vat_percentage) || 0) / 100);
 }
 
-function yesterdayIsoUtc() {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
-}
 
 // Welke facturen crediteren we?
 //   - status NIET 'concept'  (creditten kan niet, finance-invoice-credit weigert 409)
@@ -171,7 +165,6 @@ export async function annuleringVoorbeeld(onboardingId) {
     preview:             true,
     already_cancelled:   String(ctx.ob.status || '').toLowerCase() === 'geannuleerd',
     customer_name:       ctx.ob.customer_name || null,
-    bubble_user_id:      ctx.ob.bubble_user_id || null,
     lms_student_id:      ctx.ob.dfo_lms_student_id || null,
     invoices: ctx.invoices.map((i) => ({
       id: i.id, invoice_number: i.invoice_number, amount_total: r2(i.amount_total),
@@ -209,7 +202,6 @@ export async function voerAnnuleringUit({ onboardingId, reden, doorUserId, doorL
       invoices_credit:        { ok: false, results: [] },
       subscriptions_deactivate: { ok: false, results: [] },
       offertes_cancel:        { ok: false, results: [] },
-      bubble_membership_end:  { ok: false },
       onboarding_status:      { ok: false },
       cancellation_record:    { ok: false },
       notify_mentor:          { ok: false },
@@ -319,22 +311,6 @@ export async function voerAnnuleringUit({ onboardingId, reden, doorUserId, doorL
       steps.offertes_cancel = { ok: allOk, results: out };
     }
 
-    // d) Bubble: einddatum gisteren + login uit. Fail-soft.
-    if (ctx.ob.bubble_user_id) {
-      try {
-        const endIso = yesterdayIsoUtc();
-        await bubblePatch('user', ctx.ob.bubble_user_id, {
-          membership_end_date_date: endIso,
-          login_student_boolean:    false,
-        });
-        steps.bubble_membership_end = { ok: true, end_date: endIso };
-      } catch (e) {
-        steps.bubble_membership_end = { ok: false, error: e?.message || String(e) };
-      }
-    } else {
-      steps.bubble_membership_end = { ok: true, skipped: true, reason: 'geen-bubble-user-id' };
-    }
-
     // e) onboardings.status='geannuleerd'.
     try {
       const { error: upErr } = await supabaseAdmin
@@ -393,6 +369,8 @@ export async function voerAnnuleringUit({ onboardingId, reden, doorUserId, doorL
       if (!lms) {
         steps.lms_toegang = { ok: false, error: 'LMS-koppeling niet geconfigureerd' };
       } else {
+        // Historische koppelsleutel (uit Bubble geïmporteerde studenten zonder
+        // dfo_lms_student_id op de onboarding) — alleen een DB-lookup, geen Bubble.
         if (!lmsStudentId && ctx.ob.bubble_user_id) {
           const { data: viaBubble } = await lms.from('hlms_student').select('id').eq('bubble_user_id', ctx.ob.bubble_user_id).limit(2);
           if ((viaBubble || []).length === 1) lmsStudentId = viaBubble[0].id;

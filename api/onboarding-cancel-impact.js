@@ -46,7 +46,7 @@ function shouldCreditInvoice(inv) {
 async function gatherImpactContext(onboardingId) {
   const { data: ob, error: obErr } = await supabaseAdmin
     .from('onboardings')
-    .select('id, customer_id, customer_name, mentor_user_id, bubble_user_id, status')
+    .select('id, customer_id, customer_name, mentor_user_id, dfo_lms_student_id, status')
     .eq('id', onboardingId)
     .maybeSingle();
   if (obErr) throw new Error('onboarding fetch: ' + obErr.message);
@@ -137,7 +137,7 @@ export default async function handler(req, res) {
       preview:             true,
       already_cancelled:   alreadyCancelled,
       customer_name:       ctx.ob.customer_name || null,
-      bubble_user_id:      ctx.ob.bubble_user_id || null,
+      lms_student_id:      ctx.ob.dfo_lms_student_id || null,
       invoices: ctx.invoices.map((i) => ({
         id:              i.id,
         tl_invoice_id:   i.tl_invoice_id,

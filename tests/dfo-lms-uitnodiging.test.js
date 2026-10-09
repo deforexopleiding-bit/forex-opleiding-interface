@@ -116,6 +116,30 @@ test('GRENDEL: nog nooit gemaild (null) → stap 2 draait wel', async () => {
   assert.ok(gedaan.some((g) => g.url.includes('/uitnodiging/')));
 });
 
+test('OPNIEUW (expliciete knop, vervangt de Bubble-reset): al gemaild → stap 2 draait TOCH', async () => {
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { body: { code: 'gekoppeld_aan_bestaande_rij',
+      data: { student: { id: 'stud-3', uitnodiging_verstuurd_op: '2026-09-01T10:00:00Z' } } } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd', data: { verstuurd_naar: 'a@b.nl' } } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl', opnieuw: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.verstuurd, true);
+  assert.equal(r.verstuurd_naar, 'a@b.nl');
+  assert.ok(gedaan.some((g) => g.url.includes('/stud-3/uitnodiging/')));
+});
+
+test('OPNIEUW is geen standaard: zonder de vlag blijft de grendel dicht', async () => {
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { body: { code: 'bestaat_al',
+      data: { student: { id: 'stud-4', uitnodiging_verstuurd_op: '2026-09-01T10:00:00Z' } } } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl', opnieuw: 'ja' });
+  assert.equal(r.overgeslagen, true);
+  assert.ok(!gedaan.some((g) => g.url.includes('/uitnodiging/')));
+});
+
 // ── 3) Codes van stap 1 ─────────────────────────────────────────────────────
 
 for (const code of ['aangemaakt', 'gekoppeld_aan_bestaande_rij',

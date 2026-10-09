@@ -265,12 +265,16 @@ export const AVAILABLE_VARIABLES = [
   { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://crm.deforexopleiding.nl/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
   { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
-  { key: 'onboarding.login_url',    label: 'Login-URL Bubble', category: 'onboarding', example: 'https://dashboard.deforexopleiding.nl', requires_context: 'onboarding' },
+  { key: 'onboarding.login_url',    label: 'Login-URL LMS', category: 'onboarding', example: 'https://lms.deforexopleiding.nl', requires_context: 'onboarding' },
   { key: 'onboarding.temp_password', label: 'Tijdelijk wachtwoord (alleen credentials-flow)', category: 'onboarding', example: 'Aw9!Xq2p', requires_context: 'onboarding' },
-  // Bubble gebruikersnaam = klant-email. Geen wachtwoord-variabele
-  // (WA-credentials-flow is verwijderd nadat Meta wachtwoord-via-WA
-  // templates niet meer goedkeurt — UTILITY-policy).
-  { key: 'onboarding.bubble_gebruikersnaam', label: 'Bubble gebruikersnaam (klant-email)', category: 'onboarding', example: 'klant@example.com', requires_context: 'customer' },
+  // Gebruikersnaam = klant-email (zo logt de student in het LMS in). Geen
+  // wachtwoord-variabele (WA-credentials-flow is verwijderd nadat Meta
+  // wachtwoord-via-WA templates niet meer goedkeurt — UTILITY-policy).
+  { key: 'onboarding.gebruikersnaam', label: 'Gebruikersnaam LMS (klant-email)', category: 'onboarding', example: 'klant@example.com', requires_context: 'customer' },
+  // VEROUDERDE SLEUTEL (Bubble is per okt 2026 weg). Blijft bestaan omdat al
+  // opgeslagen templates hem bij naam kunnen noemen; geeft hetzelfde als
+  // onboarding.gebruikersnaam. Niet meer gebruiken in nieuwe templates.
+  { key: 'onboarding.bubble_gebruikersnaam', label: 'Gebruikersnaam (verouderde sleutel — gebruik onboarding.gebruikersnaam)', category: 'onboarding', example: 'klant@example.com', requires_context: 'customer' },
 
   // ── toegang (leadsonderhoud LMS-grants) ────────────────────────────────
   //   Vereist context.toegang met { einddatum, ... }. Wordt gebruikt door
@@ -639,7 +643,8 @@ function getOnboardingValue(onboarding, key) {
     case 'onboarding.mentor':        return String(onboarding.mentor_name || '');
     case 'onboarding.traject_label': return String(onboarding.traject_label || '');
     case 'onboarding.status':        return String(onboarding.status || '');
-    case 'onboarding.login_url':     return String(onboarding.login_url || '');
+    case 'onboarding.login_url':     return String(onboarding.login_url
+      || (process.env.DFO_LMS_BASE_URL || 'https://lms.deforexopleiding.nl').trim());
     case 'onboarding.temp_password': return String(onboarding.temp_password || '');
     default: return '';
   }
@@ -753,7 +758,7 @@ export function resolveVariableValue(key, context) {
   const v = VAR_BY_KEY.get(key);
   if (!v) return '';
 
-  // Special-case voor onboarding.bubble_gebruikersnaam: deze key hangt
+  // Special-case voor onboarding.gebruikersnaam (+ verouderde alias): deze key hangt
   // tussen onboarding en customer (= klant-email) in. Pure fail-soft: lege
   // string bij ontbrekende context, nooit throwen. Raakt expliciet alleen
   // deze key; alle andere onboarding.*-resolutie valt door naar
@@ -761,7 +766,7 @@ export function resolveVariableValue(key, context) {
   // ── DE DEADLINE VAN DE LAATSTE-KANS-MAIL ──────────────────────────────
   // Deze key heeft ZOWEL de attendee (call_status_at als nulpunt) als het event
   // (starts_at voor de bovengrens) nodig, en getAttendeeValue ziet het event
-  // niet. Zelfde special-case-patroon als onboarding.bubble_gebruikersnaam
+  // niet. Zelfde special-case-patroon als onboarding.gebruikersnaam
   // hieronder.
   //
   // De berekening zelf staat in _lib/geen-gehoor-deadline.js, dezelfde
@@ -782,10 +787,9 @@ export function resolveVariableValue(key, context) {
     return d ? formatDeadlineNl(d) : '';
   }
 
-  if (key === 'onboarding.bubble_gebruikersnaam') {
+  if (key === 'onboarding.gebruikersnaam' || key === 'onboarding.bubble_gebruikersnaam') {
     const email = (context && context.customer && context.customer.email) || null;
-    const fallback = (context && context.onboarding && context.onboarding.bubble_username) || null;
-    return String(email || fallback || '');
+    return String(email || '');
   }
 
   switch (v.category) {

@@ -9,7 +9,7 @@
  *   - Lijst-tabel met search/traject/mentor-filters + per-row mentor-assign + acties
  *   - Detail-modal met sends/provisioning:
  *       /api/onboarding-detail (read)
- *       /api/onboarding-provision-retry        (RBAC: onboarding.admin)
+ *       /api/onboarding-credentials-reset      (LMS-uitnodiging opnieuw)
  *       /api/onboarding-invite-send            (RBAC: onboarding.inbox.send)
  *       /api/onboarding-assign-mentor          (RBAC: onboarding.assign_mentor)
  *       /api/onboarding-archive                (RBAC: onboarding.admin)
@@ -318,7 +318,7 @@
               <th>Voortgang</th>
               <th>Aangemeld</th>
               <th>Startdatum</th>
-              <th>Bubble</th>
+              <th>LMS</th>
               <th style="text-align:right">Acties</th>
             </tr>
           </thead>
@@ -363,22 +363,18 @@
     return '<span class="ob-badge ' + kl + '"' + titel + '>' + esc(f.label) + '</span>';
   }
 
-  // Bubble-provisioning-status (F2). Drie states:
-  //   bubble_provisioned=true            → groen "✓ Aangemaakt" (tooltip = aanmaakdatum)
-  //   bubble_provisioned=false + error   → rood  "⚠ Mislukt"     (tooltip = error-tekst)
-  //   anders (nog niet geprobeerd)       → grijs "—"
-  function bubbleBadgeHtml(r) {
-    const ok    = r && r.bubble_provisioned === true;
-    const err   = r && r.bubble_provision_error ? String(r.bubble_provision_error) : '';
-    const stamp = r && r.bubble_provisioned_at  ? String(r.bubble_provisioned_at)  : '';
-    if (ok) {
-      const tooltip = stamp ? fmtDateTimeNL(stamp) : 'Aangemaakt';
-      return `<span class="ob-badge bubble-ok" title="${esc(tooltip)}">✓ Aangemaakt</span>`;
+  // LMS-studentkoppeling (dfo-lms). Twee states:
+  //   dfo_lms_student_id gevuld → groen "✓ In LMS"
+  //   anders                    → grijs "—" (nog niet aangemaakt)
+  // Sinds 9 okt 2026 vervangt dit de Bubble-provisioning-kolom.
+  function lmsBadgeHtml(r) {
+    if (r && r.dfo_lms_student_id) {
+      return '<span class="ob-badge lms-ok" title="LMS-student ' + esc(String(r.dfo_lms_student_id)) + '">✓ In LMS</span>';
     }
-    if (err) {
-      return `<span class="ob-badge bubble-fail" title="${esc(err)}">⚠ Mislukt</span>`;
+    if (r && r.dfo_lms_provision_error) {
+      return '<span class="ob-badge lms-fail" title="' + esc(String(r.dfo_lms_provision_error)) + '">⚠ Mislukt</span>';
     }
-    return '<span class="ob-badge bubble-none">—</span>';
+    return '<span class="ob-badge lms-none">—</span>';
   }
 
   // Bedenktijd-waiver-badge. waiver = { agreed, at } | null.
@@ -630,7 +626,7 @@
         <td>${esc(progressLabel(r))}</td>
         <td>${esc(fmtDateNL(r.created_at))}</td>
         <td>${r.start_date ? esc(fmtDateNL(r.start_date)) : '<span style="color:var(--text-faint)">— niet ingesteld</span>'}</td>
-        <td>${bubbleBadgeHtml(r)}</td>
+        <td>${lmsBadgeHtml(r)}</td>
         <td style="text-align:right">${actionsCellHtml(r)}</td>
       </tr>`;
   }
@@ -912,7 +908,7 @@
             <button type="button" class="oa-btn oa-btn-destructive" id="adCancelBtn" data-id="${id}">
               <i class="ti ti-user-x"></i> Student annuleren
             </button>
-            <span class="oa-status">Crediteert facturen, stopt abonnement, sluit Bubble-toegang.</span>
+            <span class="oa-status">Crediteert facturen, stopt abonnement, sluit LMS-toegang.</span>
           </div>
         </div>`;
     }
@@ -978,7 +974,7 @@
       { key: 'invoices_credit',           label: 'Facturen gecrediteerd' },
       { key: 'subscriptions_deactivate',  label: 'Abonnement(en) gestopt' },
       { key: 'offertes_cancel',           label: 'Offerte(s) geannuleerd' },
-      { key: 'bubble_membership_end',     label: 'Bubble-toegang beëindigd' },
+      { key: 'lms_toegang',               label: 'LMS-toegang gesloten' },
       { key: 'onboarding_status',         label: 'Status op geannuleerd' },
       { key: 'cancellation_record',       label: 'Audit-record geschreven' },
       { key: 'notify_mentor',             label: 'Mentor genotificeerd' },
@@ -1301,7 +1297,7 @@
           ${offHtml}
         </div>
         <div style="font-size:12.5px;color:var(--text)">
-          <i class="ti ti-brand-bubble"></i> <strong>Bubble-toegang wordt per gisteren beëindigd</strong> (membership_end_date_date + login uit).
+          <i class="ti ti-lock"></i> <strong>LMS-toegang wordt per gisteren gesloten</strong> (einddatum in het LMS op gisteren).
         </div>
       </div>
       <div style="margin-top:14px">
@@ -1373,7 +1369,7 @@
       { key: 'invoices_credit',          label: 'Facturen gecrediteerd' },
       { key: 'subscriptions_deactivate', label: 'Abonnement(en) gestopt' },
       { key: 'offertes_cancel',          label: 'Offerte(s) geannuleerd' },
-      { key: 'bubble_membership_end',    label: 'Bubble-toegang beëindigd' },
+      { key: 'lms_toegang',              label: 'LMS-toegang gesloten' },
       { key: 'onboarding_status',        label: 'Status op geannuleerd' },
       { key: 'cancellation_record',      label: 'Audit-record geschreven' },
       { key: 'notify_mentor',            label: 'Mentor genotificeerd' },
@@ -1457,7 +1453,7 @@
           ${_renderMentorTimeline(o)}
         `;
         _wireAdminActions(o, () => { render(); onChange(); });
-        // Lazy sidecar: patch de Bubble-afgeleide intake-velden na render.
+        // Lazy sidecar: patch de sessie-afgeleide intake-velden (LMS) na render.
         _lazyPatchIntake('detail', onboardingId).catch(() => {});
       } catch (e) {
         host.innerHTML = '<div style="padding:18px;color:#b91c1c">Ophalen mislukt: ' + esc(e?.message || e) + '</div>';
@@ -1507,7 +1503,7 @@
             ? '<div style="margin-top:8px;text-align:right"><button type="button" id="obEmailReplyBtn" style="padding:7px 14px;border:0;border-radius:8px;background:#093d54;color:#fff;font-weight:600;font-size:13px;cursor:pointer">Reageren</button></div>'
             : '');
       }
-      // Tab-refactor: 4 tabbladen — Overzicht / Account & Bubble / Vragenlijst /
+      // Tab-refactor: 4 tabbladen — Overzicht / Account & LMS / Vragenlijst /
       // Tijdlijn. Alle bestaande <dt>/<dd>-velden, knoppen en handlers blijven
       // bestaan, alleen herverdeeld over de juiste tab. mountActions wordt
       // niet meer gebruikt voor de modal: we renderen het admin-actie-blok en
@@ -1521,7 +1517,7 @@
       bd.innerHTML = `
         <div class="ob-modal-tabs" role="tablist" style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px">
           <button type="button" class="ob-modal-tab active" data-mtab="overview" style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid var(--brand-deep,#093d54);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Overzicht</button>
-          <button type="button" class="ob-modal-tab"        data-mtab="account"  style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Account &amp; Bubble</button>
+          <button type="button" class="ob-modal-tab"        data-mtab="account"  style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Account &amp; LMS</button>
           <button type="button" class="ob-modal-tab"        data-mtab="form"     style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Vragenlijst</button>
           <button type="button" class="ob-modal-tab"        data-mtab="timeline" style="padding:8px 12px;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Tijdlijn</button>
         </div>
@@ -1551,31 +1547,19 @@
           <div id="obDetailActionsHost">${actionsBlockHtml}</div>
         </div>
 
-        <!-- TAB 2: Account & Bubble -->
+        <!-- TAB 2: Account & LMS -->
         <div class="ob-modal-pane" data-mpane="account" hidden>
           <dl>
-            <dt>Bubble-status</dt>    <dd>${bubbleBadgeHtml(o)}${o.bubble_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.bubble_provisioned_at)) + '</span>' : ''}</dd>
-            ${o.bubble_user_id        ? `<dt>Bubble user-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.bubble_user_id)}</dd>` : ''}
-            ${o.bubble_provision_error ? `<dt>Bubble-fout</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.bubble_provision_error)}</dd>` : ''}
-            ${(!o.bubble_provisioned)
-              ? `<dt>Bubble-actie</dt><dd>
-                   <button type="button" class="ob-act primary" id="bubbleRetryBtn" data-id="${esc(o.id)}">
-                     <i class="ti ti-refresh"></i>Bubble opnieuw aanmaken
-                   </button>
-                   <span id="bubbleRetryStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>
-                 </dd>`
-              : ''}
+            <dt>LMS-student</dt>      <dd>${lmsBadgeHtml(o)}${o.dfo_lms_provisioned_at ? ' <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.dfo_lms_provisioned_at)) + '</span>' : ''}</dd>
+            ${o.dfo_lms_student_id     ? `<dt>LMS student-id</dt><dd style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;word-break:break-all">${esc(o.dfo_lms_student_id)}</dd>` : ''}
+            ${o.dfo_lms_provision_error ? `<dt>LMS-melding</dt><dd style="color:#b91c1c;white-space:pre-wrap;font-size:12.5px">${esc(o.dfo_lms_provision_error)}</dd>` : ''}
             <dt>Inloggegevens</dt><dd>
-              ${o.credentials_email_sent_at
-                ? '<span style="background:rgba(34,197,94,0.14);color:#15803d;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">✓ E-mail verstuurd</span> <span style="color:var(--text-faint);font-size:12px">· ' + esc(fmtDateTimeNL(o.credentials_email_sent_at)) + '</span>'
-                : '<span style="background:rgba(100,116,139,0.18);color:#475569;padding:2px 9px;border-radius:10px;font-size:11.5px;font-weight:600">— E-mail nog niet verstuurd</span>'}
-              ${''/* Resend-credentials-knop tijdelijk verborgen — Bubble
-                   reset_student_password-workflow nog niet betrouwbaar.
-                   Endpoint /api/onboarding-credentials-reset + RBAC-gate
-                   blijven ongewijzigd; doCredentialsReset-handler hieronder
-                   blijft als dode code zodat we de knop later 1-op-1 terug
-                   kunnen zetten. getElementById('credsResetBtn') return't
-                   null, wire-block is no-op. */}
+              ${o.dfo_lms_student_id
+                ? `<button type="button" class="ob-act primary" id="credsResetBtn" data-id="${esc(o.id)}">
+                     <i class="ti ti-mail-forward"></i>LMS-uitnodiging opnieuw sturen
+                   </button>
+                   <span id="credsResetStatus" style="margin-left:8px;font-size:12.5px;color:var(--text-dim)"></span>`
+                : '<span style="color:var(--text-faint);font-size:12.5px">Nog geen LMS-student — aanmaken via het klantdetail (Account &amp; LMS).</span>'}
             </dd>
             <dt>WhatsApp-uitnodiging</dt><dd>
               ${o.invite_sent_at
@@ -1622,24 +1606,17 @@
           });
         });
       });
-      // Bubble-retry knop wiren (alleen aanwezig als onboarding niet-provisioned).
-      const retryBtn = document.getElementById('bubbleRetryBtn');
-      if (retryBtn) {
-        retryBtn.addEventListener('click', () => {
-          doProvisionRetry(retryBtn.dataset.id || '', retryBtn);
-        });
-      }
-      // Credentials-reset knop wiren (alleen aanwezig als bubble_provisioned).
+      // LMS-uitnodiging opnieuw (alleen aanwezig met een LMS-student).
       // POST → /api/onboarding-credentials-reset; serverside gegate op
-      // onboarding.admin. Voor MISLUKT accounts toont de pagina daar
-      // 'Bubble opnieuw aanmaken' i.p.v. deze knop.
+      // onboarding.admin / eigen onboarding. Nieuw wachtwoord: het oude vervalt.
       const credsBtn = document.getElementById('credsResetBtn');
       if (credsBtn) {
         credsBtn.addEventListener('click', () => {
           const obId = credsBtn.dataset.id || '';
           const email = (o && o.email) ? o.email : '';
           const ok = confirm(
-            'Nieuw wachtwoord genereren en mailen naar ' + (email || 'de student') + '?'
+            'LMS-uitnodiging opnieuw sturen naar ' + (email || 'de student') + '?\n\n'
+            + 'De student krijgt een nieuw wachtwoord; het oude werkt daarna niet meer.'
           );
           if (!ok) return;
           doCredentialsReset(obId, credsBtn);
@@ -1664,87 +1641,24 @@
       if (canViewEmail && obCustId) {
         _loadObEmailThread(obCustId, o.email || '');
       }
-      // Lazy sidecar: patch de Bubble-afgeleide intake-velden na render.
+      // Lazy sidecar: patch de sessie-afgeleide intake-velden (LMS) na render.
       _lazyPatchIntake('detail', id).catch(() => {});
     } catch (e) {
       bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(e?.message || e)}</div>`;
     }
   }
 
-  // ── Bubble-provisioning retry ────────────────────────────────────────
-  // Roept /api/onboarding-provision-retry aan voor één onboarding. Endpoint
-  // is fail-soft: 200 met { ok, partial?, error? }. We zetten de knop op
-  // disabled tijdens de call, tonen inline status (spinner-tekst), en bij
-  // succes refreshen we de lijst + heropenen we de detail-modal zodat de
-  // nieuwe badge-status meteen zichtbaar is.
-  async function doProvisionRetry(onboardingId, btn) {
-    if (!onboardingId) return;
-    const status = document.getElementById('bubbleRetryStatus');
-    if (btn) btn.disabled = true;
-    if (status) {
-      status.style.color  = 'var(--text-dim)';
-      status.textContent  = 'Bezig met aanmaken in Bubble…';
-    }
-    try {
-      const r = await window.AgentShared.apiFetch('/api/onboarding-provision-retry', {
-        method  : 'POST',
-        headers : { 'Content-Type': 'application/json' },
-        body    : JSON.stringify({ onboarding_id: onboardingId }),
-      });
-      let d = null; try { d = await r.json(); } catch {}
-      if (r.status === 401) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Niet (meer) ingelogd.'; }
-        return;
-      }
-      if (r.status === 403) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Geen rechten (onboarding.admin).'; }
-        return;
-      }
-      if (!r.ok) {
-        if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + (d?.error || ('HTTP ' + r.status)); }
-        return;
-      }
-      // Endpoint geeft altijd 200; success vs partial vs hard-fail uit body.
-      if (d && d.ok === true) {
-        if (status) {
-          status.style.color = '#15803d';
-          status.textContent = d.skipped ? '✓ Al aangemaakt' : '✓ Gelukt';
-        }
-        toast(d.skipped ? 'Was al aangemaakt' : 'Bubble-account aangemaakt', 'success');
-        // Lijst verversen + modal heropenen met verse data.
-        loadList();
-        setTimeout(() => { openDetail(onboardingId); }, 250);
-        return;
-      }
-      // partial of harde fail.
-      const errMsg = (d?.error || 'Onbekende fout');
-      if (status) {
-        status.style.color = '#b91c1c';
-        status.textContent = (d?.partial ? '⚠ Gedeeltelijk: ' : '✗ Mislukt: ') + errMsg;
-      }
-      toast((d?.partial ? 'Gedeeltelijk gelukt: ' : 'Bubble-aanmaak mislukt: ') + errMsg, 'error');
-      // Bij partial heeft de retry een bubble_user_id opgeslagen — een volgende
-      // poging kan zinvol zijn. Re-enable de knop zodat de admin nogmaals kan
-      // proberen na onderzoek.
-      if (btn) btn.disabled = false;
-    } catch (e) {
-      console.error('[onboarding-admin] retry:', e?.message || e);
-      if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Onverwachte fout: ' + (e?.message || e); }
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  // ── Credentials-reset (Bubble + e-mail) ─────────────────────────────
+  // ── LMS-uitnodiging opnieuw ─────────────────────────────────────────
   // Roept /api/onboarding-credentials-reset aan voor één onboarding. Endpoint
-  // is fail-soft: 200 met { ok, sent?, error? }. Mirror van doProvisionRetry
-  // qua status/UX. Geen wachtwoord in client/UI — alleen succes/foutmelding.
+  // is fail-soft: 200 met { ok, sent?, error? }. Geen wachtwoord in de
+  // client/UI — alleen succes/foutmelding.
   async function doCredentialsReset(onboardingId, btn) {
     if (!onboardingId) return;
     const status = document.getElementById('credsResetStatus');
     if (btn) btn.disabled = true;
     if (status) {
       status.style.color = 'var(--text-dim)';
-      status.textContent = 'Bezig met reset + mailen…';
+      status.textContent = 'LMS-uitnodiging versturen…';
     }
     try {
       const r = await window.AgentShared.apiFetch('/api/onboarding-credentials-reset', {
@@ -1773,14 +1687,14 @@
           status.style.color = '#15803d';
           status.textContent = '✓ Mail verstuurd';
         }
-        toast('Inloggegevens opnieuw verstuurd', 'success');
+        toast('LMS-uitnodiging opnieuw verstuurd', 'success');
         loadList();
         setTimeout(() => { openDetail(onboardingId); }, 250);
         return;
       }
       const errMsg = (d?.error || 'Onbekende fout');
       if (status) { status.style.color = '#b91c1c'; status.textContent = '✗ Mislukt: ' + errMsg; }
-      toast('Credentials-reset mislukt: ' + errMsg, 'error');
+      toast('LMS-uitnodiging mislukt: ' + errMsg, 'error');
       if (btn) btn.disabled = false;
     } catch (e) {
       console.error('[onboarding-admin] credentials-reset:', e?.message || e);
@@ -1858,10 +1772,10 @@
   }
 
   // ── Fetch ─────────────────────────────────────────────────────────────
-  // Lazy sidecar patch: haalt de Bubble-afgeleide intake-velden op via
+  // Lazy sidecar patch: haalt de sessie-afgeleide intake-velden (LMS) op via
   // /api/onboarding-intake-status en patcht ze in bestaande UI zonder de
   // basisweergave te blokkeren. Sinds perf-refactor blokkeert admin-list +
-  // detail niet meer op de live Bubble-call — die fetchen we hier fire-and-
+  // detail niet meer op de live sessie-call — die fetchen we hier fire-and-
   // forget nadat de eerste render zichtbaar is.
   //
   // Modes:
@@ -1954,7 +1868,7 @@
         return String(a.customer_name || '').localeCompare(String(b.customer_name || ''), 'nl');
       });
       renderTable();
-      // Lazy sidecar: haal de dure Bubble-afgeleide intake-velden op en
+      // Lazy sidecar: haal de dure sessie-afgeleide intake-velden (LMS) op en
       // patch ze in de al-gerenderde rijen. Fire-and-forget.
       _lazyPatchIntake('list').catch(() => {});
     } catch (e) {

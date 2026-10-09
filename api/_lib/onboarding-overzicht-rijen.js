@@ -59,8 +59,7 @@ export async function bouwOverzichtRijen(opts = {}) {
                status, current_step, answers,
                start_date, created_at,
                started_at, completed_at, assigned_at, archived_at, token,
-               bubble_provisioned, bubble_provisioned_at, bubble_provision_error,
-               bubble_user_id, mentor_intake_status, dfo_lms_student_id,
+                              bubble_user_id, mentor_intake_status, dfo_lms_student_id,
                intake_handled_at, intake_handled_by,
                auto_afgerond_op, auto_afgerond_sessie_id, auto_afgerond_sessie_op, auto_afgerond_sessie_titel,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
@@ -105,24 +104,20 @@ export async function bouwOverzichtRijen(opts = {}) {
       annuleringByOb,
       studentNaamById,
     ] = await Promise.all([
-      // ── 2) Mentor-naam + bubble_user_id per uniek mentor_user_id ────────
+      // ── 2) Mentor-naam per uniek mentor_user_id ─────────────────────────
       (async () => {
         const nameMap   = new Map();
-        const bubbleMap = new Map();
-        if (mentorIds.length === 0) return { nameMap, bubbleMap };
+        if (mentorIds.length === 0) return { nameMap };
         const { data: tmRows, error: tmErr } = await supabaseAdmin
           .from('team_members')
-          .select('user_id, name, bubble_user_id, is_active')
+          .select('user_id, name, is_active')
           .in('user_id', mentorIds);
         if (tmErr) throw new Error('team_members fetch: ' + tmErr.message);
         for (const r of (tmRows || [])) {
           if (!r.user_id) continue;
           if (r.name) nameMap.set(r.user_id, r.name);
-          if (r.bubble_user_id && r.is_active !== false) {
-            bubbleMap.set(r.user_id, String(r.bubble_user_id).trim());
-          }
         }
-        return { nameMap, bubbleMap };
+        return { nameMap };
       })(),
       // ── 3) Paid-vlag per uniek customer_id ─────────────────────────────
       (async () => {
@@ -281,11 +276,10 @@ export async function bouwOverzichtRijen(opts = {}) {
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
-    const mentorBubbleByUid = mentorMaps.bubbleMap; // eslint-disable-line no-unused-vars
     const { waiverKey, availabilityBlock } = wizardMeta;
 
     // ── 5) 1-op-1 fetchen — VERWIJDERD uit het kritieke pad ────────────────
-    // De live Bubble-call fetchOneOnOneForMentor was seconden traag en
+    // De live sessie-call was seconden traag en
     // blokkeerde het volledige lijst-antwoord. Sinds de perf-refactor
     // draait die logica in /api/onboarding-intake-status en wordt lazy
     // opgehaald door de frontend na render. Deze endpoint returnt de auto-
@@ -305,7 +299,7 @@ export async function bouwOverzichtRijen(opts = {}) {
     const future = list.map((r) => {
       const bu = r.bubble_user_id ? String(r.bubble_user_id) : null;
       // Base intake gebruikt UITSLUITEND DB-signalen (handmatige status +
-      // hasMentor). De 3 Bubble-afgeleide signalen (doneIso/noshowIso/
+      // hasMentor). De 3 sessie-afgeleide signalen (doneIso/noshowIso/
       // plannedIso) worden lazy opgehaald via /api/onboarding-intake-status
       // en client-side ingepatcht.
       const intake = deriveIntakeStatus({
@@ -339,7 +333,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       // (waar nog_geen_mentor=-1 al bovenaan komt).
       const effRank = cancelled ? 10 : (handled ? 8 : baseRank);
 
-      // Hub-velden: traject + waiver + bedenktijd + availability + bubble.
+      // Hub-velden: traject + waiver + bedenktijd + availability.
       const t = r.traject || null;
       const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
       const waiver = waiverKey
@@ -420,10 +414,8 @@ export async function bouwOverzichtRijen(opts = {}) {
         waiver,
         bedenktijd,
         availability,
-        // Bubble-provisioning:
-        bubble_provisioned:    r.bubble_provisioned === true,
-        bubble_provisioned_at: r.bubble_provisioned_at || null,
-        bubble_provision_error: r.bubble_provision_error || null,
+        // Historische koppelsleutel (uit Bubble geïmporteerde studenten): de
+        // sessie-bron in het LMS vindt die studenten nog via deze sleutel.
         bubble_user_id:        bu,
         // Het LMS-student-id (dfo-lms): de brug voor het LMS-overzicht.
         dfo_lms_student_id:    r.dfo_lms_student_id || null,

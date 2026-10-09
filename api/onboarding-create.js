@@ -20,12 +20,13 @@
 // Response 200:
 //   { ok:true, onboarding:{id, token, status}, link }
 //
-// (Geen Bubble-call — provisioning komt in Fase 2.)
+// Geen Bubble: sinds 9 okt 2026 gaat een onboarding alleen nog naar het LMS
+// (dfo-lms, hlms_student) + de LMS-uitnodiging.
 
 import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
+import { provisionTrialSiteToegang } from './_lib/onboarding-provision.js';
 import { provisionDfoLmsStudent, noteerUitnodiging } from './_lib/dfo-lms-student.js';
 import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
@@ -90,18 +91,16 @@ export default async function handler(req, res) {
   // start_date is optioneel: lege/ongeldige input → null (provisioning valt
   // dan terug op now, identiek aan het oude gedrag).
   const startDate  = normalizeStartDate(body.start_date);
-  // Per-klant LMS-provisioning: operator-vinkje uit de aanmeld-modal. Afwezig
-  // of niet-true → false (feature standaard UIT). Bepaalt of onboarding-
-  // provision.js het LMS-blok naast Bubble draait.
+  // Per-klant trial-site-toegang: operator-vinkje uit de v1-aanmeld-modal.
+  // Afwezig of niet-true → false (standaard UIT). Bepaalt of onboarding-
+  // provision.js een trial-site-grant zet (NIET het dfo-lms).
   const lmsProvision = body.lms_provision === true;
   if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!UUID_RE.test(trajectId))  return res.status(400).json({ error: 'traject_id (uuid) vereist' });
 
   // Ondergrens: startdatum moet >= vandaag + 3 kalenderdagen (NL-tijd) liggen.
-  // Zonder deze gate belandde het abbo in Bubble op start = aanmeldmoment,
-  // en Bubble past een payment-buffer toe die de membership_state_date_date
-  // terug-shift → abbo in het verleden. Niet stil clampen: de user moet zien
-  // dat 'ie te vroeg koos zodat 'ie bewust een andere datum kiest.
+  // Niet stil clampen: de user moet zien dat 'ie te vroeg koos zodat 'ie
+  // bewust een andere datum kiest.
   const startTooEarly = assertStartDateNotTooEarly(startDate);
   if (startTooEarly) {
     return res.status(400).json({
@@ -190,20 +189,17 @@ export default async function handler(req, res) {
     }
     if (insErr) throw new Error('onboarding insert: ' + insErr.message);
 
-    // Fase 2 — Bubble-provisioning. Fail-soft: een Bubble-fout mag de
-    // aanmelding NIET 500'en. De onboarding + token zijn al gemaakt; de
-    // provisioning-status komt mee in de response zodat de admin-UI
-    // direct kan tonen of er een retry nodig is.
-    let provision = { ok: false, error: 'unknown' };
+    // Trial-site-toegang (alleen bij het lms_provision-vinkje). Fail-soft.
+    let provision = { ok: true, skipped: true };
     try {
-      provision = await provisionOnboardingStudent(inserted.id);
+      provision = await provisionTrialSiteToegang(inserted.id);
     } catch (e) {
-      console.error('[onboarding-create] provision threw:', e?.message || e);
-      provision = { ok: false, error: e?.message || 'provision-threw' };
+      console.error('[onboarding-create] trial-toegang threw:', e?.message || e);
+      provision = { ok: false, error: e?.message || 'trial-toegang-threw' };
     }
 
     // Fase 1 dfo-lms — studentrij in het NIEUWE LMS (hlms_student). Staat
-    // LOS van de Bubble-provisioning hierboven en van het lms_provision-blok
+    // LOS van het lms_provision-blok
     // (trial-site); zie api/_lib/dfo-lms-db.js voor het waarom van de naam.
     // Fail-soft en awaited: een LMS-fout mag de aanmelding niet 500'en, maar
     // we willen 'm wel afgerond hebben voor we de respons sturen zodat de
