@@ -31,6 +31,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { voegCategorieToe } from './_lib/inbox-categorie.js';
+import { selectInPorties } from './_lib/in-porties.js';
 // BP2 v3 (2026-09-01): setter-scope VERWIJDERD — Romy doet alle gesprekken.
 import {
   haalLijn, leadsInTraject, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
@@ -91,35 +92,52 @@ export default async function handler(req, res) {
     // lead-gematchte), gesorteerd op recentste eerst, zodat we straks óók
     // lead-loze conversaties als aparte rijen kunnen tonen. convsAll + nonEmpty
     // + kandidaatMap blijven beschikbaar voor de lead-loze pass verderop.
+    //
+    // 2026-10-09: de "≥1 bericht"-check zat in een losse
+    // .in('conversation_id', <500 ids>). Bij >~400 ids is de URL te lang en faalt
+    // het request; de fout werd niet gelezen → nonEmpty leeg → ALLE WhatsApp-
+    // gesprekken vielen uit de lijst (de lijn heeft er >1000). Nu bepaalt de
+    // database het in dezelfde query: per gesprek hooguit 1 bericht embedden
+    // (whatsapp_messages(id) + limit 1 op de embed). Geen id-lijst in de URL,
+    // geen max-rows-afkapping. Lukt de embed niet: fout loggen en terugvallen op
+    // de check in kleine porties (api/_lib/in-porties.js).
     const waOpLeadId = new Map();
     let convsAll = [];
     let nonEmpty = new Set();       // conv-ids met ≥1 whatsapp_message
     const kandidaatMap = new Map(); // convId -> {conv, lead}  (nummer-match op een lead)
     if (lijn.phoneNumberId) {
-      const { data: convs } = await supabaseAdmin
+      const CONV_VELDEN = 'id, phone_number, customer_id, attendee_id, last_message_at, last_message_preview, unread_count, last_inbound_at';
+      const convQuery = (velden) => supabaseAdmin
         .from('whatsapp_conversations')
-        .select('id, phone_number, customer_id, attendee_id, last_message_at, last_message_preview, unread_count, last_inbound_at')
+        .select(velden)
         .eq('phone_number_id', lijn.phoneNumberId)
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(500);
-      convsAll = convs || [];
+      const { data: convs, error: convErr } = await convQuery(CONV_VELDEN + ', whatsapp_messages(id)')
+        .limit(1, { referencedTable: 'whatsapp_messages' });
+      if (!convErr) {
+        convsAll = convs || [];
+        nonEmpty = new Set(convsAll.filter((c) => (c.whatsapp_messages || []).length > 0).map((c) => c.id));
+      } else {
+        console.error('[ls-gesprekken] gesprekken + berichten-embed mislukt, terugval op porties:', convErr.message || convErr);
+        const { data: kaal, error: kaalErr } = await convQuery(CONV_VELDEN);
+        if (kaalErr) console.error('[ls-gesprekken] gesprekken ophalen mislukt:', kaalErr.message || kaalErr);
+        convsAll = kaal || [];
+        // Kleine porties: elk gesprek levert al zijn berichten-rijen, dus 25
+        // gesprekken per keer blijft ruim onder max-rows (1000).
+        const { data: msgIds, error: msgErr } = await selectInPorties(convsAll.map((c) => c.id), (deel) =>
+          supabaseAdmin.from('whatsapp_messages').select('conversation_id').in('conversation_id', deel), { grootte: 25 });
+        if (msgErr) console.error('[ls-gesprekken] berichten-check (porties) deels mislukt:', msgErr.message || msgErr);
+        nonEmpty = new Set(msgIds.map((m) => m.conversation_id));
+      }
       // Kandidaat-convs = convs waarvan het nummer matcht met een lead-telnr.
       for (const c of convsAll) {
         if (!c.phone_number || c.phone_number.startsWith('+99999')) continue;
         const lead = leadOpNummer.get(normNummer(c.phone_number));
         if (lead) kandidaatMap.set(c.id, { conv: c, lead });
       }
-      // Batch-check over ALLE conv-ids: welke heeft ≥1 whatsapp_messages?
-      const convIds = convsAll.map(c => c.id).filter(Boolean);
-      if (convIds.length) {
-        const { data: msgIds } = await supabaseAdmin
-          .from('whatsapp_messages')
-          .select('conversation_id')
-          .in('conversation_id', convIds);
-        nonEmpty = new Set((msgIds || []).map(m => m.conversation_id));
-        for (const [cid, entry] of kandidaatMap.entries()) {
-          if (nonEmpty.has(cid)) waOpLeadId.set(entry.lead.id, entry.conv);
-        }
+      for (const [cid, entry] of kandidaatMap.entries()) {
+        if (nonEmpty.has(cid)) waOpLeadId.set(entry.lead.id, entry.conv);
       }
     }
 
