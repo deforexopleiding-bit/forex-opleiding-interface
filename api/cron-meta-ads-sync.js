@@ -110,22 +110,32 @@ async function syncInsightsForLevel(accountId, level, timeRange, leadActionTypes
 }
 
 /**
- * Update sync_state met laatste succesvolle run per key. Fail-soft: als de
- * tabel niet bestaat, log en ga door.
+ * Update sync_state met de laatste run. Kolommen volgens
+ * docs/sql-migrations/2026-06-06-finance-sync-state.sql: PK `resource`,
+ * `last_updated_since` NOT NULL (hier = start van de run; deze sync heeft
+ * geen cursor). Er is geen jsonb-kolom voor de summary; de foutteksten staan
+ * in de console.warn's per niveau. Fail-soft, maar ELKE fout loggen:
+ * supabase-js gooit niet (dus `error` uit het resultaat lezen), en
+ * isMissingRelationError slikt ook 42703 — zo bleef de oude `key`-kolom
+ * onzichtbaar.
  */
-async function touchSyncState(key, summary) {
+async function touchSyncState(resource, summary) {
+  const processed = Object.values(summary.insights || {})
+    .reduce((n, r) => n + (Number(r?.count) || 0), 0);
   try {
-    await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('sync_state')
       .upsert({
-        key,
-        last_run_at: new Date().toISOString(),
-        state:       summary,
-      }, { onConflict: 'key' });
+        resource,
+        last_updated_since:   summary.started_at,
+        last_run_at:          summary.started_at,
+        last_run_processed:   processed,
+        last_run_errors:      (summary.errors || []).length,
+        last_run_duration_ms: summary.duration_ms ?? null,
+      }, { onConflict: 'resource' });
+    if (error) console.warn('[cron-meta-ads-sync] sync_state touch:', error.message || error);
   } catch (e) {
-    if (!isMissingRelationError(e)) {
-      console.warn('[cron-meta-ads-sync] sync_state touch:', e?.message || e);
-    }
+    console.warn('[cron-meta-ads-sync] sync_state touch:', e?.message || e);
   }
 }
 

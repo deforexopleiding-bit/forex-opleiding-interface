@@ -45,17 +45,23 @@ function todayNL() {
   }).format(new Date());
 }
 
-async function touchSyncState(key, summary) {
+// Kolommen volgens docs/sql-migrations/2026-06-06-finance-sync-state.sql
+// (PK `resource`, `last_updated_since` NOT NULL = start van de run; geen jsonb
+// voor de summary). Elke fout loggen: supabase-js gooit niet, en
+// isMissingRelationError slikt ook 42703 (zo bleef de oude `key`-kolom stil).
+async function touchSyncState(resource, summary) {
   try {
-    await supabaseAdmin.from('sync_state').upsert({
-      key,
-      last_run_at: new Date().toISOString(),
-      state:       summary,
-    }, { onConflict: 'key' });
+    const { error } = await supabaseAdmin.from('sync_state').upsert({
+      resource,
+      last_updated_since:   summary.started_at,
+      last_run_at:          summary.started_at,
+      last_run_processed:   summary.alerts_evaluated || 0,
+      last_run_errors:      (summary.errors || []).length,
+      last_run_duration_ms: (Date.parse(summary.finished_at) - Date.parse(summary.started_at)) || null,
+    }, { onConflict: 'resource' });
+    if (error) console.warn('[cron-meta-ads-alerts] sync_state touch:', error.message || error);
   } catch (e) {
-    if (!isMissingRelationError(e)) {
-      console.warn('[cron-meta-ads-alerts] sync_state touch:', e?.message || e);
-    }
+    console.warn('[cron-meta-ads-alerts] sync_state touch:', e?.message || e);
   }
 }
 
