@@ -1115,7 +1115,17 @@
    * Drie toestanden met drie kleuren, want dat is de enige manier waarop dit
    * werkt: je moet in een oogopslag zien of je nog vrij kunt schrijven.
    */
-  function vensterMerk(v) {
+  function vensterMerk(v, kanaal) {
+    // Het servicevenster van 24 uur is een regel van Meta over WhatsApp. Voor
+    // mail bestaat het niet, en een badge die "nog 23u34" zegt op een mail
+    // suggereert een deadline die er niet is — dat laat je haasten met iets
+    // waar je juist rustig over had moeten nadenken.
+    //
+    // De server stuurt sinds deze wijziging null mee voor mail, dus dit is de
+    // tweede sluiting. Dat is met opzet: een oud antwoord uit de cache, of een
+    // toekomstige aanroeper die het veld zelf vult, mag hier niet alsnog
+    // doorheen glippen.
+    if (kanaal !== undefined && kanaal !== 'whatsapp') return '';
     if (!v) return '';
     if (!v.open) {
       return `<span title="Buiten het servicevenster van 24 uur mag alleen een goedgekeurde template."
@@ -1223,7 +1233,7 @@
         ${esc(r.samenvatting || r.voorbeeld || '—')}
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        ${vensterMerk(r.venster)}${koppelMerk(r)}${cat}${onzeker}
+        ${vensterMerk(r.venster, r.kanaal)}${koppelMerk(r)}${cat}${onzeker}
       </div>
     </div>`;
   }
@@ -1246,7 +1256,7 @@
       <button class="btn btn-ghost btn-sm iris-terug-knop" style="font-size:11.5px;padding:3px 9px"
         onclick="__irisTerug()" title="Terug naar de lijst">← Lijst</button>
       <b style="font-size:13px">${esc(g.naam || 'Onbekend')}</b>
-      ${vensterMerk(v)}
+      ${vensterMerk(v, g.kanaal)}
       <span style="font-size:11px;color:var(--text-3)">${esc(g.status || '')}</span>
       <div style="flex:1"></div>
       ${g.categorie ? `<span style="font-size:11px;color:var(--text-3)">${esc(CATEGORIE_LABELS[g.categorie] || g.categorie)}</span>` : ''}
