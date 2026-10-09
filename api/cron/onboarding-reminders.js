@@ -26,6 +26,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendOnboardingTemplateGeneric } from '../_lib/onboarding-template-send.js';
+import { selectInPorties } from '../_lib/in-porties.js';
 
 const DEFAULT_MAX_PER_RUN = 300;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -155,10 +156,9 @@ export default async function handler(req, res) {
     const customerIds = Array.from(new Set(capped.map((r) => r.customer_id).filter(Boolean)));
     let phoneByCustomer = new Map();
     if (customerIds.length > 0) {
-      const { data: custs, error: custErr } = await supabaseAdmin
-        .from('customers')
-        .select('id, phone')
-        .in('id', customerIds);
+      // In porties: tot 1000 ids (?limit) past niet in één URL (in-porties.js).
+      const { data: custs, error: custErr } = await selectInPorties(customerIds, (deel) =>
+        supabaseAdmin.from('customers').select('id, phone').in('id', deel));
       if (custErr) throw new Error('customers fetch: ' + custErr.message);
       for (const c of (custs || [])) phoneByCustomer.set(c.id, c.phone || null);
     }
@@ -171,11 +171,12 @@ export default async function handler(req, res) {
     ));
     let convByPhone = new Map();
     if (stopOnInbound && phonesPlus.length > 0) {
-      const { data: convs, error: convErr } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .select('id, phone_number, last_inbound_at, unread_count')
-        .in('phone_number', phonesPlus)
-        .eq('phone_number_id', onboardingPnId);
+      const { data: convs, error: convErr } = await selectInPorties(phonesPlus, (deel) =>
+        supabaseAdmin
+          .from('whatsapp_conversations')
+          .select('id, phone_number, last_inbound_at, unread_count')
+          .in('phone_number', deel)
+          .eq('phone_number_id', onboardingPnId));
       if (convErr) throw new Error('conversations fetch: ' + convErr.message);
       for (const c of (convs || [])) {
         if (c.phone_number) convByPhone.set(c.phone_number, c);
@@ -189,26 +190,29 @@ export default async function handler(req, res) {
     let handoffByConv = new Map();
     if (convIds.length > 0) {
       const cutoff = new Date(nowMs - MS_PER_DAY).toISOString();
-      const { data: sugs, error: sugErr } = await supabaseAdmin
-        .from('joost_suggestions')
-        .select('id, conversation_id, context_snapshot, created_at')
-        .eq('module', 'onboarding')
-        .in('conversation_id', convIds)
-        .gte('created_at', cutoff)
-        .order('created_at', { ascending: false })
-        .limit(1000);
+      // In porties (in-porties.js). Elk gesprek zit in precies één portie, dus
+      // "nieuwste eerst per gesprek" blijft kloppen.
+      const { data: sugs, error: sugErr } = await selectInPorties(convIds, (deel) =>
+        supabaseAdmin
+          .from('joost_suggestions')
+          .select('id, conversation_id, context_snapshot, created_at')
+          .eq('module', 'onboarding')
+          .in('conversation_id', deel)
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(1000));
       if (sugErr) {
         // Niet fataal — we behandelen geen-handoff-info als 'niet-handmatig'.
-        console.warn('[cron onboarding-reminders] joost_suggestions:', sugErr.message);
-      } else {
-        for (const s of (sugs || [])) {
-          if (handoffByConv.has(s.conversation_id)) continue; // alleen de NIEUWSTE telt
-          const handoff = s?.context_snapshot?.handoff;
-          if (handoff && handoff.needs_human === true) {
-            handoffByConv.set(s.conversation_id, true);
-          } else {
-            handoffByConv.set(s.conversation_id, false);
-          }
+        // De porties die wél lukten gebruiken we hieronder gewoon.
+        console.warn('[cron onboarding-reminders] joost_suggestions:', sugErr.message || sugErr);
+      }
+      for (const s of (sugs || [])) {
+        if (handoffByConv.has(s.conversation_id)) continue; // alleen de NIEUWSTE telt
+        const handoff = s?.context_snapshot?.handoff;
+        if (handoff && handoff.needs_human === true) {
+          handoffByConv.set(s.conversation_id, true);
+        } else {
+          handoffByConv.set(s.conversation_id, false);
         }
       }
     }
