@@ -1,7 +1,11 @@
 // api/leadsonderhoud-gesprek-berichten.js
-// GET ?lead_id=<uuid>[&mark_as_read=true]
+// GET ?lead_id=<uuid>[&conversation_id=<uuid>][&mark_as_read=true]
 //   -> de samengevoegde draad van één lead: WhatsApp-berichten én inkomende mail,
-//      op tijd gesorteerd, met per bericht het kanaal.
+//      op tijd gesorteerd, met per bericht het kanaal. conversation_id = het
+//      WA-gesprek dat de lijst al kent (sinds 2026-10-09; anders zoekt de server
+//      direct op het telefoonnummer).
+// GET ?conversation_id=<uuid>[&mark_as_read=true]   (zonder lead_id)
+//   -> lead-loze rij: alleen de WhatsApp-berichten van dat gesprek.
 //
 // Alleen lezen. Gate: leads.view. De lead moet in een traject zitten (anders 403).
 // Bij mark_as_read wordt alleen de WhatsApp-ongelezenteller op 0 gezet; de
@@ -35,18 +39,18 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (leads.view)' });
   }
 
-  // FASE 0 — conversation_id-pad (dormant; nog geen UI roept dit aan). Geeft
-  // alleen de WhatsApp-berichten van de conv terug (geen mail-tak — een lead-
-  // loze conv heeft geen e-mail). Autorisatie: de conv staat op de
-  // leadsonderhoud-lijn. Het lead_id-pad hieronder blijft ongewijzigd (incl.
-  // 403 buiten traject).
+  // conversation_id ZONDER lead_id → lead-loze rij: alleen de WhatsApp-berichten
+  // van die conv (geen mail-tak — een lead-loze conv heeft geen e-mail).
+  // Autorisatie: de conv staat op de leadsonderhoud-lijn.
+  // conversation_id MÉT lead_id (2026-10-09) → het lead-pad hieronder, met de
+  // conv die de lijst al kende als directe verwijzing (WA + mail blijven samen).
   const convIdQ = String(req.query.conversation_id || '').trim();
-  if (convIdQ) {
-    if (!UUID_RE.test(convIdQ)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  if (convIdQ && !UUID_RE.test(convIdQ)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  const leadId = String(req.query.lead_id || '');
+  if (convIdQ && !leadId) {
     return threadByConversation(res, { convId: convIdQ, markRead: String(req.query.mark_as_read || '') === 'true' });
   }
 
-  const leadId = String(req.query.lead_id || '');
   if (!UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id ontbreekt of ongeldig' });
   const markRead = String(req.query.mark_as_read || '') === 'true';
 
@@ -69,23 +73,23 @@ export default async function handler(req, res) {
     const items = [];
 
     // ── WhatsApp ──────────────────────────────────────────────────────────
-    let conv = null;
-    if (lijn.phoneNumberId && lead.telefoon_e164) {
-      const { data: convs } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .select('id, phone_number, last_inbound_at, unread_count')
-        .eq('phone_number_id', lijn.phoneNumberId)
-        .limit(500);
-      const doel = normNummer(lead.telefoon_e164);
-      conv = (convs || []).find((c) => normNummer(c.phone_number) === doel) || null;
+    // 2026-10-09: het gesprek werd gezocht in een ONGESORTEERDE .limit(500)
+    // van de lijn (>1000 gesprekken) → ~55% van de draden opende leeg, en de
+    // mark_as_read hieronder (binnen `if (conv)`) werd dan ook overgeslagen →
+    // "gelezen" sprong via de 20s-poll terug. Nu: vindLeadConv (direct).
+    const conv = await vindLeadConv(lijn, lead, convIdQ || null);
+    if (!conv && lijn.phoneNumberId && lead.telefoon_e164) {
+      console.warn('[leadsonderhoud-gesprek-berichten] geen WA-gesprek gevonden voor lead', { lead: lead.id, hint: convIdQ || null });
     }
     if (conv) {
-      const { data: waMsgs } = await supabaseAdmin
+      const { data: waMsgs, error: waErr } = await supabaseAdmin
         .from('whatsapp_messages')
         .select('id, direction, body, media_type, media_url, template_name, created_at')
         .eq('conversation_id', conv.id)
         .order('created_at', { ascending: true })
         .limit(200);
+      if (waErr) console.error('[leadsonderhoud-gesprek-berichten] WA-berichten lezen mislukt:', { conv: conv.id, fout: waErr.message });
+      else if (!(waMsgs || []).length) console.warn('[leadsonderhoud-gesprek-berichten] WA-gesprek zonder berichten', { conv: conv.id, lead: lead.id });
       for (const m of waMsgs || []) {
         // 2026-09-08: body-fallback naar '[image]' etc. blijft voor placeholder-
         // detectie in renderChatBody; die triggert alleen als er OOK geen
@@ -246,9 +250,52 @@ export default async function handler(req, res) {
   }
 }
 
-// FASE 0 — thread op basis van conversation_id (geen lead). Alleen WhatsApp;
+const CONV_VELDEN = 'id, phone_number, phone_number_id, last_inbound_at, unread_count';
+
+/** Telefoonnummer-varianten zoals ze in whatsapp_conversations.phone_number kunnen staan. PURE. */
+export function nummerVarianten(e164) {
+  const d = normNummer(e164);
+  return d ? [...new Set(['+' + d, d, '00' + d])] : [];
+}
+
+/**
+ * Het WhatsApp-gesprek van een lead op de leadsonderhoud-lijn (2026-10-09).
+ *   1. De conv die de lijst al kende (hint): alleen als hij op de lijn staat
+ *      en het nummer bij de lead hoort — anders loggen en terugvallen.
+ *   2. Anders DIRECT op phone_number_id + de nummervarianten, nieuwste eerst.
+ * Nooit meer "pak N gesprekken en zoek erin" (dat miste >50% op >1000 convs).
+ */
+export async function vindLeadConv(lijn, lead, hintId = null) {
+  if (!lijn?.phoneNumberId) return null;
+  const doel = normNummer(lead?.telefoon_e164);
+  if (hintId) {
+    const { data, error } = await supabaseAdmin.from('whatsapp_conversations')
+      .select(CONV_VELDEN).eq('id', hintId).maybeSingle();
+    if (error) {
+      console.error('[leadsonderhoud-gesprek-berichten] conv-hint lezen mislukt:', { hint: hintId, fout: error.message });
+    } else if (data && String(data.phone_number_id) === String(lijn.phoneNumberId) && (!doel || normNummer(data.phone_number) === doel)) {
+      return data;
+    } else {
+      console.warn('[leadsonderhoud-gesprek-berichten] conv-hint past niet bij lead/lijn — zoek op nummer', { hint: hintId, lead: lead?.id, gevonden: !!data });
+    }
+  }
+  if (!doel) return null;
+  const { data, error } = await supabaseAdmin.from('whatsapp_conversations')
+    .select(CONV_VELDEN)
+    .eq('phone_number_id', lijn.phoneNumberId)
+    .in('phone_number', nummerVarianten(lead.telefoon_e164))
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (error) {
+    console.error('[leadsonderhoud-gesprek-berichten] conv op nummer zoeken mislukt:', { lead: lead?.id, fout: error.message });
+    return null;
+  }
+  return (data || [])[0] || null;
+}
+
+// Thread op basis van conversation_id (lead-loze rij). Alleen WhatsApp;
 // de WA-berichten-mapping is identiek aan het lead-pad hierboven. Autorisatie:
-// de conv moet op de leadsonderhoud-lijn staan. Dormant tot fase 2.
+// de conv moet op de leadsonderhoud-lijn staan.
 async function threadByConversation(res, { convId, markRead }) {
   try {
     const lijn = await haalLijn();
@@ -263,12 +310,13 @@ async function threadByConversation(res, { convId, markRead }) {
     }
 
     const items = [];
-    const { data: waMsgs } = await supabaseAdmin
+    const { data: waMsgs, error: waErr } = await supabaseAdmin
       .from('whatsapp_messages')
       .select('id, direction, body, media_type, media_url, template_name, created_at')
       .eq('conversation_id', conv.id)
       .order('created_at', { ascending: true })
       .limit(200);
+    if (waErr) console.error('[leadsonderhoud-gesprek-berichten] WA-berichten lezen mislukt (conv):', { conv: conv.id, fout: waErr.message });
     for (const m of waMsgs || []) {
       const tekst = m.body || (m.template_name ? '[sjabloon] ' + m.template_name : '')
         || (m.media_type ? '[' + m.media_type + ']' : '') || '';

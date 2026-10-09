@@ -342,8 +342,10 @@ test('bedrading: cron elke minuut, eigen module, bronlijsten, cache-busters, SQL
   const html = lees('modules/klanten-v2/index.html');
   assert.match(html, /<script src="views\/webinar-v2\.js\?v=2"><\/script>/);
   for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e0'], ['klanten-v2', '1f5']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
+  // Minstens de versie van de webinar-PR (latere PR's mogen verder ophogen).
   for (const [f, v] of [['leads-v2.js', 28], ['funnel-dashboard-v2.js', 3], ['leadsonderhoud-v2.js', 66]]) {
-    assert.match(html, new RegExp(`views/${f.replace('.', '\\.')}\\?v=${v}"`), f);
+    const m = html.match(new RegExp(`views/${f.replace('.', '\\.')}\\?v=(\\d+)"`));
+    assert.ok(m && Number(m[1]) >= v, `${f} ?v=${m && m[1]} < ${v}`);
   }
   for (const f of ['api/_lib/funnel-stats-compute.js', 'modules/klanten-v2/views/leadsonderhoud-v2.js', 'modules/klanten-v2/views/leads-v2.js', 'modules/leads.html']) {
     const src = lees(f);
