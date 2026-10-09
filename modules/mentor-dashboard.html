@@ -1188,7 +1188,9 @@
       const bonusDezeMaand = Number(t.deze_maand)     || 0;
       const bonusOpen      = Number(t.open)           || 0;
       const coachingMaand  = Number(coachMonth.grand_total) || 0;
-      const coachingTotal  = Number(coachAll.grand_total)   || 0;
+      // Sinds Bubble dicht is telt de helper vóór okt 2026 alleen het LMS-deel;
+      // grand_total_incl_historie voegt de opgeslagen uitbetalingen toe.
+      const coachingTotal  = Number(coachAll.grand_total_incl_historie ?? coachAll.grand_total) || 0;
       const verdiendTotaal = bonusEarned + coachingTotal;
 
       setDashboardKpis({
@@ -1984,7 +1986,7 @@
     const bonusDezeMaand  = Number(bonusTotals.deze_maand)   || 0;
     const bonusOpen       = Number(bonusTotals.open)         || 0;
     const coachingMaand   = Number(coachMonth?.grand_total)  || 0;
-    const coachingYTD     = Number(coachYtd?.grand_total)    || 0;
+    const coachingYTD     = Number(coachYtd?.grand_total_incl_historie ?? coachYtd?.grand_total) || 0;
     const totaalStudenten = Array.isArray(students?.students) ? students.students.length : 0;
     const verdiendMaand   = bonusDezeMaand + coachingMaand;
     const verdiendYTD     = bonusEarnedYTD + coachingYTD;

@@ -2,8 +2,14 @@
 //
 // GET → coaching-verdiensten v1: telt 1-op-1 sessies + team-trainingen +
 // no-shows binnen een periode en rekent ze om naar bedragen (incl. btw).
-// Read-only: sessies uit het LMS (dfo-lms) + Bubble voor de periode vóór
-// oktober 2026. Een onbereikbare bron geeft een fout, nooit stil 0.
+// Read-only: sessies uit het LMS (dfo-lms). Een onbereikbare bron geeft een
+// fout, nooit stil 0.
+//
+// PERIODEN VÓÓR 1 OKT 2026 (Bubble dicht sinds okt 2026): de helper telt dan
+// alleen het LMS-deel. De respons draagt dan `melding` (uitleg) en
+// `uitbetalingen` — de opgeslagen mentor_payouts van die maanden met hun
+// coachingbedrag — zodat het scherm het volledige bedrag kan tonen in plaats
+// van een te laag getal.
 //
 // Dual-gate (consistent met andere mentor-endpoints):
 //   - ?mentor_user_id=… → admin (mentor.admin.view, die id).
@@ -19,7 +25,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { computeCoachingEarnings } from './_lib/coaching-earnings.js';
+import { computeCoachingEarnings, OUDE_BRON_EINDE } from './_lib/coaching-earnings.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -83,16 +89,7 @@ export default async function handler(req, res) {
   const debugOn = req.query?.debug === '1';
 
   try {
-    const { data: tm, error: tmErr } = await supabaseAdmin
-      .from('team_members')
-      .select('bubble_user_id, is_active')
-      .eq('user_id', effectiveUserId)
-      .eq('is_active', true)
-      .maybeSingle();
-    if (tmErr) throw new Error('team_members lookup: ' + tmErr.message);
-    // Bubble-koppeling is optioneel: zonder bubble_user_id telt alleen het LMS.
     const result = await computeCoachingEarnings({
-      bubbleUserId: tm?.bubble_user_id || null,
       mentorUserId: effectiveUserId,
       from,
       to,
@@ -109,6 +106,41 @@ export default async function handler(req, res) {
       bronnen   : result._meta?.bronnen || null,
     };
 
+    // Oude maanden: de opgeslagen uitbetalingen erbij (faalzacht — de melding
+    // staat er hoe dan ook).
+    if (from < OUDE_BRON_EINDE) {
+      payload.melding = result._meta?.melding || null;
+      try {
+        const { data: pays, error: pErr } = await supabaseAdmin
+          .from('mentor_payouts')
+          .select('period_month, status, coaching_total, total')
+          .eq('mentor_user_id', effectiveUserId)
+          .gte('period_month', from.slice(0, 7) + '-01')
+          .lt('period_month', OUDE_BRON_EINDE)
+          .lte('period_month', to)
+          .order('period_month', { ascending: true });
+        if (pErr) throw new Error(pErr.message);
+        payload.uitbetalingen = pays || [];
+        // Totaal MET historie, alleen als het venster op een maandgrens begint
+        // (dan dekken de maanduitbetalingen het oude deel precies): het LMS
+        // vanaf 1 okt + de opgeslagen coaching van de oude maanden. Gebruikt
+        // door het all-time-cijfer op het mentordashboard.
+        if (from.endsWith('-01')) {
+          const historie = (pays || []).reduce((som, x) => som + (Number(x.coaching_total) || 0), 0);
+          let lmsNa = 0;
+          if (to >= OUDE_BRON_EINDE) {
+            const na = await computeCoachingEarnings({ mentorUserId: effectiveUserId, from: OUDE_BRON_EINDE, to });
+            lmsNa = Number(na.grand_total) || 0;
+          }
+          payload.grand_total_incl_historie = Math.round((historie + lmsNa) * 100) / 100;
+        }
+      } catch (pe) {
+        console.warn('[mentor-coaching-earnings] uitbetalingen lezen:', pe?.message || pe);
+        payload.uitbetalingen = null;
+        payload.grand_total_incl_historie = null;
+      }
+    }
+
     if (debugOn) {
       payload.debug = {
         students_count   : result.students_count,
@@ -123,12 +155,6 @@ export default async function handler(req, res) {
     console.error('[mentor-coaching-earnings]', e?.message || e);
     if (e?.code === 'LMS_NIET_GECONFIGUREERD' || e?.code === 'LMS_ONBEREIKBAAR') {
       return res.status(502).json({ error: 'Sessies uit het LMS konden niet gelezen worden — ' + e.message });
-    }
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
-    if (e?.code === 'BUBBLE_NETWORK' || e?.code === 'BUBBLE_ONBEREIKBAAR' || (typeof e?.code === 'string' && e.code.startsWith('BUBBLE_HTTP_'))) {
-      return res.status(502).json({ error: e.message });
     }
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }

@@ -18,9 +18,16 @@
 //
 // Bronnen (alles incl btw — excl = round2(incl / 1.21)):
 //   1) BONUS    → mentor_ledger_entries (vrijgegeven, niet aan payout gekoppeld).
-//   2) COACHING → coaching-earnings helper (1on1/team/no-show/funded) —
-//                 LMS (hlms_sessie) + Bubble alleen vóór oktober 2026.
-//                 Een bronfout gooit door: concept blijft ongemoeid.
+//   2) COACHING → coaching-earnings helper (1on1/team/no-show/funded/intake)
+//                 uit het LMS (hlms_sessie). Een bronfout gooit door: concept
+//                 blijft ongemoeid.
+//                 MAANDEN VÓÓR OKTOBER 2026 worden NIET opnieuw uitgerekend:
+//                 die zijn deels in Bubble gegeven, en Bubble is dicht. Bestaat
+//                 er een concept, dan blijven de opgeslagen coachingregels
+//                 (snapshot) staan en wordt alleen de rest herberekend (bv. na
+//                 een handmatige post). Bestaat er niets, dan stopt het met een
+//                 duidelijke fout (code OUDE_PERIODE) in plaats van een te laag
+//                 bedrag.
 //   3) TRAVEL   → mentor_payout_config + mentor_travel_days (alleen als enabled).
 //   4) RECURRING→ mentor_recurring_items (actief).
 //   5) MANUAL   → mentor_payout_adjustments (mag negatief).
@@ -32,7 +39,9 @@
 //     total, total_excl, btw_amount, lines:[...] }
 
 import { supabaseAdmin } from '../supabase.js';
-import { computeCoachingEarnings, coachingRegelLabel, intakeRegelLabel } from './coaching-earnings.js';
+import {
+  computeCoachingEarnings, coachingRegelLabel, intakeRegelLabel, OUDE_BRON_EINDE,
+} from './coaching-earnings.js';
 import { computeBonusOverview } from '../mentor-bonus-overview.js';
 
 export const BTW_RATE = 1.21;
@@ -88,16 +97,6 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
   const period = periodFromMonthStart(monthStart);
   if (!period) throw new Error('computeAndUpsertConcept: monthStart moet YYYY-MM-DD zijn');
 
-  // 1) Resolve team_member voor bubble_user_id (coaching, optioneel).
-  const { data: tm, error: tmErr } = await supabaseAdmin
-    .from('team_members')
-    .select('bubble_user_id')
-    .eq('user_id', mentorUserId)
-    .eq('is_active', true)
-    .maybeSingle();
-  if (tmErr) throw new Error(`team_members lookup (${mentorUserId}): ${tmErr.message}`);
-  const bubbleUserId = tm?.bubble_user_id || null;
-
   // 2) Bestaande payout-rij ophalen — skip bij definitieve status.
   const { data: existing, error: existErr } = await supabaseAdmin
     .from('mentor_payouts')
@@ -116,20 +115,38 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     };
   }
 
-  // 2a) COACHING — helper (LMS + Bubble vóór oktober 2026). Bewust VÓÓR elke
-  //     schrijfactie (ledger-unlink, payout-update): faalt een bron, dan gooit
-  //     de helper en blijft het bestaande concept volledig ongemoeid. Nooit
-  //     meer afvangen naar 0 — een onbereikbare bron mag niet stil als €0 in
-  //     een rapport belanden. mentor-payout-generate.js meldt de fout per mentor.
-  //     bubbleUserId is optioneel: zonder koppeling telt alleen het LMS.
-  const coaching = await computeCoachingEarnings({
-    bubbleUserId,
-    mentorUserId,
-    from: period.start,
-    to  : period.last,
-  });
-  const coachingBreakdown = coaching.breakdown || null;
-  const coachingTotal     = round2(coaching.grand_total || 0);
+  // 2a) COACHING. Bewust VÓÓR elke schrijfactie (ledger-unlink, payout-
+  //     update): faalt een bron, dan gooit de helper en blijft het bestaande
+  //     concept volledig ongemoeid. Nooit afvangen naar 0 — een onbereikbare
+  //     bron mag niet stil als €0 in een rapport belanden.
+  //     Maand vóór OUDE_BRON_EINDE: de opgeslagen coachingregels hergebruiken
+  //     (zie de kop) — nooit opnieuw rekenen zonder de Bubble-sessies.
+  let coachingBreakdown = null;
+  let coachingTotal     = 0;
+  let coachingSnapshot  = null; // opgeslagen coachingregels (oude maand)
+  if (period.start < OUDE_BRON_EINDE) {
+    if (!existing) {
+      const err = new Error(`Maand ${period.start.slice(0, 7)} ligt vóór oktober 2026: de coaching kwam deels uit Bubble, `
+        + 'dat gesloten is. Zonder bestaand concept kan deze maand niet meer berekend worden.');
+      err.code = 'OUDE_PERIODE';
+      throw err;
+    }
+    const { data: oudeRegels, error: orErr } = await supabaseAdmin
+      .from('mentor_payout_lines')
+      .select('kind, label, qty, unit_incl, amount_incl, amount_excl')
+      .eq('payout_id', existing.id);
+    if (orErr) throw new Error(`coaching-snapshot lezen (${mentorUserId}): ${orErr.message}`);
+    coachingSnapshot = (oudeRegels || []).filter((r) => String(r.kind || '').startsWith('coaching_'));
+    coachingTotal = round2(coachingSnapshot.reduce((som, r) => som + (Number(r.amount_incl) || 0), 0));
+  } else {
+    const coaching = await computeCoachingEarnings({
+      mentorUserId,
+      from: period.start,
+      to  : period.last,
+    });
+    coachingBreakdown = coaching.breakdown || null;
+    coachingTotal     = round2(coaching.grand_total || 0);
+  }
 
   // 2b) HERBEREKENING: als er al een concept/open payout bestaat, koppel
   //     eerst DIE payout's eigen entries los. Zonder deze stap zou de
@@ -310,6 +327,19 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
     });
   }
 
+  if (coachingSnapshot) {
+    for (const r of coachingSnapshot) {
+      lineInserts.push({
+        payout_id   : payoutId,
+        kind        : r.kind,
+        label       : r.label,
+        qty         : r.qty,
+        unit_incl   : r.unit_incl,
+        amount_incl : r.amount_incl,
+        amount_excl : r.amount_excl,
+      });
+    }
+  }
   if (coachingBreakdown) {
     const COACH_DEFS = [
       { key: 'one_on_one', kind: 'coaching_1on1',   label: '1-op-1 sessies' },

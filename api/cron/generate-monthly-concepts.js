@@ -116,7 +116,7 @@ export default async function handler(req, res) {
     const skipped   = [];
     const errors    = [];
 
-    // Sequentieel — leesbare logs + niet alle Bubble-roundtrips parallel.
+    // Sequentieel — leesbare logs + niet alle LMS-roundtrips parallel.
     for (const mid of mentorIds) {
       try {
         const r = await computeAndUpsertConcept({
@@ -144,9 +144,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[cron generate-monthly-concepts]', e?.message || e);
-    if (e?.code === 'BUBBLE_CONFIG_MISSING') {
-      return res.status(503).json({ error: 'Bubble-koppeling niet geconfigureerd (env)' });
-    }
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
 }
