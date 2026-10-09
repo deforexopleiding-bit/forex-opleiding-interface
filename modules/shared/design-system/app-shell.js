@@ -108,7 +108,9 @@
     { g: 'Verkoop & Financiën',    id: 'setter-payout',    naam: 'Commissie',         icon: I.euro,     color: 'emerald', roles: ['super_admin', 'manager', 'appointmentsetter'], permKey: 'setter.ledger.view', tabs: ['Overzicht', 'Mijn calls', 'Rapporten'] },
 
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
-    { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Webinar', 'Statistieken'] },
+    { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
+    // 2026-10-09: Webinar als eigen module (was tab in Events). Zelfde rollen als Events.
+    { g: 'Leren & Events',         id: 'webinar',          naam: 'Webinar',           icon: I.video,    color: 'pink',    roles: SAMSM,tabs: [] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM, permKey: 'onboarding.admin', tabs: ['Actief', 'Inbox', 'Archief'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 

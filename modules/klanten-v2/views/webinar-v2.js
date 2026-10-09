@@ -1,6 +1,8 @@
 // modules/klanten-v2/views/webinar-v2.js
 //
-// Events → Webinar (fase 1, 2026-10-09). Gratis webinar elke maandag 19:00.
+// Module Webinar (fase 1, 2026-10-09). Gratis webinar elke maandag 19:00.
+// Eigen sidebar-item onder Events (was eerst de tab Events → Webinar);
+// view en logica ongewijzigd, alleen de plek.
 //   - Instellingen van de reeks: titel, Zoom-link (vaste terugkerende link),
 //     starttijd, duur, actief.
 //   - De weken: 4 terug + komende; per week het aantal aanmeldingen,
@@ -209,5 +211,8 @@
   }
 
   window.DFO.VIEWS = window.DFO.VIEWS || {};
-  window.DFO.VIEWS['events/Webinar'] = webinarView;
+  // Module zonder tabs → de shell zoekt VIEWS['webinar/'].
+  window.DFO.VIEWS['webinar/'] = webinarView;
+  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('webinar');
+  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('webinar');
 })();
