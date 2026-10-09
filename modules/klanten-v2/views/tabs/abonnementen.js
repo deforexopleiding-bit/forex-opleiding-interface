@@ -247,7 +247,7 @@ function inclPerTerm(sub) {
 // Ronde-11: compacte tabel-view voor consistentie met Facturen +
 // Creditnota's. Kolommen: Titel / Bedrag / Startdatum / Termijn /
 // Hernieuwingsdatum (= einddatum voor eenmalige termijn / start_date +
-// term_count) / Status. Actions verplaatst naar een 3-dots-menu per rij.
+// term_count) / Status. Acties per rij: ✎ aanpassen / ⏱ uitstellen / ⊘ deactiveren.
 function renderSubRow(sub) {
   const st       = sub.status;
   const ended    = ['cancelled', 'deactivated', 'completed'].includes(String(st || '').toLowerCase());
@@ -269,7 +269,7 @@ function renderSubRow(sub) {
       <td>${statusPill(st)}</td>
       <td class="r kv-fac-actions">
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}"
-          ${hasInv ? 'disabled title="Al gefactureerd — aanpassen niet toegestaan"' : 'title="Aanpassen"'}>✎</button>
+          ${hasInv ? 'aria-disabled="true" data-kv-abo-locked style="opacity:.45;cursor:not-allowed" title="Al gefactureerd — aanpassen niet mogelijk. Gebruik crediteren + nieuw abonnement."' : 'title="Aanpassen"'}>✎</button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone="${K().esc(sub.id)}" title="Uitstellen">⏱</button>
         ${ended ? '' : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">⊘</button>`}
       </td>
@@ -508,28 +508,38 @@ function wire(rootEl) {
     });
   });
 
-  // Mutatie-buttons per card (finance-mutaties ronde).
+  // Mutatie-buttons per rij (finance-mutaties ronde).
+  //
+  // 2026-10-09: het potlood had bij een gefactureerd abonnement een échte
+  // `disabled` → een klik deed NIETS en de knop zag er normaal uit (37% van de
+  // lopende abo's). Nu blijft hij klikbaar, oogt hij vergrendeld, en legt
+  // openSubscriptionUpdateModal met een toast uit waarom bewerken niet kan
+  // (zelfde regel als de server: 409 HAS_INVOICES). Een onvindbaar abonnement
+  // of een fout in het modal wordt gelogd en gemeld i.p.v. stil genegeerd.
   const findSub = (id) => state.subs.find((s) => s.id === id);
   const refresh = () => actLoad(rootEl);
-  rootEl.querySelectorAll('[data-kv-abo-update]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      const sub = findSub(btn.getAttribute('data-kv-abo-update'));
-      if (sub) openSubscriptionUpdateModal({ sub, onSuccess: refresh });
+  const bindRij = (attr, open, wat) => {
+    rootEl.querySelectorAll(`[${attr}]`).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute(attr);
+        const sub = findSub(id);
+        if (!sub) {
+          console.error(`[klanten-v2 abonnementen] ${wat}: abonnement ${id} niet in de geladen lijst`);
+          K().toast('Abonnement niet gevonden — herlaad de pagina.');
+          return;
+        }
+        try {
+          open({ sub, onSuccess: refresh });
+        } catch (e) {
+          console.error(`[klanten-v2 abonnementen] ${wat} openen mislukt:`, e);
+          K().toast(`${wat} openen mislukt — zie console.`);
+        }
+      });
     });
-  });
-  rootEl.querySelectorAll('[data-kv-abo-postpone]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const sub = findSub(btn.getAttribute('data-kv-abo-postpone'));
-      if (sub) openSubscriptionPostponeModal({ sub, onSuccess: refresh });
-    });
-  });
-  rootEl.querySelectorAll('[data-kv-abo-delete]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const sub = findSub(btn.getAttribute('data-kv-abo-delete'));
-      if (sub) openSubscriptionDeleteModal({ sub, onSuccess: refresh });
-    });
-  });
+  };
+  bindRij('data-kv-abo-update', openSubscriptionUpdateModal, 'Aanpassen');
+  bindRij('data-kv-abo-postpone', openSubscriptionPostponeModal, 'Uitstellen');
+  bindRij('data-kv-abo-delete', openSubscriptionDeleteModal, 'Deactiveren');
   rootEl.querySelector('[data-kv-abo-postpone-all]')?.addEventListener('click', () => {
     const activeCount = state.subs.filter((s) => {
       const k = String(s.status || '').toLowerCase();
