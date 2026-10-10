@@ -221,7 +221,8 @@ export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', 
   if (!log?.ok) console.error('[lead-bericht] in de draad loggen mislukt', { lead: lead.id, fout: log?.error });
   const { error: blErr } = await sb.from('berichten_log').insert({
     lead_id: lead.id, traject: lead.traject || null, soort: 'handmatig-template', kanaal: 'whatsapp',
-    naar: tel, agent: agent || 'handmatig', status: 'ok', verstuurd_op: new Date().toISOString(), meta_template: t.name,
+    // berichten_log heeft GEEN meta_template-kolom (die insert faalde) — de wamid in extern_id.
+    naar: tel, agent: agent || 'handmatig', status: 'ok', verstuurd_op: new Date().toISOString(), extern_id: wamid,
   });
   if (blErr) console.warn('[lead-bericht] berichten_log (WA) mislukt:', blErr.message);
   return { ok: true, wamid, conversation_id: log?.conv_id || null, in_draad: !!log?.ok };

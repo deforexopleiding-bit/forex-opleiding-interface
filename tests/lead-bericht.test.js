@@ -113,7 +113,7 @@ test('WA: versturen via de lead-lijn, in de draad via logOutboundWa, berichten_l
   assert.equal(afgegeven.waLog[0].phoneNumberId, LIJN);
   assert.equal(afgegeven.waLog[0].body, 'Hey Robby, ik denk dat je erg druk bent 😊');
   assert.equal(afgegeven.waLog[0].templateName, 'followup_2_druk');
-  assert.deepEqual(db.inserts[0], { t: 'berichten_log', rij: { lead_id: 'lead-1', traject: 'minicursus', soort: 'handmatig-template', kanaal: 'whatsapp', naar: '+32470000077', agent: 'romy@x', status: 'ok', verstuurd_op: db.inserts[0].rij.verstuurd_op, meta_template: 'followup_2_druk' } });
+  assert.deepEqual(db.inserts[0], { t: 'berichten_log', rij: { lead_id: 'lead-1', traject: 'minicursus', soort: 'handmatig-template', kanaal: 'whatsapp', naar: '+32470000077', agent: 'romy@x', status: 'ok', verstuurd_op: db.inserts[0].rij.verstuurd_op, extern_id: 'wamid.1' } });
 });
 
 test('WA: geen geldig nummer / niet goedgekeurd / lege variabele / media-kop → nette fout, niets verstuurd', async () => {
