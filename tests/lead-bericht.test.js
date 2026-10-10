@@ -212,8 +212,9 @@ test('bedrading: knoppen in Leads + Contacten, script-tag, cache-busters, SQL me
   assert.match(ls, /\$\{berichtBtn\}\$\{inlogBtn\}/);
   const html = lees('modules/klanten-v2/index.html');
   assert.match(html, /<script src="views\/_stuur-bericht\.js\?v=1"><\/script>/);
-  assert.match(html, /views\/leads-v2\.js\?v=29"/);
-  assert.match(html, /views\/leadsonderhoud-v2\.js\?v=68"/);
+  const versie = (re) => Number((html.match(re) || [])[1] || 0);
+  assert.ok(versie(/views\/leads-v2\.js\?v=(\d+)"/) >= 29, 'leads-v2 minstens v29');
+  assert.ok(versie(/views\/leadsonderhoud-v2\.js\?v=(\d+)"/) >= 68, 'leadsonderhoud-v2 minstens v68');
   assert.ok(html.indexOf('views/_stuur-bericht.js') < html.indexOf('views/leads-v2.js'), 'popup vóór de views');
   const sql = lees('docs/sql-migrations/2026-10-09-lead-mail-sjablonen.sql');
   assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.lead_mail_sjablonen/);

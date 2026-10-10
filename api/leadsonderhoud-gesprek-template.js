@@ -19,7 +19,15 @@
 //   variables     array   optional — positional [{{1}}, {{2}}, ...] tekst-waarden
 //
 // Response 200:
-//   { ok:true, wamid }
+//   { ok:true, wamid, in_draad }   (in_draad=false → verstuurd, maar de
+//                                   draad-log mislukte; staat in de Vercel-log)
+//
+// 2026-10-10: het gesprek werd gezocht in een ONGESORTEERDE .limit(500) van de
+// lijn (>1000 gesprekken) — op een drukke lijn werd het vaak niet gevonden en
+// kwam het verstuurde sjabloon niet in de draad. Nu vindLeadConv (direct op
+// nummer, zoals de draad zelf sinds #1760); geen gesprek → logOutboundWa maakt
+// het aan. De berichten_log-insert schreef een niet-bestaande kolom
+// (meta_template) en faalde stil; nu de wamid in extern_id.
 // Errors:
 //   400 { error }                  — validatie
 //   404 { error }                  — lead niet gevonden
@@ -30,7 +38,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { haalLijn, trajectSlugs, normNummer } from './_lib/leadsonderhoud-gesprekken.js';
+import { haalLijn, trajectSlugs, vindLeadConv } from './_lib/leadsonderhoud-gesprekken.js';
+import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { renderTemplatePreview } from './_lib/render-template-preview.js';
 
@@ -101,17 +110,12 @@ export default async function handler(req, res) {
     if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld' });
     if (!lead.telefoon_e164) return res.status(409).json({ error: 'Deze lead heeft geen telefoonnummer' });
 
-    // Zoek een bestaande WA-conv (voor logging + phone_number canoniek).
+    // Zoek de bestaande WA-conv (voor logging + phone_number canoniek) — direct
+    // op lijn + nummer, nieuwste eerst (vindLeadConv; zie kop).
     // GEEN 24u-venster-check: templates mogen ook buiten venster.
-    const { data: convs } = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .select('id, phone_number, phone_number_id, last_inbound_at')
-      .eq('phone_number_id', lijn.phoneNumberId)
-      .limit(500);
-    const doel = normNummer(lead.telefoon_e164);
-    const conv = (convs || []).find((c) => normNummer(c.phone_number) === doel) || null;
-    // Als er nog geen conv bestaat: Meta accepteert alsnog een template naar
-    // een 'nieuw' nummer (opt-in-templates). We loggen zonder conversation_id.
+    const conv = await vindLeadConv(lijn, lead, null, { sb: supabaseAdmin, tag: '[ls-gesprek-template]' });
+    // Nog geen conv: Meta accepteert alsnog een template naar een 'nieuw'
+    // nummer; logOutboundWa maakt het gesprek daarna aan (zie onder).
     const toNumber = conv ? conv.phone_number : lead.telefoon_e164;
     const phoneNumberId = (conv && conv.phone_number_id) || lijn.phoneNumberId;
 
@@ -166,54 +170,49 @@ export default async function handler(req, res) {
       console.warn('[ls-gesprek-template] renderTemplatePreview soft-fail:', e?.message || e);
     }
 
+    // Draad-log. Fail-soft (het bericht IS verstuurd), maar nooit stil: elke
+    // fout wordt gelogd en in_draad=false gaat terug naar de UI.
+    let inDraad = false;
     if (conv) {
+      inDraad = await logInConv(conv.id, { user, wamid, templateName, templateVarsMap, renderedBody, nu, tag: 'lead' });
+    } else {
       try {
-        await supabaseAdmin
-          .from('whatsapp_messages')
-          .insert({
-            conversation_id: conv.id,
-            direction: 'out',
-            meta_wamid: wamid,
-            template_name: templateName,
-            template_variables: templateVarsMap,
-            body: renderedBody || '',
-            status: 'queued',
-            sent_at: nu,
-            sent_by_user_id: user.id,
-          });
-        await supabaseAdmin
-          .from('whatsapp_conversations')
-          .update({
-            last_message_at: nu,
-            last_message_preview: (renderedBody || ('template: ' + templateName)).slice(0, 120),
-          })
-          .eq('id', conv.id);
+        const r = await logOutboundWa(supabaseAdmin, {
+          toPhone: toNumber,
+          phoneNumberId,
+          body: renderedBody || ('[sjabloon] ' + templateName),
+          wamid,
+          templateName,
+          templateVariables: templateVarsMap,
+          source: 'ls-gesprek-template',
+        });
+        inDraad = !!(r && r.ok && r.message_id);
+        if (!inDraad) console.error('[ls-gesprek-template] logOutboundWa zonder bericht:', { lead: leadId, fout: r?.error || null });
       } catch (e) {
-        console.error('[ls-gesprek-template] log-insert soft-fail:', e?.message || e);
+        console.error('[ls-gesprek-template] logOutboundWa faalde:', { lead: leadId, fout: e?.message || e });
       }
     }
 
     // berichten_log (motor-log) — spiegel wat cron-leadsonderhoud doet zodat
-    // deze template-send meetelt in de leadsonderhoud-log.
-    try {
-      await supabaseAdmin
-        .from('berichten_log')
-        .insert({
-          lead_id: leadId,
-          traject: lead.traject || null,
-          soort: 'handmatig-template',
-          kanaal: 'whatsapp',
-          naar: toNumber,
-          agent: user.email || user.id,
-          status: 'ok',
-          verstuurd_op: nu,
-          meta_template: templateName,
-        });
-    } catch (e) {
-      console.warn('[ls-gesprek-template] berichten_log soft-fail:', e?.message || e);
-    }
+    // deze template-send meetelt in de leadsonderhoud-log. Alleen bestaande
+    // kolommen: de wamid in extern_id (zoals api/_lib/lead-bericht.js). De
+    // templatenaam staat al in whatsapp_messages.template_name.
+    const { error: logErr } = await supabaseAdmin
+      .from('berichten_log')
+      .insert({
+        lead_id: leadId,
+        traject: lead.traject || null,
+        soort: 'handmatig-template',
+        kanaal: 'whatsapp',
+        naar: toNumber,
+        agent: user.email || user.id,
+        status: 'ok',
+        verstuurd_op: nu,
+        extern_id: wamid,
+      });
+    if (logErr) console.error('[ls-gesprek-template] berichten_log-insert mislukt:', { lead: leadId, fout: logErr.message });
 
-    return res.status(200).json({ ok: true, wamid });
+    return res.status(200).json({ ok: true, wamid, in_draad: inDraad });
   } catch (e) {
     console.error('[ls-gesprek-template] fout:', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Template versturen mislukt' });
@@ -281,23 +280,37 @@ async function sendTemplateByConversation(res, { user, convId, body }) {
       console.warn('[ls-gesprek-template] renderTemplatePreview soft-fail (conv):', e?.message || e);
     }
 
-    try {
-      await supabaseAdmin.from('whatsapp_messages').insert({
-        conversation_id: conv.id, direction: 'out', meta_wamid: wamid,
-        template_name: templateName, template_variables: templateVarsMap,
-        body: renderedBody || '', status: 'queued', sent_at: nu, sent_by_user_id: user.id,
-      });
-      await supabaseAdmin.from('whatsapp_conversations').update({
-        last_message_at: nu,
-        last_message_preview: (renderedBody || ('template: ' + templateName)).slice(0, 120),
-      }).eq('id', conv.id);
-    } catch (e) {
-      console.error('[ls-gesprek-template] log-insert soft-fail (conv):', e?.message || e);
-    }
+    const inDraad = await logInConv(conv.id, { user, wamid, templateName, templateVarsMap, renderedBody, nu, tag: 'conv' });
 
-    return res.status(200).json({ ok: true, wamid });
+    return res.status(200).json({ ok: true, wamid, in_draad: inDraad });
   } catch (e) {
     console.error('[ls-gesprek-template] fout (conv):', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Template versturen mislukt' });
+  }
+}
+
+// Uitgaand sjabloon in een bekend gesprek zetten + de lijst-preview bijwerken.
+// supabase-js gooit niet bij een DB-fout maar geeft { error } terug — dus
+// expliciet checken (de oude try/catch ving niets). -> true als het bericht staat.
+async function logInConv(convId, { user, wamid, templateName, templateVarsMap, renderedBody, nu, tag }) {
+  try {
+    const { error: insErr } = await supabaseAdmin.from('whatsapp_messages').insert({
+      conversation_id: convId, direction: 'out', meta_wamid: wamid,
+      template_name: templateName, template_variables: templateVarsMap,
+      body: renderedBody || '', status: 'queued', sent_at: nu, sent_by_user_id: user.id,
+    });
+    if (insErr) {
+      console.error('[ls-gesprek-template] bericht in draad zetten mislukt (' + tag + '):', { conv: convId, fout: insErr.message });
+      return false;
+    }
+    const { error: updErr } = await supabaseAdmin.from('whatsapp_conversations').update({
+      last_message_at: nu,
+      last_message_preview: (renderedBody || ('template: ' + templateName)).slice(0, 120),
+    }).eq('id', convId);
+    if (updErr) console.error('[ls-gesprek-template] gesprek-preview bijwerken mislukt (' + tag + '):', { conv: convId, fout: updErr.message });
+    return true;
+  } catch (e) {
+    console.error('[ls-gesprek-template] draad-log faalde (' + tag + '):', { conv: convId, fout: e?.message || e });
+    return false;
   }
 }

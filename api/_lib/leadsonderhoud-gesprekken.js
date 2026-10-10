@@ -104,3 +104,51 @@ export function adresUit(from) {
   const m = s.match(/<([^>]+)>/);
   return (m ? m[1] : s).trim().toLowerCase();
 }
+
+// ── Het WA-gesprek van een lead (2026-10-09, verhuisd 2026-10-10) ─────────
+// Stond in api/leadsonderhoud-gesprek-berichten.js (#1760). Nu gedeeld, zodat
+// ook de "Sjabloon"-route (leadsonderhoud-gesprek-template.js) het gesprek
+// direct vindt i.p.v. in een ongesorteerde .limit(500) van de lijn.
+const CONV_VELDEN = 'id, phone_number, phone_number_id, last_inbound_at, unread_count';
+
+/** Telefoonnummer-varianten zoals ze in whatsapp_conversations.phone_number kunnen staan. PURE. */
+export function nummerVarianten(e164) {
+  const d = normNummer(e164);
+  return d ? [...new Set(['+' + d, d, '00' + d])] : [];
+}
+
+/**
+ * Het WhatsApp-gesprek van een lead op de leadsonderhoud-lijn.
+ *   1. De conv die de caller al kende (hint): alleen als hij op de lijn staat
+ *      en het nummer bij de lead hoort — anders loggen en terugvallen.
+ *   2. Anders DIRECT op phone_number_id + de nummervarianten, nieuwste eerst.
+ * Nooit "pak N gesprekken en zoek erin" (dat miste >50% op >1000 convs).
+ * opts.sb = de client van de caller (default de gedeelde service-role client).
+ */
+export async function vindLeadConv(lijn, lead, hintId = null, { sb = supabaseAdmin, tag = '[leadsonderhoud-gesprek-berichten]' } = {}) {
+  if (!lijn?.phoneNumberId) return null;
+  const doel = normNummer(lead?.telefoon_e164);
+  if (hintId) {
+    const { data, error } = await sb.from('whatsapp_conversations')
+      .select(CONV_VELDEN).eq('id', hintId).maybeSingle();
+    if (error) {
+      console.error(tag + ' conv-hint lezen mislukt:', { hint: hintId, fout: error.message });
+    } else if (data && String(data.phone_number_id) === String(lijn.phoneNumberId) && (!doel || normNummer(data.phone_number) === doel)) {
+      return data;
+    } else {
+      console.warn(tag + ' conv-hint past niet bij lead/lijn — zoek op nummer', { hint: hintId, lead: lead?.id, gevonden: !!data });
+    }
+  }
+  if (!doel) return null;
+  const { data, error } = await sb.from('whatsapp_conversations')
+    .select(CONV_VELDEN)
+    .eq('phone_number_id', lijn.phoneNumberId)
+    .in('phone_number', nummerVarianten(lead.telefoon_e164))
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (error) {
+    console.error(tag + ' conv op nummer zoeken mislukt:', { lead: lead?.id, fout: error.message });
+    return null;
+  }
+  return (data || [])[0] || null;
+}
