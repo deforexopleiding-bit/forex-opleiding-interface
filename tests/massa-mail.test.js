@@ -423,6 +423,8 @@ test('bedrading: draad, endpoints, cron, SQL, UI, cache-busters', () => {
   const leads = lees('modules/klanten-v2/views/leads-v2.js');
   assert.match(leads, /window\.MassaBericht\.open\(\{/);
   assert.match(leads, /__leadSelAlles/);
+  assert.match(leads, /filter: handmatig \? \{\} : massaFilterVanLijst\(\),/, 'vinkjes zonder lijstfilters');
+  assert.match(lees('modules/klanten-v2/views/leadsonderhoud-v2.js'), /filter: handmatig \? \{\} : \{ q:/);
   assert.match(leads, /Laatst massabericht/);
   const ls = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
   assert.match(ls, /window\.__lsMassa\(\)/);
