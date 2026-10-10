@@ -1621,13 +1621,17 @@
           const j = await resp.json().catch(() => ({}));
           throw new Error(j.error || j.meta_error || ('HTTP ' + resp.status));
         }
+        // 2026-10-10: de server zegt of het bericht ook in de draad staat
+        // (in_draad=false → verstuurd, maar het loggen mislukte).
+        const _tplRes = await resp.json().catch(() => ({}));
         _lsInbOptimisticAppend(_tplKey, 'whatsapp', rendered);
         _lsInb.compose.mode[_tplKey] = 'text';
         // v=8: bij succesvolle send de bewaarde variabelewaarden voor deze
         // template opruimen (voorkomt dat de volgende template-send met
         // stale data start).
         try { delete _lsTplValues[tpl.name]; } catch (_) {}
-        _lsInbToast('Template verzonden', 'ok');
+        if (_tplRes && _tplRes.in_draad === false) _lsInbToast('Template verzonden, maar niet in het gesprek opgeslagen — meld dit even', 'error');
+        else _lsInbToast('Template verzonden', 'ok');
       } catch (e) {
         console.warn('[ls-inb] template-send fail:', e && e.message);
         _lsInbToast('Template versturen mislukt: ' + (e?.message || 'onbekend'), 'error');

@@ -21,7 +21,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 // BP2 v3 (2026-09-01): setter-scope VERWIJDERD — Romy doet alle threads.
 import {
-  haalLijn, trajectSlugs, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
+  haalLijn, trajectSlugs, binnenVenster, postvakNaam, adresUit, mailAfzender,
+  nummerVarianten, vindLeadConv,
 } from './_lib/leadsonderhoud-gesprekken.js';
 import { vulSjabloon } from './_lib/leadsonderhoud-sjabloon.js';
 
@@ -71,23 +72,20 @@ export default async function handler(req, res) {
 
     const lijn = await haalLijn();
     const items = [];
+    let waMeer = false;
 
     // ── WhatsApp ──────────────────────────────────────────────────────────
     // 2026-10-09: het gesprek werd gezocht in een ONGESORTEERDE .limit(500)
     // van de lijn (>1000 gesprekken) → ~55% van de draden opende leeg, en de
     // mark_as_read hieronder (binnen `if (conv)`) werd dan ook overgeslagen →
     // "gelezen" sprong via de 20s-poll terug. Nu: vindLeadConv (direct).
-    const conv = await vindLeadConv(lijn, lead, convIdQ || null);
+    const conv = await vindLeadConv(lijn, lead, convIdQ || null, { sb: supabaseAdmin });
     if (!conv && lijn.phoneNumberId && lead.telefoon_e164) {
       console.warn('[leadsonderhoud-gesprek-berichten] geen WA-gesprek gevonden voor lead', { lead: lead.id, hint: convIdQ || null });
     }
     if (conv) {
-      const { data: waMsgs, error: waErr } = await supabaseAdmin
-        .from('whatsapp_messages')
-        .select('id, direction, body, media_type, media_url, template_name, created_at')
-        .eq('conversation_id', conv.id)
-        .order('created_at', { ascending: true })
-        .limit(200);
+      const { rijen: waMsgs, fout: waErr, afgekapt: waAfgekapt } = await laadNieuwsteWa(conv.id);
+      waMeer = waAfgekapt;
       if (waErr) console.error('[leadsonderhoud-gesprek-berichten] WA-berichten lezen mislukt:', { conv: conv.id, fout: waErr.message });
       else if (!(waMsgs || []).length) console.warn('[leadsonderhoud-gesprek-berichten] WA-gesprek zonder berichten', { conv: conv.id, lead: lead.id });
       for (const m of waMsgs || []) {
@@ -130,7 +128,7 @@ export default async function handler(req, res) {
         .select('id, from_address, subject, snippet, body_text, date_received, is_read')
         .eq('mailbox', postvakNaam())
         .ilike('from_address', '%' + email + '%')
-        .order('date_received', { ascending: true })
+        .order('date_received', { ascending: false })
         .limit(200);
       const teMarkeren = [];
       for (const m of mails || []) {
@@ -159,7 +157,7 @@ export default async function handler(req, res) {
         .eq('status', 'verstuurd')
         .neq('soort', 'handmatig-antwoord') // die bubbel komt uit email_replies (met body)
         .ilike('naar', email)
-        .order('verstuurd_op', { ascending: true })
+        .order('verstuurd_op', { ascending: false })
         .limit(200);
       if (logs && logs.length) {
         const trajecten = [...new Set(logs.map((l) => l.traject).filter(Boolean))];
@@ -203,7 +201,7 @@ export default async function handler(req, res) {
         .select('id, email_subject, final_reply, from_address, to_address, sent_at')
         .ilike('from_address', mailAfzender())
         .ilike('to_address', '%' + email + '%')
-        .order('sent_at', { ascending: true })
+        .order('sent_at', { ascending: false })
         .limit(200);
       for (const r of replies || []) {
         if (adresUit(r.to_address) !== email) continue; // precieze match
@@ -228,7 +226,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Samenvoegen op tijd (oudste eerst). Alle tijdstippen zijn timestamptz/ISO
+    // Samenvoegen op tijd (oudste eerst; de queries hierboven halen per bron
+    // de NIEUWSTE 200 op, deze sort zet ze in leesvolgorde). Alle tijdstippen zijn timestamptz/ISO
     // (UTC), dus deze vergelijking is tijdzone-veilig; pas bij het TONEN wordt
     // naar Europe/Amsterdam geformatteerd (frontend kortMoment).
     items.sort((a, b) => new Date(a.ts) - new Date(b.ts));
@@ -241,6 +240,7 @@ export default async function handler(req, res) {
         email: lead.email || null,
         can_send_text: conv ? binnenVenster(conv.last_inbound_at) : false,
         has_wa: !!conv,
+        wa_ouder_beschikbaar: waMeer,
       },
       items,
     });
@@ -250,47 +250,29 @@ export default async function handler(req, res) {
   }
 }
 
-const CONV_VELDEN = 'id, phone_number, phone_number_id, last_inbound_at, unread_count';
+// Verhuisd naar api/_lib/leadsonderhoud-gesprekken.js (gedeeld met de
+// "Sjabloon"-route); hier her-geëxporteerd voor bestaande imports/tests.
+export { nummerVarianten, vindLeadConv };
 
-/** Telefoonnummer-varianten zoals ze in whatsapp_conversations.phone_number kunnen staan. PURE. */
-export function nummerVarianten(e164) {
-  const d = normNummer(e164);
-  return d ? [...new Set(['+' + d, d, '00' + d])] : [];
-}
+// Max. aantal WhatsApp-berichten in de draad.
+export const WA_DRAAD_MAX = 200;
 
 /**
- * Het WhatsApp-gesprek van een lead op de leadsonderhoud-lijn (2026-10-09).
- *   1. De conv die de lijst al kende (hint): alleen als hij op de lijn staat
- *      en het nummer bij de lead hoort — anders loggen en terugvallen.
- *   2. Anders DIRECT op phone_number_id + de nummervarianten, nieuwste eerst.
- * Nooit meer "pak N gesprekken en zoek erin" (dat miste >50% op >1000 convs).
+ * De NIEUWSTE WA_DRAAD_MAX berichten van een gesprek, oudste eerst (2026-10-10).
+ * Voorheen order(asc).limit(200) = de OUDSTE 200: bij >200 berichten vielen
+ * juist de laatste berichten (en wat je net verstuurde) uit de draad.
+ * -> { rijen, fout, afgekapt }
  */
-export async function vindLeadConv(lijn, lead, hintId = null) {
-  if (!lijn?.phoneNumberId) return null;
-  const doel = normNummer(lead?.telefoon_e164);
-  if (hintId) {
-    const { data, error } = await supabaseAdmin.from('whatsapp_conversations')
-      .select(CONV_VELDEN).eq('id', hintId).maybeSingle();
-    if (error) {
-      console.error('[leadsonderhoud-gesprek-berichten] conv-hint lezen mislukt:', { hint: hintId, fout: error.message });
-    } else if (data && String(data.phone_number_id) === String(lijn.phoneNumberId) && (!doel || normNummer(data.phone_number) === doel)) {
-      return data;
-    } else {
-      console.warn('[leadsonderhoud-gesprek-berichten] conv-hint past niet bij lead/lijn — zoek op nummer', { hint: hintId, lead: lead?.id, gevonden: !!data });
-    }
-  }
-  if (!doel) return null;
-  const { data, error } = await supabaseAdmin.from('whatsapp_conversations')
-    .select(CONV_VELDEN)
-    .eq('phone_number_id', lijn.phoneNumberId)
-    .in('phone_number', nummerVarianten(lead.telefoon_e164))
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(1);
-  if (error) {
-    console.error('[leadsonderhoud-gesprek-berichten] conv op nummer zoeken mislukt:', { lead: lead?.id, fout: error.message });
-    return null;
-  }
-  return (data || [])[0] || null;
+export async function laadNieuwsteWa(convId) {
+  const { data, error } = await supabaseAdmin
+    .from('whatsapp_messages')
+    .select('id, direction, body, media_type, media_url, template_name, created_at')
+    .eq('conversation_id', convId)
+    .order('created_at', { ascending: false })
+    .limit(WA_DRAAD_MAX);
+  if (error) return { rijen: [], fout: error, afgekapt: false };
+  const rijen = (data || []).slice().reverse();
+  return { rijen, fout: null, afgekapt: rijen.length >= WA_DRAAD_MAX };
 }
 
 // Thread op basis van conversation_id (lead-loze rij). Alleen WhatsApp;
@@ -310,12 +292,7 @@ async function threadByConversation(res, { convId, markRead }) {
     }
 
     const items = [];
-    const { data: waMsgs, error: waErr } = await supabaseAdmin
-      .from('whatsapp_messages')
-      .select('id, direction, body, media_type, media_url, template_name, created_at')
-      .eq('conversation_id', conv.id)
-      .order('created_at', { ascending: true })
-      .limit(200);
+    const { rijen: waMsgs, fout: waErr, afgekapt: waMeer } = await laadNieuwsteWa(conv.id);
     if (waErr) console.error('[leadsonderhoud-gesprek-berichten] WA-berichten lezen mislukt (conv):', { conv: conv.id, fout: waErr.message });
     for (const m of waMsgs || []) {
       const tekst = m.body || (m.template_name ? '[sjabloon] ' + m.template_name : '')
@@ -347,6 +324,7 @@ async function threadByConversation(res, { convId, markRead }) {
         email: null,
         can_send_text: binnenVenster(conv.last_inbound_at),
         has_wa: true,
+        wa_ouder_beschikbaar: waMeer,
       },
       items,
     });
