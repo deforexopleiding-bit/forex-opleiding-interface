@@ -1,7 +1,8 @@
 // api/_lib/massa-mail.js
 //
-// Massa-e-mail fase 2a (2026-10-10): een groep leads in één keer een e-mail
-// sturen via een getemporiseerde wachtrij.
+// Massabericht — fase 2a (2026-10-10, e-mail) + fase 2b (2026-10-11, WhatsApp
+// en "beide"): een groep leads in één keer een bericht sturen via een
+// getemporiseerde wachtrij. Per lead één item per kanaal (massa_items.kanaal).
 //
 //   zoekSegment     — alle (niet-verwijderde) leads met de verrijking die de
 //                     filters nodig hebben (categorie, massa-geschiedenis,
@@ -17,6 +18,10 @@
 //                     ontvanger exact de fase-1 verzending (verstuurMail), met
 //                     afmeldlink + List-Unsubscribe; logt in de draad
 //                     (email_replies) en zet de item-status.
+//                     WhatsApp (2b): fase-1 verstuurWaTemplate (sendTemplate +
+//                     logOutboundWa → in de draad) na een health-check-guard
+//                     (lijn 1273723375834177 / WABA 2579784712469452), met een
+//                     eigen portie/daglimiet/pauze in app_settings.massa_whatsapp.
 //
 // Afmelden/voorkeuren: lead_mail_voorkeuren (1 rij per e-mailadres, met token).
 // De publieke pagina staat op dfo-website (/voorkeuren?token=…). Bij ELKE
@@ -24,12 +29,18 @@
 // alsnog overgeslagen).
 
 import crypto from 'node:crypto';
-import { EMAIL_RE, schoonHtml, onbekendeVariabelen, leadVariabelen, vulMailVariabelen, verstuurMail, LeadBerichtFout } from './lead-bericht.js';
+import {
+  EMAIL_RE, schoonHtml, onbekendeVariabelen, leadVariabelen, vulMailVariabelen, verstuurMail, LeadBerichtFout,
+  verstuurWaTemplate, isLeadTemplate, waVerstuurbaar, renderWaTekst,
+} from './lead-bericht.js';
+import { goedgekeurdeTemplatesOpLijn } from './meta-whatsapp.js';
+import { haalLijn } from './leadsonderhoud-gesprekken.js';
 import { renderLeadMail, htmlNaarTekst } from './mail-shell-lead.js';
 import { bepaalCategorieen } from './inbox-categorie.js';
 import { sluitSmtpPools } from './send-email-core.js';
 
 export const MIGRATIE = '2026-10-10-massa-mail-fase2a.sql';
+export const MIGRATIE_2B = '2026-10-11-massa-whatsapp-fase2b.sql';
 export const WEBSITE_URL = String(process.env.WEBSITE_URL || 'https://www.deforexopleiding.nl').replace(/\/+$/, '');
 export const MASSA_SOORTEN = Object.freeze({
   tips: 'Tips & lessen over traden',
@@ -314,26 +325,77 @@ export function planCampagne(leads, soort) {
   return { verzenden, overgeslagen, redenen };
 }
 
-/** Velden van een campagne valideren. -> { naam, soort, onderwerp, html, portie } of MassaFout. */
+/**
+ * Wie krijgt de WhatsApp? PURE (fase 2b). Geen geldig E.164-nummer → overslaan;
+ * hetzelfde nummer twee keer → één bericht (de tweede lead wordt overgeslagen).
+ * De e-mailvoorkeuren gelden NIET voor WhatsApp (Meta geeft bij een
+ * marketing-template zelf een afmeldoptie).
+ */
+export function planWhatsApp(leads) {
+  const gezien = new Set();
+  const verzenden = [];
+  const overgeslagen = [];
+  for (const l of leads) {
+    const tel = String(l.telefoon_e164 || '').trim();
+    let reden = null;
+    if (!E164_RE.test(tel)) reden = 'geen_geldig_nummer';
+    else if (gezien.has(tel)) reden = 'dubbel_nummer';
+    if (reden) overgeslagen.push({ lead: l, reden });
+    else { gezien.add(tel); verzenden.push(l); }
+  }
+  const redenen = {};
+  for (const o of overgeslagen) redenen[o.reden] = (redenen[o.reden] || 0) + 1;
+  return { verzenden, overgeslagen, redenen };
+}
+
+export const KANALEN = Object.freeze(['email', 'whatsapp', 'beide']);
+/** Welke item-kanalen horen bij een campagne-kanaal. PURE. */
+export const itemKanalen = (kanaal) => (kanaal === 'beide' ? ['email', 'whatsapp'] : [kanaal || 'email']);
+
+// WhatsApp-parameters: geen regeleinden/tabs en geen 4+ spaties achter elkaar (Meta).
+const WA_PARAM_FOUT = /[\n\r\t]| {4,}/;
+
+/**
+ * Velden van een campagne valideren (puur; de template zelf wordt in
+ * maakCampagne tegen de live lijst gecontroleerd).
+ * -> { naam, kanaal, soort, onderwerp, html, portie, sjabloon_id, wa } of MassaFout.
+ */
 export function valideerCampagne(b = {}) {
   const naam = String(b.naam || '').trim();
   if (!naam) throw new MassaFout(400, 'NAAM_LEEG', 'Geef de campagne een naam.');
   if (naam.length > 120) throw new MassaFout(400, 'NAAM_TE_LANG', 'De campagnenaam is te lang (max 120 tekens).');
-  const soort = String(b.soort || '');
-  if (!MASSA_SOORTEN[soort]) throw new MassaFout(400, 'SOORT_ONGELDIG', 'Kies het soort mail (voor de voorkeuren van de ontvanger).');
-  if (String(b.kanaal || 'email') !== 'email') throw new MassaFout(400, 'KANAAL_NIET_ONDERSTEUND', 'Alleen e-mail kan nu; WhatsApp volgt in fase 2b.');
-  const onderwerp = String(b.onderwerp || '').trim();
-  if (!onderwerp) throw new MassaFout(400, 'ONDERWERP_LEEG', 'Vul een onderwerp in.');
-  if (onderwerp.length > 200) throw new MassaFout(400, 'ONDERWERP_TE_LANG', 'Het onderwerp is te lang (max 200 tekens).');
-  const html = schoonHtml(b.html);
-  if (!htmlNaarTekst(html).trim()) throw new MassaFout(400, 'BERICHT_LEEG', 'Het bericht is leeg.');
-  if (html.length > 50000) throw new MassaFout(400, 'BERICHT_TE_LANG', 'Het bericht is te lang.');
-  const onbekend = onbekendeVariabelen(onderwerp + ' ' + html);
-  if (onbekend.length) throw new MassaFout(400, 'ONBEKENDE_VARIABELEN', `Onbekende variabele(n): ${onbekend.map((x) => '{{' + x + '}}').join(', ')}.`);
-  const p = Math.floor(Number(b.portie));
-  const portie = Number.isFinite(p) && p >= 1 ? Math.min(MAX_PORTIE, p) : STANDAARD_PORTIE;
-  const sjabloonId = UUID_RE.test(String(b.sjabloon_id || '')) ? String(b.sjabloon_id) : null;
-  return { naam, soort, onderwerp, html, portie, sjabloon_id: sjabloonId };
+  const kanaal = String(b.kanaal || 'email');
+  if (!KANALEN.includes(kanaal)) throw new MassaFout(400, 'KANAAL_ONGELDIG', 'Kies e-mail, WhatsApp of beide.');
+  const metMail = kanaal !== 'whatsapp';
+  const metWa = kanaal !== 'email';
+  const uit = { naam, kanaal, soort: null, onderwerp: null, html: null, portie: STANDAARD_PORTIE, sjabloon_id: null, wa: null };
+  if (metMail) {
+    const soort = String(b.soort || '');
+    if (!MASSA_SOORTEN[soort]) throw new MassaFout(400, 'SOORT_ONGELDIG', 'Kies het soort mail (voor de voorkeuren van de ontvanger).');
+    const onderwerp = String(b.onderwerp || '').trim();
+    if (!onderwerp) throw new MassaFout(400, 'ONDERWERP_LEEG', 'Vul een onderwerp in.');
+    if (onderwerp.length > 200) throw new MassaFout(400, 'ONDERWERP_TE_LANG', 'Het onderwerp is te lang (max 200 tekens).');
+    const html = schoonHtml(b.html);
+    if (!htmlNaarTekst(html).trim()) throw new MassaFout(400, 'BERICHT_LEEG', 'Het bericht is leeg.');
+    if (html.length > 50000) throw new MassaFout(400, 'BERICHT_TE_LANG', 'Het bericht is te lang.');
+    const onbekend = onbekendeVariabelen(onderwerp + ' ' + html);
+    if (onbekend.length) throw new MassaFout(400, 'ONBEKENDE_VARIABELEN', `Onbekende variabele(n): ${onbekend.map((x) => '{{' + x + '}}').join(', ')}.`);
+    const p = Math.floor(Number(b.portie));
+    Object.assign(uit, {
+      soort, onderwerp, html,
+      portie: Number.isFinite(p) && p >= 1 ? Math.min(MAX_PORTIE, p) : STANDAARD_PORTIE,
+      sjabloon_id: UUID_RE.test(String(b.sjabloon_id || '')) ? String(b.sjabloon_id) : null,
+    });
+  }
+  if (metWa) {
+    const template = String(b.wa_template || '').trim();
+    if (!template) throw new MassaFout(400, 'WA_TEMPLATE_LEEG', 'Kies een WhatsApp-template.');
+    const param2 = String(b.wa_param2 || '').trim();
+    if (param2.length > 200) throw new MassaFout(400, 'WA_PARAM_TE_LANG', 'De tekst voor {{2}} is te lang (max 200 tekens).');
+    if (WA_PARAM_FOUT.test(param2)) throw new MassaFout(400, 'WA_PARAM_ONGELDIG', 'De tekst voor {{2}} mag geen enters, tabs of 4+ spaties achter elkaar bevatten.');
+    uit.wa = { template, taal: String(b.wa_taal || 'nl').trim() || 'nl', param2 };
+  }
+  return uit;
 }
 
 async function boekingslinkVoor(sb, traject, cache) {
@@ -347,29 +409,109 @@ async function boekingslinkVoor(sb, traject, cache) {
   return link;
 }
 
+// ── WhatsApp (fase 2b) ───────────────────────────────────────────────────────
+
+/** De enige lijn/WABA waarop massa-WhatsApp mag. Anders: niets versturen. */
+export const MASSA_WA_NUMMER = '1273723375834177';
+export const MASSA_WA_WABA = '2579784712469452';
+export const MASSA_WA_MAX_VARS = 2;
+export const MASSA_WA_PREFIX = 'massa_';
+export const STANDAARD_WA_INSTELLINGEN = Object.freeze({ portie: 20, dag_max: 100, pauze_ms: 3000, stille_uren: true });
+
+/** Voornaam voor {{1}}; Meta weigert een lege parameter. PURE. */
+export const waVoornaam = (lead) => String(lead?.voornaam || '').trim().split(/\s+/)[0] || 'daar';
+/** Aantal {{n}}-variabelen in een template-tekst. PURE. */
+export const telWaVars = (body) => new Set([...String(body || '').matchAll(/\{\{(\d+)\}\}/g)].map((m) => m[1])).size;
+/** De waarden per ontvanger: {{1}} = voornaam, {{2}} = het campagneveld. PURE. */
+export function waWaardenVoor(lead, param2, aantalVars) {
+  return [waVoornaam(lead), String(param2 || '')].slice(0, Math.max(0, Math.min(MASSA_WA_MAX_VARS, aantalVars || 0)));
+}
+
+/**
+ * Health-check-guard + de templates die voor massa mogen: ECHT goedgekeurd op
+ * de lead-WABA (live bij 360dialog), categorie MARKETING, naam begint met
+ * 'massa_' (Meta zet ook gewone agenda/sessie/toegang-templates op MARKETING;
+ * daar betekent {{1}}/{{2}} iets anders dan voornaam/campagnetekst), voor leads
+ * bedoeld, zonder media-kop, max 2 variabelen.
+ * -> { ok:true, templates, waba_id, nummer } | { ok:false, reden, melding }
+ */
+export async function massaWaTemplates() {
+  const lijn = await haalLijn();
+  if (String(lijn?.phoneNumberId || '') !== MASSA_WA_NUMMER) {
+    return { ok: false, reden: 'VERKEERDE_LIJN', melding: `De lead-lijn is ${lijn?.phoneNumberId || 'niet ingesteld'}, niet ${MASSA_WA_NUMMER} — massa-WhatsApp staat uit.` };
+  }
+  const live = await goedgekeurdeTemplatesOpLijn(lijn.phoneNumberId);
+  if (!live || !live.ok) return { ok: false, reden: 'TEMPLATES_ONBEKEND', melding: 'De goedgekeurde templates konden niet worden opgehaald (360dialog).' };
+  if (String(live.waba_id || '') !== MASSA_WA_WABA) {
+    return { ok: false, reden: 'VERKEERDE_WABA', melding: `De sleutel van de lead-lijn hoort bij WABA ${live.waba_id || 'onbekend'}, niet ${MASSA_WA_WABA} — massa-WhatsApp staat uit.` };
+  }
+  const templates = (live.templates || [])
+    .filter((t) => String(t.category || '').toUpperCase() === 'MARKETING' && String(t.name || '').startsWith(MASSA_WA_PREFIX) && isLeadTemplate(t.name) && waVerstuurbaar(t).ok)
+    .map((t) => ({ name: t.name, language: t.language, body: t.body, footer: t.footer || null, knoppen: t.knoppen || [], aantal_vars: t.aantal_vars, bruikbaar: t.aantal_vars <= MASSA_WA_MAX_VARS }));
+  return { ok: true, templates, waba_id: live.waba_id, nummer: lijn.phoneNumberId };
+}
+
+/** Instellingen uit app_settings.massa_whatsapp (jsonb), met veilige grenzen. */
+export async function leesWaInstellingen(sb) {
+  const { data, error } = await sb.from('app_settings').select('value').eq('key', 'massa_whatsapp').maybeSingle();
+  if (error) console.warn('[massa-mail] WA-instellingen lezen mislukt — standaard:', error.message);
+  let v = data?.value;
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = null; } }
+  v = v && typeof v === 'object' ? v : {};
+  const getal = (x, d, min, max) => { const n = Number(x); return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.floor(n))) : d; };
+  return {
+    portie: getal(v.portie, STANDAARD_WA_INSTELLINGEN.portie, 1, 200),
+    dag_max: getal(v.dag_max, STANDAARD_WA_INSTELLINGEN.dag_max, 0, 2000),
+    pauze_ms: getal(v.pauze_ms, STANDAARD_WA_INSTELLINGEN.pauze_ms, 0, 30000),
+    stille_uren: v.stille_uren !== false,
+  };
+}
+
 /**
  * Preview of start van een campagne.
- *   b = { naam, soort, kanaal, onderwerp, html, portie, sjabloon_id, filter, lead_ids, bevestig_aantal }
+ *   b = { naam, kanaal ('email'|'whatsapp'|'beide'), soort, onderwerp, html, portie,
+ *         sjabloon_id, wa_template, wa_taal, wa_param2, filter, lead_ids, bevestig_aantal }
  * De ontvangers zijn PRECIES de aangevinkte lead_ids (het filter wordt alleen
- * bewaard, voor de geschiedenis). Preview → exact aantal + voorbeeldmail;
- * start → alleen als bevestig_aantal nog klopt (anders 409).
+ * bewaard, voor de geschiedenis). Per kanaal een plan: "beide" = elke lead krijgt
+ * wat hij kan ontvangen (mail en/of WhatsApp). Preview → exacte aantallen per
+ * kanaal + voorbeelden; start → alleen als bevestig_aantal (totaal) nog klopt.
  */
 export async function maakCampagne(sb, b, { start = false, userId = null, nu = new Date() } = {}) {
   const v = valideerCampagne(b);
+  const kanalen = itemKanalen(v.kanaal);
+  const metMail = kanalen.includes('email');
+  const metWa = kanalen.includes('whatsapp');
   const ids = lijst(b.lead_ids).filter((id) => UUID_RE.test(id));
   if (!ids.length) throw new MassaFout(400, 'GEEN_SELECTIE', 'Er zijn geen leads geselecteerd.');
   if (ids.length > MAX_ONTVANGERS) throw new MassaFout(400, 'TE_VEEL', `Maximaal ${MAX_ONTVANGERS} ontvangers per campagne.`);
+
+  let waTpl = null;
+  let waInst = null;
+  if (metWa) {
+    const lijstWa = await massaWaTemplates();
+    if (!lijstWa.ok) throw new MassaFout(503, 'WA_GUARD', lijstWa.melding);
+    waTpl = lijstWa.templates.find((t) => t.name === v.wa.template && t.language === v.wa.taal) || null;
+    if (!waTpl) throw new MassaFout(409, 'WA_TEMPLATE_ONBEKEND', `Template "${v.wa.template}" is geen goedgekeurde MARKETING-template op de lead-WABA.`);
+    if (!waTpl.bruikbaar) throw new MassaFout(409, 'WA_TEMPLATE_TE_VEEL_VARS', `Template "${waTpl.name}" heeft ${waTpl.aantal_vars} variabelen; massa ondersteunt er max ${MASSA_WA_MAX_VARS} ({{1}} = voornaam, {{2}} = campagnetekst).`);
+    if (waTpl.aantal_vars >= 2 && !v.wa.param2) throw new MassaFout(400, 'WA_PARAM_LEEG', 'Vul de tekst voor {{2}} in.');
+    waInst = await leesWaInstellingen(sb);
+  }
+
   const seg = await zoekSegment(sb, { lead_ids: ids }, { nu });
   if (seg.tabel_ontbreekt) throw new MassaFout(409, 'MIGRATIE_NODIG', `De massa-tabellen bestaan nog niet — draai ${MIGRATIE}.`);
   // Volgorde = de volgorde van de aangevinkte lijst.
   const positie = new Map(ids.map((id, i) => [id, i]));
   const leads = seg.items.slice().sort((a, c) => positie.get(a.id) - positie.get(c.id));
-  const plan = planCampagne(leads, v.soort);
   const nietGevonden = ids.length - leads.length;
-  if (nietGevonden) plan.redenen.lead_niet_gevonden = nietGevonden;
+  const mailPlan = metMail ? planCampagne(leads, v.soort) : null;
+  const waPlan = metWa ? planWhatsApp(leads) : null;
 
-  const eerste = plan.verzenden[0] || null;
+  const redenen = {};
+  for (const p of [mailPlan, waPlan]) for (const [k, n] of Object.entries(p?.redenen || {})) redenen[k] = (redenen[k] || 0) + n;
+  if (nietGevonden) redenen.lead_niet_gevonden = nietGevonden;
+
   let voorbeeld = null;
+  const eerste = mailPlan?.verzenden[0] || null;
   if (eerste) {
     const link = await boekingslinkVoor(sb, eerste.traject, new Map());
     const vars = leadVariabelen(eerste, { boekingslink: link });
@@ -379,40 +521,68 @@ export async function maakCampagne(sb, b, { start = false, userId = null, nu = n
       html: renderLeadMail({ bodyHtml: vulMailVariabelen(v.html, vars, { html: true }), voorkeurenUrl: voorkeurenUrl('VOORBEELD') }),
     };
   }
+  let voorbeeldWa = null;
+  const eersteWa = waPlan?.verzenden[0] || null;
+  if (waTpl) {
+    const waarden = waWaardenVoor(eersteWa || {}, v.wa.param2, waTpl.aantal_vars);
+    voorbeeldWa = { aan: eersteWa ? eersteWa.telefoon_e164 : null, template: waTpl.name, taal: waTpl.language, tekst: renderWaTekst(waTpl.body, waarden), footer: waTpl.footer, knoppen: waTpl.knoppen };
+  }
+  const nMail = mailPlan ? mailPlan.verzenden.length : 0;
+  const nWa = waPlan ? waPlan.verzenden.length : 0;
   const samenvatting = {
+    kanaal: v.kanaal,
     aantal_geselecteerd: ids.length,
-    aantal_verzenden: plan.verzenden.length,
-    aantal_overgeslagen: plan.overgeslagen.length + nietGevonden,
-    redenen: plan.redenen,
+    aantal_verzenden: nMail + nWa,
+    aantal_overgeslagen: (mailPlan ? mailPlan.overgeslagen.length : 0) + (waPlan ? waPlan.overgeslagen.length : 0) + nietGevonden,
+    per_kanaal: {
+      ...(mailPlan ? { email: { verzenden: nMail, overgeslagen: mailPlan.overgeslagen.length, redenen: mailPlan.redenen } } : {}),
+      ...(waPlan ? { whatsapp: { verzenden: nWa, overgeslagen: waPlan.overgeslagen.length, redenen: waPlan.redenen } } : {}),
+    },
+    redenen,
     portie: v.portie,
+    wa_portie: waInst ? waInst.portie : null,
     voorbeeld,
+    voorbeeld_wa: voorbeeldWa,
   };
   if (!start) return samenvatting;
 
-  if (!plan.verzenden.length) throw new MassaFout(400, 'GEEN_ONTVANGERS', 'Niemand in de selectie kan deze mail ontvangen.');
-  if (Number(b.bevestig_aantal) !== plan.verzenden.length) {
-    throw new MassaFout(409, 'AANTAL_GEWIJZIGD', `Het aantal ontvangers is veranderd (nu ${plan.verzenden.length}). Bekijk de controle opnieuw.`, { samenvatting });
+  if (!(nMail + nWa)) throw new MassaFout(400, 'GEEN_ONTVANGERS', 'Niemand in de selectie kan dit bericht ontvangen.');
+  if (Number(b.bevestig_aantal) !== nMail + nWa) {
+    throw new MassaFout(409, 'AANTAL_GEWIJZIGD', `Het aantal berichten is veranderd (nu ${nMail + nWa}). Bekijk de controle opnieuw.`, { samenvatting });
   }
-  const { data: camp, error: cErr } = await sb.from('massa_campagnes').insert({
-    naam: v.naam, kanaal: 'email', soort: v.soort, onderwerp: v.onderwerp, html: v.html,
-    sjabloon_id: v.sjabloon_id, filter: b.filter && typeof b.filter === 'object' ? b.filter : {},
-    portie: v.portie, status: 'wachtrij', aantal: plan.verzenden.length,
-    aantal_overgeslagen: plan.overgeslagen.length, aangemaakt_door: userId,
-  }).select('id').single();
+  // E-mail-only: exact dezelfde rij als in 2a (geen wa_*-kolommen → werkt ook
+  // zonder de 2b-migratie). Met WhatsApp: de wa_*-kolommen erbij.
+  const rij = {
+    naam: v.naam, kanaal: v.kanaal, filter: b.filter && typeof b.filter === 'object' ? b.filter : {},
+    portie: v.portie, status: 'wachtrij', aantal: nMail + nWa,
+    aantal_overgeslagen: samenvatting.aantal_overgeslagen - nietGevonden, aangemaakt_door: userId,
+  };
+  if (metMail) Object.assign(rij, { soort: v.soort, onderwerp: v.onderwerp, html: v.html, sjabloon_id: v.sjabloon_id });
+  if (metWa) Object.assign(rij, { wa_template: waTpl.name, wa_taal: waTpl.language, wa_param2: v.wa.param2 || null, wa_body: waTpl.body });
+  const { data: camp, error: cErr } = await sb.from('massa_campagnes').insert(rij).select('id').single();
   if (cErr) {
+    if (metWa && (/wa_template|wa_param2|wa_body|wa_taal|kanaal_check|not-null|null value/i.test(cErr.message || '') || cErr.code === '23514' || cErr.code === '23502' || cErr.code === 'PGRST204')) {
+      throw new MassaFout(409, 'MIGRATIE_NODIG', `WhatsApp-campagnes vragen eerst de migratie ${MIGRATIE_2B}.`);
+    }
     if (tabelOntbreekt(cErr)) throw new MassaFout(409, 'MIGRATIE_NODIG', `De massa-tabellen bestaan nog niet — draai ${MIGRATIE}.`);
     throw new Error('campagne aanmaken: ' + cErr.message);
   }
-  const rijen = [
-    ...plan.verzenden.map((l) => ({ campagne_id: camp.id, lead_id: l.id, kanaal: 'email', email: l.email, status: 'queued' })),
-    ...plan.overgeslagen.map((o) => ({ campagne_id: camp.id, lead_id: o.lead.id, kanaal: 'email', email: o.lead.email || null, status: 'skipped', reden: o.reden })),
-  ];
+  const rijen = [];
+  if (mailPlan) {
+    rijen.push(...mailPlan.verzenden.map((l) => ({ campagne_id: camp.id, lead_id: l.id, kanaal: 'email', email: l.email, status: 'queued' })));
+    rijen.push(...mailPlan.overgeslagen.map((o) => ({ campagne_id: camp.id, lead_id: o.lead.id, kanaal: 'email', email: o.lead.email || null, status: 'skipped', reden: o.reden })));
+  }
+  if (waPlan) {
+    rijen.push(...waPlan.verzenden.map((l) => ({ campagne_id: camp.id, lead_id: l.id, kanaal: 'whatsapp', status: 'queued' })));
+    rijen.push(...waPlan.overgeslagen.map((o) => ({ campagne_id: camp.id, lead_id: o.lead.id, kanaal: 'whatsapp', status: 'skipped', reden: o.reden })));
+  }
   for (let i = 0; i < rijen.length; i += 500) {
     const { error: iErr } = await sb.from('massa_items').insert(rijen.slice(i, i + 500));
     if (iErr) {
       console.error('[massa-mail] items aanmaken mislukt — campagne teruggedraaid:', { campagne: camp.id, fout: iErr.message });
       const { error: dErr } = await sb.from('massa_campagnes').delete().eq('id', camp.id);
       if (dErr) console.error('[massa-mail] terugdraaien mislukt:', { campagne: camp.id, fout: dErr.message });
+      if (metMail && metWa && (iErr.code === '23505' || iErr.code === '23514')) throw new MassaFout(409, 'MIGRATIE_NODIG', `"Beide" vraagt eerst de migratie ${MIGRATIE_2B}.`);
       throw new Error('wachtrij vullen: ' + iErr.message);
     }
   }
@@ -469,6 +639,21 @@ export async function herteltCampagne(sb, id, nu = new Date()) {
   return { queued, sending, sent, failed, skipped, klaar: patch.status === 'klaar' };
 }
 
+/** Tellers per kanaal (voor de voortgang in de popup). */
+export async function tellingPerKanaal(sb, id) {
+  const uit = {};
+  for (const kanaal of ['email', 'whatsapp']) {
+    const r = {};
+    for (const status of ['queued', 'sending', 'sent', 'failed', 'skipped']) {
+      const { count, error } = await sb.from('massa_items').select('id', { count: 'exact', head: true }).eq('campagne_id', id).eq('kanaal', kanaal).eq('status', status);
+      if (error) throw new Error('tellen ' + kanaal + '/' + status + ': ' + error.message);
+      r[status] = count || 0;
+    }
+    if (Object.values(r).some(Boolean)) uit[kanaal] = r;
+  }
+  return uit;
+}
+
 const slaapStandaard = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 async function zetItem(sb, id, patch) {
@@ -476,101 +661,160 @@ async function zetItem(sb, id, patch) {
   if (error) console.error('[massa-mail] item-status zetten mislukt:', { item: id, patch: patch.status, fout: error.message });
 }
 
+// Fouten waarbij de WhatsApp-kant als geheel niet kan (niet de ontvanger): item
+// terug in de wachtrij en WhatsApp stoppen voor deze run.
+const WA_STOP_CODES = new Set(['GEEN_LIJN', 'TEMPLATES_ONBEKEND', 'TEMPLATE_NIET_GOEDGEKEURD', 'GEEN_LEAD_TEMPLATE', 'TEMPLATE_NIET_ONDERSTEUND', 'VARIABELEN']);
+
 /**
  * Eén run van de wachtrij.
  * opts: campagneId (alleen die), tijdBudgetMs, handmatig (negeert stille uren),
- *       verstuur (test-injectie), slaap (test-injectie), nu.
+ *       verstuur (test-injectie e-mail), verstuurWa (test-injectie WhatsApp),
+ *       waGuard (test-injectie), slaap (test-injectie), nu.
+ * Per kanaal eigen portie, pauze, daglimiet en stille uren:
+ *   e-mail    → campagne.portie + app_settings.massa_mail
+ *   WhatsApp  → app_settings.massa_whatsapp (portie, dag_max, pauze_ms, stille_uren)
+ * WhatsApp alleen na de health-check-guard (lijn 1273723375834177 / WABA 2579784712469452).
  * -> samenvatting { verstuurd, mislukt, overgeslagen, campagnes:[…], reden? }
  */
 export async function verwerkWachtrij(sb, {
   campagneId = null, tijdBudgetMs = 240000, handmatig = false,
-  verstuur = verstuurMail, slaap = slaapStandaard, nu = () => new Date(),
+  verstuur = verstuurMail, verstuurWa = verstuurWaTemplate, waGuard = massaWaTemplates,
+  slaap = slaapStandaard, nu = () => new Date(),
 } = {}) {
   const start = Date.now();
-  const uit = { verstuurd: 0, mislukt: 0, overgeslagen: 0, campagnes: [], reden: null, dag_resterend: null };
-  const inst = await leesInstellingen(sb);
+  const uit = { verstuurd: 0, mislukt: 0, overgeslagen: 0, campagnes: [], reden: null, dag_resterend: null, per_kanaal: {} };
+  const inst = { email: await leesInstellingen(sb), whatsapp: await leesWaInstellingen(sb) };
   const uur = amsUur(nu());
-  if (!handmatig && inst.stille_uren && (uur >= 21 || uur < 8)) { uit.reden = 'stille_uren'; return uit; }
+  const stil = (k) => !handmatig && inst[k].stille_uren && (uur >= 21 || uur < 8);
+  if (stil('email') && stil('whatsapp')) { uit.reden = 'stille_uren'; return uit; }
 
   // Hangende 'sending' (run viel weg na de claim): niet opnieuw versturen —
-  // we weten niet of de mail de deur uit ging. Markeer als mislukt.
+  // we weten niet of het bericht de deur uit ging. Markeer als mislukt.
   const grens = new Date(nu().getTime() - 15 * 60000).toISOString();
   const { error: hErr } = await sb.from('massa_items').update({ status: 'failed', fout: 'onderbroken: geen bevestiging van verzending' })
     .eq('status', 'sending').lt('geclaimd_op', grens);
   if (hErr && !tabelOntbreekt(hErr)) console.error('[massa-mail] hangende items opruimen mislukt:', hErr.message);
 
-  const { count: vandaag, error: dErr } = await sb.from('massa_items').select('id', { count: 'exact', head: true })
-    .eq('status', 'sent').gte('verzonden_op', amsDagStartIso(nu()));
-  if (dErr) {
-    if (tabelOntbreekt(dErr)) { uit.reden = 'migratie_nodig'; return uit; }
-    throw new Error('daglimiet tellen: ' + dErr.message);
+  // Daglimiet per kanaal.
+  const resterend = {};
+  for (const k of ['email', 'whatsapp']) {
+    const { count, error: dErr } = await sb.from('massa_items').select('id', { count: 'exact', head: true })
+      .eq('status', 'sent').eq('kanaal', k).gte('verzonden_op', amsDagStartIso(nu()));
+    if (dErr) {
+      if (tabelOntbreekt(dErr)) { uit.reden = 'migratie_nodig'; return uit; }
+      throw new Error('daglimiet tellen: ' + dErr.message);
+    }
+    resterend[k] = Math.max(0, inst[k].dag_max - (count || 0));
   }
-  let resterend = Math.max(0, inst.dag_max - (vandaag || 0));
-  uit.dag_resterend = resterend;
-  if (resterend <= 0) { uit.reden = 'daglimiet'; return uit; }
+  uit.dag_resterend = resterend.email;
+  uit.per_kanaal = { email: { dag_resterend: resterend.email }, whatsapp: { dag_resterend: resterend.whatsapp } };
+  if (resterend.email <= 0 && resterend.whatsapp <= 0) { uit.reden = 'daglimiet'; return uit; }
 
-  let q = sb.from('massa_campagnes').select('id, naam, soort, onderwerp, html, portie, status, aangemaakt_door, gestart_op')
+  // select('*'): de wa_*-kolommen bestaan pas na de 2b-migratie; e-mail mag daar niet op wachten.
+  let q = sb.from('massa_campagnes').select('*')
     .in('status', ['wachtrij', 'bezig']).order('aangemaakt_op', { ascending: true }).limit(20);
   if (campagneId) q = q.eq('id', campagneId);
   const { data: campagnes, error: cErr } = await q;
   if (cErr) throw new Error('campagnes lezen: ' + cErr.message);
 
   const linkCache = new Map();
+  let guard = null; // één health-check per run, pas als er WhatsApp te doen is
+  const waGeblokkeerd = { reden: null };
   try {
     for (const c of campagnes || []) {
-      if (resterend <= 0 || Date.now() - start > tijdBudgetMs) break;
+      if (Date.now() - start > tijdBudgetMs) break;
       const per = { id: c.id, naam: c.naam, verstuurd: 0, mislukt: 0, overgeslagen: 0 };
       uit.campagnes.push(per);
-      const max = Math.min(c.portie || STANDAARD_PORTIE, resterend);
-      const { data: items, error: iErr } = await sb.from('massa_items').select('id, lead_id')
-        .eq('campagne_id', c.id).eq('status', 'queued').order('aangemaakt_op', { ascending: true }).limit(max);
-      if (iErr) { console.error('[massa-mail] items lezen mislukt:', { campagne: c.id, fout: iErr.message }); continue; }
-      if ((items || []).length && c.status === 'wachtrij') {
-        const { error: sErr } = await sb.from('massa_campagnes').update({ status: 'bezig', gestart_op: c.gestart_op || nu().toISOString() }).eq('id', c.id).eq('status', 'wachtrij');
-        if (sErr) console.error('[massa-mail] campagne op bezig zetten mislukt:', { campagne: c.id, fout: sErr.message });
-      }
-      let eersteMail = true;
-      for (const it of items || []) {
-        if (resterend <= 0 || Date.now() - start > tijdBudgetMs) break;
-        // Atomische claim: een parallelle run pakt hetzelfde item niet nog eens.
-        const { data: claim, error: clErr } = await sb.from('massa_items').update({ status: 'sending', geclaimd_op: nu().toISOString() })
-          .eq('id', it.id).eq('status', 'queued').select('id');
-        if (clErr) { console.error('[massa-mail] claim mislukt:', { item: it.id, fout: clErr.message }); continue; }
-        if (!claim || !claim.length) continue;
-        // Gepauzeerd of geannuleerd sinds het begin van de run? Terugzetten en stoppen.
-        const { data: nogActief } = await sb.from('massa_campagnes').select('status').eq('id', c.id).maybeSingle();
-        if (!nogActief || !['wachtrij', 'bezig'].includes(nogActief.status)) {
-          await zetItem(sb, it.id, { status: nogActief?.status === 'geannuleerd' ? 'skipped' : 'queued', reden: nogActief?.status === 'geannuleerd' ? 'geannuleerd' : null });
-          break;
+      for (const kanaal of itemKanalen(c.kanaal)) {
+        if (Date.now() - start > tijdBudgetMs) break;
+        if (stil(kanaal)) { if (!uit.reden) uit.reden = 'stille_uren'; continue; }
+        if (resterend[kanaal] <= 0) { if (!uit.reden) uit.reden = 'daglimiet'; continue; }
+        if (kanaal === 'whatsapp') {
+          if (waGeblokkeerd.reden) continue;
+          if (!guard) {
+            guard = await waGuard();
+            if (!guard.ok) {
+              waGeblokkeerd.reden = 'wa_guard';
+              console.error('[massa-mail] WhatsApp-guard niet gehaald — niets verstuurd:', guard.reden, guard.melding);
+              if (!uit.reden) uit.reden = 'wa_guard';
+              continue;
+            }
+          }
         }
-        try {
-          const { data: lead, error: lErr } = await sb.from('leads')
-            .select('id, voornaam, achternaam, email, traject, verwijderd_op').eq('id', it.lead_id).maybeSingle();
-          if (lErr) throw new Error('lead lezen: ' + lErr.message);
-          const email = String(lead?.email || '').trim().toLowerCase();
-          if (!lead || lead.verwijderd_op) { await zetItem(sb, it.id, { status: 'skipped', reden: 'lead_verwijderd' }); per.overgeslagen++; uit.overgeslagen++; continue; }
-          if (!EMAIL_RE.test(email)) { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_email', email: email || null }); per.overgeslagen++; uit.overgeslagen++; continue; }
-          const vk = await zorgVoorkeur(sb, email, lead.id);
-          const mag = magOntvangen(vk, c.soort);
-          if (!mag.ok) { await zetItem(sb, it.id, { status: 'skipped', reden: mag.reden, email }); per.overgeslagen++; uit.overgeslagen++; continue; }
-          if (!eersteMail && inst.pauze_ms) await slaap(inst.pauze_ms);
-          eersteMail = false;
-          const boekingslink = await boekingslinkVoor(sb, lead.traject, linkCache);
-          const r = await verstuur(sb, {
-            lead: { ...lead, email }, onderwerp: c.onderwerp, html: c.html, boekingslink,
-            userId: c.aangemaakt_door || null,
-            massa: { voorkeurenUrl: voorkeurenUrl(vk.token), afmeldUrl: afmeldUrl(vk.token), campagneId: c.id },
-          });
-          await zetItem(sb, it.id, { status: 'sent', verzonden_op: nu().toISOString(), extern_id: r?.messageId || null, email, fout: r?.in_draad === false ? 'verstuurd, maar niet in de draad gelogd' : null });
-          per.verstuurd++; uit.verstuurd++; resterend--;
-        } catch (e) {
-          const code = e instanceof LeadBerichtFout ? e.code : null;
-          if (code === 'GEEN_GELDIG_EMAIL') { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_email' }); per.overgeslagen++; uit.overgeslagen++; continue; }
-          console.error('[massa-mail] verzenden mislukt:', { campagne: c.id, item: it.id, code, fout: e?.message || e });
-          await zetItem(sb, it.id, { status: 'failed', fout: String(e?.message || e).slice(0, 500) });
-          per.mislukt++; uit.mislukt++;
-          if (code === 'MAIL_NIET_GECONFIGUREERD') { uit.reden = 'mail_niet_geconfigureerd'; break; }
+        const max = Math.min(kanaal === 'email' ? (c.portie || STANDAARD_PORTIE) : inst.whatsapp.portie, resterend[kanaal]);
+        const { data: items, error: iErr } = await sb.from('massa_items').select('id, lead_id')
+          .eq('campagne_id', c.id).eq('kanaal', kanaal).eq('status', 'queued').order('aangemaakt_op', { ascending: true }).limit(max);
+        if (iErr) { console.error('[massa-mail] items lezen mislukt:', { campagne: c.id, kanaal, fout: iErr.message }); continue; }
+        if ((items || []).length && c.status === 'wachtrij') {
+          const { error: sErr } = await sb.from('massa_campagnes').update({ status: 'bezig', gestart_op: c.gestart_op || nu().toISOString() }).eq('id', c.id).eq('status', 'wachtrij');
+          if (sErr) console.error('[massa-mail] campagne op bezig zetten mislukt:', { campagne: c.id, fout: sErr.message });
+          c.status = 'bezig';
         }
+        let eerste = true;
+        for (const it of items || []) {
+          if (resterend[kanaal] <= 0 || Date.now() - start > tijdBudgetMs) break;
+          // Atomische claim: een parallelle run pakt hetzelfde item niet nog eens.
+          const { data: claim, error: clErr } = await sb.from('massa_items').update({ status: 'sending', geclaimd_op: nu().toISOString() })
+            .eq('id', it.id).eq('status', 'queued').select('id');
+          if (clErr) { console.error('[massa-mail] claim mislukt:', { item: it.id, fout: clErr.message }); continue; }
+          if (!claim || !claim.length) continue;
+          // Gepauzeerd of geannuleerd sinds het begin van de run? Terugzetten en stoppen.
+          const { data: nogActief } = await sb.from('massa_campagnes').select('status').eq('id', c.id).maybeSingle();
+          if (!nogActief || !['wachtrij', 'bezig'].includes(nogActief.status)) {
+            await zetItem(sb, it.id, { status: nogActief?.status === 'geannuleerd' ? 'skipped' : 'queued', reden: nogActief?.status === 'geannuleerd' ? 'geannuleerd' : null });
+            break;
+          }
+          const telOver = () => { per.overgeslagen++; uit.overgeslagen++; };
+          try {
+            const { data: lead, error: lErr } = await sb.from('leads')
+              .select('id, voornaam, achternaam, email, telefoon_e164, traject, verwijderd_op').eq('id', it.lead_id).maybeSingle();
+            if (lErr) throw new Error('lead lezen: ' + lErr.message);
+            if (!lead || lead.verwijderd_op) { await zetItem(sb, it.id, { status: 'skipped', reden: 'lead_verwijderd' }); telOver(); continue; }
+            if (kanaal === 'email') {
+              const email = String(lead.email || '').trim().toLowerCase();
+              if (!EMAIL_RE.test(email)) { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_email', email: email || null }); telOver(); continue; }
+              const vk = await zorgVoorkeur(sb, email, lead.id);
+              const mag = magOntvangen(vk, c.soort);
+              if (!mag.ok) { await zetItem(sb, it.id, { status: 'skipped', reden: mag.reden, email }); telOver(); continue; }
+              if (!eerste && inst.email.pauze_ms) await slaap(inst.email.pauze_ms);
+              eerste = false;
+              const boekingslink = await boekingslinkVoor(sb, lead.traject, linkCache);
+              const r = await verstuur(sb, {
+                lead: { ...lead, email }, onderwerp: c.onderwerp, html: c.html, boekingslink,
+                userId: c.aangemaakt_door || null,
+                massa: { voorkeurenUrl: voorkeurenUrl(vk.token), afmeldUrl: afmeldUrl(vk.token), campagneId: c.id },
+              });
+              await zetItem(sb, it.id, { status: 'sent', verzonden_op: nu().toISOString(), extern_id: r?.messageId || null, email, fout: r?.in_draad === false ? 'verstuurd, maar niet in de draad gelogd' : null });
+            } else {
+              const tel = String(lead.telefoon_e164 || '').trim();
+              if (!E164_RE.test(tel)) { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_nummer' }); telOver(); continue; }
+              if (!eerste && inst.whatsapp.pauze_ms) await slaap(inst.whatsapp.pauze_ms);
+              eerste = false;
+              const r = await verstuurWa(sb, {
+                lead, templateNaam: c.wa_template, taal: c.wa_taal || 'nl',
+                variabelen: waWaardenVoor(lead, c.wa_param2, telWaVars(c.wa_body)),
+                agent: 'massa', soort: 'massa-whatsapp',
+              });
+              await zetItem(sb, it.id, { status: 'sent', verzonden_op: nu().toISOString(), extern_id: r?.wamid || null, fout: r?.in_draad === false ? 'verstuurd, maar niet in de draad gelogd' : null });
+            }
+            per.verstuurd++; uit.verstuurd++; resterend[kanaal]--;
+          } catch (e) {
+            const code = e instanceof LeadBerichtFout ? e.code : null;
+            if (code === 'GEEN_GELDIG_EMAIL') { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_email' }); telOver(); continue; }
+            if (code === 'GEEN_GELDIG_NUMMER') { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_nummer' }); telOver(); continue; }
+            if (kanaal === 'whatsapp' && WA_STOP_CODES.has(code)) {
+              console.error('[massa-mail] WhatsApp gestopt voor deze run:', { campagne: c.id, code, fout: e?.message });
+              await zetItem(sb, it.id, { status: 'queued' });
+              waGeblokkeerd.reden = code; if (!uit.reden) uit.reden = 'wa_' + String(code).toLowerCase();
+              break;
+            }
+            console.error('[massa-mail] verzenden mislukt:', { campagne: c.id, item: it.id, kanaal, code, fout: e?.message || e });
+            await zetItem(sb, it.id, { status: 'failed', fout: String(e?.message || e).slice(0, 500) });
+            per.mislukt++; uit.mislukt++;
+            if (code === 'MAIL_NIET_GECONFIGUREERD') { uit.reden = 'mail_niet_geconfigureerd'; break; }
+          }
+        }
+        if (uit.reden === 'mail_niet_geconfigureerd') break;
       }
       try { per.stand = await herteltCampagne(sb, c.id, nu()); } catch (e) { console.error('[massa-mail] hertellen mislukt:', { campagne: c.id, fout: e?.message || e }); }
       if (uit.reden === 'mail_niet_geconfigureerd') break;
@@ -578,7 +822,8 @@ export async function verwerkWachtrij(sb, {
   } finally {
     sluitSmtpPools();
   }
-  uit.dag_resterend = resterend;
+  uit.dag_resterend = resterend.email;
+  uit.per_kanaal = { email: { dag_resterend: resterend.email }, whatsapp: { dag_resterend: resterend.whatsapp } };
   if (!uit.reden && Date.now() - start > tijdBudgetMs) uit.reden = 'tijdbudget';
   return uit;
 }
