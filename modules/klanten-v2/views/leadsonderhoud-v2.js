@@ -362,7 +362,8 @@
     const call = F('ls-call', 'all');
     const handmatig = _lsMsel.aan && !_lsMsel.alles && _lsMsel.ids.size;
     window.MassaBericht.open({
-      filter: { q: (F('ls-q', '') || '').trim(), traject: F('ls-traj', '') || '', kennismaking: call === 'ja' ? 'ooit' : (call === 'nee' ? 'geen' : '') },
+      // Met de hand aangevinkt → alleen die leads, zonder de lijstfilters (zie leads-v2.js).
+      filter: handmatig ? {} : { q: (F('ls-q', '') || '').trim(), traject: F('ls-traj', '') || '', kennismaking: call === 'ja' ? 'ooit' : (call === 'nee' ? 'geen' : '') },
       leadIds: handmatig ? [..._lsMsel.ids] : [],
       onKlaar: () => { _lsMsel.ids.clear(); _lsMsel.alles = false; _lsMsel.aan = false; DFO.render(); },
     });

@@ -527,7 +527,10 @@
     if (!window.MassaBericht) { alert('Massabericht is niet geladen — ververs de pagina.'); return; }
     const handmatig = _msel.aan && !_msel.alles && _msel.ids.size;
     window.MassaBericht.open({
-      filter: massaFilterVanLijst(),
+      // Met de hand aangevinkt → alleen die leads, ZONDER de lijstfilters: je vinkt
+      // vaak aan over meerdere zoekopdrachten heen, en de laatste zoektekst zou de
+      // eerdere vinkjes anders wegfilteren (gezien bij de live test, 2026-10-10).
+      filter: handmatig ? {} : massaFilterVanLijst(),
       leadIds: handmatig ? [..._msel.ids] : [],
       onKlaar: () => { _msel.ids.clear(); _msel.alles = false; _msel.aan = false; window.DFO.render(); },
     });
