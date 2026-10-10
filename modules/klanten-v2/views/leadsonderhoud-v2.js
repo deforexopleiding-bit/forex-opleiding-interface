@@ -424,6 +424,11 @@
               const inlogBtn = idForBtn
                 ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsInlogOpnieuw('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="Inloggegevens opnieuw versturen (optioneel naar een ander adres)">Inlog opnieuw</button>`
                 : '';
+              // 2026-10-09: "Stuur bericht" — gedeelde popup views/_stuur-bericht.js
+              // (WhatsApp-template of e-mail, 1-op-1; verschijnt in de draad).
+              const berichtBtn = idForBtn
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.StuurBericht && window.StuurBericht.open('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="1-op-1 WhatsApp-template of e-mail sturen">Bericht</button>`
+                : '';
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>
@@ -436,7 +441,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td class="optional" style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
                 <td class="optional" style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
-                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${inlogBtn}${geefToegangBtn}${extendBtn}</td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${berichtBtn}${inlogBtn}${geefToegangBtn}${extendBtn}</td>
               </tr>`;
             }).join('')}
           </tbody>
