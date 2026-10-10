@@ -16,12 +16,24 @@
       "maxDuration": 300,
       "memory": 1024
     },
+    "api/cron-massa-mail.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/massa-campagne.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
     }
   },
   "crons": [
+    {
+      "path": "/api/cron-massa-mail",
+      "schedule": "*/15 * * * *"
+    },
     {
       "path": "/api/sync-emails",
       "schedule": "*/5 * * * *"

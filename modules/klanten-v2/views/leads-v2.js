@@ -36,6 +36,9 @@
     producten: null, prodLoading: false,
     form: { voornaam: '', achternaam: '', email: '', telefoon: '', productSlugs: [], van: '', tot: '', herkomst: 'handmatig', welkomstmail: false },
   };
+  // Massabericht (fase 2a): selectiemodus met vinkjes. alles=true → "alle leads
+  // die aan het filter voldoen" (niet alleen de zichtbare pagina).
+  const _msel = { aan: false, ids: new Set(), alles: false };
   // Meer-acties modal state (archiveer / herstel / omzetten-klant).
   const _act2 = { open: false, kind: null, submitting: false };
   // "Inloggegevens opnieuw versturen" woont in de gedeelde popup
@@ -496,6 +499,40 @@
     window.__leadPatch({ notitie: val });
   };
 
+  // ── Massabericht (fase 2a) ─────────────────────────────────────────────
+  // De lijstfilters gaan mee als beginfilter van de popup (zelfde betekenis).
+  function massaFilterVanLijst() {
+    const afspr = F('lead-afspr', '');
+    return {
+      soort: F('lead-soort', ''), traject: F('lead-traject', ''), kwalificatie: F('lead-kwal', ''),
+      bron: F('lead-bron', ''), status: F('lead-st', ''),
+      kennismaking: afspr === 'ja' ? 'ooit' : (afspr === 'nee' ? 'geen' : ''),
+      q: String(_act.search || '').trim(),
+    };
+  }
+  window.__leadSelToggle = () => { _msel.aan = !_msel.aan; if (!_msel.aan) { _msel.ids.clear(); _msel.alles = false; } window.DFO.render(); };
+  window.__leadSelRij = (id, aan) => {
+    if (_msel.alles) { _msel.alles = false; for (const x of (_act.data?.items || [])) _msel.ids.add(x.id); }
+    if (aan) _msel.ids.add(id); else _msel.ids.delete(id);
+    window.DFO.render();
+  };
+  window.__leadSelPagina = (aan) => {
+    if (_msel.alles && !aan) { _msel.alles = false; _msel.ids.clear(); window.DFO.render(); return; }
+    for (const x of (_act.data?.items || [])) { if (aan) _msel.ids.add(x.id); else _msel.ids.delete(x.id); }
+    window.DFO.render();
+  };
+  window.__leadSelAlles = () => { _msel.alles = true; _msel.ids.clear(); window.DFO.render(); };
+  window.__leadSelWis = () => { _msel.alles = false; _msel.ids.clear(); window.DFO.render(); };
+  window.__leadMassa = () => {
+    if (!window.MassaBericht) { alert('Massabericht is niet geladen — ververs de pagina.'); return; }
+    const handmatig = _msel.aan && !_msel.alles && _msel.ids.size;
+    window.MassaBericht.open({
+      filter: massaFilterVanLijst(),
+      leadIds: handmatig ? [..._msel.ids] : [],
+      onKlaar: () => { _msel.ids.clear(); _msel.alles = false; _msel.aan = false; window.DFO.render(); },
+    });
+  };
+
   window.__leadSort = (by) => {
     if (_act.sortBy === by) _act.sortDir = _act.sortDir === 'asc' ? 'desc' : 'asc';
     else { _act.sortBy = by; _act.sortDir = by === 'aangemaakt' ? 'desc' : 'desc'; }
@@ -698,9 +735,17 @@
         `<div class="tb-right">
           <button class="btn btn-sm" onclick="__leadSort('aangemaakt')" title="Sorteer op aanmaakdatum">Datum${sortIcon('aangemaakt')}</button>
           <button class="btn btn-sm" onclick="__leadSort('score')" title="Sorteer op score">Score${sortIcon('score')}</button>
+          <button class="btn btn-sm" onclick="__leadSelToggle()" title="Vinkjes per rij om leads te kiezen voor een massabericht">${_msel.aan ? 'Selectie uit' : 'Selecteren'}</button>
+          <button class="btn btn-sm" onclick="__leadMassa()" title="E-mail aan een groep leads (uitgebreide filters, wachtrij, afmeldlink)">${svg(I.mail || I.send, 'width:14px;height:14px')}Massabericht</button>
           <button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button>
         </div>`,
       ])}
+      ${_msel.aan ? `<div class="sv-total" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface-2,#f6f8fa);border-radius:8px;padding:8px 12px;margin:8px 20px 0">
+        <b>${_msel.alles ? (total != null ? total : 'alle') + ' (alles wat aan het filter voldoet)' : _msel.ids.size}</b> geselecteerd
+        ${!_msel.alles && total != null ? `<button class="btn btn-sm" onclick="__leadSelAlles()">Selecteer alle ${total} die aan het filter voldoen</button>` : ''}
+        <button class="btn btn-sm" onclick="__leadSelWis()">Wis selectie</button>
+        <button class="btn btn-primary btn-sm" onclick="__leadMassa()" ${_msel.alles || _msel.ids.size ? '' : 'disabled'}>Stuur massabericht</button>
+      </div>` : ''}
       <div class="sv-total" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <span>${_act.loading ? 'Laden…' : (() => {
           if (total == null) return '—';
@@ -726,7 +771,7 @@
         <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings, 'width:14px;height:14px')} Opnieuw proberen</button>
       </div>` : ''}
       ${H.table(
-        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Kwalificatie', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
+        [...(_msel.aan ? [{ l: `<input type="checkbox" title="Deze pagina (de)selecteren" onclick="__leadSelPagina(this.checked)" ${items.length && items.every((x) => _msel.alles || _msel.ids.has(x.id)) ? 'checked' : ''}>` }] : []), { l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Kwalificatie', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           const herkomst = l.soort || l.herkomst || '';
@@ -742,6 +787,7 @@
           const call = l.afspraak_op ? dstr(l.afspraak_op) : '—';
           const nameEsc = String(l.naam || '').replace(/"/g, '&quot;').replace(/'/g, "\\'");
           return [
+            ...(_msel.aan ? [`<input type="checkbox" onclick="event.stopPropagation();__leadSelRij('${l.id}', this.checked)" ${_msel.alles || _msel.ids.has(l.id) ? 'checked' : ''}>`] : []),
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
             `<span class="mono" style="font-size:11.5px;color:var(--text-2)">${esc(l.email) || '—'}</span>`,
             `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(l.telefoon) || '—'}</span>`,
@@ -1076,8 +1122,12 @@
     _det.loading = true; _det.error = null; _det.id = id;
     window.DFO.render();
     try {
-      const data = await tryFetch('leads-detail', '/api/leads-detail?id=' + encodeURIComponent(id));
+      const [data, massa] = await Promise.all([
+        tryFetch('leads-detail', '/api/leads-detail?id=' + encodeURIComponent(id)),
+        tryFetch('massa-historie', '/api/massa-campagne?lead_id=' + encodeURIComponent(id)),
+      ]);
       if (seq !== _det.seq) return;
+      _det.massa = massa && Array.isArray(massa.historie) ? massa.historie : null;
       if (!data) {
         _det.data = { lead: {}, antwoorden: [], messages: [], eigenaar: null };
         _det.error = 'Kon lead-detail niet laden (endpoint returnde null; check RBAC/500).';
@@ -1216,6 +1266,11 @@
             <div class="sv-card-body">
               <div class="sv-row"><span>Score</span><b>${l.score != null ? l.score : '—'}${l.drempel ? ' / ' + l.drempel : ''}</b></div>
               <div class="sv-row"><span>Tag</span><b>${esc(l.tag) || '—'}</b></div>
+              ${(() => {
+                const verstuurd = (_det.massa || []).filter((m) => m.status === 'sent' && m.verzonden_op);
+                const laatst = verstuurd[0];
+                return `<div class="sv-row"><span>Laatst massabericht</span><b title="${esc(verstuurd.map((m) => (m.naam || '?') + ' · ' + dtStr(m.verzonden_op)).join('\n'))}">${laatst ? esc(dtStr(laatst.verzonden_op)) + ' · ' + esc(laatst.naam || '') + (verstuurd.length > 1 ? ` (${verstuurd.length}×)` : '') : (_det.massa ? 'nog nooit' : '—')}</b></div>`;
+              })()}
               <div class="sv-row"><span>Lead-ID</span><b class="mono" style="font-size:11px">${esc(String(l.id || '').slice(0, 8))}…</b></div>
             </div>
           </div>

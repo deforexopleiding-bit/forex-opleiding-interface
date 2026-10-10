@@ -27,8 +27,24 @@ function metOpmaak(html) {
   return String(html || '').replace(/<(p|div|h2|h3|ul|ol|li|blockquote)>/g, (m, t) => `<${t} style="${OPMAAK[t]}">`);
 }
 
-/** Volledige HTML-mail rond (opgeschoonde) editor-inhoud. */
-export function renderLeadMail({ bodyHtml = '' } = {}) {
+const escAttr = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Afmeldregel onder een massamail (alleen bij massa). PURE. */
+export function afmeldVoet(voorkeurenUrl) {
+  if (!voorkeurenUrl) return '';
+  return `<tr><td style="padding:0 30px 22px;text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.5;color:#8a96a3">
+          Je ontvangt deze mail omdat je je bij De Forex Opleiding hebt aangemeld.<br>
+          Liever minder of geen mails? <a href="${escAttr(voorkeurenUrl)}" style="color:#5b6b7c;text-decoration:underline">Voorkeuren aanpassen of afmelden</a>.
+        </td></tr>`;
+}
+
+/** Platte-tekstversie van de afmeldregel. PURE. */
+export function afmeldTekst(voorkeurenUrl) {
+  return voorkeurenUrl ? `\n\n—\nLiever minder of geen mails? Voorkeuren aanpassen of afmelden: ${voorkeurenUrl}` : '';
+}
+
+/** Volledige HTML-mail rond (opgeschoonde) editor-inhoud. voorkeurenUrl alleen bij massa. */
+export function renderLeadMail({ bodyHtml = '', voorkeurenUrl = null } = {}) {
   return `<!-- lead-mailshell -->
 <div style="margin:0;padding:0;background:#eef1f5">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f5;padding:24px 12px">
@@ -44,6 +60,7 @@ export function renderLeadMail({ bodyHtml = '' } = {}) {
         <tr><td style="padding:20px 30px 26px;border-top:1px solid #edf0f4;text-align:center">
           <img src="${LOGO_URL}" alt="De Forex Opleiding" width="${LOGO_W}" height="${LOGO_H}" style="width:${LOGO_W}px;max-width:60%;height:auto;opacity:.9;display:inline-block;border:0" />
         </td></tr>
+        ${afmeldVoet(voorkeurenUrl)}
       </table>
     </td></tr>
   </table>
