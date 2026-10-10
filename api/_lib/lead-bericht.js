@@ -186,7 +186,7 @@ export async function waTemplatesVoorLead(sb, lead, vars) {
   };
 }
 
-export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', variabelen = [], agent = null }) {
+export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', variabelen = [], agent = null, soort = 'handmatig-template' }) {
   const tel = String(lead?.telefoon_e164 || '').trim();
   if (!E164_RE.test(tel)) throw new LeadBerichtFout(409, 'GEEN_GELDIG_NUMMER', 'Deze lead heeft geen geldig telefoonnummer.');
   const lijn = await haalLijn();
@@ -217,11 +217,11 @@ export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', 
   const tekst = renderWaTekst(t.body, waarden);
   const log = await logOutboundWa(sb, {
     toPhone: tel, phoneNumberId: lijn.phoneNumberId, body: tekst, wamid,
-    templateName: t.name, templateVariables: Object.fromEntries(waarden.map((x, i) => [i + 1, x])), source: 'lead-bericht',
+    templateName: t.name, templateVariables: Object.fromEntries(waarden.map((x, i) => [i + 1, x])), source: soort === 'massa-whatsapp' ? 'massa' : 'lead-bericht',
   });
   if (!log?.ok) console.error('[lead-bericht] in de draad loggen mislukt', { lead: lead.id, fout: log?.error });
   const { error: blErr } = await sb.from('berichten_log').insert({
-    lead_id: lead.id, traject: lead.traject || null, soort: 'handmatig-template', kanaal: 'whatsapp',
+    lead_id: lead.id, traject: lead.traject || null, soort, kanaal: 'whatsapp', // massa: 'massa-whatsapp'
     // berichten_log heeft GEEN meta_template-kolom (die insert faalde) — de wamid in extern_id.
     naar: tel, agent: agent || 'handmatig', status: 'ok', verstuurd_op: new Date().toISOString(), extern_id: wamid,
   });

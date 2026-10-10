@@ -3,6 +3,8 @@
 // Massa-e-mail fase 2a — campagnes.
 //
 // GET                 → { campagnes:[…] }                    (laatste 50, met tellers)
+// GET ?wa_templates=1 → { ok, templates:[…], waba_id, nummer, wa_portie }  (2b: goedgekeurde
+//                       MARKETING-templates van de lead-WABA, na de health-check-guard)
 // GET ?id=<uuid>      → { campagne, mislukt:[…] }             (detail + mislukte items)
 // GET ?lead_id=<uuid> → { historie:[{campagne_id, naam, status, verzonden_op}] }
 // POST { actie:'preview', …campagne }  → exact aantal + voorbeeldmail (niets opgeslagen)
@@ -10,16 +12,17 @@
 // POST { actie:'pauzeer'|'hervat'|'annuleer', id }
 // POST { actie:'verwerk_nu', id }       → één portie nu (zelfde worker als de cron)
 //
-// campagne = { naam, soort, kanaal:'email', onderwerp, html, portie, sjabloon_id,
-//              filter, lead_ids:[…] }
+// campagne = { naam, kanaal:'email'|'whatsapp'|'beide', soort, onderwerp, html, portie,
+//              sjabloon_id, wa_template, wa_taal, wa_param2, filter, lead_ids:[…] }
 // RBAC: GET leads.view, POST leads.update. Fouten → { error, code }.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { maakCampagne, verwerkWachtrij, herteltCampagne, MassaFout, tabelOntbreekt, MIGRATIE } from './_lib/massa-mail.js';
+import { maakCampagne, verwerkWachtrij, herteltCampagne, tellingPerKanaal, massaWaTemplates, leesWaInstellingen, MassaFout, tabelOntbreekt, MIGRATIE } from './_lib/massa-mail.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CAMP_VELDEN = 'id, naam, kanaal, soort, onderwerp, portie, status, aantal, aantal_verstuurd, aantal_mislukt, aantal_overgeslagen, aangemaakt_op, gestart_op, klaar_op';
+// select('*') + html eruit: de wa_*-kolommen bestaan pas na de 2b-migratie.
+const zonderHtml = (c) => { if (!c) return c; const { html, ...rest } = c; return rest; };
 const migratieNodig = (res) => res.status(409).json({ error: `De massa-tabellen bestaan nog niet — draai ${MIGRATIE}.`, code: 'MIGRATIE_NODIG' });
 
 export default async function handler(req, res) {
@@ -34,29 +37,36 @@ export default async function handler(req, res) {
       if (!(await requirePermission(req, 'leads.view'))) return res.status(403).json({ error: 'Geen rechten (leads.view)' });
       const id = String(req.query?.id || '');
       const leadId = String(req.query?.lead_id || '');
+      if (req.query?.wa_templates) {
+        const t = await massaWaTemplates();
+        if (!t.ok) return res.status(200).json({ ok: false, reden: t.reden, melding: t.melding, templates: [] });
+        const inst = await leesWaInstellingen(supabaseAdmin);
+        return res.status(200).json({ ...t, wa_portie: inst.portie, wa_dag_max: inst.dag_max });
+      }
       if (leadId) {
         if (!UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id ongeldig' });
         const { data, error } = await supabaseAdmin.from('massa_items')
-          .select('campagne_id, status, reden, verzonden_op, massa_campagnes(naam)')
+          .select('campagne_id, kanaal, status, reden, verzonden_op, massa_campagnes(naam)')
           .eq('lead_id', leadId).order('aangemaakt_op', { ascending: false }).limit(50);
         if (error) { if (tabelOntbreekt(error)) return res.status(200).json({ historie: [], tabel_ontbreekt: true }); throw error; }
         return res.status(200).json({
-          historie: (data || []).map((r) => ({ campagne_id: r.campagne_id, naam: r.massa_campagnes?.naam || null, status: r.status, reden: r.reden, verzonden_op: r.verzonden_op })),
+          historie: (data || []).map((r) => ({ campagne_id: r.campagne_id, naam: r.massa_campagnes?.naam || null, kanaal: r.kanaal || 'email', status: r.status, reden: r.reden, verzonden_op: r.verzonden_op })),
         });
       }
       if (id) {
         if (!UUID_RE.test(id)) return res.status(400).json({ error: 'id ongeldig' });
-        const { data: c, error } = await supabaseAdmin.from('massa_campagnes').select(CAMP_VELDEN).eq('id', id).maybeSingle();
+        const { data: c, error } = await supabaseAdmin.from('massa_campagnes').select('*').eq('id', id).maybeSingle();
         if (error) { if (tabelOntbreekt(error)) return migratieNodig(res); throw error; }
         if (!c) return res.status(404).json({ error: 'Campagne niet gevonden' });
         const stand = await herteltCampagne(supabaseAdmin, id);
-        const { data: mislukt } = await supabaseAdmin.from('massa_items').select('email, fout, reden, status')
+        const perKanaal = await tellingPerKanaal(supabaseAdmin, id);
+        const { data: mislukt } = await supabaseAdmin.from('massa_items').select('email, kanaal, fout, reden, status')
           .eq('campagne_id', id).in('status', ['failed']).limit(50);
-        return res.status(200).json({ campagne: { ...c, ...{ aantal_verstuurd: stand.sent, aantal_mislukt: stand.failed, aantal_overgeslagen: stand.skipped }, in_wachtrij: stand.queued, bezig: stand.sending, status: stand.klaar ? 'klaar' : c.status }, mislukt: mislukt || [] });
+        return res.status(200).json({ campagne: { ...zonderHtml(c), ...{ aantal_verstuurd: stand.sent, aantal_mislukt: stand.failed, aantal_overgeslagen: stand.skipped }, in_wachtrij: stand.queued, bezig: stand.sending, status: stand.klaar ? 'klaar' : c.status, per_kanaal: perKanaal }, mislukt: mislukt || [] });
       }
-      const { data, error } = await supabaseAdmin.from('massa_campagnes').select(CAMP_VELDEN).order('aangemaakt_op', { ascending: false }).limit(50);
+      const { data, error } = await supabaseAdmin.from('massa_campagnes').select('*').order('aangemaakt_op', { ascending: false }).limit(50);
       if (error) { if (tabelOntbreekt(error)) return res.status(200).json({ campagnes: [], tabel_ontbreekt: true }); throw error; }
-      return res.status(200).json({ campagnes: data || [] });
+      return res.status(200).json({ campagnes: (data || []).map(zonderHtml) });
     }
 
     if (req.method !== 'POST') return res.status(405).json({ error: 'GET of POST' });
