@@ -33,7 +33,8 @@ const omgeving = {
     TPL,
     { ...TPL, name: 'followup_2_druk', category: 'UTILITY', aantal_vars: 1, body: 'Hey {{1}}' },
     { ...TPL, name: 'aanmaning_dag7', category: 'MARKETING' },
-    { ...TPL, name: 'drie_vars', body: '{{1}} {{2}} {{3}}', aantal_vars: 3 },
+    { ...TPL, name: 'massa_drie_vars', body: '{{1}} {{2}} {{3}}', aantal_vars: 3 },
+    { ...TPL, name: 'agenda_doorsturen_v1', aantal_vars: 1, body: 'Hoi {{1}}' },
     { ...TPL, name: 'met_foto', header_format: 'IMAGE' },
   ] }),
 };
@@ -131,7 +132,7 @@ test('planWhatsApp + waarden + valideerCampagne', () => {
 test('massaWaTemplates: guard op lijn en WABA, alleen MARKETING lead-templates', async () => {
   const r = await M.massaWaTemplates();
   assert.equal(r.ok, true);
-  assert.deepEqual(r.templates.map((t) => [t.name, t.bruikbaar]), [['massa_heropenen', true], ['drie_vars', false]], 'UTILITY, aanmaning en media-kop eruit; 3 variabelen niet bruikbaar');
+  assert.deepEqual(r.templates.map((t) => [t.name, t.bruikbaar]), [['massa_heropenen', true], ['massa_drie_vars', false]], 'UTILITY, aanmaning, media-kop en niet-massa_-namen (agenda) eruit; 3 variabelen niet bruikbaar');
   omgeving.lijn = '999';
   assert.equal((await M.massaWaTemplates()).reden, 'VERKEERDE_LIJN');
   omgeving.lijn = NUMMER;
@@ -185,7 +186,8 @@ test('maakCampagne "beide": per lead de juiste items, aantallen per kanaal, voor
 test('maakCampagne WhatsApp: template-checks, {{2}} verplicht, e-mail-only ongewijzigd (geen wa-kolommen)', async () => {
   const db = campDb();
   await assert.rejects(M.maakCampagne(db, { ...CAMP, wa_template: 'followup_2_druk', lead_ids: IDS }), (e) => e.code === 'WA_TEMPLATE_ONBEKEND', 'UTILITY mag niet voor massa');
-  await assert.rejects(M.maakCampagne(db, { ...CAMP, wa_template: 'drie_vars', lead_ids: IDS }), (e) => e.code === 'WA_TEMPLATE_TE_VEEL_VARS');
+  await assert.rejects(M.maakCampagne(db, { ...CAMP, wa_template: 'massa_drie_vars', lead_ids: IDS }), (e) => e.code === 'WA_TEMPLATE_TE_VEEL_VARS');
+  await assert.rejects(M.maakCampagne(db, { ...CAMP, wa_template: 'agenda_doorsturen_v1', lead_ids: IDS }), (e) => e.code === 'WA_TEMPLATE_ONBEKEND', 'MARKETING maar geen massa_-template');
   await assert.rejects(M.maakCampagne(db, { ...CAMP, wa_param2: '', lead_ids: IDS }), (e) => e.code === 'WA_PARAM_LEEG');
   omgeving.lijn = '999';
   await assert.rejects(M.maakCampagne(db, { ...CAMP, lead_ids: IDS }), (e) => e.code === 'WA_GUARD' && e.status === 503);

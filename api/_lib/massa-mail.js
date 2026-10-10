@@ -415,6 +415,7 @@ async function boekingslinkVoor(sb, traject, cache) {
 export const MASSA_WA_NUMMER = '1273723375834177';
 export const MASSA_WA_WABA = '2579784712469452';
 export const MASSA_WA_MAX_VARS = 2;
+export const MASSA_WA_PREFIX = 'massa_';
 export const STANDAARD_WA_INSTELLINGEN = Object.freeze({ portie: 20, dag_max: 100, pauze_ms: 3000, stille_uren: true });
 
 /** Voornaam voor {{1}}; Meta weigert een lege parameter. PURE. */
@@ -428,8 +429,10 @@ export function waWaardenVoor(lead, param2, aantalVars) {
 
 /**
  * Health-check-guard + de templates die voor massa mogen: ECHT goedgekeurd op
- * de lead-WABA (live bij 360dialog), categorie MARKETING, voor leads bedoeld,
- * zonder media-kop, max 2 variabelen.
+ * de lead-WABA (live bij 360dialog), categorie MARKETING, naam begint met
+ * 'massa_' (Meta zet ook gewone agenda/sessie/toegang-templates op MARKETING;
+ * daar betekent {{1}}/{{2}} iets anders dan voornaam/campagnetekst), voor leads
+ * bedoeld, zonder media-kop, max 2 variabelen.
  * -> { ok:true, templates, waba_id, nummer } | { ok:false, reden, melding }
  */
 export async function massaWaTemplates() {
@@ -443,7 +446,7 @@ export async function massaWaTemplates() {
     return { ok: false, reden: 'VERKEERDE_WABA', melding: `De sleutel van de lead-lijn hoort bij WABA ${live.waba_id || 'onbekend'}, niet ${MASSA_WA_WABA} — massa-WhatsApp staat uit.` };
   }
   const templates = (live.templates || [])
-    .filter((t) => String(t.category || '').toUpperCase() === 'MARKETING' && isLeadTemplate(t.name) && waVerstuurbaar(t).ok)
+    .filter((t) => String(t.category || '').toUpperCase() === 'MARKETING' && String(t.name || '').startsWith(MASSA_WA_PREFIX) && isLeadTemplate(t.name) && waVerstuurbaar(t).ok)
     .map((t) => ({ name: t.name, language: t.language, body: t.body, footer: t.footer || null, knoppen: t.knoppen || [], aantal_vars: t.aantal_vars, bruikbaar: t.aantal_vars <= MASSA_WA_MAX_VARS }));
   return { ok: true, templates, waba_id: live.waba_id, nummer: lijn.phoneNumberId };
 }
