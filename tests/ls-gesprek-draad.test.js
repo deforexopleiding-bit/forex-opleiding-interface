@@ -149,7 +149,8 @@ test('view: draad-URL met lead_id + conversation_id (openen én poll), cache-bus
   assert.match(v, /const _threadUrl = _lsInbThreadUrl\(leadId, markParam\);/);
   assert.match(v, /const _pollUrl = _lsInbThreadUrl\(_lsInb\.thread\.leadId\);/);
   assert.equal((v.match(/leadsonderhoud-gesprek-berichten\?/g) || []).length, 1, 'één plek bouwt de URL');
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/leadsonderhoud-v2\.js\?v=67"/);
+  const versie = lees('modules/klanten-v2/index.html').match(/views\/leadsonderhoud-v2\.js\?v=(\d+)"/);
+  assert.ok(versie && Number(versie[1]) >= 67, 'cache-buster minstens v67');
   const code = lees('api/leadsonderhoud-gesprek-berichten.js').split('\n').filter((r) => !r.trim().startsWith('//')).join('\n');
   assert.doesNotMatch(code, /\.limit\(500\)/, 'geen ongesorteerde 500-opzoeking meer');
 });

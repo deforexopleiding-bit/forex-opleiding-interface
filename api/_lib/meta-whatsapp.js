@@ -248,29 +248,95 @@ const _templateCache = new Map();
 export async function templateStatusOpLijn(phoneNumberId, naam, taal = 'nl') {
   const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
   if (!nummer || nummer.provider !== '360dialog' || !apiKeyVan(nummer)) return null;
-  let entry = _templateCache.get(nummer.sleutel);
-  if (!entry || entry.tot < Date.now()) {
-    try {
-      const statusOp = new Map();
-      let pad = '/message_templates?limit=200';
-      for (let i = 0; i < 20 && pad; i++) {
-        const res = await d360Fetch(nummer, pad);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const j = await res.json();
-        for (const t of (j.waba_templates || j.data || [])) {
-          statusOp.set(`${t.name}|${t.language}`, String(t.status || '').toUpperCase());
-        }
-        const na = j.paging?.cursors?.after;
-        pad = j.paging?.next && na ? `/message_templates?limit=200&after=${encodeURIComponent(na)}` : null;
-      }
-      entry = { tot: Date.now() + TEMPLATE_CACHE_MS, statusOp };
-      _templateCache.set(nummer.sleutel, entry);
-    } catch (e) {
-      console.warn('[360dialog] templatelijst ophalen mislukt voor', nummer.sleutel, e?.message || e);
-      return 'ONBEKEND';
-    }
-  }
+  const entry = await laadTemplates(nummer);
+  if (!entry) return 'ONBEKEND';
   return entry.statusOp.get(`${naam}|${taal}`) || 'ONTBREEKT';
+}
+
+/** Templatelijst van een 360dialog-nummer (gecachet). null = niet op te halen. */
+async function laadTemplates(nummer) {
+  let entry = _templateCache.get(nummer.sleutel);
+  if (entry && entry.tot >= Date.now()) return entry;
+  try {
+    const statusOp = new Map();
+    const lijst = [];
+    let pad = '/message_templates?limit=200';
+    for (let i = 0; i < 20 && pad; i++) {
+      const res = await d360Fetch(nummer, pad);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      for (const t of (j.waba_templates || j.data || [])) {
+        statusOp.set(`${t.name}|${t.language}`, String(t.status || '').toUpperCase());
+        lijst.push(t);
+      }
+      const na = j.paging?.cursors?.after;
+      pad = j.paging?.next && na ? `/message_templates?limit=200&after=${encodeURIComponent(na)}` : null;
+    }
+    entry = { tot: Date.now() + TEMPLATE_CACHE_MS, statusOp, lijst };
+    _templateCache.set(nummer.sleutel, entry);
+    return entry;
+  } catch (e) {
+    console.warn('[360dialog] templatelijst ophalen mislukt voor', nummer.sleutel, e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * De ECHT goedgekeurde templates op de WABA van deze lijn (live bij 360dialog,
+ * 10 min gecachet) — niet de CRM-tabel, die nog de status van de oude WABA kan
+ * tonen. Alleen APPROVED, met de body-tekst en het aantal body-variabelen.
+ *
+ * @returns {Promise<{ ok: true, templates: Array } | { ok: false, reden: string }>}
+ *   reden 'GEEN_360_LIJN' (geen 360dialog-lijn met key) of 'LIJST_NIET_OP_TE_HALEN'.
+ */
+export async function goedgekeurdeTemplatesOpLijn(phoneNumberId) {
+  const nummer = await d360NummerVoorPhoneNumberId(phoneNumberId);
+  if (!nummer || nummer.provider !== '360dialog' || !apiKeyVan(nummer)) return { ok: false, reden: 'GEEN_360_LIJN' };
+  const entry = await laadTemplates(nummer);
+  if (!entry) return { ok: false, reden: 'LIJST_NIET_OP_TE_HALEN' };
+  const waba_id = await d360WabaId(nummer);
+  const templates = (entry.lijst || [])
+    .filter((t) => String(t.status || '').toUpperCase() === 'APPROVED')
+    .map((t) => {
+      const comps = Array.isArray(t.components) ? t.components : [];
+      const body = comps.find((c) => String(c.type).toUpperCase() === 'BODY');
+      const header = comps.find((c) => String(c.type).toUpperCase() === 'HEADER');
+      const footer = comps.find((c) => String(c.type).toUpperCase() === 'FOOTER');
+      const knoppen = comps.find((c) => String(c.type).toUpperCase() === 'BUTTONS');
+      const tekst = String(body?.text || '');
+      const posities = [...new Set((tekst.match(/\{\{(\d+)\}\}/g) || []).map((m) => Number(m.slice(2, -2))))].sort((a, b) => a - b);
+      return {
+        name: t.name,
+        language: t.language,
+        category: t.category || null,
+        body: tekst,
+        aantal_vars: posities.length ? Math.max(...posities) : 0,
+        header_format: header ? String(header.format || 'TEXT').toUpperCase() : null,
+        header_heeft_var: !!(header && /\{\{\d+\}\}/.test(String(header.text || ''))),
+        footer: footer ? String(footer.text || '') : null,
+        knoppen: Array.isArray(knoppen?.buttons) ? knoppen.buttons.map((b) => ({ type: b.type, text: b.text })) : [],
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true, templates, waba_id, nummer: nummer.sleutel };
+}
+
+// WABA-id per 360dialog-nummer (uit /health_status), per serverinstantie onthouden.
+// Alleen ter controle/weergave: "deze lijst komt van WABA X".
+const _wabaCache = new Map();
+async function d360WabaId(nummer) {
+  if (_wabaCache.has(nummer.sleutel)) return _wabaCache.get(nummer.sleutel);
+  try {
+    const res = await d360Fetch(nummer, '/health_status');
+    const j = res.ok ? await res.json().catch(() => null) : null;
+    const waba = (j?.health_status?.entities || []).find((e) => e.entity_type === 'WABA');
+    const id = waba?.id ? String(waba.id) : null;
+    if (id) _wabaCache.set(nummer.sleutel, id);
+    return id;
+  } catch (e) {
+    console.warn('[360dialog] WABA-id niet op te vragen voor', nummer.sleutel, e?.message || e);
+    return null;
+  }
 }
 
 /** Alleen voor tests: templatecache leegmaken. */

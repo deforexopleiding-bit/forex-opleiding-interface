@@ -1224,6 +1224,7 @@
             <div class="sv-card-head">${svg(I.warn)}Meer acties</div>
             <div class="sv-card-body">
               <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm" onclick="window.StuurBericht && window.StuurBericht.open('${esc(l.id || '')}')" title="1-op-1 een goedgekeurde WhatsApp-template of e-mail sturen — verschijnt in de gesprekkendraad">${svg(I.send || I.mail || I.chat, 'width:14px;height:14px')}Stuur bericht…</button>
                 ${l.verwijderd_op
                   ? `<button class="btn btn-sm" onclick="__leadAct2Open('restore')">${svg(I.repeat)}Herstel lead uit archief</button>`
                   : `<button class="btn btn-sm" onclick="__leadAct2Open('archive')">${svg(I.x || I.warn)}Archiveer lead</button>`
