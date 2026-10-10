@@ -13,13 +13,14 @@
 //     welkom@ (mailAfzender). Gelogd in email_replies met from=welkom@ en
 //     to=lead — precies wat de Gesprekken-draad als uitgaande mail toont.
 //
-// Geen massaverzending (fase 2).
+// Massaverzending (fase 2a) hergebruikt verstuurMail per ontvanger met
+// opts.massa (afmeldlink + List-Unsubscribe) — zie api/_lib/massa-mail.js.
 
 import { sendTemplate, templateStatusOpLijn, goedgekeurdeTemplatesOpLijn } from './meta-whatsapp.js';
 import { logOutboundWa } from './wa-outbound-log.js';
 import { sendEmailViaSmtp } from './send-email-core.js';
 import { haalLijn, mailAfzender } from './leadsonderhoud-gesprekken.js';
-import { renderLeadMail, htmlNaarTekst } from './mail-shell-lead.js';
+import { renderLeadMail, htmlNaarTekst, afmeldTekst } from './mail-shell-lead.js';
 
 export const E164_RE = /^\+[1-9]\d{7,14}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -228,7 +229,13 @@ export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', 
   return { ok: true, wamid, conversation_id: log?.conv_id || null, in_draad: !!log?.ok };
 }
 
-export async function verstuurMail(sb, { lead, onderwerp, html, boekingslink, userId = null }) {
+/**
+ * Eén e-mail aan een lead. opts.massa (fase 2a, massa-wachtrij):
+ *   { voorkeurenUrl, afmeldUrl } → afmeldregel onder de mail + List-Unsubscribe
+ *   (one-click) header; hergebruikt de SMTP-verbinding; berichten_log soort
+ *   'massa-mail'. De draad toont de mail (email_replies) zonder afmeldregel.
+ */
+export async function verstuurMail(sb, { lead, onderwerp, html, boekingslink, userId = null, massa = null }) {
   const naar = String(lead?.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(naar)) throw new LeadBerichtFout(409, 'GEEN_GELDIG_EMAIL', 'Deze lead heeft geen geldig e-mailadres.');
   const ruwOnderwerp = String(onderwerp || '').trim();
@@ -243,7 +250,16 @@ export async function verstuurMail(sb, { lead, onderwerp, html, boekingslink, us
   const bodyHtml = vulMailVariabelen(schoon, vars, { html: true });
   const tekst = htmlNaarTekst(bodyHtml) + '\n\n' + HANDTEKENING;
   const afzender = mailAfzender();
-  const r = await sendEmailViaSmtp({ fromMailbox: afzender, to: naar, subject, text: tekst, html: renderLeadMail({ bodyHtml }) });
+  const voorkeurenUrl = massa?.voorkeurenUrl || null;
+  const headers = massa?.afmeldUrl
+    ? { 'List-Unsubscribe': `<${massa.afmeldUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+    : null;
+  const r = await sendEmailViaSmtp({
+    fromMailbox: afzender, to: naar, subject,
+    text: tekst + afmeldTekst(voorkeurenUrl),
+    html: renderLeadMail({ bodyHtml, voorkeurenUrl }),
+    headers, hergebruik: !!massa,
+  });
   if (!r?.ok) {
     console.error('[lead-bericht] mail versturen mislukt', { lead: lead.id, code: r?.code, fout: r?.reason });
     if (r?.code === 'SMTP_NOT_CONFIGURED') throw new LeadBerichtFout(503, 'MAIL_NIET_GECONFIGUREERD', 'Afzender-mailbox niet geconfigureerd.');
@@ -259,9 +275,10 @@ export async function verstuurMail(sb, { lead, onderwerp, html, boekingslink, us
   if (erErr) console.error('[lead-bericht] email_replies (draad) mislukt:', erErr.message);
   // soort 'handmatig-antwoord': de draad slaat die in berichten_log over (de bubbel
   // komt al uit email_replies) — zelfde afspraak als leadsonderhoud-gesprek-mailantwoord.
+  // Massa: soort 'massa-mail' (de draad slaat die ook over).
   const { error: blErr } = await sb.from('berichten_log').insert({
-    lead_id: lead.id, soort: 'handmatig-antwoord', kanaal: 'mail', naar, traject: lead.traject || null,
-    agent: 'handmatig', status: 'verstuurd', verstuurd_op: nu, extern_id: r.messageId || null,
+    lead_id: lead.id, soort: massa ? 'massa-mail' : 'handmatig-antwoord', kanaal: 'mail', naar, traject: lead.traject || null,
+    agent: massa ? 'massa' : 'handmatig', status: 'verstuurd', verstuurd_op: nu, extern_id: r.messageId || null,
   });
   if (blErr) console.warn('[lead-bericht] berichten_log (mail) mislukt:', blErr.message);
   return { ok: true, messageId: r.messageId || null, in_draad: !erErr, onderwerp: subject };

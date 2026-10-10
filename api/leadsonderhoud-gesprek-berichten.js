@@ -156,6 +156,7 @@ export default async function handler(req, res) {
         .eq('kanaal', 'mail')
         .eq('status', 'verstuurd')
         .neq('soort', 'handmatig-antwoord') // die bubbel komt uit email_replies (met body)
+        .neq('soort', 'massa-mail')         // idem voor massamails (fase 2a)
         .ilike('naar', email)
         .order('verstuurd_op', { ascending: false })
         .limit(200);

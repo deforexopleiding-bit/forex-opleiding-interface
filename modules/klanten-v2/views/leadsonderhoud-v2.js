@@ -346,6 +346,28 @@
   /* ══════════════════════════════════════════════════════════════════
      TAB 2 — CONTACTEN (alle leads over alle trajecten)
      ══════════════════════════════════════════════════════════════════ */
+  // Massabericht (fase 2a): selectiemodus in Contacten. alles=true → "alles wat
+  // aan het filter voldoet" (de popup rekent dat zelf uit, ook boven de 500).
+  const _lsMsel = { aan: false, ids: new Set(), alles: false };
+  window.__lsSelToggle = () => { _lsMsel.aan = !_lsMsel.aan; if (!_lsMsel.aan) { _lsMsel.ids.clear(); _lsMsel.alles = false; } DFO.render(); };
+  window.__lsSelRij = (id, aan) => {
+    if (_lsMsel.alles) { _lsMsel.alles = false; for (const x of ((_live.contacten.data && _live.contacten.data.items) || [])) _lsMsel.ids.add(x.id); }
+    if (aan) _lsMsel.ids.add(id); else _lsMsel.ids.delete(id);
+    DFO.render();
+  };
+  window.__lsSelAlles = () => { _lsMsel.alles = true; _lsMsel.ids.clear(); DFO.render(); };
+  window.__lsSelWis = () => { _lsMsel.alles = false; _lsMsel.ids.clear(); DFO.render(); };
+  window.__lsMassa = () => {
+    if (!window.MassaBericht) { alert('Massabericht is niet geladen — ververs de pagina.'); return; }
+    const call = F('ls-call', 'all');
+    const handmatig = _lsMsel.aan && !_lsMsel.alles && _lsMsel.ids.size;
+    window.MassaBericht.open({
+      filter: { q: (F('ls-q', '') || '').trim(), traject: F('ls-traj', '') || '', kennismaking: call === 'ja' ? 'ooit' : (call === 'nee' ? 'geen' : '') },
+      leadIds: handmatig ? [..._lsMsel.ids] : [],
+      onKlaar: () => { _lsMsel.ids.clear(); _lsMsel.alles = false; _lsMsel.aan = false; DFO.render(); },
+    });
+  };
+
   function contactenView() {
     const q       = (F('ls-q', '') || '').trim();
     const traject = F('ls-traj', '') || '';
@@ -385,6 +407,7 @@
       ? `<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
           <thead>
             <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+              ${_lsMsel.aan ? '<th style="padding:8px 6px 8px 10px"></th>' : ''}
               <th style="padding:8px 10px">Naam</th>
               <th style="padding:8px 10px">Traject</th>
               <th style="padding:8px 10px">Warmte</th>
@@ -430,6 +453,7 @@
                 ? `<button class="btn btn-ghost btn-sm" onclick="window.StuurBericht && window.StuurBericht.open('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="1-op-1 WhatsApp-template of e-mail sturen">Bericht</button>`
                 : '';
               return `<tr style="border-bottom:1px solid var(--border)">
+                ${_lsMsel.aan ? `<td style="padding:8px 6px 8px 10px"><input type="checkbox" onclick="window.__lsSelRij('${idForBtn}', this.checked)" ${_lsMsel.alles || _lsMsel.ids.has(l.id) ? 'checked' : ''}></td>` : ''}
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>
                   <div style="color:var(--text-3);font-size:11px">${esc(l.email || '')}${l.telefoon ? ' · ' + esc(l.telefoon) : ''}</div>
@@ -470,8 +494,16 @@
           <button class="chip ${call === 'nee' ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="DFO.setF('ls-call','nee')">— nog niet</button>
         </div>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (total + ' leads')}</span>
+        <button class="btn btn-ghost btn-sm" onclick="window.__lsSelToggle()" style="font-size:12.5px" title="Vinkjes per rij om leads te kiezen voor een massabericht">${_lsMsel.aan ? 'Selectie uit' : 'Selecteren'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__lsMassa()" style="font-size:12.5px" title="E-mail aan een groep leads (uitgebreide filters, wachtrij, afmeldlink)">✉ Massabericht</button>
         <button class="btn btn-primary btn-sm" onclick="__lsNewLead()" style="font-size:12.5px;padding:6px 12px">+ Nieuwe lead</button>
-      </div>`;
+      </div>
+      ${_lsMsel.aan ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:-4px 0 12px;padding:8px 12px;border-radius:8px;background:var(--surface-2,#f6f8fa);font-size:12.5px">
+        <b>${_lsMsel.alles ? total + ' (alles wat aan het filter voldoet)' : _lsMsel.ids.size}</b> geselecteerd
+        ${!_lsMsel.alles ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsSelAlles()">Selecteer alle ${total} die aan het filter voldoen</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="window.__lsSelWis()">Wis selectie</button>
+        <button class="btn btn-primary btn-sm" onclick="window.__lsMassa()" ${_lsMsel.alles || _lsMsel.ids.size ? '' : 'disabled'}>Stuur massabericht</button>
+      </div>` : ''}`;
 
     return `${_lsExtModalHtml()}${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       ${toolbar}

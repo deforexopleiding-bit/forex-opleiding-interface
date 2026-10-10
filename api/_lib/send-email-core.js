@@ -36,6 +36,10 @@ const SMTP_PORT = 465;
  * @param {string|string[]} [opts.bcc]
  * @param {string} [opts.inReplyTo]   Message-ID van de bronmail (threading).
  * @param {string} [opts.references]  Idem; default gelijk aan inReplyTo.
+ * @param {object} [opts.headers]     Extra mailheaders (bv. List-Unsubscribe bij massamail).
+ * @param {boolean} [opts.hergebruik] Eén SMTP-verbinding per mailbox hergebruiken
+ *                                    (pool) i.p.v. per mail opnieuw inloggen — voor
+ *                                    de massa-wachtrij. Sluit af met sluitSmtpPools().
  * @returns {Promise<{ ok:true, messageId:string, accepted:string[] } |
  *                    { ok:false, reason:string, code?:string }>}
  */
@@ -50,6 +54,8 @@ export async function sendEmailViaSmtp({
   inReplyTo = null,
   references = null,
   handtekening = false, // opt-in: voeg de vaste handtekening (HTML+tekst) toe
+  headers   = null,
+  hergebruik = false,
 } = {}) {
   const mailbox = String(fromMailbox || '').toLowerCase();
   if (!mailbox || !SMTP_ACCOUNTS[mailbox]) {
@@ -67,11 +73,20 @@ export async function sendEmailViaSmtp({
 
   let transporter;
   try {
-    transporter = nodemailer.createTransport({
+    const opties = {
       host: SMTP_HOST, port: SMTP_PORT, secure: true,
       auth: { user: mailbox, pass: password },
       connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
-    });
+    };
+    if (hergebruik) {
+      transporter = POOLS.get(mailbox);
+      if (!transporter) {
+        transporter = nodemailer.createTransport({ ...opties, pool: true, maxConnections: 1, maxMessages: 100 });
+        POOLS.set(mailbox, transporter);
+      }
+    } else {
+      transporter = nodemailer.createTransport(opties);
+    }
   } catch (e) {
     return { ok: false, reason: 'transport-init: ' + (e?.message || e), code: 'TRANSPORT_INIT' };
   }
@@ -95,6 +110,7 @@ export async function sendEmailViaSmtp({
       replyTo: mailbox,
     };
     if (bodyHtml) mailOpts.html = bodyHtml;
+    if (headers && typeof headers === 'object') mailOpts.headers = headers;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
     // Threading: Gmail/Outlook groeperen het antwoord onder het origineel.
@@ -110,3 +126,14 @@ export async function sendEmailViaSmtp({
 }
 
 export const SMTP_MAILBOXES = Object.keys(SMTP_ACCOUNTS);
+
+// Gedeelde SMTP-verbindingen (alleen bij hergebruik:true).
+const POOLS = new Map();
+
+/** Sluit de hergebruikte SMTP-verbindingen (einde van een massa-run). */
+export function sluitSmtpPools() {
+  for (const [mailbox, t] of POOLS) {
+    try { t.close(); } catch (e) { console.warn('[send-email-core] pool sluiten (soft):', mailbox, e?.message || e); }
+  }
+  POOLS.clear();
+}
