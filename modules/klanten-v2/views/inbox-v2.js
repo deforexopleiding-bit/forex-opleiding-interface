@@ -1053,6 +1053,7 @@
   window.__ibCat = (v) => DFO.setF('cat', String(v || 'alles'));
 
   /* ── VIEW ─────────────────────────────────────────────────────────── */
+  const _zoekGezaaid = new Set();
   function inboxView() {
     // Pre-src hint uit sessionStorage (zie Onboarding "Inbox is verhuisd"-tab).
     _applyPreSrcHint();
@@ -1060,6 +1061,18 @@
     if (!_live.fetched && !_live.loading) {
       queueMicrotask(() => fetchInboxBundle());
     }
+
+    // Zoekveld (2026-10-11): gedeelde stableSearch — het <input> blijft over
+    // renders heen staan (eerder: oninput → DFO.render() → this.focus() op een
+    // losgekoppeld element → cursor na elke toets weg). Gedebounced filteren.
+    const qSleutel = DFO.key() + '::q';
+    const zoekKey = 'inbox-q::' + DFO.key();
+    if (!_zoekGezaaid.has(zoekKey)) { _zoekGezaaid.add(zoekKey); if (F('q', '')) H.setSearchValue(zoekKey, F('q', '')); }
+    H.onSearch(zoekKey, (val) => {
+      if ((DFO.S.filters[qSleutel] || '') === (val || '')) return;
+      DFO.S.filters[qSleutel] = val || '';
+      DFO.render();
+    }, { debounceMs: 150 });
 
     const totaal = IB_SRC.reduce((a, x) => a + (srcCount(x[0]) || 0), 0);
     const rows = currentRows();
@@ -1069,6 +1082,12 @@
     const naNieuw = flOnlyNw ? filtered.filter(r => r.nw) : filtered;
     const srcInfo = IB_SRC.find(x => x[0] === ibSrc) || IB_SRC[0];
     const [, srcName, srcIc, srcCol, srcKind, srcMod] = srcInfo;
+    // Het zoek-<input> blijft bestaan bij een bronwissel: placeholder bijwerken
+    // zodra de render (en het terughangen van het input) klaar is.
+    queueMicrotask(() => {
+      const i = document.querySelector('.kv-search-mount[data-search-key="' + zoekKey + '"] .kv-search-input');
+      if (i) i.placeholder = 'Zoek in ' + srcName + '…';
+    });
     // Categorie-filter (2026-10-07) — alleen bij de WhatsApp-bronnen.
     const IC = window.INBOX_CATEGORIE;
     const metCat = !!IC && srcKind === 'wa' && naNieuw.some(r => r.categorie);
@@ -1111,9 +1130,7 @@
 
       <div class="ib-list">
         <div class="ib-top">
-          <div class="tb-search" style="width:100%">${svg('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>')}
-            <input placeholder="Zoek in ${srcName}…" value="${(F('q','') || '').replace(/"/g, '&quot;')}"
-              oninput="S.filters[DFO.key()+'::q']=this.value;DFO.render();this.focus();this.setSelectionRange(this.value.length,this.value.length)"></div>
+          ${H.stableSearch(zoekKey, 'Zoek in ' + srcName + '…').replace('class="kv-search-mount"', 'class="kv-search-mount" style="display:flex;width:100%"')}
           <div style="display:flex;gap:6px;margin-top:9px;align-items:center">
             <button class="chip ${!flOnlyNw ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="DFO.setF('fl','all')">Alles</button>
             <button class="chip ${flOnlyNw ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="DFO.setF('fl','nw')">Nieuw</button>
