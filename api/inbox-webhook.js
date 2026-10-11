@@ -36,6 +36,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
+import { beoordeelToegangGate, GATE_AANVRAAG_VELDEN } from './_lib/toegang-gate-besluit.js';
 import { markeerAfspraakBevestigd } from './_lib/afspraak-bevestig.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { vindOfHechtGesprek } from './_lib/wa-gesprek-lijn.js';
@@ -1446,13 +1447,29 @@ export async function verwerkWhatsAppWebhookBody(req, body, ctx = {}) {
                 } else {
                   const { data: rows } = await supabaseAdmin
                     .from('toegang_aanvragen')
-                    .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
+                    .select(GATE_AANVRAAG_VELDEN)
                     .eq('status', 'wachtend')
                     .eq('telefoon_last9', last9)
                     .order('created_at', { ascending: true })
                     .order('id', { ascending: true })
                     .limit(50);
                   kandidaten = rows || [];
+                }
+                // 2026-10-11: hoort dit bericht ECHT bij het toegangsbericht?
+                // Reply-context (msg.context.id) → alleen een antwoord óp een
+                // toegangsbericht telt; zonder context een venster na het laatste
+                // toegangsbericht en geen later ander template (bv. massa-WhatsApp).
+                // Nee → niets doen (geen claim, geen zusterrijen, geen provisioning).
+                if (kandidaten.length) {
+                  const besluit = await beoordeelToegangGate(supabaseAdmin, {
+                    aanvraag: kandidaten[0], contextWamid: msg.context?.id || null, convId: conv?.id || null,
+                  });
+                  traceEvents.push({ ...traceBase, stage: 'gate-besluit', match_id: kandidaten[0].id,
+                    ok: besluit.ok, reden: besluit.reden, context_wamid: msg.context?.id || null,
+                    context_template: besluit.context_template || null, later_template: besluit.later_template || null,
+                  });
+                  console.log('[inbox-webhook] toegang-gate besluit:', besluit.ok ? 'JA' : 'NEE', besluit.reden, 'aanvraag=', kandidaten[0].id);
+                  if (!besluit.ok) { kandidaten = []; matchStrategy += '+besluit_nee'; }
                 }
                 // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
                 // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE
