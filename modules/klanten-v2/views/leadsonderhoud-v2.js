@@ -83,7 +83,9 @@
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
     funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
-    emails:         { loading: false, fetched: false, error: null, data: null, _seq: 0, filter: 'alle', mailbox: 'alle' },
+    emails:         { loading: false, fetched: false, error: null, data: null, _seq: 0, filter: 'alle', mailbox: 'alle',
+                      // 2026-10-11: lead-mailsjablonen (mailbouwer / Stuur bericht / Massabericht).
+                      leadSj: [], leadSjFout: null },
     emailPreview:   { open: false, naam: '', html: '' },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
@@ -4566,6 +4568,15 @@
     st.loading = true; st.error = null;
     const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
+    // Lead-mailsjablonen via EXACT dezelfde GET als de "Stuur bericht"-popup en
+    // Massabericht (/api/lead-mail-sjablonen) — los fail-soft: een fout daar
+    // laat de rest van het overzicht staan.
+    const leadSjP = window.KV.authedJson('/api/lead-mail-sjablonen').then(
+      (j) => ({ lijst: Array.isArray(j && j.sjablonen) ? j.sjablonen : [], fout: null }),
+      (e) => {
+        console.error('[ls-v2] lead-mailsjablonen fetch fail:', e?.status, e?.body || e?.message);
+        return { lijst: [], fout: (e && e.body && e.body.code === 'MIGRATIE_NODIG') ? 'De sjablonen-tabel bestaat nog niet (migratie 2026-10-09-lead-mail-sjablonen.sql).' : 'Kon de lead-mailsjablonen niet laden.' };
+      });
     try {
       const j = await window.KV.authedJson('/api/email-overzicht');
       if (seq !== st._seq) return;
@@ -4576,15 +4587,42 @@
       st.error = 'Kon e-mailoverzicht niet laden' + status;
       console.error('[ls-v2] emails fetch fail:', e?.status, e?.body || e?.message);
     }
+    const ls = await leadSjP;
+    if (seq !== st._seq) return;
+    st.leadSj = ls.lijst; st.leadSjFout = ls.fout;
     st.loading = false; st.fetched = true;
     if (window.DFO?.render) window.DFO.render();
   }
   window._lsSetEmailFilter  = function (f) { _live.emails.filter = f; if (window.DFO?.render) window.DFO.render(); };
   window._lsSetEmailMailbox = function (sel) { _live.emails.mailbox = String(sel.value || 'alle'); if (window.DFO?.render) window.DFO.render(); };
+  // Lead-mailsjablonen als overzichtsrij. Preview = de echte verzonden vorm
+  // (huisstijl-shell rond de opgeslagen, door de server gecompileerde html).
+  function _lsLeadSjRij(s) {
+    const shell = window.MailHuisstijl && window.MailHuisstijl.renderLeadMail;
+    let preview = s.html || '';
+    try { if (shell && preview) preview = shell({ bodyHtml: preview }); } catch (_) { /* kale html als voorbeeld */ }
+    return {
+      id: s.id, naam: s.naam, subject: s.onderwerp || null,
+      categorie: 'lead-mails', doel: Array.isArray(s.blokken) && s.blokken.length ? 'Mailbouwer' : 'Los sjabloon',
+      mailbox: 'welkom@ (per verzending)', bron: 'lead_mail_sjablonen', bewerkbaar: true, actief: true,
+      trigger: 'Stuur bericht (1-op-1) · Massabericht', preview_html: preview,
+    };
+  }
   function _lsAlleEmailRijen() {
     const c = (_live.emails.data && _live.emails.data.categories) || {};
-    return [].concat(c.email_templates || [], c.onderhoud_sjablonen || [], c.code || []);
+    return [].concat((_live.emails.leadSj || []).map(_lsLeadSjRij), c.email_templates || [], c.onderhoud_sjablonen || [], c.code || []);
   }
+  // Nieuw / Bewerk: dezelfde mailbouwer + opslag (/api/lead-mail-sjablonen) als
+  // in de "Stuur bericht"-popup. Na opslaan de lijst verversen.
+  function _lsOpenBouwer(sjabloon) {
+    if (!window.MailBouwer) { window.KV.toast('De mailbouwer is niet geladen — ververs de pagina.', 'warn'); return; }
+    window.MailBouwer.open({ sjabloon: sjabloon || {}, onOpgeslagen: () => fetchEmails(true) });
+  }
+  window._lsLeadSjNieuw  = function () { _lsOpenBouwer({}); };
+  window._lsLeadSjBewerk = function (id) {
+    const s = (_live.emails.leadSj || []).find((x) => String(x.id) === String(id));
+    if (s) _lsOpenBouwer(s);
+  };
   window._lsEmailPreview = function (bron, id) {
     const row = _lsAlleEmailRijen().find((r) => r.bron === bron && String(r.id) === String(id));
     if (!row) return;
@@ -4594,6 +4632,7 @@
   window._lsCloseEmailPreview = function () { _live.emailPreview = { open: false, naam: '', html: '' }; if (window.DFO?.render) window.DFO.render(); };
   window._lsEmailBewerk = function () { if (window.DFO?.goMod) window.DFO.goMod('instellingen'); };
   function _lsEmailBronBadge(bron) {
+    if (bron === 'lead_mail_sjablonen') return '<span style="background:var(--amber-soft, rgba(255,194,26,.18));color:var(--amber, #a86b00);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · lead-mails</span>';
     if (bron === 'email_templates') return '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · email_templates</span>';
     if (bron === 'onderhoud_sjablonen') return '<span style="background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · sjablonen</span>';
     return '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Code</span>';
@@ -4609,7 +4648,7 @@
     if (st.mailbox !== 'alle') rows = rows.filter((r) => r.mailbox === st.mailbox);
 
     // Categorie-chips uit de response (functionele categorieën) + tellingen.
-    const catLabels = (_live.emails.data && _live.emails.data.categorie_labels) || {};
+    const catLabels = { 'lead-mails': 'Lead-mails', ...((_live.emails.data && _live.emails.data.categorie_labels) || {}) };
     const alleRijen = _lsAlleEmailRijen();
     const catCount = (v) => v === 'alle' ? alleRijen.length : alleRijen.filter((r) => r.categorie === v).length;
     const catChip = (v, l) => `<button class="chip ${st.filter === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetEmailFilter('${v}')">${esc(l)} <span style="opacity:.7">(${catCount(v)})</span></button>`;
@@ -4623,7 +4662,9 @@
       const previewBtn = r.preview_html
         ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsEmailPreview('${esc(r.bron)}','${esc(String(r.id))}')">Preview</button>`
         : '';
-      const bewerkBtn = r.bron === 'email_templates'
+      const bewerkBtn = r.bron === 'lead_mail_sjablonen'
+        ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--brand)" title="Bewerk in de mailbouwer" onclick="window._lsLeadSjBewerk('${esc(String(r.id))}')">Bewerk ✎</button>`
+        : r.bron === 'email_templates'
         ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--brand)" title="Bewerk in Instellingen → E-mailtemplates" onclick="window._lsEmailBewerk()">Bewerk ↗</button>`
         : '';
       const codeBestand = r.bestand ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(r.bestand)}</div>` : '';
@@ -4658,7 +4699,9 @@
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Categorie</span>
         ${catChip('alle', 'Alles')}${Object.keys(catLabels).map((k) => catChip(k, catLabels[k])).join('')}
         <select onchange="window._lsSetEmailMailbox(this)" style="padding:5px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;margin-left:auto">${mailboxOpts}</select>
+        <button class="btn btn-primary btn-sm" style="font-size:12.5px;padding:6px 12px" onclick="window._lsLeadSjNieuw()" title="Nieuw sjabloon in de mailbouwer — daarna te kiezen bij Stuur bericht en Massabericht">+ Nieuw e-mailsjabloon</button>
       </div>
+      ${st.leadSjFout ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.leadSjFout)}</div>` : ''}
       ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
@@ -4669,7 +4712,7 @@
           <tbody>${body}</tbody>
         </table></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">DB-templates (email_templates) zijn bewerkbaar via Instellingen → E-mailtemplates. onderhoud_sjablonen (toelating/afwijzing) worden op dfo-website beheerd — hier alleen preview. Code-mails zijn hardcoded (bestand vermeld).</div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Lead-mails (lead_mail_sjablonen) maak en bewerk je hier in de mailbouwer; ze zijn te kiezen bij Stuur bericht en Massabericht. DB-templates (email_templates) zijn de compose-sjablonen van de E-mail-module, bewerkbaar via Instellingen → E-mailtemplates. onderhoud_sjablonen (toelating/afwijzing) worden op dfo-website beheerd — hier alleen preview. Code-mails zijn hardcoded (bestand vermeld).</div>
       ${previewModal}
     </div>`;
   }

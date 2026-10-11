@@ -265,6 +265,9 @@
       st.data = j;
       if (!st.naam) st.naam = j.lead.naam;
       if (!j.lead.geldig_telefoon && j.lead.geldig_email) st.tab = 'mail';
+      // Opent de popup meteen op E-mail (geen geldig nummer), dan ook meteen de
+      // sjablonen laden — anders bleef "sjabloon laden" leeg tot een tabklik.
+      if (st.tab !== 'whatsapp') laadSjablonen(false);
     } catch (e) {
       if (!st) return;
       console.error('[stuur-bericht] laden mislukt:', e && e.status, e && (e.body || e.message));
