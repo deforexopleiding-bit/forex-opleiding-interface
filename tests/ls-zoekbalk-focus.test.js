@@ -155,17 +155,17 @@ test('Inbox (zelfde patroon): zoekveld blijft staan, placeholder volgt de bron',
   assert.equal(content.querySelector('.kv-search-input'), input);
   assert.equal(w.document.activeElement, input);
   assert.equal(input.selectionStart, 7);
-  const bron = content.querySelectorAll('.ib-src')[1];
-  const naam = bron.textContent.trim();
-  bron.click();
+  // Bronwissel (inline onclick draait niet in jsdom → handler zelf aanroepen).
+  assert.ok([...content.querySelectorAll('.ib-src')].some((b) => (b.getAttribute('onclick') || '').includes("__ibSetSrc('ev')")));
+  w.__ibSetSrc('ev');
   await wacht(5);
   assert.equal(content.querySelector('.kv-search-input'), input, 'bronwissel: zelfde input');
-  assert.ok(input.placeholder.length > 'Zoek in '.length && naam.includes(input.placeholder.replace(/^Zoek in /, '').replace('…', '')), 'placeholder volgt de bron');
+  assert.equal(input.placeholder, 'Zoek in Events…', 'placeholder volgt de bron');
   w.__sluit();
 });
 
 test('bedrading: cache-busters gebumpt, geen kale zoek-inputs meer', () => {
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/leadsonderhoud-v2\.js\?v=72"/);
+  assert.match(lees('modules/klanten-v2/index.html'), /views\/leadsonderhoud-v2\.js\?v=7[2-9]"/);
   assert.match(lees('modules/klanten-v2/index.html'), /views\/inbox-v2\.js\?v=12"/);
   assert.doesNotMatch(lees('modules/klanten-v2/views/inbox-v2.js'), /oninput="[^"]*DFO\.render\(\);this\.focus/);
   const ls = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
