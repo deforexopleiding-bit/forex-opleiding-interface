@@ -21,6 +21,7 @@ import { logOutboundWa } from './wa-outbound-log.js';
 import { sendEmailViaSmtp } from './send-email-core.js';
 import { haalLijn, mailAfzender } from './leadsonderhoud-gesprekken.js';
 import { renderLeadMail, htmlNaarTekst, afmeldTekst } from './mail-shell-lead.js';
+import { normaliseerBlokken, compileerBlokken } from '../../modules/shared/mail-blokken.js';
 
 export const E164_RE = /^\+[1-9]\d{7,14}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -235,12 +236,22 @@ export async function verstuurWaTemplate(sb, { lead, templateNaam, taal = 'nl', 
  *   (one-click) header; hergebruikt de SMTP-verbinding; berichten_log soort
  *   'massa-mail'. De draad toont de mail (email_replies) zonder afmeldregel.
  */
-export async function verstuurMail(sb, { lead, onderwerp, html, boekingslink, userId = null, massa = null }) {
+export async function verstuurMail(sb, { lead, onderwerp, html, blokken = null, boekingslink, userId = null, massa = null }) {
   const naar = String(lead?.email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(naar)) throw new LeadBerichtFout(409, 'GEEN_GELDIG_EMAIL', 'Deze lead heeft geen geldig e-mailadres.');
   const ruwOnderwerp = String(onderwerp || '').trim();
   if (!ruwOnderwerp) throw new LeadBerichtFout(400, 'ONDERWERP_LEEG', 'Onderwerp ontbreekt.');
-  const schoon = schoonHtml(html);
+  // Mailbouwer (2026-10-11): blokken → de server compileert ZELF naar tabel-HTML
+  // (de browser-HTML wordt voor blok-mails nooit vertrouwd). Anders de losse
+  // editor-HTML, opgeschoond zoals altijd.
+  let schoon;
+  if (Array.isArray(blokken) && blokken.length) {
+    const n = normaliseerBlokken(blokken);
+    if (n.fouten.length) throw new LeadBerichtFout(400, 'BLOKKEN_ONGELDIG', n.fouten.join(' '));
+    schoon = compileerBlokken(n.blokken);
+  } else {
+    schoon = schoonHtml(html);
+  }
   if (!htmlNaarTekst(schoon).trim()) throw new LeadBerichtFout(400, 'BERICHT_LEEG', 'Het bericht is leeg.');
   const onbekend = onbekendeVariabelen(ruwOnderwerp + ' ' + schoon);
   if (onbekend.length) throw new LeadBerichtFout(400, 'ONBEKENDE_VARIABELEN', `Onbekende variabele(n): ${onbekend.map((x) => '{{' + x + '}}').join(', ')}.`, { onbekend });

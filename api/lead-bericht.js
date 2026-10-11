@@ -85,7 +85,7 @@ export default async function handler(req, res) {
       }
       if (b.kanaal === 'mail') {
         const r = await verstuurMail(supabaseAdmin, {
-          lead, onderwerp: b.onderwerp, html: b.html, boekingslink, userId: user.id,
+          lead, onderwerp: b.onderwerp, html: b.html, blokken: Array.isArray(b.blokken) ? b.blokken : null, boekingslink, userId: user.id,
         });
         return res.status(200).json(r);
       }

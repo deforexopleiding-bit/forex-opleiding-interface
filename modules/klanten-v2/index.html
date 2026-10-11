@@ -190,8 +190,19 @@
        gebruikt door leads-v2 en leadsonderhoud-v2. Moet vóór die views staan. -->
   <script src="views/_inlog-opnieuw.js?v=1"></script>
   <!-- 2026-10-09 "Stuur bericht" (WhatsApp-template / e-mail, 1-op-1) — gedeeld door Leads + Contacten. -->
-  <script src="views/_stuur-bericht.js?v=1"></script>
-  <script src="views/_massa-bericht.js?v=2"></script>
+  <!-- Mailbouwer (2026-10-11): compiler + huisstijl = dezelfde bestanden als op de server
+       (api/_lib/lead-bericht.js e.a. importeren ze ook) → voorbeeld = verzonden mail.
+       Zonder ?v: mail-blokken.js importeert mail-huisstijl.js zelf, één module-instantie;
+       statische bestanden worden met must-revalidate geserveerd. -->
+  <script type="module">
+    import * as MailBlokken from "../shared/mail-blokken.js";
+    import * as MailHuisstijl from "../shared/mail-huisstijl.js";
+    window.MailBlokken = MailBlokken;
+    window.MailHuisstijl = MailHuisstijl;
+  </script>
+  <script src="views/_mail-bouwer.js?v=1"></script>
+  <script src="views/_stuur-bericht.js?v=2"></script>
+  <script src="views/_massa-bericht.js?v=3"></script>
   <!-- Inbox-categorie (2026-10-07): label + filterchips per gesprek, gedeeld door
        inbox-, wanbetalers-, events-, onboarding- en leadsonderhoud-v2. -->
   <script src="../shared/inbox-categorie.js?v=2"></script>

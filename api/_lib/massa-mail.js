@@ -36,11 +36,13 @@ import {
 import { goedgekeurdeTemplatesOpLijn } from './meta-whatsapp.js';
 import { haalLijn } from './leadsonderhoud-gesprekken.js';
 import { renderLeadMail, htmlNaarTekst } from './mail-shell-lead.js';
+import { normaliseerBlokken, compileerBlokken } from '../../modules/shared/mail-blokken.js';
 import { bepaalCategorieen } from './inbox-categorie.js';
 import { sluitSmtpPools } from './send-email-core.js';
 
 export const MIGRATIE = '2026-10-10-massa-mail-fase2a.sql';
 export const MIGRATIE_2B = '2026-10-11-massa-whatsapp-fase2b.sql';
+export const MIGRATIE_BOUWER = '2026-10-11-mail-bouwer.sql';
 export const WEBSITE_URL = String(process.env.WEBSITE_URL || 'https://www.deforexopleiding.nl').replace(/\/+$/, '');
 export const MASSA_SOORTEN = Object.freeze({
   tips: 'Tips & lessen over traden',
@@ -368,21 +370,31 @@ export function valideerCampagne(b = {}) {
   if (!KANALEN.includes(kanaal)) throw new MassaFout(400, 'KANAAL_ONGELDIG', 'Kies e-mail, WhatsApp of beide.');
   const metMail = kanaal !== 'whatsapp';
   const metWa = kanaal !== 'email';
-  const uit = { naam, kanaal, soort: null, onderwerp: null, html: null, portie: STANDAARD_PORTIE, sjabloon_id: null, wa: null };
+  const uit = { naam, kanaal, soort: null, onderwerp: null, html: null, blokken: null, portie: STANDAARD_PORTIE, sjabloon_id: null, wa: null };
   if (metMail) {
     const soort = String(b.soort || '');
     if (!MASSA_SOORTEN[soort]) throw new MassaFout(400, 'SOORT_ONGELDIG', 'Kies het soort mail (voor de voorkeuren van de ontvanger).');
     const onderwerp = String(b.onderwerp || '').trim();
     if (!onderwerp) throw new MassaFout(400, 'ONDERWERP_LEEG', 'Vul een onderwerp in.');
     if (onderwerp.length > 200) throw new MassaFout(400, 'ONDERWERP_TE_LANG', 'Het onderwerp is te lang (max 200 tekens).');
-    const html = schoonHtml(b.html);
+    // Mailbouwer (2026-10-11): blokken → de server compileert zelf naar tabel-HTML.
+    let html;
+    let blokken = null;
+    if (Array.isArray(b.blokken) && b.blokken.length) {
+      const n = normaliseerBlokken(b.blokken);
+      if (n.fouten.length) throw new MassaFout(400, 'BLOKKEN_ONGELDIG', n.fouten.join(' '));
+      blokken = n.blokken;
+      html = compileerBlokken(blokken);
+    } else {
+      html = schoonHtml(b.html);
+    }
     if (!htmlNaarTekst(html).trim()) throw new MassaFout(400, 'BERICHT_LEEG', 'Het bericht is leeg.');
-    if (html.length > 50000) throw new MassaFout(400, 'BERICHT_TE_LANG', 'Het bericht is te lang.');
-    const onbekend = onbekendeVariabelen(onderwerp + ' ' + html);
+    if (html.length > (blokken ? 200000 : 50000)) throw new MassaFout(400, 'BERICHT_TE_LANG', 'Het bericht is te lang.');
+    const onbekend = onbekendeVariabelen(onderwerp + ' ' + (blokken ? JSON.stringify(blokken) : html));
     if (onbekend.length) throw new MassaFout(400, 'ONBEKENDE_VARIABELEN', `Onbekende variabele(n): ${onbekend.map((x) => '{{' + x + '}}').join(', ')}.`);
     const p = Math.floor(Number(b.portie));
     Object.assign(uit, {
-      soort, onderwerp, html,
+      soort, onderwerp, html, blokken,
       portie: Number.isFinite(p) && p >= 1 ? Math.min(MAX_PORTIE, p) : STANDAARD_PORTIE,
       sjabloon_id: UUID_RE.test(String(b.sjabloon_id || '')) ? String(b.sjabloon_id) : null,
     });
@@ -558,9 +570,13 @@ export async function maakCampagne(sb, b, { start = false, userId = null, nu = n
     aantal_overgeslagen: samenvatting.aantal_overgeslagen - nietGevonden, aangemaakt_door: userId,
   };
   if (metMail) Object.assign(rij, { soort: v.soort, onderwerp: v.onderwerp, html: v.html, sjabloon_id: v.sjabloon_id });
+  if (metMail && v.blokken) rij.blokken = v.blokken; // alleen dan: zonder de bouwer-migratie werkt losse HTML gewoon
   if (metWa) Object.assign(rij, { wa_template: waTpl.name, wa_taal: waTpl.language, wa_param2: v.wa.param2 || null, wa_body: waTpl.body });
   const { data: camp, error: cErr } = await sb.from('massa_campagnes').insert(rij).select('id').single();
   if (cErr) {
+    if (v.blokken && (cErr.code === 'PGRST204' || cErr.code === '42703' || /blokken/i.test(cErr.message || ''))) {
+      throw new MassaFout(409, 'MIGRATIE_NODIG', `Mails uit de mailbouwer vragen eerst de migratie ${MIGRATIE_BOUWER}.`);
+    }
     if (metWa && (/wa_template|wa_param2|wa_body|wa_taal|kanaal_check|not-null|null value/i.test(cErr.message || '') || cErr.code === '23514' || cErr.code === '23502' || cErr.code === 'PGRST204')) {
       throw new MassaFout(409, 'MIGRATIE_NODIG', `WhatsApp-campagnes vragen eerst de migratie ${MIGRATIE_2B}.`);
     }
@@ -780,7 +796,8 @@ export async function verwerkWachtrij(sb, {
               eerste = false;
               const boekingslink = await boekingslinkVoor(sb, lead.traject, linkCache);
               const r = await verstuur(sb, {
-                lead: { ...lead, email }, onderwerp: c.onderwerp, html: c.html, boekingslink,
+                lead: { ...lead, email }, onderwerp: c.onderwerp, html: c.html,
+                blokken: Array.isArray(c.blokken) && c.blokken.length ? c.blokken : null, boekingslink,
                 userId: c.aangemaakt_door || null,
                 massa: { voorkeurenUrl: voorkeurenUrl(vk.token), afmeldUrl: afmeldUrl(vk.token), campagneId: c.id },
               });
