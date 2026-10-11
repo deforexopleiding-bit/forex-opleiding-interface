@@ -37,6 +37,24 @@
   const { I, svg, F } = window.DFO;
   const H = window.KV_V2.helpers;
   const asArr = (x) => Array.isArray(x) ? x : [];
+
+  // Zoekvelden (2026-10-11): de gedeelde stableSearch uit _shared-v2.js. Het
+  // <input> leeft buiten de view-HTML en wordt na elke DFO.render() teruggehangen
+  // — dus geen focus-/cursorverlies meer bij typen of bij een poll-render — en
+  // onChange loopt gedebounced. Eerder stond hier een kaal <input oninput=
+  // "…DFO.render();this.focus()">: na de innerHTML-swap was 'this' losgekoppeld,
+  // dus de cursor was na elke toets weg.
+  function zoekVeld(key, placeholder, stijl) {
+    return H.stableSearch(key, placeholder).replace('class="kv-search-mount"', `class="kv-search-mount" style="${stijl}"`);
+  }
+  // Begin-waarde één keer zaaien (daarna is het input de bron; opnieuw zetten
+  // per render zou getypte tekst binnen de debounce overschrijven).
+  const _lsZoekGezaaid = new Set();
+  function zaaiZoek(key, waarde) {
+    if (_lsZoekGezaaid.has(key)) return;
+    _lsZoekGezaaid.add(key);
+    if (waarde) H.setSearchValue(key, waarde);
+  }
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -370,6 +388,13 @@
   };
 
   function contactenView() {
+    const qSleutel = DFO.key() + '::ls-q';
+    zaaiZoek('ls-contacten', F('ls-q', '') || '');
+    H.onSearch('ls-contacten', (val) => {
+      if ((DFO.S.filters[qSleutel] || '') === (val || '')) return;
+      DFO.S.filters[qSleutel] = val || '';
+      DFO.render(); // nieuwe q → contactenView haalt de lijst opnieuw op
+    }, { debounceMs: 250 });
     const q       = (F('ls-q', '') || '').trim();
     const traject = F('ls-traj', '') || '';
     const call    = F('ls-call', 'all'); // 'all' | 'ja' | 'nee'
@@ -482,12 +507,9 @@
         ${trajectOpts.map(t => `<option value="${esc(t)}" ${currentTraj === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
       </select>`;
 
-    const searchQ = (F('ls-q','') || '').replace(/"/g, '&quot;');
     const toolbar = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <input placeholder="Zoek op naam of e-mail…" value="${searchQ}"
-          oninput="DFO.S.filters[DFO.key()+'::ls-q']=this.value;DFO.render();this.focus();this.setSelectionRange(this.value.length,this.value.length)"
-          style="flex:1;min-width:200px;padding:7px 11px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
+        ${zoekVeld('ls-contacten', 'Zoek op naam of e-mail…', 'flex:1 1 240px;min-width:200px')}
         ${trajFilterHtml}
         <div style="display:flex;gap:4px">
           <button class="chip ${call === 'all' ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="DFO.setF('ls-call','all')">Alle calls</button>
@@ -800,20 +822,13 @@
   // Zoek-setter: live tijdens typen. Rendert door en herstelt focus + caret
   // op #lsInbSearch zodat de gebruiker gewoon kan doortikken. Robuust ook
   // wanneer de 20s-poll tussendoor een render triggert.
+  // Sinds 2026-10-11 via stableSearch ('ls-gesprekken', zie zoekVeld): het
+  // input blijft staan, ook bij de 20s-poll. Deze setter blijft voor wie de
+  // zoekterm van buitenaf zet.
   window.__lsInbSetSearch = (v) => {
     _lsInb.search = String(v == null ? '' : v);
-    const active = document.activeElement;
-    const wasSearch = !!(active && active.id === 'lsInbSearch');
-    const caret = wasSearch ? active.selectionStart : null;
+    H.setSearchValue('ls-gesprekken', _lsInb.search);
     if (window.DFO?.render) window.DFO.render();
-    if (wasSearch) {
-      requestAnimationFrame(() => {
-        const el = document.getElementById('lsInbSearch');
-        if (!el) return;
-        el.focus();
-        try { const p = caret == null ? el.value.length : caret; el.setSelectionRange(p, p); } catch (_) { /* noop */ }
-      });
-    }
   };
 
   /* ── Modal-helpers (custom confirm — geen native window.confirm) ────── */
@@ -2145,6 +2160,12 @@
     const rowsAll = asArr(_lsInb.convs.items);
     // Zoekterm: naam OF telefoon. Digits-only-vergelijking op telefoon zodat
     // '06 44 64 24 95', '+31644642495' en '644642495' allemaal matchen.
+    zaaiZoek('ls-gesprekken', _lsInb.search || '');
+    H.onSearch('ls-gesprekken', (val) => {
+      if ((_lsInb.search || '') === (val || '')) return;
+      _lsInb.search = val || '';
+      if (window.DFO?.render) window.DFO.render();
+    }, { debounceMs: 150 });
     const q = String(_lsInb.search || '').trim().toLowerCase();
     const qDigits = q.replace(/\D/g, '');
     const rowsAfterSearch = !q ? rowsAll : rowsAll.filter(r => {
@@ -2202,12 +2223,7 @@
           <span>${rows.length}${rows.length !== rowsAll.length ? ' / ' + rowsAll.length : ''} leads</span>
         </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">
-          <input id="lsInbSearch" type="search" placeholder="Zoek op naam of telefoon…"
-                 value="${esc(_lsInb.search || '')}"
-                 oninput="window.__lsInbSetSearch(this.value)"
-                 autocomplete="off" spellcheck="false"
-                 style="flex:1;padding:5px 9px;font-size:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-1);outline:none">
-          ${_lsInb.search ? `<button type="button" onclick="window.__lsInbSetSearch('')" title="Wissen" style="background:none;border:none;color:var(--text-3);font-size:16px;cursor:pointer;padding:2px 6px;line-height:1">×</button>` : ''}
+          ${zoekVeld('ls-gesprekken', 'Zoek op naam of telefoon…', 'flex:1 1 auto;min-width:0')}
         </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:5px;flex-wrap:wrap">
           ${filterChip('all', 'Alle', rowsAfterCat.length)}
@@ -4107,7 +4123,7 @@
     }
   }
   window.__lsTplSetFilter = (v) => { _lsTplTab.filterCat = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
-  window.__lsTplSetSearch = (v) => { _lsTplTab.search    = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplSetSearch = (v) => { _lsTplTab.search    = String(v || ''); H.setSearchValue('ls-templates', _lsTplTab.search); if (window.DFO?.render) window.DFO.render(); };
   window.__lsTplToggleCat = (cat) => {
     if (!_lsTplTab.collapsedCats) _lsTplTab.collapsedCats = {};
     _lsTplTab.collapsedCats[cat] = !_lsTplTab.collapsedCats[cat];
@@ -4348,6 +4364,12 @@
     }
 
     // Overview
+    zaaiZoek('ls-templates', _lsTplTab.search || '');
+    H.onSearch('ls-templates', (val) => {
+      if ((_lsTplTab.search || '') === (val || '')) return;
+      _lsTplTab.search = val || '';
+      if (window.DFO?.render) window.DFO.render();
+    }, { debounceMs: 150 });
     const items = _lsTplTab.items || [];
     const cats  = _lsTplTab.categories || [];
     const filtered = items.filter((it) => {
@@ -4433,9 +4455,7 @@
         ${nieuweBtn}
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <input type="search" placeholder="Zoek in titel of tekst…" value="${esc(_lsTplTab.search)}"
-          oninput="window.__lsTplSetSearch(this.value)"
-          style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12.5px">
+        ${zoekVeld('ls-templates', 'Zoek in titel of tekst…', 'flex:1 1 240px;min-width:180px')}
         <div style="display:flex;gap:4px;flex-wrap:wrap">${chipAlle}${chipCats}</div>
       </div>
       ${_lsTplTab.loading && !items.length ? '<div style="padding:22px;text-align:center;color:var(--text-3)">Laden…</div>' : ''}
