@@ -84,14 +84,33 @@ test('compiler: tabellen + inline CSS, geen flex/grid/<style>, Outlook-kolommen'
   assert.match(html, /^<!-- dfo-mailbouwer v1 --><table role="presentation"/);
   assert.doesNotMatch(html, /display:\s*(flex|grid)|<style|class=/i, 'e-mailveilig');
   assert.match(html, /<h2 style="margin:0;font-family:Arial/);
-  assert.match(html, /<td align="center" bgcolor="#10284A"[^>]*>\s*<a href="\{\{boekingslink\}\}" target="_blank" style="display:inline-block;padding:13px 26px/, 'bulletproof knop in navy');
-  assert.match(html, new RegExp(`<img src="${IMG.replace(/[.?/]/g, '\\$&')}" alt="Grafiek" width="540"`));
+  assert.match(html, /<td align="center" valign="middle" bgcolor="#10284A" style="background-color:#10284A;border-radius:8px">\s*<a href="\{\{boekingslink\}\}" target="_blank" style="display:inline-block;min-width:\d+px;background-color:#10284A;border:1px solid #10284A;border-radius:8px;padding:13px 29px;[^"]*font-weight:700;[^"]*color:#ffffff/, 'bulletproof knop: gevuld vlak + padding + witte vette tekst');
+  assert.match(html, /<!--\[if mso\]><v:roundrect [^>]*href="\{\{boekingslink\}\}"[^>]*fillcolor="#10284A"><w:anchorlock\/><center style="color:#ffffff;[^"]*font-weight:bold">Plan een gesprek<\/center><\/v:roundrect><!\[endif\]-->/, 'VML-knop voor Outlook');
+  assert.match(html, /<!--\[if !mso\]><!-->[\s\S]*?<!--<!\[endif\]-->/, 'HTML-knop verborgen voor Outlook (geen dubbele knop)');
+  assert.match(html, new RegExp(`<img src="${IMG.replace(/[.?/]/g, '\\$&')}" alt="Grafiek" width="324" style="display:block;width:324px;max-width:100%;height:auto`), 'standaard Middel (60%), verhouding behouden');
   assert.match(html, /<!--\[if mso\]><table role="presentation" width="100%"[\s\S]*?<!\[endif\]-->/, 'Outlook-tabel voor de kolommen');
   assert.match(html, /display:inline-block;width:100%;max-width:270px/, 'kolommen stapelen op mobiel');
   assert.match(html, /border-top:1px solid #dfe5ec/);
   assert.match(html, /height:24px;font-size:0;line-height:0/);
   const goud = B.compileerBlokken([{ ...B.maakBlok('knop'), stijl: 'goud', url: 'https://x.nl' }]);
-  assert.match(goud, /bgcolor="#FFC21A"[\s\S]*color:#10284A/);
+  assert.match(goud, /fillcolor="#FFC21A"[\s\S]*bgcolor="#FFC21A"[\s\S]*background-color:#FFC21A;[\s\S]*color:#10284A/);
+});
+
+test('afbeelding: formaat klein/middel/volledig; oude sjablonen houden hun breedte', () => {
+  const img = (b) => B.compileerBlokken([{ soort: 'afbeelding', url: IMG, ...b }]).match(/<img [^>]*>/)[0];
+  assert.match(img({ formaat: 'klein' }), /width="189" style="display:block;width:189px;max-width:100%;height:auto/);
+  assert.match(img({ formaat: 'middel' }), /width="324"/);
+  assert.match(img({ formaat: 'volledig' }), /width="540" style="display:block;width:540px;max-width:100%/);
+  assert.match(img({ breedte: 100 }), /width="540"/, 'oud sjabloon (breedte 100%) blijft volledige breedte');
+  assert.match(img({ breedte: 50 }), /width="270"/);
+  assert.match(img({}), /width="540"/, 'zonder formaat en breedte: zoals vroeger volledig');
+  assert.match(img({ formaat: 'raar', breedte: 40 }), /width="216"/, 'onbekend formaat valt terug op breedte');
+  assert.match(img({ formaat: 'klein', uitlijning: 'right' }), /margin:0 0 0 auto/);
+  const n = B.normaliseerBlokken([{ soort: 'afbeelding', url: IMG, formaat: 'klein' }, { soort: 'afbeelding', url: IMG, breedte: 70 }]).blokken;
+  assert.equal(n[0].formaat, 'klein'); assert.equal(n[0].breedte, undefined);
+  assert.equal(n[1].formaat, undefined); assert.equal(n[1].breedte, 70);
+  assert.equal(B.maakBlok('afbeelding').formaat, 'middel');
+  assert.doesNotMatch(B.compileerBlokken(alleBlokken()), /width:100%;max-width:\d+px;height:auto/, 'geen width:100% op afbeeldingen (Outlook rekt die op)');
 });
 
 test('compiler: escaping en alleen veilige links/afbeeldingen', () => {

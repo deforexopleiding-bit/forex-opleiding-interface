@@ -15,7 +15,7 @@
   const knop = (t, url = '{{boekingslink}}', stijl = 'navy', uitlijning = 'center') => ({ soort: 'knop', tekst: t, url, stijl, uitlijning });
   const lijn = (kleur = 'grijs') => ({ soort: 'lijn', kleur });
   const ruimte = (hoogte = 16) => ({ soort: 'ruimte', hoogte });
-  const afbeelding = (alt, breedte = 60) => ({ soort: 'afbeelding', url: LOGO, alt, breedte, link: '', uitlijning: 'center' });
+  const afbeelding = (alt, formaat = 'middel') => ({ soort: 'afbeelding', url: LOGO, alt, formaat, link: '', uitlijning: 'center' });
   const kolommen = (links, rechts) => ({ soort: 'kolommen', links, rechts });
 
   window.MailStartlayouts = [
@@ -69,7 +69,7 @@
       omschrijving: 'Openingsbeeld, intro, twee onderwerpen naast elkaar en een afsluiter.',
       onderwerp: 'Nieuws van De Forex Opleiding',
       blokken: () => [
-        afbeelding('De Forex Opleiding', 50),
+        afbeelding('De Forex Opleiding', 'middel'),
         kop('Dit is er nieuw'),
         tekst('<p>Hoi {{voornaam}},</p><p>Een korte intro: wat staat er in deze nieuwsbrief?</p>'),
         lijn(),
