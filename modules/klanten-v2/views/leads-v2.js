@@ -1272,7 +1272,7 @@
               ${(() => {
                 const verstuurd = (_det.massa || []).filter((m) => m.status === 'sent' && m.verzonden_op);
                 const laatst = verstuurd[0];
-                return `<div class="sv-row"><span>Laatst massabericht</span><b title="${esc(verstuurd.map((m) => (m.naam || '?') + ' · ' + dtStr(m.verzonden_op)).join('\n'))}">${laatst ? esc(dtStr(laatst.verzonden_op)) + ' · ' + esc(laatst.naam || '') + (verstuurd.length > 1 ? ` (${verstuurd.length}×)` : '') : (_det.massa ? 'nog nooit' : '—')}</b></div>`;
+                return `<div class="sv-row"><span>Laatst massabericht</span><b title="${esc(verstuurd.map((m) => (m.naam || '?') + (m.kanaal === 'whatsapp' ? ' (WhatsApp)' : '') + ' · ' + dtStr(m.verzonden_op)).join('\n'))}">${laatst ? esc(dtStr(laatst.verzonden_op)) + ' · ' + esc(laatst.naam || '') + (laatst.kanaal === 'whatsapp' ? ' (WhatsApp)' : '') + (verstuurd.length > 1 ? ` (${verstuurd.length}×)` : '') : (_det.massa ? 'nog nooit' : '—')}</b></div>`;
               })()}
               <div class="sv-row"><span>Lead-ID</span><b class="mono" style="font-size:11px">${esc(String(l.id || '').slice(0, 8))}…</b></div>
             </div>

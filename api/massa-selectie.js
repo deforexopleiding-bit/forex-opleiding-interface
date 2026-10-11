@@ -16,6 +16,7 @@ export function compact(l) {
   return {
     id: l.id,
     naam: [l.voornaam, l.achternaam].filter(Boolean).join(' ') || l.email || 'Onbekend',
+    voornaam: l.voornaam || null,
     email: l.email || null,
     telefoon: l.telefoon_e164 || null,
     bron: l.bron || null,

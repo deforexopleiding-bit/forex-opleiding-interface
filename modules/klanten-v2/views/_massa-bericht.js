@@ -6,9 +6,11 @@
 // Stappen:
 //   1. Selectie  — combineerbare filters (AND) + vinkjes; standaard staat alles
 //                  aan wat aan het filter voldoet. Toont het aantal geselecteerd.
-//   2. Bericht   — kanaal (nu alleen e-mail), verplichte campagnenaam, soort mail
-//                  (voor de voorkeuren van de ontvanger), onderwerp + editor of
-//                  een opgeslagen e-mailsjabloon, tempo (portie).
+//   2. Bericht   — kanaal E-mail / WhatsApp / Beide (2b), verplichte campagnenaam.
+//                  E-mail: soort mail (voorkeuren), onderwerp + editor of een
+//                  e-mailsjabloon, tempo (portie). WhatsApp: een goedgekeurde
+//                  MARKETING-template van de lead-WABA; {{1}} = voornaam per
+//                  ontvanger, {{2}} = één campagnetekst voor iedereen, live voorbeeld.
 //   3. Controle  — de server rekent het EXACTE aantal ontvangers uit (afgemeld /
 //                  geen adres / dubbel → overgeslagen) + een voorbeeldmail.
 //   4. Wachtrij  — bevestigen → campagne in de wachtrij; voortgang, "nu een
@@ -40,9 +42,25 @@
     const namen = [...String(tekst || '').matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((m) => m[1]);
     return [...new Set(namen.filter((n) => VARS.indexOf(n) < 0))];
   }
-  /** Wat ontbreekt er nog in stap 2? '' = niets. */
-  function berichtFout(b, html) {
+  /** De gekozen WhatsApp-template ("naam|taal") uit de lijst. */
+  function waTemplateVan(b, templates) {
+    return (templates || []).find((t) => t.name + '|' + t.language === b.wa_template) || null;
+  }
+  /** WhatsApp-voorbeeld: {{1}} = voornaam, {{2}} = campagnetekst. PURE. */
+  function waVoorbeeld(body, voornaam, param2) {
+    return String(body || '').replace(/\{\{(\d+)\}\}/g, (m, n) => (n === '1' ? (voornaam || 'daar') : n === '2' ? (String(param2 || '').trim() || m) : m));
+  }
+  /** Wat ontbreekt er nog in stap 2? '' = niets. waTemplates = de geladen lijst. */
+  function berichtFout(b, html, waTemplates) {
     if (!String(b.naam || '').trim()) return 'Geef de campagne een naam.';
+    const kanaal = b.kanaal || 'email';
+    if (kanaal !== 'email') {
+      if (!b.wa_template) return 'Kies een WhatsApp-template.';
+      const t = waTemplateVan(b, waTemplates);
+      if (t && t.aantal_vars >= 2 && !String(b.wa_param2 || '').trim()) return 'Vul de tekst voor {{2}} in.';
+      if (/[\n\r\t]| {4,}/.test(String(b.wa_param2 || ''))) return 'De tekst voor {{2}} mag geen enters, tabs of 4+ spaties bevatten.';
+    }
+    if (kanaal === 'whatsapp') return '';
     if (!SOORTEN[b.soort]) return 'Kies het soort mail.';
     if (!String(b.onderwerp || '').trim()) return 'Vul een onderwerp in.';
     if (!tekstVan(html)) return 'Het bericht is leeg.';
@@ -66,7 +84,8 @@
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
   }
-  const REDENEN = { geen_geldig_email: 'geen geldig e-mailadres', afgemeld: 'afgemeld', voorkeur_uit: 'wil dit soort mail niet', dubbel_email: 'dubbel e-mailadres', lead_niet_gevonden: 'lead niet (meer) gevonden', lead_verwijderd: 'lead verwijderd', geannuleerd: 'geannuleerd' };
+  const KANAAL_LABEL = { email: 'E-mail', whatsapp: 'WhatsApp', beide: 'E-mail + WhatsApp' };
+  const REDENEN = { geen_geldig_nummer: 'geen geldig telefoonnummer (WhatsApp)', dubbel_nummer: 'dubbel telefoonnummer (WhatsApp)', geen_geldig_email: 'geen geldig e-mailadres', afgemeld: 'afgemeld', voorkeur_uit: 'wil dit soort mail niet', dubbel_email: 'dubbel e-mailadres', lead_niet_gevonden: 'lead niet (meer) gevonden', lead_verwijderd: 'lead verwijderd', geannuleerd: 'geannuleerd' };
 
   function toast(msg, ok) {
     try { if (window.KV && typeof window.KV.toast === 'function') window.KV.toast(msg, { duration: ok ? 4500 : 9000 }); } catch (_) { /* noop */ }
@@ -166,18 +185,47 @@
     <div data-mb-editor contenteditable="true" spellcheck="true" style="min-height:200px;max-height:320px;overflow:auto;padding:12px 14px;border:1px solid var(--border);border-radius:0 0 8px 8px;background:var(--surface,#fff);font-size:14px;line-height:1.6;outline:none"></div>`;
   }
 
+  function eersteVoornaam() {
+    const l = (st.items || []).find((x) => st.gekozen.has(x.id) && x.voornaam);
+    return l ? String(l.voornaam).trim().split(/\s+/)[0] : 'Jeffrey';
+  }
+  function waBlokHtml() {
+    const b = st.bericht;
+    if (st.wa.laden) return '<div style="color:var(--text-3)">WhatsApp-templates laden…</div>';
+    if (st.wa.fout) return `<div style="padding:10px 12px;border-radius:8px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line)">${esc(st.wa.fout)}</div>`;
+    const t = waTemplateVan(b, st.wa.templates);
+    const opties = (st.wa.templates || []).map((x) => `<option value="${esc(x.name + '|' + x.language)}" ${b.wa_template === x.name + '|' + x.language ? 'selected' : ''} ${x.bruikbaar ? '' : 'disabled'}>${esc(x.name)} (${esc(x.language)})${x.bruikbaar ? '' : ' — te veel variabelen'}</option>`).join('');
+    return `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Goedgekeurde MARKETING-templates van de lead-WABA${st.wa.waba ? ' <span class="mono">' + esc(st.wa.waba) + '</span>' : ''}. Meta voegt zelf een afmeldoptie toe.</div>
+      ${(st.wa.templates || []).length ? `<select class="ib-input" data-mb-b="wa_template" style="width:100%"><option value="">— Kies een WhatsApp-template —</option>${opties}</select>` : '<div style="color:var(--text-3)">Er staat nog geen goedgekeurde MARKETING-template op de lead-WABA.</div>'}
+      ${t ? `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-top:10px">
+        <div>
+          <div style="font-size:12px;color:var(--text-3)"><span class="mono">{{1}}</span> = voornaam, automatisch per ontvanger (anders "daar")</div>
+          ${t.aantal_vars >= 2 ? `<label style="display:block;font-size:12px;color:var(--text-3);margin-top:8px"><span class="mono">{{2}}</span> = campagnetekst, voor iedereen gelijk
+            <input class="ib-input" data-mb-b="wa_param2" value="${esc(b.wa_param2)}" maxlength="200" placeholder="bv. een gratis live webinar over onze strategie" style="width:100%;margin-top:3px"></label>` : ''}
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Tempo: max <b>${esc(st.wa.portie || '—')}</b> WhatsApps per ronde (elke 15 min)${st.wa.dagMax ? ', daglimiet ' + esc(st.wa.dagMax) : ''}. Alleen naar leads met een geldig nummer; hetzelfde nummer krijgt hem één keer.</div>
+        </div>
+        <div><div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Voorbeeld (voor ${esc(eersteVoornaam())})</div>
+          <div data-mb-wapreview style="white-space:pre-wrap;background:#dcf8c6;color:#111;border-radius:10px 10px 2px 10px;padding:10px 12px;font-size:13.5px;line-height:1.45;box-shadow:0 1px 1px rgba(0,0,0,.08)">${esc(waVoorbeeld(t.body, eersteVoornaam(), b.wa_param2))}</div>
+          ${t.footer ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px">${esc(t.footer)}</div>` : ''}
+          ${(t.knoppen || []).length ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">${t.knoppen.map((k) => `<div style="text-align:center;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;font-size:12.5px;color:#0a7cff">${esc(k.text)}</div>`).join('')}</div>` : ''}
+        </div></div>` : ''}`;
+  }
   function berichtHtml() {
     const b = st.bericht;
     const sj = st.sj.lijst || [];
+    const kanaal = b.kanaal || 'email';
+    const metMail = kanaal !== 'whatsapp';
+    const metWa = kanaal !== 'email';
+    const radio = (v, l) => `<label style="cursor:pointer"><input type="radio" name="mb-kanaal" data-mb-b="kanaal" value="${v}" ${kanaal === v ? 'checked' : ''}> ${l}</label>`;
     return `<div style="display:flex;gap:16px;align-items:center;margin-bottom:10px;font-size:13px">
-        <span style="color:var(--text-3)">Kanaal:</span>
-        <label><input type="radio" checked> E-mail</label>
-        <label style="color:var(--text-3)" title="Volgt in fase 2b"><input type="radio" disabled> WhatsApp (volgt)</label>
-        <label style="color:var(--text-3)" title="Volgt in fase 2b"><input type="radio" disabled> Beide (volgt)</label>
+        <span style="color:var(--text-3)">Kanaal:</span>${radio('email', 'E-mail')}${radio('whatsapp', 'WhatsApp')}${radio('beide', 'Beide')}
         <span style="margin-left:auto;font-size:12px;color:var(--text-3)">${st.gekozen.size} ontvanger(s) geselecteerd</span>
       </div>
-      <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,110px);gap:8px;margin-bottom:8px">
-        <input class="ib-input" data-mb-b="naam" value="${esc(b.naam)}" placeholder="Campagnenaam (verplicht, alleen intern)" maxlength="120">
+      <input class="ib-input" data-mb-b="naam" value="${esc(b.naam)}" placeholder="Campagnenaam (verplicht, alleen intern)" maxlength="120" style="width:100%;margin-bottom:8px">
+      ${kanaal === 'beide' ? '<div style="font-size:11.5px;color:var(--text-3);margin:-2px 0 8px">Beide = iedereen krijgt wat hij kan ontvangen: met nummer én mailadres beide, anders het ene kanaal dat er is.</div>' : ''}
+      ${metWa ? `<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px"><div style="font-weight:600;margin-bottom:6px">WhatsApp</div>${waBlokHtml()}</div>` : ''}
+      ${metMail ? `<div${metWa ? ' style="border:1px solid var(--border);border-radius:10px;padding:10px 12px"' : ''}>${metWa ? '<div style="font-weight:600;margin-bottom:6px">E-mail</div>' : ''}
+      <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,110px);gap:8px;margin-bottom:8px">
         <select class="ib-input" data-mb-b="soort"><option value="">— Soort mail —</option>${Object.entries(SOORTEN).map(([k, l]) => `<option value="${k}" ${b.soort === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
         <input class="ib-input" data-mb-b="portie" type="number" min="1" max="500" value="${esc(b.portie)}" title="Max. aantal mails per portie (één portie per 15 minuten)">
       </div>
@@ -186,7 +234,7 @@
         ${sj.map((x) => `<option value="${esc(x.id)}">${esc(x.naam)}</option>`).join('')}</select>
       <input class="ib-input" data-mb-b="onderwerp" value="${esc(b.onderwerp)}" placeholder="Onderwerp" maxlength="200" style="width:100%;margin-bottom:8px">
       ${toolbarHtml()}
-      <div style="font-size:11px;color:var(--text-3);margin-top:6px">Elke mail krijgt de huisstijl (kop, logo, groet) en onderaan automatisch een link om voorkeuren aan te passen of af te melden. Verstuurd als welkom@; staat in de gesprekkendraad van de lead.</div>`;
+      <div style="font-size:11px;color:var(--text-3);margin-top:6px">Elke mail krijgt de huisstijl (kop, logo, groet) en onderaan automatisch een link om voorkeuren aan te passen of af te melden. Verstuurd als welkom@; staat in de gesprekkendraad van de lead.</div></div>` : ''}`;
   }
 
   function controleHtml() {
@@ -195,14 +243,27 @@
     const p = st.preview.data;
     if (!p) return '';
     const redenen = Object.entries(p.redenen || {}).map(([k, n]) => `<li>${n} × ${esc(REDENEN[k] || k)}</li>`).join('');
-    const rondes = Math.ceil(p.aantal_verzenden / Math.max(1, p.portie));
+    const pk = p.per_kanaal || { email: { verzenden: p.aantal_verzenden } };
+    const nMail = pk.email ? pk.email.verzenden : 0;
+    const nWa = pk.whatsapp ? pk.whatsapp.verzenden : 0;
+    const delen = [];
+    if (pk.email) delen.push(`<b>${nMail}</b> e-mail${nMail === 1 ? '' : 's'}`);
+    if (pk.whatsapp) delen.push(`<b>${nWa}</b> WhatsApp${nWa === 1 ? '' : 's'}`);
+    const tempo = [];
+    if (pk.email) tempo.push(`e-mail max <b>${p.portie}</b> per ronde (≈ ${Math.ceil(nMail / Math.max(1, p.portie))} ronde${Math.ceil(nMail / Math.max(1, p.portie)) === 1 ? '' : 's'})`);
+    if (pk.whatsapp) tempo.push(`WhatsApp max <b>${p.wa_portie || '—'}</b> per ronde (≈ ${Math.ceil(nWa / Math.max(1, p.wa_portie || 1))} ronde${Math.ceil(nWa / Math.max(1, p.wa_portie || 1)) === 1 ? '' : 's'})`);
+    const w = p.voorbeeld_wa;
     return `<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:16px">
       <div>
         <div style="font-size:28px;font-weight:700">${p.aantal_verzenden}</div>
-        <div style="font-size:13px">mail${p.aantal_verzenden === 1 ? '' : 's'} gaan de wachtrij in voor campagne <b>${esc(st.bericht.naam)}</b></div>
+        <div style="font-size:13px">${pk.whatsapp ? 'bericht' + (p.aantal_verzenden === 1 ? '' : 'en') : 'mail' + (p.aantal_verzenden === 1 ? '' : 's')} gaan de wachtrij in voor campagne <b>${esc(st.bericht.naam)}</b></div>
+        <div data-mb-perkanaal style="font-size:14px;margin-top:6px">${delen.join(' · ')}</div>
         <div style="font-size:12px;color:var(--text-3);margin-top:6px">${p.aantal_geselecteerd} geselecteerd · ${p.aantal_overgeslagen} overgeslagen</div>
         ${redenen ? `<ul style="font-size:12px;color:var(--text-3);margin:6px 0 0;padding-left:18px">${redenen}</ul>` : ''}
-        <div style="font-size:12px;margin-top:12px;padding:8px 10px;border-radius:8px;background:var(--surface-2,#f6f8fa)">Tempo: max <b>${p.portie}</b> per ronde, elke 15 minuten → ongeveer ${rondes} ronde${rondes === 1 ? '' : 's'} (stille uren 21:00–08:00 en de daglimiet gaan voor).</div>
+        <div style="font-size:12px;margin-top:12px;padding:8px 10px;border-radius:8px;background:var(--surface-2,#f6f8fa)">Tempo, elke 15 minuten: ${tempo.join('; ')}. Stille uren 21:00–08:00 en de daglimiet gaan voor.</div>
+        ${w ? `<div style="font-size:12px;margin-top:12px"><b>WhatsApp-template:</b> <span class="mono">${esc(w.template)}</span>${st.bericht.wa_param2 ? ` · <b>{{2}}</b>: ${esc(st.bericht.wa_param2)}` : ''}</div>
+          <div style="white-space:pre-wrap;background:#dcf8c6;color:#111;border-radius:10px 10px 2px 10px;padding:10px 12px;font-size:13px;line-height:1.45;margin-top:6px">${esc(w.tekst)}</div>
+          ${(w.knoppen || []).length ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">Knoppen: ${w.knoppen.map((k) => esc(k.text)).join(' · ')}</div>` : ''}` : ''}
       </div>
       <div>${p.voorbeeld ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Voorbeeld voor ${esc(p.voorbeeld.aan)} — onderwerp: <b style="color:var(--text)">${esc(p.voorbeeld.onderwerp)}</b></div>
         <iframe data-mb-voorbeeld sandbox="" style="width:100%;height:360px;border:1px solid var(--border);border-radius:10px;background:#eef1f5"></iframe>` : ''}</div>
@@ -214,19 +275,20 @@
     const pct = c.aantal ? Math.round(((c.aantal_verstuurd || 0) + (c.aantal_mislukt || 0)) / c.aantal * 100) : 0;
     const kan = (s) => s.includes(c.status);
     return `<div style="font-weight:600;font-size:15px">${esc(c.naam)}</div>
-      <div style="font-size:12px;color:var(--text-3);margin:2px 0 10px">${esc(SOORTEN[c.soort] || c.soort)} · onderwerp: ${esc(c.onderwerp)} · portie ${c.portie} · status <b>${esc(c.status)}</b></div>
+      <div style="font-size:12px;color:var(--text-3);margin:2px 0 10px">${esc(KANAAL_LABEL[c.kanaal || 'email'] || c.kanaal)}${c.onderwerp ? ' · ' + esc(SOORTEN[c.soort] || c.soort || '') + ' · onderwerp: ' + esc(c.onderwerp) + ' · portie ' + esc(c.portie) : ''}${c.wa_template ? ' · WhatsApp: <span class="mono">' + esc(c.wa_template) + '</span>' + (c.wa_param2 ? ' ({{2}}: ' + esc(c.wa_param2) + ')' : '') : ''} · status <b>${esc(c.status)}</b></div>
       <div style="height:8px;border-radius:6px;background:var(--surface-2,#eef1f5);overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--emerald,#10b981)"></div></div>
       <div style="display:flex;gap:16px;font-size:13px;margin:8px 0 12px;flex-wrap:wrap">
         <span><b>${c.aantal_verstuurd || 0}</b> verstuurd</span><span><b>${c.in_wachtrij != null ? c.in_wachtrij : '—'}</b> in de wachtrij</span>
         <span><b>${c.aantal_mislukt || 0}</b> mislukt</span><span><b>${c.aantal_overgeslagen || 0}</b> overgeslagen</span>
       </div>
+      ${c.per_kanaal && Object.keys(c.per_kanaal).length > 1 || (c.per_kanaal && c.per_kanaal.whatsapp) ? `<div data-mb-voortgang-kanaal style="font-size:12px;color:var(--text-3);margin:-4px 0 12px">${Object.entries(c.per_kanaal).map(([k, v]) => `${esc(KANAAL_LABEL[k] || k)}: ${v.sent} verstuurd · ${v.queued} in de wachtrij · ${v.failed} mislukt · ${v.skipped} overgeslagen`).join('<br>')}</div>` : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${kan(['wachtrij', 'bezig']) ? `<button class="btn btn-primary btn-sm" data-mb-actie="verwerk" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig…' : 'Nu een portie versturen'}</button><button class="btn btn-ghost btn-sm" data-mb-actie="pauzeer" ${st.bezig ? 'disabled' : ''}>Pauzeren</button>` : ''}
         ${kan(['gepauzeerd']) ? `<button class="btn btn-primary btn-sm" data-mb-actie="hervat" ${st.bezig ? 'disabled' : ''}>Hervatten</button>` : ''}
         ${kan(['wachtrij', 'bezig', 'gepauzeerd']) ? `<button class="btn btn-ghost btn-sm" data-mb-actie="annuleer" style="color:var(--rose)" ${st.bezig ? 'disabled' : ''}>Annuleren</button>` : ''}
         <button class="btn btn-ghost btn-sm" data-mb-actie="ververs">Vernieuwen</button>
       </div>
-      ${(st.campDetail && st.campDetail.mislukt || []).length ? `<div style="margin-top:12px;font-size:12px"><b>Mislukt</b><ul style="margin:4px 0 0;padding-left:18px">${st.campDetail.mislukt.map((m) => `<li>${esc(m.email || '—')}: ${esc(m.fout || '')}</li>`).join('')}</ul></div>` : ''}`;
+      ${(st.campDetail && st.campDetail.mislukt || []).length ? `<div style="margin-top:12px;font-size:12px"><b>Mislukt</b><ul style="margin:4px 0 0;padding-left:18px">${st.campDetail.mislukt.map((m) => `<li>${esc(m.kanaal === 'whatsapp' ? 'WhatsApp' : (m.email || '—'))}: ${esc(m.fout || '')}</li>`).join('')}</ul></div>` : ''}`;
   }
 
   function campagnesHtml() {
@@ -237,7 +299,7 @@
     if (!l.length) return '<div style="color:var(--text-3);font-size:13px">Nog geen campagnes.</div>';
     return `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">${l.map((c) => `
       <div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer" data-mb-actie="camp-open" data-mb-id="${esc(c.id)}">
-        <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(c.naam)}</div><div style="font-size:12px;color:var(--text-3)">${datum(c.aangemaakt_op)} · ${esc(c.onderwerp)}</div></div>
+        <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(c.naam)}</div><div style="font-size:12px;color:var(--text-3)">${datum(c.aangemaakt_op)} · ${esc(KANAAL_LABEL[c.kanaal || 'email'] || c.kanaal)} · ${esc(c.onderwerp || c.wa_template || '')}</div></div>
         <div style="font-size:12px;text-align:right">${c.aantal_verstuurd}/${c.aantal} verstuurd${c.aantal_mislukt ? ` · <span style="color:var(--rose)">${c.aantal_mislukt} mislukt</span>` : ''}<div style="color:var(--text-3)">${esc(c.status)}</div></div>
       </div>`).join('')}</div>`;
   }
@@ -250,11 +312,12 @@
       if (st.stap === 'selectie') {
         knoppen += k('naar-bericht', `Volgende: bericht (${st.gekozen.size}) →`, true, !st.gekozen.size);
       } else if (st.stap === 'bericht') {
-        links = berichtFout(st.bericht, st.bericht.html); // st.bericht.html loopt mee met de editor
+        links = berichtFout(st.bericht, st.bericht.html, st.wa.templates); // st.bericht.html loopt mee met de editor
         knoppen = k('naar-selectie', '← Selectie') + knoppen + k('naar-controle', 'Controleren →', true, !!links);
       } else if (st.stap === 'controle') {
         const p = st.preview.data;
-        knoppen = k('naar-bericht-terug', '← Bericht') + knoppen + k('start', st.bezig ? 'Bezig…' : `Bevestig: ${p ? p.aantal_verzenden : '…'} mails in de wachtrij`, true, !p || !p.aantal_verzenden);
+        const wat = (st.bericht.kanaal || 'email') === 'email' ? 'mails' : 'berichten';
+        knoppen = k('naar-bericht-terug', '← Bericht') + knoppen + k('start', st.bezig ? 'Bezig…' : `Bevestig: ${p ? p.aantal_verzenden : '…'} ${wat} in de wachtrij`, true, !p || !p.aantal_verzenden);
       }
     }
     return `<span style="flex:1;font-size:12px;color:${st.fout ? 'var(--rose)' : 'var(--text-3)'}">${esc(st.fout || links)}</span>${knoppen}`;
@@ -328,10 +391,41 @@
     st.sj.laden = false;
     if (st.stap === 'bericht') render();
   }
+  async function laadWaTemplates() {
+    if (st.wa.geladen || st.wa.laden) return;
+    st.wa.laden = true; st.wa.fout = null; if (st.stap === 'bericht') render();
+    try {
+      const j = await api('/api/massa-campagne?wa_templates=1');
+      if (!st) return;
+      if (!j.ok) st.wa.fout = j.melding || 'WhatsApp is nu niet beschikbaar voor massaberichten.';
+      st.wa.templates = j.templates || []; st.wa.waba = j.waba_id || null;
+      st.wa.portie = j.wa_portie || null; st.wa.dagMax = j.wa_dag_max || null; st.wa.geladen = !!j.ok;
+      const bruikbaar = st.wa.templates.filter((t) => t.bruikbaar);
+      if (!st.bericht.wa_template && bruikbaar.length === 1) st.bericht.wa_template = bruikbaar[0].name + '|' + bruikbaar[0].language;
+    } catch (e) {
+      if (!st) return;
+      console.error('[massa-bericht] WhatsApp-templates laden mislukt:', e && e.status, e && (e.body || e.message));
+      st.wa.fout = 'Kon de WhatsApp-templates niet laden: ' + ((e && e.message) || 'onbekend');
+    }
+    st.wa.laden = false;
+    if (st.stap === 'bericht') render();
+  }
+  function repaintWaPreview() {
+    const p = root() && root().querySelector('[data-mb-wapreview]');
+    const t = waTemplateVan(st.bericht, st.wa.templates);
+    if (p && t) p.textContent = waVoorbeeld(t.body, eersteVoornaam(), st.bericht.wa_param2);
+  }
   function campagneBody(extra) {
     bewaarEditor();
     const b = st.bericht;
-    return JSON.stringify({ ...extra, naam: b.naam, soort: b.soort, kanaal: 'email', onderwerp: b.onderwerp, html: b.html, portie: Number(b.portie) || 100, sjabloon_id: b.sjabloon_id || null, filter: filterVoorApi(st.filter), lead_ids: (st.items || []).filter((x) => st.gekozen.has(x.id)).map((x) => x.id) });
+    const kanaal = b.kanaal || 'email';
+    const body = { ...extra, naam: b.naam, kanaal, filter: filterVoorApi(st.filter), lead_ids: (st.items || []).filter((x) => st.gekozen.has(x.id)).map((x) => x.id) };
+    if (kanaal !== 'whatsapp') Object.assign(body, { soort: b.soort, onderwerp: b.onderwerp, html: b.html, portie: Number(b.portie) || 100, sjabloon_id: b.sjabloon_id || null });
+    if (kanaal !== 'email') {
+      const [naam, taal] = String(b.wa_template || '').split('|');
+      Object.assign(body, { wa_template: naam || '', wa_taal: taal || 'nl', wa_param2: String(b.wa_param2 || '').trim() });
+    }
+    return JSON.stringify(body);
   }
   async function laadPreview() {
     st.stap = 'controle'; st.preview = { laden: true, fout: null, data: null }; st.fout = null; render();
@@ -353,7 +447,7 @@
     try {
       const j = await api('/api/massa-campagne', { method: 'POST', body: campagneBody({ actie: 'start', bevestig_aantal: p.aantal_verzenden }) });
       if (!st) return;
-      toast(`Campagne "${st.bericht.naam}": ${j.aantal_verzenden} mails in de wachtrij`, true);
+      toast(`Campagne "${st.bericht.naam}": ${j.aantal_verzenden} ${(st.bericht.kanaal || 'email') === 'email' ? 'mails' : 'berichten'} in de wachtrij`, true);
       st.campagneId = j.campagne_id; st.stap = 'wachtrij'; st.bezig = false;
       await laadCampagne();
     } catch (e) {
@@ -448,7 +542,7 @@
     else if (actie === 'niets') { st.gekozen = new Set(); repaintLijst(); }
     else if (actie === 'filters-wis') { st.filter = { ...STANDAARD_FILTER, lead_ids: st.filter.lead_ids }; render(); laadSelectie(); }
     else if (actie === 'selectie-los') { st.filter = { ...st.filter, lead_ids: [] }; render(); laadSelectie(); }
-    else if (actie === 'naar-bericht') { st.stap = 'bericht'; st.fout = null; render(); laadSjablonen(); }
+    else if (actie === 'naar-bericht') { st.stap = 'bericht'; st.fout = null; render(); laadSjablonen(); if ((st.bericht.kanaal || 'email') !== 'email') laadWaTemplates(); }
     else if (actie === 'naar-selectie') { st.stap = 'selectie'; st.fout = null; render(); }
     else if (actie === 'naar-controle') laadPreview();
     else if (actie === 'naar-bericht-terug') { st.stap = 'bericht'; st.fout = null; render(); }
@@ -468,7 +562,8 @@
       return;
     }
     const b = el.getAttribute && el.getAttribute('data-mb-b');
-    if (b && b !== 'sjabloon' && b !== 'soort') { st.bericht[b] = el.value; repaintVoet(); return; }
+    if (b === 'wa_param2') { st.bericht.wa_param2 = el.value; repaintWaPreview(); repaintVoet(); return; }
+    if (b && !['sjabloon', 'soort', 'kanaal', 'wa_template'].includes(b)) { st.bericht[b] = el.value; repaintVoet(); return; }
     if (el.matches && el.matches('[data-mb-editor]')) { bewaarEditor(); repaintVoet(); }
   }
   function onChange(e) {
@@ -483,6 +578,12 @@
     }
     const b = el.getAttribute && el.getAttribute('data-mb-b');
     if (b === 'soort') { st.bericht.soort = el.value; repaintVoet(); }
+    else if (b === 'kanaal') {
+      st.bericht.kanaal = el.value; st.fout = null;
+      if (el.value !== 'email') laadWaTemplates();
+      render();
+    }
+    else if (b === 'wa_template') { st.bericht.wa_template = el.value; render(); }
     else if (b === 'sjabloon' && el.value) {
       const x = (st.sj.lijst || []).find((s) => s.id === el.value);
       if (!x) return;
@@ -523,7 +624,8 @@
       tab: 'nieuw', stap: 'selectie', vraag: 0,
       filter: { ...STANDAARD_FILTER, ...(o.filter || {}), lead_ids: Array.isArray(o.leadIds) ? o.leadIds.slice(0, 5000) : [] },
       items: [], gekozen: new Set(), opties: null, campagnes: [], laden: true, laadFout: null, tabelOntbreekt: false,
-      bericht: { naam: '', soort: '', onderwerp: '', html: '', portie: 100, sjabloon_id: null },
+      bericht: { naam: '', kanaal: 'email', soort: '', onderwerp: '', html: '', portie: 100, sjabloon_id: null, wa_template: '', wa_param2: '' },
+      wa: { laden: false, geladen: false, fout: null, templates: [], waba: null, portie: null, dagMax: null },
       sj: { laden: false, geladen: false, fout: null, lijst: [] },
       preview: { laden: false, fout: null, data: null },
       camps: { laden: false, fout: null, lijst: [] }, campagneId: null, campDetail: null,
@@ -543,5 +645,5 @@
     laadSelectie();
   }
 
-  window.MassaBericht = { open, sluit, _intern: { berichtFout, filterVoorApi, onbekendeVars, STANDAARD_FILTER } };
+  window.MassaBericht = { open, sluit, _intern: { berichtFout, filterVoorApi, onbekendeVars, waVoorbeeld, STANDAARD_FILTER } };
 })();

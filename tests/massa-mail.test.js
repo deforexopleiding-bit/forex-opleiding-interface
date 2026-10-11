@@ -186,7 +186,7 @@ test('valideerCampagne: naam, soort, kanaal, onderwerp, inhoud, variabelen, port
   const fout = (b) => { try { M.valideerCampagne(b); return null; } catch (e) { return e.code; } };
   assert.equal(fout({ ...goed, naam: '  ' }), 'NAAM_LEEG');
   assert.equal(fout({ ...goed, soort: 'spam' }), 'SOORT_ONGELDIG');
-  assert.equal(fout({ ...goed, kanaal: 'whatsapp' }), 'KANAAL_NIET_ONDERSTEUND');
+  assert.equal(fout({ ...goed, kanaal: 'sms' }), 'KANAAL_ONGELDIG');
   assert.equal(fout({ ...goed, onderwerp: '' }), 'ONDERWERP_LEEG');
   assert.equal(fout({ ...goed, html: '<p> </p>' }), 'BERICHT_LEEG');
   assert.equal(fout({ ...goed, html: '<p>{{korting}}</p>' }), 'ONBEKENDE_VARIABELEN');
@@ -286,9 +286,9 @@ function wachtrijDb({ n = 5, portie = 2, status = 'wachtrij', extraItems = [], i
     lead_mail_voorkeuren: [],
     onderhoud_trajecten: [{ slug: '7-daagse', agenda_link: 'https://agenda.example/7' }],
     app_settings: instellingen ? [{ key: 'massa_mail', value: instellingen }] : [],
-    massa_campagnes: [{ id: id(900), naam: 'C', soort: 'tips', onderwerp: 'Hoi {{voornaam}}', html: '<p>Hallo</p>', portie, status, aangemaakt_door: 'u1', gestart_op: null, aangemaakt_op: '2026-10-10T08:00:00Z' }],
+    massa_campagnes: [{ id: id(900), naam: 'C', kanaal: 'email', soort: 'tips', onderwerp: 'Hoi {{voornaam}}', html: '<p>Hallo</p>', portie, status, aangemaakt_door: 'u1', gestart_op: null, aangemaakt_op: '2026-10-10T08:00:00Z' }],
     massa_items: [
-      ...leads.map((l, i) => ({ id: 'it' + (i + 1), campagne_id: id(900), lead_id: l.id, status: 'queued', aangemaakt_op: '2026-10-10T08:00:0' + i + 'Z' })),
+      ...leads.map((l, i) => ({ id: 'it' + (i + 1), campagne_id: id(900), lead_id: l.id, kanaal: 'email', status: 'queued', aangemaakt_op: '2026-10-10T08:00:0' + i + 'Z' })),
       ...extraItems,
     ],
   });
@@ -334,11 +334,11 @@ test('wachtrij: afmelding vlak voor verzending, ongeldig adres, verwijderde lead
 test('wachtrij: daglimiet, stille uren, gepauzeerd, fout → failed', async () => {
   mails.length = 0;
   // Daglimiet 1, er ging vandaag al 1 uit → niets.
-  const vol = wachtrijDb({ n: 2, instellingen: { dag_max: 1 }, extraItems: [{ id: 'oud', campagne_id: id(901), lead_id: id(50), status: 'sent', verzonden_op: '2026-10-10T07:00:00Z' }] });
+  const vol = wachtrijDb({ n: 2, instellingen: { dag_max: 1 }, extraItems: [{ id: 'oud', campagne_id: id(901), lead_id: id(50), kanaal: 'email', status: 'sent', verzonden_op: '2026-10-10T07:00:00Z' }] });
   assert.equal((await M.verwerkWachtrij(vol, { slaap: geenSlaap, nu: () => NU })).reden, 'daglimiet');
   assert.equal(mails.length, 0);
   // Daglimiet 2 → max 1 extra in deze run, ook al is de portie groter.
-  const half = wachtrijDb({ n: 3, portie: 10, instellingen: { dag_max: 2 }, extraItems: [{ id: 'oud', campagne_id: id(901), lead_id: id(50), status: 'sent', verzonden_op: '2026-10-10T07:00:00Z' }] });
+  const half = wachtrijDb({ n: 3, portie: 10, instellingen: { dag_max: 2 }, extraItems: [{ id: 'oud', campagne_id: id(901), lead_id: id(50), kanaal: 'email', status: 'sent', verzonden_op: '2026-10-10T07:00:00Z' }] });
   assert.equal((await M.verwerkWachtrij(half, { slaap: geenSlaap, nu: () => NU })).verstuurd, 1);
   // Stille uren (22:30 NL): cron doet niets, handmatig wel.
   mails.length = 0;
@@ -364,7 +364,7 @@ test('wachtrij: pauze tussen mails, hangende claim → failed (niet dubbel verst
   mails.length = 0;
   const pauzes = [];
   const db = wachtrijDb({ n: 3, portie: 10, instellingen: { pauze_ms: 1200 }, extraItems: [
-    { id: 'hangt', campagne_id: id(900), lead_id: id(1), status: 'sending', geclaimd_op: '2026-10-10T09:00:00Z', aangemaakt_op: '2026-10-10T07:00:00Z' },
+    { id: 'hangt', campagne_id: id(900), lead_id: id(1), kanaal: 'email', status: 'sending', geclaimd_op: '2026-10-10T09:00:00Z', aangemaakt_op: '2026-10-10T07:00:00Z' },
   ] });
   await M.verwerkWachtrij(db, { slaap: async (ms) => { pauzes.push(ms); }, nu: () => NU });
   assert.deepEqual(pauzes, [1200, 1200], 'pauze tussen mails, niet vóór de eerste');
@@ -415,7 +415,7 @@ test('bedrading: draad, endpoints, cron, SQL, UI, cache-busters', () => {
   assert.doesNotMatch(sql, /CREATE POLICY/, 'geen policies: alleen de service role');
   assert.match(sql, /status IN \('queued', 'sending', 'sent', 'failed', 'skipped'\)/);
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /<script src="views\/_massa-bericht\.js\?v=1"><\/script>/);
+  assert.match(html, /<script src="views\/_massa-bericht\.js\?v=\d+"><\/script>/);
   assert.ok(html.indexOf('views/_massa-bericht.js') < html.indexOf('views/leads-v2.js'), 'popup vóór de views');
   const versie = (re) => Number((html.match(re) || [])[1] || 0);
   assert.ok(versie(/views\/leads-v2\.js\?v=(\d+)"/) >= 30);
