@@ -211,7 +211,7 @@ test('bedrading: knoppen in Leads + Contacten, script-tag, cache-busters, SQL me
   assert.match(ls, /window\.StuurBericht && window\.StuurBericht\.open\('\$\{idForBtn\}', '\$\{nameForBtn\}'\)/);
   assert.match(ls, /\$\{berichtBtn\}\$\{inlogBtn\}/);
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /<script src="views\/_stuur-bericht\.js\?v=1"><\/script>/);
+  assert.match(html, /<script src="views\/_stuur-bericht\.js\?v=\d+"><\/script>/);
   const versie = (re) => Number((html.match(re) || [])[1] || 0);
   assert.ok(versie(/views\/leads-v2\.js\?v=(\d+)"/) >= 29, 'leads-v2 minstens v29');
   assert.ok(versie(/views\/leadsonderhoud-v2\.js\?v=(\d+)"/) >= 68, 'leadsonderhoud-v2 minstens v68');

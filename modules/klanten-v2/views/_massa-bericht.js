@@ -63,6 +63,12 @@
     if (kanaal === 'whatsapp') return '';
     if (!SOORTEN[b.soort]) return 'Kies het soort mail.';
     if (!String(b.onderwerp || '').trim()) return 'Vul een onderwerp in.';
+    if (Array.isArray(b.blokken) && b.blokken.length) { // mailbouwer-sjabloon: de server compileert
+      const onbB = onbekendeVars(b.onderwerp);
+      if (onbB.length) return 'Onbekende variabele: ' + onbB.map((x) => '{{' + x + '}}').join(', ');
+      const pB = Number(b.portie);
+      return (!Number.isFinite(pB) || pB < 1 || pB > 500) ? 'Portie moet tussen 1 en 500 liggen.' : '';
+    }
     if (!tekstVan(html)) return 'Het bericht is leeg.';
     const onb = onbekendeVars(b.onderwerp + ' ' + html);
     if (onb.length) return 'Onbekende variabele: ' + onb.map((x) => '{{' + x + '}}').join(', ');
@@ -233,7 +239,10 @@
       <select class="ib-input" data-mb-b="sjabloon" style="width:100%;margin-bottom:8px"><option value="">${st.sj.laden ? 'Sjablonen laden…' : (st.sj.fout ? 'Sjablonen niet beschikbaar' : '— Optioneel: e-mailsjabloon laden —')}</option>
         ${sj.map((x) => `<option value="${esc(x.id)}">${esc(x.naam)}</option>`).join('')}</select>
       <input class="ib-input" data-mb-b="onderwerp" value="${esc(b.onderwerp)}" placeholder="Onderwerp" maxlength="200" style="width:100%;margin-bottom:8px">
-      ${toolbarHtml()}
+      ${b.blokken ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px;color:var(--text-3)">Sjabloon uit de mailbouwer: <b style="color:var(--text)">${esc(b.sjabloonNaam || '')}</b>
+          <button type="button" class="btn btn-ghost btn-sm" data-mb-actie="bouwer-los" style="margin-left:auto">Zelf typen in plaats daarvan</button></div>
+        <iframe data-mb-bouwer-voorbeeld sandbox="" title="Voorbeeld" style="width:100%;height:360px;border:1px solid var(--border);border-radius:10px;background:#eef1f5"></iframe>
+        <div style="display:none">${toolbarHtml()}</div>` : toolbarHtml()}
       <div style="font-size:11px;color:var(--text-3);margin-top:6px">Elke mail krijgt de huisstijl (kop, logo, groet) en onderaan automatisch een link om voorkeuren aan te passen of af te melden. Verstuurd als welkom@; staat in de gesprekkendraad van de lead.</div></div>` : ''}`;
   }
 
@@ -348,6 +357,11 @@
       <div style="padding:14px 18px;font-size:13px;line-height:1.5;overflow:auto;flex:1">${body}</div>
       <div data-mb-voet style="display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border)">${voetHtml()}</div>`;
     const ed = editor(); if (ed) ed.innerHTML = st.bericht.html || '';
+    const bv = r.querySelector('[data-mb-bouwer-voorbeeld]');
+    if (bv && st.bericht.blokken && window.MailBlokken && window.MailHuisstijl) {
+      const body = window.MailBlokken.compileerBlokken(st.bericht.blokken).replace(/\{\{\s*voornaam\s*\}\}/g, esc(eersteVoornaam()));
+      bv.srcdoc = '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">' + window.MailHuisstijl.renderLeadMail({ bodyHtml: body, voorkeurenUrl: '#' }) + '</body></html>';
+    }
     const fr = r.querySelector('[data-mb-voorbeeld]');
     if (fr && st.preview.data && st.preview.data.voorbeeld) fr.srcdoc = st.preview.data.voorbeeld.html;
   }
@@ -421,6 +435,7 @@
     const kanaal = b.kanaal || 'email';
     const body = { ...extra, naam: b.naam, kanaal, filter: filterVoorApi(st.filter), lead_ids: (st.items || []).filter((x) => st.gekozen.has(x.id)).map((x) => x.id) };
     if (kanaal !== 'whatsapp') Object.assign(body, { soort: b.soort, onderwerp: b.onderwerp, html: b.html, portie: Number(b.portie) || 100, sjabloon_id: b.sjabloon_id || null });
+    if (kanaal !== 'whatsapp' && Array.isArray(b.blokken) && b.blokken.length) body.blokken = b.blokken;
     if (kanaal !== 'email') {
       const [naam, taal] = String(b.wa_template || '').split('|');
       Object.assign(body, { wa_template: naam || '', wa_taal: taal || 'nl', wa_param2: String(b.wa_param2 || '').trim() });
@@ -546,6 +561,7 @@
     else if (actie === 'naar-selectie') { st.stap = 'selectie'; st.fout = null; render(); }
     else if (actie === 'naar-controle') laadPreview();
     else if (actie === 'naar-bericht-terug') { st.stap = 'bericht'; st.fout = null; render(); }
+    else if (actie === 'bouwer-los') { st.bericht.blokken = null; st.bericht.sjabloonNaam = null; render(); }
     else if (actie === 'start') start();
     else if (actie === 'camp-open') { st.campagneId = a.getAttribute('data-mb-id'); st.campDetail = null; render(); laadCampagne(); }
     else if (actie === 'camps-terug') { st.campagneId = null; laadCampagnes(); }
@@ -588,8 +604,10 @@
       const x = (st.sj.lijst || []).find((s) => s.id === el.value);
       if (!x) return;
       bewaarEditor();
-      if (tekstVan(st.bericht.html) && !window.confirm('De huidige tekst vervangen door sjabloon "' + x.naam + '"?')) { el.value = ''; return; }
-      st.bericht.onderwerp = x.onderwerp; st.bericht.html = x.html; st.bericht.sjabloon_id = x.id;
+      if ((st.bericht.blokken || tekstVan(st.bericht.html)) && !window.confirm('De huidige tekst vervangen door sjabloon "' + x.naam + '"?')) { el.value = ''; return; }
+      st.bericht.onderwerp = x.onderwerp; st.bericht.sjabloon_id = x.id;
+      if (Array.isArray(x.blokken) && x.blokken.length) { st.bericht.blokken = x.blokken; st.bericht.sjabloonNaam = x.naam; st.bericht.html = ''; }
+      else { st.bericht.blokken = null; st.bericht.sjabloonNaam = null; st.bericht.html = x.html; }
       render();
     }
   }
@@ -624,7 +642,7 @@
       tab: 'nieuw', stap: 'selectie', vraag: 0,
       filter: { ...STANDAARD_FILTER, ...(o.filter || {}), lead_ids: Array.isArray(o.leadIds) ? o.leadIds.slice(0, 5000) : [] },
       items: [], gekozen: new Set(), opties: null, campagnes: [], laden: true, laadFout: null, tabelOntbreekt: false,
-      bericht: { naam: '', kanaal: 'email', soort: '', onderwerp: '', html: '', portie: 100, sjabloon_id: null, wa_template: '', wa_param2: '' },
+      bericht: { naam: '', kanaal: 'email', soort: '', onderwerp: '', html: '', blokken: null, sjabloonNaam: null, portie: 100, sjabloon_id: null, wa_template: '', wa_param2: '' },
       wa: { laden: false, geladen: false, fout: null, templates: [], waba: null, portie: null, dagMax: null },
       sj: { laden: false, geladen: false, fout: null, lijst: [] },
       preview: { laden: false, fout: null, data: null },

@@ -10,7 +10,10 @@
 //   E-mail          — onderwerp + editor (vet/cursief/onderstreept/kop/lijsten/
 //                     link), variabelen {{voornaam}} e.d., optioneel een sjabloon
 //                     laden; verzonden in de huisstijl-shell, staat in de draad.
-//   E-mailsjablonen — bibliotheek: nieuw / bewerken / verwijderen / gebruiken.
+//   E-mailsjablonen — bibliotheek: nieuw / bewerken (in de MAILBOUWER,
+//                     views/_mail-bouwer.js, sinds 2026-10-11) / verwijderen /
+//                     gebruiken. Een bouwer-sjabloon wordt als voorbeeld getoond
+//                     en als BLOKKEN verstuurd (de server compileert zelf).
 // Geen massaverzending (fase 2).
 //
 // Hangt aan document.body (niet aan DFO.render): leadsonderhoud rendert elke
@@ -63,6 +66,10 @@
     if (!s || !s.data) return { uit: true, reden: '' };
     if (!s.data.lead.geldig_email) return { uit: true, reden: 'Deze lead heeft geen geldig e-mailadres.' };
     if (!String(s.mail.onderwerp || '').trim()) return { uit: true, reden: 'Vul een onderwerp in.' };
+    if (Array.isArray(s.mail.blokken) && s.mail.blokken.length) {
+      const onbB = onbekendeVars(s.mail.onderwerp);
+      return onbB.length ? { uit: true, reden: 'Onbekende variabele: ' + onbB.map((x) => '{{' + x + '}}').join(', ') } : { uit: false, reden: '' };
+    }
     if (!tekstVan(html)) return { uit: true, reden: 'Het bericht is leeg.' };
     const onb = onbekendeVars(s.mail.onderwerp + ' ' + html);
     if (onb.length) return { uit: true, reden: 'Onbekende variabele: ' + onb.map((x) => '{{' + x + '}}').join(', ') };
@@ -149,7 +156,11 @@
           ${sj.map((x) => `<option value="${esc(x.id)}">${esc(x.naam)}</option>`).join('')}</select>
       </div>
       <input class="ib-input" data-sb-veld="onderwerp" value="${esc(st.mail.onderwerp)}" placeholder="Onderwerp" maxlength="200" style="width:100%;margin-bottom:8px">
-      ${toolbarHtml('mail')}
+      ${st.mail.blokken ? `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12px;color:var(--text-3)">Sjabloon uit de mailbouwer: <b style="color:var(--text)">${esc(st.mail.sjabloonNaam || '')}</b>
+          <button type="button" class="btn btn-ghost btn-sm" data-sb-actie="bouwer-los" style="margin-left:auto">Zelf typen in plaats daarvan</button></div>
+        <iframe data-sb-bouwer-voorbeeld sandbox="" title="Voorbeeld" style="width:100%;height:380px;border:1px solid var(--border);border-radius:10px;background:#eef1f5"></iframe>
+        <div style="display:none">` : ''}
+      ${toolbarHtml('mail')}${st.mail.blokken ? '</div>' : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
         <span style="font-size:11px;color:var(--text-3)">{{voornaam}} wordt "${esc(d.variabelen.voornaam || '—')}", {{boekingslink}} wordt ${esc(d.variabelen.boekingslink)}</span>
         <button type="button" class="btn btn-ghost btn-sm" data-sb-actie="voorbeeld">${st.mail.voorbeeld ? 'Verberg voorbeeld' : 'Voorbeeld'}</button>
@@ -173,7 +184,7 @@
         <button type="button" class="btn btn-primary btn-sm" data-sb-actie="sj-nieuw">+ Nieuw sjabloon</button></div>
       ${lijst.length ? `<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">${lijst.map((x) => `
         <div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border)">
-          <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(x.naam)}</div><div style="font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.onderwerp)}</div></div>
+          <div style="flex:1;min-width:0"><div style="font-weight:600">${esc(x.naam)}${Array.isArray(x.blokken) && x.blokken.length ? ' <span style="font-size:10.5px;font-weight:500;padding:1px 6px;border-radius:8px;background:var(--surface-2,#eef1f5);color:var(--text-3)">mailbouwer</span>' : ''}</div><div style="font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.onderwerp)}</div></div>
           <button type="button" class="btn btn-ghost btn-sm" data-sb-actie="sj-gebruik" data-sb-id="${esc(x.id)}">Gebruik in mail</button>
           <button type="button" class="btn btn-ghost btn-sm" data-sb-actie="sj-bewerk" data-sb-id="${esc(x.id)}">Bewerken</button>
           <button type="button" class="btn btn-ghost btn-sm" data-sb-actie="sj-verwijder" data-sb-id="${esc(x.id)}" style="color:var(--rose)">Verwijderen</button>
@@ -219,6 +230,11 @@
       <div data-sb-voet style="display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--border)">${voetHtml()}</div>`;
     // Editor-inhoud zetten ná de opbouw (nooit tijdens typen).
     const em = editor('mail'); if (em) em.innerHTML = st.mail.html || '';
+    const bv = r.querySelector('[data-sb-bouwer-voorbeeld]');
+    if (bv && st.mail.blokken && window.MailBlokken && window.MailHuisstijl) {
+      const body = vulVars(window.MailBlokken.compileerBlokken(st.mail.blokken), st.data ? st.data.variabelen : {});
+      bv.srcdoc = '<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">' + window.MailHuisstijl.renderLeadMail({ bodyHtml: body }) + '</body></html>';
+    }
     const es = editor('sj'); if (es && st.sj.bewerk) es.innerHTML = st.sj.bewerk.html || '';
     if (st.mail.voorbeeld) repaintMailPreview();
   }
@@ -300,7 +316,7 @@
     if (mailKnopStatus(st, st.mail.html).uit) { repaintVoet(); return; }
     st.bezig = true; st.fout = null; repaintVoet();
     try {
-      const j = await api('/api/lead-bericht', { method: 'POST', body: JSON.stringify({ lead_id: st.leadId, kanaal: 'mail', onderwerp: st.mail.onderwerp, html: st.mail.html }) });
+      const j = await api('/api/lead-bericht', { method: 'POST', body: JSON.stringify({ lead_id: st.leadId, kanaal: 'mail', onderwerp: st.mail.onderwerp, html: st.mail.html, blokken: st.mail.blokken || undefined }) });
       toast(`E-mail "${(j && j.onderwerp) || st.mail.onderwerp}" verstuurd naar ${st.data.lead.email}` + (j && j.in_draad === false ? ' (let op: niet in de draad gelogd)' : ' · staat in de gesprekkendraad'), true);
       sluit(true);
     } catch (e) {
@@ -334,13 +350,20 @@
       toast('Verwijderen mislukt: ' + ((e && e.message) || 'onbekend'), false);
     }
   }
+  // Mailbouwer: nieuw of bewerken (losse sjablonen openen als één tekstblok).
+  function openBouwer(x) {
+    if (!window.MailBouwer) { toast('De mailbouwer is niet geladen — ververs de pagina.', false); return; }
+    window.MailBouwer.open({ sjabloon: x || {}, onOpgeslagen: () => { if (st) laadSjablonen(true); } });
+  }
   function gebruikSjabloon(id) {
     const x = (st.sj.lijst || []).find((s) => s.id === id);
     if (!x) return;
     const ed = editor('mail');
-    const heeftInhoud = ed ? tekstVan(ed.innerHTML) : tekstVan(st.mail.html);
+    const heeftInhoud = st.mail.blokken || (ed ? tekstVan(ed.innerHTML) : tekstVan(st.mail.html));
     if (heeftInhoud && !window.confirm('De huidige tekst vervangen door sjabloon "' + x.naam + '"?')) return;
-    st.mail.onderwerp = x.onderwerp; st.mail.html = x.html; st.tab = 'mail'; st.fout = null;
+    st.mail.onderwerp = x.onderwerp; st.tab = 'mail'; st.fout = null;
+    if (Array.isArray(x.blokken) && x.blokken.length) { st.mail.blokken = x.blokken; st.mail.sjabloonNaam = x.naam; st.mail.html = ''; }
+    else { st.mail.blokken = null; st.mail.sjabloonNaam = null; st.mail.html = x.html; }
     render();
   }
 
@@ -384,8 +407,9 @@
     else if (actie === 'verstuur-wa') verstuurWa();
     else if (actie === 'verstuur-mail') verstuurMail();
     else if (actie === 'voorbeeld') { bewaarEditor(); st.mail.voorbeeld = !st.mail.voorbeeld; render(); }
-    else if (actie === 'sj-nieuw') { st.sj.bewerk = { id: null, naam: '', onderwerp: '', html: '' }; st.fout = null; render(); }
-    else if (actie === 'sj-bewerk') { const x = st.sj.lijst.find((s) => s.id === id); if (x) { st.sj.bewerk = { ...x }; st.fout = null; render(); } }
+    else if (actie === 'sj-nieuw') { openBouwer(null); }
+    else if (actie === 'sj-bewerk') { const x = st.sj.lijst.find((s) => s.id === id); if (x) openBouwer(x); }
+    else if (actie === 'bouwer-los') { st.mail.blokken = null; st.mail.sjabloonNaam = null; render(); }
     else if (actie === 'sj-annuleer') { st.sj.bewerk = null; st.fout = null; render(); }
     else if (actie === 'sj-opslaan') sjOpslaan();
     else if (actie === 'sj-verwijder') sjVerwijder(id);
@@ -439,7 +463,7 @@
       leadId: String(leadId), naam: naam || '', onKlaar: opts && opts.onKlaar,
       tab: 'whatsapp', laden: true, laadFout: null, data: null, bezig: false, fout: null,
       wa: { gekozen: null, waarden: [] },
-      mail: { onderwerp: '', html: '', voorbeeld: false },
+      mail: { onderwerp: '', html: '', voorbeeld: false, blokken: null, sjabloonNaam: null },
       sj: { laden: false, geladen: false, fout: null, lijst: [], bewerk: null },
     };
     const r = document.createElement('div');
