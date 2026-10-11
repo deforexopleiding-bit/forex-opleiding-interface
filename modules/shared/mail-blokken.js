@@ -29,6 +29,8 @@ export const BLOK_SOORTEN = Object.freeze({
 export const MAIL_VARIABELEN = Object.freeze(['voornaam', 'achternaam', 'naam', 'email', 'boekingslink']);
 export const MAX_BLOKKEN = 40;
 export const INHOUD_BREEDTE = 540; // 600 kaart − 2×30 padding (zie de shell)
+/** Afbeeldingsformaat → % van de inhoudsbreedte (2026-10-11: standaard Middel). */
+export const AFBEELDING_FORMATEN = Object.freeze({ klein: 35, middel: 60, volledig: 100 });
 
 const TEKST_KLEUR = '#2b3a4a';
 const FONT = 'Arial,Helvetica,sans-serif';
@@ -105,7 +107,7 @@ export function maakBlok(soort) {
     case 'kop': return { id, soort, tekst: 'Een sterke kop', niveau: 'h2', uitlijning: 'left' };
     case 'tekst': return { id, soort, html: '<p>Hoi {{voornaam}},</p><p>Schrijf hier je tekst.</p>', uitlijning: 'left' };
     case 'knop': return { id, soort, tekst: 'Plan een gesprek', url: '{{boekingslink}}', stijl: 'navy', uitlijning: 'center' };
-    case 'afbeelding': return { id, soort, url: '', alt: '', breedte: 100, link: '', uitlijning: 'center' };
+    case 'afbeelding': return { id, soort, url: '', alt: '', formaat: 'middel', link: '', uitlijning: 'center' };
     case 'kolommen': return { id, soort, links: { afbeelding: '', alt: '', html: '<p>Linker kolom</p>' }, rechts: { afbeelding: '', alt: '', html: '<p>Rechter kolom</p>' } };
     case 'lijn': return { id, soort, kleur: 'grijs' };
     case 'ruimte': return { id, soort, hoogte: 24 };
@@ -154,7 +156,9 @@ export function normaliseerBlokken(raw) {
       case 'afbeelding': {
         const url = veiligeAfbeelding(b.url);
         if (!url) fouten.push(`Blok ${i + 1} (afbeelding) heeft nog geen afbeelding.`);
-        blokken.push({ id, soort: 'afbeelding', url, alt: kort(b.alt, 200), breedte: getal(b.breedte, 20, 100, 100), link: veiligeLink(b.link), uitlijning });
+        // formaat (klein/middel/volledig); oudere sjablonen zonder formaat houden hun breedte (%).
+        const formaat = AFBEELDING_FORMATEN[b.formaat] ? b.formaat : null;
+        blokken.push({ id, soort: 'afbeelding', url, alt: kort(b.alt, 200), ...(formaat ? { formaat } : { breedte: getal(b.breedte, 20, 100, 100) }), link: veiligeLink(b.link), uitlijning });
         break;
       }
       case 'kolommen': {
@@ -179,10 +183,40 @@ const rij = (inhoud, { padding = '0 0 16px', uitlijning = 'left' } = {}) =>
 
 function compileerKolom(k, breedte) {
   const img = k.afbeelding
-    ? `<img src="${esc(k.afbeelding)}" alt="${esc(k.alt)}" width="${breedte}" style="display:block;width:100%;max-width:${breedte}px;height:auto;border:0;margin:0 0 10px;border-radius:6px" />`
+    ? `<img src="${esc(k.afbeelding)}" alt="${esc(k.alt)}" width="${breedte}" style="display:block;width:${breedte}px;max-width:100%;height:auto;border:0;margin:0 0 10px;border-radius:6px" />`
     : '';
   const tekst = k.html ? opgemaakteTekst(k.html) : '';
   return img + tekst;
+}
+
+/** Breedte in px van een afbeeldingsblok: formaat, of (oud) breedte-%. PURE. */
+export function afbeeldingPx(b) {
+  const pct = AFBEELDING_FORMATEN[b.formaat] || getal(b.breedte, 20, 100, 100);
+  return Math.round(INHOUD_BREEDTE * pct / 100);
+}
+
+/**
+ * "Bulletproof" e-mailknop (2026-10-11): overal een ECHTE gevulde knop.
+ *   - Outlook (Windows): VML-roundrect met vulkleur, in <!--[if mso]>;
+ *   - de rest: tabelcel met achtergrond + een <a> met inline achtergrond, rand
+ *     in dezelfde kleur en padding (blijft een vlak, ook als een client de
+ *     padding of het bgcolor-attribuut negeert); verborgen voor Outlook.
+ * Navy = witte tekst; goud = navy tekst (wit op goud is onleesbaar). PURE.
+ */
+export function knopHtml(b) {
+  const goud = b.stijl === 'goud';
+  const achter = goud ? GOUD : NAVY;
+  const voor = goud ? NAVY : '#ffffff';
+  const tekst = esc(b.tekst);
+  const url = esc(b.url);
+  const breedte = Math.min(420, Math.max(180, Math.round(String(b.tekst || '').length * 9 + 64)));
+  const hoogte = 46;
+  const marge = b.uitlijning === 'center' ? '0 auto' : b.uitlijning === 'right' ? '0 0 0 auto' : '0';
+  return `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${url}" style="height:${hoogte}px;v-text-anchor:middle;width:${breedte}px" arcsize="18%" strokecolor="${achter}" fillcolor="${achter}"><w:anchorlock/><center style="color:${voor};font-family:${FONT};font-size:15px;font-weight:bold">${tekst}</center></v:roundrect><![endif]-->
+        <!--[if !mso]><!--><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${b.uitlijning}" style="margin:${marge};border-collapse:separate"><tr>
+          <td align="center" valign="middle" bgcolor="${achter}" style="background-color:${achter};border-radius:8px">
+            <a href="${url}" target="_blank" style="display:inline-block;min-width:${breedte - 60}px;background-color:${achter};border:1px solid ${achter};border-radius:8px;padding:13px 29px;font-family:${FONT};font-size:15px;font-weight:700;line-height:20px;color:${voor};text-align:center;text-decoration:none">${tekst}</a>
+          </td></tr></table><!--<![endif]-->`;
 }
 
 /** Eén blok → één tabelrij. PURE. */
@@ -194,19 +228,13 @@ export function compileerBlok(b) {
     }
     case 'tekst':
       return rij(opgemaakteTekst(b.html, { uitlijning: b.uitlijning }), { padding: '0 0 4px', uitlijning: b.uitlijning });
-    case 'knop': {
-      const goud = b.stijl === 'goud';
-      const achter = goud ? GOUD : NAVY;
-      const voor = goud ? NAVY : '#ffffff';
-      const knop = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${b.uitlijning}" style="margin:0 ${b.uitlijning === 'center' ? 'auto' : '0'}"><tr>
-        <td align="center" bgcolor="${achter}" style="border-radius:8px;background:${achter}">
-          <a href="${esc(b.url)}" target="_blank" style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:15px;font-weight:700;line-height:1.2;color:${voor};text-decoration:none;border-radius:8px">${esc(b.tekst)}</a>
-        </td></tr></table>`;
-      return rij(knop, { padding: '8px 0 20px', uitlijning: b.uitlijning });
-    }
+    case 'knop':
+      return rij(knopHtml(b), { padding: '8px 0 20px', uitlijning: b.uitlijning });
     case 'afbeelding': {
-      const px = Math.round(INHOUD_BREEDTE * b.breedte / 100);
-      let img = `<img src="${esc(b.url)}" alt="${esc(b.alt)}" width="${px}" style="display:block;width:100%;max-width:${px}px;height:auto;border:0;border-radius:8px;margin:${b.uitlijning === 'center' ? '0 auto' : b.uitlijning === 'right' ? '0 0 0 auto' : '0'}" />`;
+      // Vaste breedte (width-attribuut + inline px) met max-width:100%: Outlook
+      // houdt zich aan de breedte, telefoons schalen omlaag; hoogte automatisch.
+      const px = afbeeldingPx(b);
+      let img = `<img src="${esc(b.url)}" alt="${esc(b.alt)}" width="${px}" style="display:block;width:${px}px;max-width:100%;height:auto;border:0;border-radius:8px;margin:${b.uitlijning === 'center' ? '0 auto' : b.uitlijning === 'right' ? '0 0 0 auto' : '0'}" />`;
       if (b.link) img = `<a href="${esc(b.link)}" target="_blank" style="text-decoration:none">${img}</a>`;
       return rij(img, { padding: '4px 0 18px', uitlijning: b.uitlijning });
     }

@@ -47,7 +47,7 @@
       case 'kop': return b.tekst;
       case 'tekst': return tekst(b.html);
       case 'knop': return b.tekst + ' → ' + b.url;
-      case 'afbeelding': return b.url ? (b.alt || 'afbeelding') : 'nog geen afbeelding';
+      case 'afbeelding': return b.url ? (b.alt || 'afbeelding') + ' · ' + ({ klein: 'klein', middel: 'middel', volledig: 'volledige breedte' }[b.formaat] || (b.breedte || 100) + '%') : 'nog geen afbeelding';
       case 'kolommen': return tekst(b.links && b.links.html) + ' | ' + tekst(b.rechts && b.rechts.html);
       case 'lijn': return b.kleur === 'goud' ? 'goud' : 'grijs';
       case 'ruimte': return b.hoogte + ' px';
@@ -124,7 +124,7 @@
       case 'afbeelding': return titel + veld('Afbeelding', uploadVeld('url', b.url))
         + veld('Of een https-adres', invoer('url', b.url, 'placeholder="https://…"'))
         + veld('Omschrijving (alt-tekst)', invoer('alt', b.alt, 'maxlength="200"'))
-        + veld(`Breedte (${b.breedte}%)`, `<input type="range" min="20" max="100" step="5" data-mbw-veld="breedte" value="${esc(b.breedte)}" style="width:100%">`)
+        + veld('Formaat', keuze('formaat', b.formaat || '', [...(b.formaat ? [] : [['', `Zoals eerder (${b.breedte || 100}%)`]]), ['klein', 'Klein'], ['middel', 'Middel'], ['volledig', 'Volledige breedte']]))
         + veld('Link bij klikken (optioneel)', invoer('link', b.link, 'placeholder="https://…"')) + veld('Uitlijning', keuze('uitlijning', b.uitlijning, UITLIJNING));
       case 'kolommen': return titel + ['links', 'rechts'].map((kant) => `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px">
           <div style="font-size:12px;font-weight:600;margin-bottom:6px">${kant === 'links' ? 'Linker kolom' : 'Rechter kolom'}</div>
