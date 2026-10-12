@@ -3684,11 +3684,34 @@
     _ui.inbox.autoOpenedFirst = false;
     try { window.DFO?.render?.(); } catch (_) {}
   };
+  /* H10 — van WhatsApp naar E-mail sprong de draad terug naar het oudste
+     bericht (9 september). Oorzaak: deze knop riep de volle DFO.render() aan,
+     en die vervangt #wbxInboxThreadScroll — een nieuwe node begint op
+     scrollTop 0.
+
+     Een kanaalwissel verandert alleen de schrijfbalk. Dus hertekenen we alleen
+     die, met hetzelfde chirurgische patroon dat dit bestand al gebruikt voor
+     de draad en het klantpaneel. De draad blijft staan waar hij stond, want hij
+     wordt niet aangeraakt. */
   window.__wbxInboxToggleChannel = (ch) => {
     _ui.inbox.compose.channel = String(ch || 'wa');
     _ui.inbox.compose.error = null;
-    try { window.DFO?.render?.(); } catch (_) {}
+    if (!_repaintInboxCompose()) {
+      // Geen schrijfbalk in de DOM (ander tabblad, nog niets geselecteerd):
+      // dan is de volle hertekening alsnog de juiste. Terugvallen is hier geen
+      // luiheid maar de enige manier om niet stil niets te doen.
+      try { window.DFO?.render?.(); } catch (_) {}
+    }
   };
+
+  /* Chirurgische hertekening van alleen de schrijfbalk.
+     @returns {boolean} of het gelukt is */
+  function _repaintInboxCompose() {
+    const el = document.getElementById('wbxInboxCompose');
+    if (!el) return false;
+    el.innerHTML = _inboxComposeHtml(_ui.inbox.selectedConv);
+    return true;
+  }
   window.__wbxInboxComposeField = (field, val) => {
     _ui.inbox.compose[field] = val;
   };
@@ -5190,8 +5213,8 @@
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-width:0">
           ${_inboxThreadHeaderHtml(convId)}
-          <div id="wbxInboxThreadScroll" style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
-          ${_inboxComposeHtml(convId)}
+          <div id="wbxInboxThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
+          <div id="wbxInboxCompose">${_inboxComposeHtml(convId)}</div>
         </div>
         <div id="wbxInboxRightPane" style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
           ${_inboxKlantgegevensHtml(convId)}

@@ -162,6 +162,26 @@
    */
   const GEEN_WERK = ['spam'];
 
+  /**
+   * De stand van een gesprek, in gewone taal.
+   *
+   * H5 — in de gesprekskop stond de databankwaarde: "wacht_op_ons", met
+   * liggend streepje. De filterpillen eronder zeiden "Wacht op ons". Twee
+   * namen voor hetzelfde ding op één scherm is hoe je gaat twijfelen of het
+   * wel hetzelfde ding is.
+   *
+   * De vijf standen komen uit de CHECK op iris_gesprekken.status; staat er
+   * ooit iets anders, dan valt hij terug op de ruwe waarde — zichtbaar vreemd
+   * is beter dan stil weggelaten.
+   */
+  const STAND_LABELS = {
+    nieuw: 'Nog in te delen',
+    wacht_op_ons: 'Wacht op ons',
+    wacht_op_klant: 'Wacht op klant',
+    belofte_loopt: 'Belofte loopt',
+    geregeld: 'Geregeld',
+  };
+
   const CATEGORIE_LABELS = {
     facturatie: 'Facturatie',
     betaalafspraak: 'Betaalafspraak',
@@ -1710,9 +1730,14 @@
     return `<div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;gap:5px;flex-wrap:wrap">${Object.keys(FILTER_LABELS).map(pil).join('')}</div>
       <div style="display:flex;gap:6px;align-items:center">
-        <input type="search" placeholder="Zoek op naam of e-mailadres…" value="${esc(S.zoek)}"
+        <!-- H7 — de placeholder was "Zoek op naam of e-mailadres…" en werd
+             afgekapt tot "Zoek op naam of e-n". Een afgekapte uitleg legt
+             niets uit; korter en volledig is beter dan langer en halve. De
+             volledige tekst staat in de title, voor wie er toch over hangt. -->
+        <input type="search" placeholder="Zoek op naam of e-mail" value="${esc(S.zoek)}"
+          title="Zoek op naam of e-mailadres"
           oninput="__irisZoek(this.value)"
-          style="flex:1;min-width:0;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)" />
+          style="flex:1;min-width:0;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1);text-overflow:ellipsis" />
         <select onchange="__irisCategorie(this.value)"
           style="font-size:11.5px;padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1);max-width:150px">${cats}</select>
       </div>
@@ -1850,7 +1875,7 @@
         onclick="__irisTerug()" title="Terug naar de lijst">← Lijst</button>
       <b style="font-size:13px">${esc(g.naam || 'Onbekend')}</b>
       ${vensterMerk(v, g.kanaal)}
-      <span style="font-size:11px;color:var(--text-3)">${esc(g.status || '')}</span>
+      <span style="font-size:11px;color:var(--text-3)">${esc(STAND_LABELS[g.status] || g.status || '')}</span>
       <div style="flex:1"></div>
       ${g.categorie ? `<span style="font-size:11px;color:var(--text-3)">${esc(CATEGORIE_LABELS[g.categorie] || g.categorie)}</span>` : ''}
       ${indelingKnop(g)}
@@ -1865,9 +1890,17 @@
 
     const voet = schrijfbalk(S.gekozen, verzenden);
 
+    /* H6 — let op `min-height:0` op het scrollende vak hieronder. In een
+       flex-kolom is de standaard min-height:auto, en dan WEIGERT een vak met
+       flex:1 kleiner te worden dan zijn inhoud: de draad groeit door en duwt de
+       schrijfbalk onder de vouw. Bij 801 px hoog was die niet meer te zien.
+
+       De regel staat al in de CSS van .iris-post, maar die geldt alleen voor
+       directe kinderen — dit vak zit een laag dieper. Precies het gat dat de
+       toets in iris-post-breedtes.test.js moest dekken en niet dekte. */
     return `<div style="display:flex;flex-direction:column;height:100%;min-width:0">
       ${kop}
-      <div style="flex:1;overflow-y:auto;padding:12px 14px">${draad}</div>
+      <div style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px">${draad}</div>
       ${voet}
     </div>`;
   }
@@ -2764,11 +2797,12 @@
 
     const rijen = st.items.map((r) => {
       const mis = r.resultaat === 'fout' || r.fout;
+      const wat = logRegelTekst(r);
       return `<div style="display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
         <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap;min-width:92px">${esc(tijdKort(r.wanneer))}</span>
         <span style="color:${mis ? 'var(--rose)' : 'var(--text-3)'};font-weight:600">${mis ? '✕' : '·'}</span>
         <span style="flex:1;min-width:0">
-          ${esc(r.wat || '—')}
+          ${esc(wat)}
           ${r.fout ? `<div style="font-size:11px;color:var(--rose);margin-top:2px">${esc(r.fout)}</div>` : ''}
         </span>
         <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(r.wie ? 'medewerker' : 'Iris')}</span>
@@ -2776,6 +2810,48 @@
     }).join('');
 
     return `<div style="max-width:760px;margin:0 auto;padding:0 20px 24px">${kop}${rijen}</div>`;
+  }
+
+  /**
+   * Eén logregel, met wat die ronde dééd.
+   *
+   * ── WAT ER MIS WAS (H8) ──────────────────────────────────────────────────
+   * Het logboek was honderd keer het woord "werkronde" en verder niets. Dat is
+   * geen logboek, dat is een hartslag — en een hartslag die honderd regels in
+   * beslag neemt verbergt de drie regels waar je naar zocht.
+   *
+   * De gegevens waren er al: cron-iris-werk schrijft het volledige rapport in
+   * `details` (opgenomen_wa, opgenomen_mail, ingedeeld, verstuurd,
+   * signalen_nieuw, duur_ms), en het endpoint geeft die kolom al mee. Alleen
+   * het scherm keek er niet naar.
+   *
+   * Wat er nu staat is wat er gebeurde, en niets anders: nullen worden
+   * weggelaten. Een ronde die drie mails opnam heet "werkronde · 3 mails
+   * opgenomen". Een lege ronde komt niet eens in het logboek (die check staat
+   * in de cron), dus als hier "werkronde" zonder inhoud staat, is dát de
+   * informatie: er is een rij zonder rapport.
+   */
+  function logRegelTekst(r) {
+    const wat = String(r?.wat || '—');
+    const d = (r && r.details && typeof r.details === 'object' && !Array.isArray(r.details)) ? r.details : null;
+    if (!d) return wat;
+
+    const delen = [];
+    const tel = (sleutel, enkel, meer) => {
+      const n = Number(d[sleutel]);
+      if (!Number.isFinite(n) || n <= 0) return;
+      delen.push(`${n} ${n === 1 ? enkel : meer}`);
+    };
+    tel('opgenomen_wa', 'WhatsApp-bericht opgenomen', "WhatsApp-berichten opgenomen");
+    tel('opgenomen_mail', 'mail opgenomen', 'mails opgenomen');
+    tel('ingedeeld', 'gesprek ingedeeld', 'gesprekken ingedeeld');
+    tel('verstuurd', 'bericht verstuurd', 'berichten verstuurd');
+    tel('signalen_nieuw', 'mentorsignaal', 'mentorsignalen');
+    tel('gekoppeld', 'contact gekoppeld', 'contacten gekoppeld');
+    tel('te_bevestigen', 'koppeling te bevestigen', 'koppelingen te bevestigen');
+
+    if (!delen.length) return wat + ' · niets te doen';
+    return wat + ' · ' + delen.join(', ');
   }
 
   /**
