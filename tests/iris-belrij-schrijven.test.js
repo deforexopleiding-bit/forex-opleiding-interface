@@ -109,7 +109,7 @@ test('een afgehandelde rij blokkeert geen nieuwe: gedaan is gedaan', async () =>
 test('zonder redenen gebeurt er niets', async () => {
   const db = nepDb({ iris_belrij: [], iris_belrij_redenen: [] });
   const uit = await schrijfPersoon(db, { contact_id: CONTACT, redenen: [] });
-  assert.deepEqual(uit, { nieuw: 0, bijgewerkt: 0, redenen_nieuw: 0, redenen_verwerkt: 0 });
+  assert.deepEqual(uit, { nieuw: 0, bijgewerkt: 0, redenen_nieuw: 0, redenen_verwerkt: 0, redenen_fout: null });
   assert.equal(db._data.iris_belrij.length, 0);
 });
 

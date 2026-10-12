@@ -262,6 +262,15 @@ export default async function handler(req, res) {
         if (rapport.belrij?.fouten?.length) {
           for (const f of rapport.belrij.fouten) meldFout('belrij vullen', new Error(f));
         }
+        // De redenen-tabel is één probleem, niet één per persoon. Eén regel in
+        // het logboek met het aantal erbij, zodat zichtbaar is dat de belrij
+        // zich wél vult maar zonder de redenen -- en wat eraan mankeert.
+        if (rapport.belrij?.redenen_fout) {
+          meldFout(
+            `belrij-redenen (${rapport.belrij.redenen_fout_aantal} personen)`,
+            new Error(rapport.belrij.redenen_fout)
+          );
+        }
       } catch (e) {
         meldFout('belrij vullen', e);
       }

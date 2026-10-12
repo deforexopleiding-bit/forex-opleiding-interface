@@ -163,7 +163,7 @@ export async function contactPerGesprek(db, gesprekIds) {
  * hoeven kijken.
  */
 export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} } = {}) {
-  const uit = { nieuw: 0, bijgewerkt: 0, redenen_nieuw: 0, redenen_verwerkt: 0 };
+  const uit = { nieuw: 0, bijgewerkt: 0, redenen_nieuw: 0, redenen_verwerkt: 0, redenen_fout: null };
   if (!rij?.contact_id || !Array.isArray(rij.redenen) || !rij.redenen.length) return uit;
 
   const { data: bestaand, error: leesFout } = await db
@@ -219,6 +219,23 @@ export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} 
     uit.nieuw = 1;
   }
 
+  // ── De redenen, fail-soft ───────────────────────────────────────────────────
+  //
+  // Hierboven staat de belrij-rij al in de databank. Gooien we hier, dan is de
+  // rij er wél en de reden niet -- en dan probeert de volgende ronde hetzelfde
+  // opnieuw en gooit opnieuw. Dat levert een belrij op die zich gewoon vult
+  // (met de ene reden die in iris_belrij.reden staat, zoals vóór taak 6) plus
+  // een foutmelding per persoon per ronde. Niemand leest dat, en het verbergt
+  // elke ándere fout eronder.
+  //
+  // Het geval dat dit in de praktijk raakt: de migratie
+  // docs/sql-migrations/2026-10-12-iris-belrij-redenen.sql is nog niet
+  // gedraaid. Dan is de belrij nuttig-maar-beperkt in plaats van luidruchtig
+  // kapot, en de ronde zegt ÉÉN keer wat eraan mankeert.
+  //
+  // Fail-soft is hier geen "fout wegslikken": de reden komt in het rapport en
+  // in console.error, dus een echte bug in dit pad blijft zichtbaar. Alleen
+  // blokkeert hij de rest van de ronde niet meer.
   const { data: gezet, error: redenFout } = await db
     .from('iris_belrij_redenen')
     .upsert(
@@ -234,7 +251,11 @@ export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} 
       { onConflict: 'belrij_id,bron_sleutel' }
     )
     .select('id');
-  if (redenFout) throw new Error(`redenen opslaan: ${redenFout.message}`);
+  if (redenFout) {
+    uit.redenen_fout = redenFout.message;
+    console.error('[iris/belrij-vullen] redenen opslaan:', redenFout.message);
+    return uit;
+  }
   uit.redenen_nieuw = (gezet || []).length;
 
   const { data: open, error: openFout } = await db
@@ -242,7 +263,11 @@ export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} 
     .select('id, bron_sleutel')
     .eq('belrij_id', belrijId)
     .is('verwerkt_op', null);
-  if (openFout) throw new Error(`open redenen lezen: ${openFout.message}`);
+  if (openFout) {
+    uit.redenen_fout = openFout.message;
+    console.error('[iris/belrij-vullen] open redenen lezen:', openFout.message);
+    return uit;
+  }
 
   const weg = vervallenRedenen(open, rij.redenen.map((r) => r.bron_sleutel));
   if (weg.length) {
@@ -250,7 +275,11 @@ export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} 
       .from('iris_belrij_redenen')
       .update({ verwerkt_op: nu.toISOString() })
       .in('id', weg);
-    if (error) throw new Error(`redenen afvinken: ${error.message}`);
+    if (error) {
+      uit.redenen_fout = error.message;
+      console.error('[iris/belrij-vullen] redenen afvinken:', error.message);
+      return uit;
+    }
     uit.redenen_verwerkt = weg.length;
   }
 
@@ -273,6 +302,9 @@ export async function vulBelrij(db, { nu = new Date(), max = PER_BRON_MAX, opTij
     nieuw: 0, bijgewerkt: 0,
     redenen_nieuw: 0, redenen_verwerkt: 0,
     zonder_contact: 0, meerdere_contacten: 0,
+    // Eén keer per ronde, niet één keer per persoon: als de redenen-tabel er
+    // niet is, is dat één probleem en geen honderd.
+    redenen_fout: null, redenen_fout_aantal: 0,
     fouten: [], afgekapt: false,
   };
 
@@ -319,6 +351,10 @@ export async function vulBelrij(db, { nu = new Date(), max = PER_BRON_MAX, opTij
       rapport.bijgewerkt += uit.bijgewerkt;
       rapport.redenen_nieuw += uit.redenen_nieuw;
       rapport.redenen_verwerkt += uit.redenen_verwerkt;
+      if (uit.redenen_fout) {
+        rapport.redenen_fout_aantal++;
+        if (!rapport.redenen_fout) rapport.redenen_fout = uit.redenen_fout;
+      }
     } catch (e) {
       const tekst = e?.message || String(e);
       console.error(`[iris/belrij-vullen] contact ${rij.contact_id}:`, tekst);
