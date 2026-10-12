@@ -2,9 +2,10 @@
 //
 // Eén stap uitvoeren.
 //
-//   POST { actie: 'klaarzetten', opdracht_id?, contact_id?, type, parameters, idempotentie? }
-//   POST { actie: 'uitvoeren',   id }
-//   POST { actie: 'annuleren',   id }
+//   POST { actie: 'klaarzetten',    opdracht_id?, contact_id?, type, parameters, idempotentie? }
+//   POST { actie: 'uitvoeren',      id }
+//   POST { actie: 'annuleren',      id }
+//   POST { actie: 'plan_uitvoeren', opdracht_id, gesprek_id?, contact_id? }
 //
 // Recht: iris.post.beantwoorden voor klaarzetten, per type een eigen recht
 // voor uitvoeren (zie RECHT_PER_TYPE).
@@ -15,6 +16,22 @@
 // het betekent dat er precies één plaats is waar de rechten, de idempotentie
 // en het logboek geregeld zijn. Twee plekken zouden betekenen dat de tweede de
 // eerste na een half jaar stilletjes achterna hinkt.
+//
+// ── WAAROM plan_uitvoeren HIER STAAT EN NIET BIJ DE OPDRACHT ─────────────────
+// Een opdracht komt met een plan van meerdere stappen, en tot nu toe was dat
+// plan onuitvoerbaar: iris-opdracht maakte alleen de plan-jsonb en nooit een
+// iris_acties-rij, en het scherm had geen knop die hiernaartoe wees. Je kreeg
+// een plan te zien, met status "Wacht op jouw akkoord", en er was niets om op
+// te drukken.
+//
+// Dat gat dichten kon op twee manieren. Het scherm per stap twee keer laten
+// aankloppen (klaarzetten, dan uitvoeren) zou werken, maar dan ligt de
+// volgorde, de halve mislukking en het afsluiten van de opdracht bij de
+// browser — en een browser die halverwege wegklikt laat dan een opdracht
+// achter waarvan niemand weet hoe ver hij kwam.
+//
+// Dus één aanroep, hier, in het bestand dat de rechten per staptype en de
+// idempotentie al bewaakt. Eén plek waar iets écht gebeurt blijft eén plek.
 //
 // ── DE IDEMPOTENTIESLEUTEL ───────────────────────────────────────────────────
 // UNIQUE op iris_acties. Een dubbele klik botst erop, en dat vangen we op als
@@ -29,7 +46,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
-import { STAPTYPES } from './_lib/iris/opdracht.js';
+import { STAPTYPES, NIET_VIA_OPDRACHT, verloopRegel } from './_lib/iris/opdracht.js';
+import { haalHerkenningspunten, telefoonVormen, naamUit } from './_lib/iris/doel.js';
 import { bouwOpvolging } from './_lib/iris/opvolging.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -99,6 +117,7 @@ export default async function handler(req, res) {
     if (actie === 'klaarzetten') return await klaarzetten(req, res, user);
     if (actie === 'uitvoeren') return await uitvoeren(req, res, user);
     if (actie === 'annuleren') return await annuleren(req, res, user);
+    if (actie === 'plan_uitvoeren') return await planUitvoeren(req, res, user);
     return res.status(400).json({ error: `onbekende actie: ${actie || '(leeg)'}` });
   } catch (e) {
     console.error('[iris-actie]', actie, e?.message || e);
@@ -127,6 +146,21 @@ async function klaarzetten(req, res, user) {
   const sleutel = String(req.body?.idempotentie || '').trim()
     || bouwSleutel({ type, contactId, opdrachtId, parameters });
 
+  const uit = await zetKlaar({ type, contactId, opdrachtId, parameters, sleutel });
+  return res.status(200).json({ actie: uit.actie, al_gedaan: uit.al_gedaan });
+}
+
+/**
+ * Eén stap als rij neerzetten.
+ *
+ * Apart van het endpoint omdat plan_uitvoeren hem ook nodig heeft, en twee
+ * inserts met elk hun eigen behandeling van de unieke sleutel is precies hoe
+ * de tweede na een half jaar anders gaat werken dan de eerste.
+ *
+ * @returns {Promise<{actie: object, al_gedaan: boolean}>}
+ */
+async function zetKlaar({ type, contactId = null, opdrachtId = null, parameters = {}, sleutel }) {
+  const key = sleutel || bouwSleutel({ type, contactId, opdrachtId, parameters });
   const { data, error } = await supabaseAdmin
     .from('iris_acties')
     .insert({
@@ -135,24 +169,22 @@ async function klaarzetten(req, res, user) {
       type,
       parameters,
       status: 'klaar',
-      idempotentie: sleutel,
+      idempotentie: key,
     })
     .select('*')
     .single();
 
-  if (error) {
-    if (String(error.code) === '23505') {
-      // Al klaargezet. Dat is geen fout: de gebruiker wilde deze stap, en die
-      // staat er. Geef de bestaande rij terug zodat het scherm "✓ gedaan" kan
-      // tonen met een verwijzing naar wat er al is.
-      const { data: bestaand } = await supabaseAdmin
-        .from('iris_acties').select('*').eq('idempotentie', sleutel).maybeSingle();
-      return res.status(200).json({ actie: bestaand, al_gedaan: true });
-    }
-    throw new Error('actie opslaan: ' + error.message);
-  }
+  if (!error) return { actie: data, al_gedaan: false };
 
-  return res.status(200).json({ actie: data, al_gedaan: false });
+  if (String(error.code) === '23505') {
+    // Al klaargezet. Dat is geen fout: de gebruiker wilde deze stap, en die
+    // staat er. Geef de bestaande rij terug zodat het scherm "✓ gedaan" kan
+    // tonen met een verwijzing naar wat er al is.
+    const { data: bestaand } = await supabaseAdmin
+      .from('iris_acties').select('*').eq('idempotentie', key).maybeSingle();
+    return { actie: bestaand, al_gedaan: true };
+  }
+  throw new Error('actie opslaan: ' + error.message);
 }
 
 // ── Uitvoeren ────────────────────────────────────────────────────────────────
@@ -174,14 +206,7 @@ async function uitvoeren(req, res, user) {
   // De claim. Van klaar/goedgekeurd naar uitgevoerd lukt één keer. Zou dit een
   // gewone update zijn, dan kon dezelfde stap bij een samenloop twee keer
   // gedaan worden — en twee keer toegang verlengen is twee keer zo lang.
-  const { data: geclaimd, error: claimFout } = await supabaseAdmin
-    .from('iris_acties')
-    .update({ status: 'uitgevoerd', uitgevoerd_op: new Date().toISOString(), uitgevoerd_door: user.id })
-    .eq('id', id)
-    .in('status', ['klaar', 'goedgekeurd'])
-    .select('*')
-    .maybeSingle();
-  if (claimFout) throw new Error('claim: ' + claimFout.message);
+  const geclaimd = await claimStap(id, user);
   if (!geclaimd) {
     return res.status(409).json({
       error: 'Deze stap is al opgepakt',
@@ -190,11 +215,26 @@ async function uitvoeren(req, res, user) {
     });
   }
 
+  const uit = await doeStap(geclaimd, user);
+  if (uit.ok) return res.status(200).json({ ok: true, resultaat: uit.resultaat });
+  return res.status(502).json({ error: 'Stap mislukt', uitleg: uit.fout });
+}
+
+/**
+ * Een geclaimde stap daadwerkelijk doen, en de uitkomst wegschrijven.
+ *
+ * Gooit NIET: een stap die misgaat is een uitkomst, geen uitzondering. Dat is
+ * wat plan_uitvoeren nodig heeft — daar mag één mislukte stap de rest van het
+ * plan niet meesleuren (de les uit CLAUDE.md over lussen).
+ *
+ * @returns {Promise<{ok: true, resultaat: object} | {ok: false, fout: string}>}
+ */
+async function doeStap(geclaimd, user) {
   try {
     const resultaat = await voerUit(geclaimd, user);
-    await supabaseAdmin.from('iris_acties').update({ resultaat, fout: null }).eq('id', id);
+    await supabaseAdmin.from('iris_acties').update({ resultaat, fout: null }).eq('id', geclaimd.id);
     await logStap(user, geclaimd, 'ok', null);
-    return res.status(200).json({ ok: true, resultaat });
+    return { ok: true, resultaat };
   } catch (e) {
     const tekst = e?.message || String(e);
     console.error('[iris-actie] uitvoeren mislukt:', geclaimd.type, tekst);
@@ -203,10 +243,23 @@ async function uitvoeren(req, res, user) {
     await supabaseAdmin
       .from('iris_acties')
       .update({ status: 'mislukt', fout: tekst.slice(0, 500) })
-      .eq('id', id);
+      .eq('id', geclaimd.id);
     await logStap(user, geclaimd, 'mislukt', tekst);
-    return res.status(502).json({ error: 'Stap mislukt', uitleg: tekst });
+    return { ok: false, fout: tekst };
   }
+}
+
+/** Claim één stap van klaar/goedgekeurd naar uitgevoerd. Null als een ander 'm had. */
+async function claimStap(id, user) {
+  const { data, error } = await supabaseAdmin
+    .from('iris_acties')
+    .update({ status: 'uitgevoerd', uitgevoerd_op: new Date().toISOString(), uitgevoerd_door: user.id })
+    .eq('id', id)
+    .in('status', ['klaar', 'goedgekeurd'])
+    .select('*')
+    .maybeSingle();
+  if (error) throw new Error('claim: ' + error.message);
+  return data || null;
 }
 
 async function annuleren(req, res, user) {
@@ -226,6 +279,324 @@ async function annuleren(req, res, user) {
   if (error) throw new Error('annuleren: ' + error.message);
   if (!data) return res.status(409).json({ error: 'Deze stap is niet meer te annuleren' });
   return res.status(200).json({ ok: true });
+}
+
+/**
+ * Welke staptypes zonder doel niet kunnen.
+ *
+ * Niet verzonnen maar afgelezen uit voerUit(): die gooit er zelf op
+ * ("belofte zonder contact", "belrij zonder contact", en bouwOpvolging()
+ * weigert een opvolging zonder gesprek of contact, want die zou ALTIJD afgaan).
+ * lms_toegang_verlengen zoekt de student op via het contact, tenzij het
+ * student_id al in de parameters staat.
+ *
+ * Deze lijst bestaat om de weigering VOORAF te doen in plaats van halverwege.
+ * Een plan van drie stappen waarvan de tweede omvalt op een ontbrekend doel,
+ * laat een opdracht achter die half gedaan is — en dat is erger dan een plan
+ * dat niet begint en zegt waarom.
+ */
+const DOEL_NODIG = Object.freeze(['belofte_vastleggen', 'belrij_toevoegen', 'opvolging_instellen']);
+
+/** Standen waarin een opdracht niets meer hoort uit te voeren. */
+const OPDRACHT_KLAAR = Object.freeze(['geregeld', 'afgebroken']);
+
+/**
+ * Zoek het gesprek waar deze stap op slaat.
+ *
+ * ── DE VOLGORDE IS DE HELE VEILIGHEID ────────────────────────────────────────
+ * Eerst op e-mailadres of telefoonnummer uit de plantekst: die zijn uniek
+ * genoeg om zeker van te zijn. Pas als die er niet in staan, op naam — en een
+ * naam is nooit genoeg om op te handelen, want twee studenten kunnen Jan
+ * Jansen heten.
+ *
+ * ── WAAROM OP GESPREK EN NIET OP CONTACT ─────────────────────────────────────
+ * In productie bestaan dubbele contacten: dezelfde persoon, hetzelfde adres,
+ * twee rijen, allebei in hetzelfde gesprek. Tellen op contacten zou daar "twee
+ * treffers, dus vragen" van maken terwijl het één en dezelfde draad is. Tellen
+ * op gesprekken geeft er één, en dat is ook wat de opvolging nodig heeft
+ * (waarop = 'gesprek' is het scherpste spoor dat er is).
+ *
+ * Nul of meer dan één gesprek is GEEN uitkomst om op te handelen. Dan is het
+ * een vraag, en kiest een mens. Er wordt ook nooit een contact aangemaakt: dat
+ * zou een persoon verzinnen op grond van een stuk tekst.
+ *
+ * @returns {Promise<{gesprekId: string|null, hoe: string, kandidaten: number}>}
+ */
+async function zoekDoelGesprek({ wie, vraag, omschrijving }) {
+  const { emails, telefoons } = haalHerkenningspunten(wie, vraag, omschrijving);
+
+  /** Van contact-ids naar de gesprekken eronder, ontdubbeld. */
+  const gesprekkenVan = async (contactIds) => {
+    if (!contactIds.length) return [];
+    const { data, error } = await supabaseAdmin
+      .from('iris_gesprekken')
+      .select('id')
+      .in('contact_id', contactIds)
+      .limit(25);
+    if (error) throw new Error('gesprekken zoeken: ' + error.message);
+    return [...new Set((data || []).map((g) => g.id))];
+  };
+
+  /** Contacten op een arraykolom die een van deze waarden bevat. */
+  const contactenOp = async (kolom, waarden) => {
+    if (!waarden.length) return [];
+    const { data, error } = await supabaseAdmin
+      .from('iris_contacten')
+      .select('id')
+      .overlaps(kolom, waarden)
+      .limit(25);
+    if (error) throw new Error(`contacten op ${kolom}: ` + error.message);
+    return (data || []).map((c) => c.id);
+  };
+
+  // 1. e-mail
+  if (emails.length) {
+    const ids = await contactenOp('emails', emails);
+    const g = await gesprekkenVan(ids);
+    if (g.length === 1) return { gesprekId: g[0], hoe: 'email', kandidaten: 1 };
+    if (g.length > 1) return { gesprekId: null, hoe: 'email', kandidaten: g.length };
+  }
+
+  // 2. telefoon
+  if (telefoons.length) {
+    const vormen = [...new Set(telefoons.flatMap((t) => telefoonVormen(t)))];
+    const ids = await contactenOp('telefoons', vormen);
+    const g = await gesprekkenVan(ids);
+    if (g.length === 1) return { gesprekId: g[0], hoe: 'telefoon', kandidaten: 1 };
+    if (g.length > 1) return { gesprekId: null, hoe: 'telefoon', kandidaten: g.length };
+  }
+
+  // 3. naam — alleen als er geen adres en geen nummer was
+  const naam = naamUit(wie);
+  if (naam) {
+    const { data, error } = await supabaseAdmin
+      .from('iris_contacten')
+      .select('id')
+      .ilike('weergavenaam', `%${naam}%`)
+      .limit(25);
+    if (error) throw new Error('contacten op naam: ' + error.message);
+    const g = await gesprekkenVan((data || []).map((c) => c.id));
+    if (g.length === 1) return { gesprekId: g[0], hoe: 'naam', kandidaten: 1 };
+    return { gesprekId: null, hoe: 'naam', kandidaten: g.length };
+  }
+
+  return { gesprekId: null, hoe: 'niets', kandidaten: 0 };
+}
+
+/**
+ * Het hele plan van een opdracht uitvoeren.
+ *
+ * ── WAT HIER NIET GEBEURT: GOKKEN OP WIE ─────────────────────────────────────
+ * Het plan noemt mensen zoals een mens dat doet ("Andy De Landtsheer
+ * (andy@dl-interieur.be)"), niet bij uuid — een taalmodel kent geen sleutels.
+ * De eerste treffer op een naam pakken is precies het soort stille vergissing
+ * die je pas ontdekt als er een opvolging op de verkeerde persoon loopt.
+ *
+ * Dus: het doel komt van de AANROEPER mee (gesprek_id of contact_id), óf het
+ * wordt gezocht volgens zoekDoelGesprek() — eerst op adres of nummer, dan op
+ * naam, en altijd met de eis dat het naar precies ÉÉN gesprek leidt. Nul of
+ * meer: 409 met de vraag erbij, en het scherm laat kiezen. Er wordt dan nog
+ * niets klaargezet, en er wordt nooit een contact aangemaakt.
+ *
+ * ── VOLGORDE: EERST KEUREN, DAN DOEN ─────────────────────────────────────────
+ * Alle stappen worden eerst nagekeken (bestaat het type, mag deze medewerker
+ * het, is er een doel als het nodig is). Pas als alles door die poort is, gaat
+ * de eerste stap draaien. Een plan dat halverwege op een rechtenfout stukloopt
+ * laat de klant met een halve afspraak zitten.
+ *
+ * ── EN DAARNA MAG ÉÉN STAP MISGAAN ───────────────────────────────────────────
+ * Technisch misgaan kan altijd (het LMS ligt eruit, een datum is onzin). Dan
+ * blijft de opdracht op wacht_op_ok staan met de fout per stap zichtbaar, en
+ * is "nog eens proberen" een geldige handeling: de idempotentiesleutel bevat de
+ * dag, dus een geslaagde stap wordt niet dubbel gedaan.
+ */
+async function planUitvoeren(req, res, user) {
+  const opdrachtId = String(req.body?.opdracht_id || '').trim();
+  if (!UUID_RE.test(opdrachtId)) return res.status(400).json({ error: 'opdracht_id moet een geldige uuid zijn' });
+
+  const gesprekId = String(req.body?.gesprek_id || '').trim() || null;
+  const contactIdIn = String(req.body?.contact_id || '').trim() || null;
+  if (gesprekId && !UUID_RE.test(gesprekId)) return res.status(400).json({ error: 'gesprek_id moet een geldige uuid zijn' });
+  if (contactIdIn && !UUID_RE.test(contactIdIn)) return res.status(400).json({ error: 'contact_id moet een geldige uuid zijn' });
+
+  const { data: opdracht, error: oFout } = await supabaseAdmin
+    .from('iris_opdrachten')
+    .select('id, status, plan, na_uitvoeren, verloop')
+    .eq('id', opdrachtId)
+    .maybeSingle();
+  if (oFout) throw new Error('opdracht: ' + oFout.message);
+  if (!opdracht) return res.status(404).json({ error: 'Opdracht niet gevonden' });
+  if (OPDRACHT_KLAAR.includes(String(opdracht.status))) {
+    return res.status(409).json({ error: 'Deze opdracht is afgesloten', status: opdracht.status });
+  }
+
+  const plan = opdracht.plan && typeof opdracht.plan === 'object' && !Array.isArray(opdracht.plan)
+    ? opdracht.plan : null;
+  const stappen = Array.isArray(plan?.stappen) ? plan.stappen : [];
+  if (plan?.vraag) {
+    return res.status(409).json({
+      error: 'vraag_open',
+      uitleg: 'Iris heeft eerst een vraag. Beantwoord die; daarna staat het plan vast.',
+      vraag: plan.vraag,
+    });
+  }
+  if (!stappen.length) {
+    return res.status(409).json({ error: 'geen_stappen', uitleg: 'Er staat geen enkele stap in dit plan.' });
+  }
+
+  // Een contact uit het meegegeven gesprek, zodat het scherm kan volstaan met
+  // het gesprek dat je toch al open had.
+  let contactId = contactIdIn;
+  if (!contactId && gesprekId) {
+    const { data: g } = await supabaseAdmin
+      .from('iris_gesprekken').select('contact_id').eq('id', gesprekId).maybeSingle();
+    contactId = g?.contact_id || null;
+  }
+
+  // ── Poort 1: het type ──────────────────────────────────────────────────────
+  for (const stap of stappen) {
+    const type = String(stap?.type || '');
+    if (!STAPTYPES.includes(type)) {
+      return res.status(422).json({
+        error: 'onbekende_stap',
+        uitleg: `Het plan bevat een stap die niet bestaat: ${type || '(leeg)'}.`,
+      });
+    }
+    if (NIET_VIA_OPDRACHT.includes(type)) {
+      return res.status(422).json({
+        error: 'stap_niet_via_opdracht',
+        uitleg: `De stap "${type}" loopt niet via een opdracht. Versturen gaat via de Post.`,
+        type,
+      });
+    }
+  }
+
+  // ── Poort 2: de rechten, per staptype ──────────────────────────────────────
+  for (const stap of stappen) {
+    const recht = RECHT_PER_TYPE[String(stap.type)];
+    if (!recht || !(await requirePermission(req, recht))) {
+      return res.status(403).json({ error: `Geen rechten (${recht || 'onbekend type'})`, type: stap.type });
+    }
+  }
+
+  // ── Poort 3: het doel ──────────────────────────────────────────────────────
+  // Kwam er geen gesprek mee, dan mag ik er één zoeken — maar alleen op een
+  // e-mailadres of telefoonnummer uit de plantekst, en alleen als dat naar
+  // precies één gesprek leidt. Zie zoekDoelGesprek() voor waarom.
+  let doelGesprek = gesprekId;
+  let doelHoe = gesprekId ? 'meegegeven' : null;
+  for (const stap of stappen) {
+    const type = String(stap.type);
+    if (!DOEL_NODIG.includes(type)) continue;
+    if (contactId || doelGesprek || stap?.parameters?.gesprek_id) continue;
+
+    const gevonden = await zoekDoelGesprek({
+      wie: stap?.wie,
+      vraag: opdracht.vraag,
+      omschrijving: stap?.omschrijving || stap?.parameters?.omschrijving,
+    });
+    if (gevonden.gesprekId) {
+      doelGesprek = gevonden.gesprekId;
+      doelHoe = gevonden.hoe;
+      continue;
+    }
+    return res.status(409).json({
+      error: 'doel_onbekend',
+      uitleg: gevonden.kandidaten > 1
+        ? `Deze stap past bij ${gevonden.kandidaten} gesprekken. Open het juiste gesprek en druk daar op Uitvoeren.`
+        : 'Ik vind geen gesprek bij deze persoon. Open het juiste gesprek en druk daar op Uitvoeren.',
+      type,
+      wie: stap?.wie || null,
+      gezocht_op: gevonden.hoe,
+      kandidaten: gevonden.kandidaten,
+    });
+  }
+
+  // ── Doen ───────────────────────────────────────────────────────────────────
+  const uitkomsten = [];
+  for (const stap of stappen) {
+    const type = String(stap.type);
+    // Try per stap: één stap die omvalt mag de rest niet meesleuren.
+    try {
+      const parameters = (stap?.parameters && typeof stap.parameters === 'object' && !Array.isArray(stap.parameters))
+        ? { ...stap.parameters } : {};
+      if (type === 'opvolging_instellen' && doelGesprek && !parameters.gesprek_id) {
+        parameters.gesprek_id = doelGesprek;
+      }
+      if (!parameters.omschrijving && stap?.omschrijving) parameters.omschrijving = String(stap.omschrijving);
+
+      const gezet = await zetKlaar({ type, contactId, opdrachtId, parameters });
+      if (!gezet.actie) {
+        uitkomsten.push({ type, ok: false, fout: 'stap kon niet worden klaargezet' });
+        continue;
+      }
+      if (gezet.al_gedaan && gezet.actie.status === 'uitgevoerd') {
+        // Vandaag al gedaan. Dat is geen fout en ook geen tweede keer doen.
+        uitkomsten.push({ type, ok: true, al_gedaan: true, actie_id: gezet.actie.id });
+        continue;
+      }
+
+      const geclaimd = await claimStap(gezet.actie.id, user);
+      if (!geclaimd) {
+        uitkomsten.push({ type, ok: false, al_opgepakt: true, fout: `stap staat op "${gezet.actie.status}"` });
+        continue;
+      }
+      const gedaan = await doeStap(geclaimd, user);
+      uitkomsten.push(gedaan.ok
+        ? { type, ok: true, actie_id: geclaimd.id, resultaat: gedaan.resultaat }
+        : { type, ok: false, actie_id: geclaimd.id, fout: gedaan.fout });
+    } catch (e) {
+      const tekst = e?.message || String(e);
+      console.error('[iris-actie] plan_uitvoeren stap mislukt:', opdrachtId, type, tekst);
+      uitkomsten.push({ type, ok: false, fout: tekst });
+    }
+  }
+
+  // ── De opdracht bijwerken ──────────────────────────────────────────────────
+  // Alles gelukt? Dan is de opdracht uitgevoerd, of hij wacht nog op een
+  // antwoord van de klant (dat zegt na_uitvoeren). Ging er iets mis, dan blijft
+  // hij op wacht_op_ok staan: er is nog werk, en dan hoort hij in de werkbak te
+  // blijven staan in plaats van er afgerond uit te zien.
+  const mislukt = uitkomsten.filter((u) => !u.ok);
+  const nieuweStatus = mislukt.length
+    ? 'wacht_op_ok'
+    : (opdracht.na_uitvoeren === 'wacht' ? 'wacht_op_antwoord' : 'uitgevoerd');
+
+  const regel = mislukt.length
+    ? `uitgevoerd: ${uitkomsten.length - mislukt.length} van ${uitkomsten.length} gelukt`
+    : `uitgevoerd: ${uitkomsten.length} stap(pen)`;
+
+  const { data: bijgewerkt, error: bFout } = await supabaseAdmin
+    .from('iris_opdrachten')
+    .update({
+      status: nieuweStatus,
+      verloop: [
+        ...(Array.isArray(opdracht.verloop) ? opdracht.verloop : []),
+        verloopRegel(regel, {
+        wie: user.id,
+        details: {
+          gelukt: uitkomsten.length - mislukt.length,
+          mislukt: mislukt.length,
+          // Hoe het gesprek gevonden is, staat erbij. Anders is later niet na
+          // te gaan of een opvolging op de juiste persoon loopt.
+          ...(doelHoe ? { gesprek_gevonden_op: doelHoe } : {}),
+        },
+      }),
+      ],
+      bijgewerkt_op: new Date().toISOString(),
+    })
+    .eq('id', opdrachtId)
+    .select('*')
+    .single();
+  if (bFout) throw new Error('opdracht bijwerken: ' + bFout.message);
+
+  return res.status(200).json({
+    ok: mislukt.length === 0,
+    opdracht: bijgewerkt,
+    stappen: uitkomsten,
+    gelukt: uitkomsten.length - mislukt.length,
+    mislukt: mislukt.length,
+  });
 }
 
 // ── Wat elke stap doet ───────────────────────────────────────────────────────

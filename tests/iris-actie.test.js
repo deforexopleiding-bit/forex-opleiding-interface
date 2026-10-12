@@ -10,6 +10,7 @@
 // bestand over.
 
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { RECHT_PER_TYPE, bouwSleutel } from '../api/iris-actie.js';
 import { STAPTYPES } from '../api/_lib/iris/opdracht.js';
@@ -124,4 +125,151 @@ test('er staan geen rechten voor stappen die niet bestaan', () => {
   for (const type of Object.keys(RECHT_PER_TYPE)) {
     assert.ok(STAPTYPES.includes(type), `${type} staat bij de rechten maar is geen staptype`);
   }
+});
+
+// ── het plan uitvoeren (H1) ─────────────────────────────────────────────────
+//
+// ── WAT ER MIS WAS ──────────────────────────────────────────────────────────
+// Een opdracht met een geldig plan was ONUITVOERBAAR. Drie gaten tegelijk:
+// iris-opdracht sloeg het plan op en maakte nooit een iris_acties-rij; het
+// scherm had geen Uitvoeren-knop en riep /api/iris-actie nergens aan; en
+// volgendeToestand() gaf altijd wacht_op_ok terug. Je kreeg dus een plan te
+// zien, status "Wacht op jouw akkoord", en er was niets om op te drukken.
+//
+// Deze toetsen falen op de code van vóór die fix: `plan_uitvoeren` bestond
+// niet en `__irisOpdrachtUitvoeren` ook niet.
+
+const ACTIE_SRC = readFileSync(new URL('../api/iris-actie.js', import.meta.url), 'utf8');
+const SCHERM_SRC = readFileSync(new URL('../modules/iris/iris.js', import.meta.url), 'utf8');
+const INDEX_SRC = readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8');
+
+/** De tekst van één functie, tot aan de volgende functie op hetzelfde niveau. */
+function lijf(src, naam, eind) {
+  const i = src.indexOf(naam);
+  assert.ok(i > 0, naam + ' hoort te bestaan');
+  const j = eind ? src.indexOf(eind, i) : -1;
+  return src.slice(i, j > i ? j : undefined);
+}
+
+test('er is een actie die het hele plan uitvoert', () => {
+  assert.match(ACTIE_SRC, /actie === 'plan_uitvoeren'/);
+  assert.match(ACTIE_SRC, /async function planUitvoeren\(req, res, user\)/);
+});
+
+test('het scherm heeft een Uitvoeren-knop die daarheen wijst', () => {
+  // Dit was het gat: de server kon het al, het scherm wees er niet naar.
+  assert.match(SCHERM_SRC, /window\.__irisOpdrachtUitvoeren = async \(id, meeGesprek\) =>/);
+  assert.match(SCHERM_SRC, /'\/api\/iris-actie'/);
+  assert.match(SCHERM_SRC, /onclick="__irisOpdrachtUitvoeren\('\$\{esc\(o\.id\)\}'\)"/);
+  // En de knop staat er alleen als hij ook iets kan.
+  assert.match(SCHERM_SRC, /const magUitvoeren = !klaar && !o\.vraag_aan_maxim && planStappen\.length > 0;/);
+  // Het scherm hoort een nieuw nummer te hebben, anders laadt de browser de
+  // oude kopie en is de knop er voor niemand.
+  assert.match(INDEX_SRC, /\.\.\/iris\/iris\.js\?v=20/);
+});
+
+test('er wordt NOOIT een naam naar een contact gezocht', () => {
+  // Een plan noemt mensen bij naam, niet bij sleutel. De eerste treffer pakken
+  // is precies hoe een opvolging op de verkeerde persoon komt te lopen. Het
+  // doel komt van de aanroeper, of het komt niet.
+  const body = lijf(ACTIE_SRC, 'async function planUitvoeren', '// ── Wat elke stap doet');
+  assert.doesNotMatch(body, /iris_contacten/, 'planUitvoeren mag geen contact opzoeken');
+  assert.doesNotMatch(body, /\.ilike\(|\.textSearch\(|naam/i);
+  assert.match(body, /error: 'doel_onbekend'/, 'weet hij het niet, dan is het een vraag');
+});
+
+test('de doel-lijst klopt met wat voerUit echt nodig heeft', () => {
+  // Niet verzonnen maar afgelezen: voerUit gooit zelf op een ontbrekend
+  // contact. Zou DOEL_NODIG korter zijn dan die lijst, dan valt een plan
+  // halverwege om; zou hij langer zijn, dan vraagt Iris om een gesprek dat
+  // de stap niet nodig heeft.
+  const voer = lijf(ACTIE_SRC, 'async function voerUit(actie, user)');
+  for (const type of ['belofte_vastleggen', 'belrij_toevoegen']) {
+    assert.match(voer, new RegExp(`${type}[\\s\\S]{0,400}!actie\\.contact_id`), type + ' gooit op geen contact');
+  }
+  const lijst = lijf(ACTIE_SRC, 'const DOEL_NODIG = Object.freeze(', ');');
+  for (const type of ['belofte_vastleggen', 'belrij_toevoegen', 'opvolging_instellen']) {
+    assert.ok(lijst.includes(`'${type}'`), type + ' hoort in DOEL_NODIG');
+  }
+  // Deze twee hebben géén doel nodig: ze maken een taak aan in het bestaande
+  // takenbakje en hangen niet aan één persoon.
+  for (const type of ['taak_aanmaken', 'factuur_nakijken']) {
+    assert.ok(!lijst.includes(`'${type}'`), type + ' hoeft geen doel');
+  }
+});
+
+test('eerst alle poorten, dan pas de eerste stap', () => {
+  // Een plan dat halverwege op een rechtenfout stukloopt, laat de klant met
+  // een halve afspraak zitten. Dus: type, rechten en doel voor ALLE stappen
+  // nagekeken voordat er één rij wordt klaargezet.
+  const body = lijf(ACTIE_SRC, 'async function planUitvoeren', '// ── Wat elke stap doet');
+  const iType  = body.indexOf("error: 'onbekende_stap'");
+  const iRecht = body.indexOf('RECHT_PER_TYPE[String(stap.type)]');
+  const iDoel  = body.indexOf("error: 'doel_onbekend'");
+  const iZet   = body.indexOf('await zetKlaar(');
+  for (const [naam, i] of [['type', iType], ['rechten', iRecht], ['doel', iDoel], ['klaarzetten', iZet]]) {
+    assert.ok(i > 0, naam + ' hoort vindbaar te zijn');
+  }
+  assert.ok(iType < iZet, 'de typecontrole hoort vóór het klaarzetten');
+  assert.ok(iRecht < iZet, 'de rechtencontrole hoort vóór het klaarzetten');
+  assert.ok(iDoel < iZet, 'de doelcontrole hoort vóór het klaarzetten');
+});
+
+test('één mislukte stap sleept de rest niet mee', () => {
+  // De les uit CLAUDE.md over lussen: try/catch per item, nooit een early
+  // return op één faal-item.
+  const body = lijf(ACTIE_SRC, 'const uitkomsten = [];', '// ── De opdracht bijwerken');
+  assert.match(body, /try \{/);
+  assert.match(body, /catch \(e\)/);
+  assert.match(body, /continue;/);
+  assert.doesNotMatch(body, /\breturn\b/, 'een return in de lus laat de rest van het plan liggen');
+  // En doeStap gooit niet: een stap die misgaat is een uitkomst.
+  assert.match(ACTIE_SRC, /async function doeStap\(geclaimd, user\)/);
+  assert.match(ACTIE_SRC, /return \{ ok: false, fout: tekst \};/);
+});
+
+test('een opdracht met een mislukte stap blijft in de werkbak staan', () => {
+  // Hem op uitgevoerd zetten terwijl er nog werk is, laat hem er afgerond
+  // uitzien — en dan kijkt niemand er meer naar.
+  assert.match(ACTIE_SRC, /const nieuweStatus = mislukt\.length\s*\n?\s*\? 'wacht_op_ok'/);
+  assert.match(ACTIE_SRC, /opdracht\.na_uitvoeren === 'wacht' \? 'wacht_op_antwoord' : 'uitgevoerd'/);
+});
+
+test('een afgesloten opdracht voert niets meer uit, en een open vraag ook niet', () => {
+  assert.match(ACTIE_SRC, /const OPDRACHT_KLAAR = Object\.freeze\(\['geregeld', 'afgebroken'\]\)/);
+  assert.match(ACTIE_SRC, /error: 'Deze opdracht is afgesloten'/);
+  assert.match(ACTIE_SRC, /error: 'vraag_open'/);
+  assert.match(ACTIE_SRC, /error: 'geen_stappen'/);
+});
+
+test('stappen die niet via een opdracht kunnen, worden vooraf geweigerd', () => {
+  // NIET_VIA_OPDRACHT zijn de vijf die bij uitvoering een throw doen. Die
+  // horen hier niet halverwege om te vallen maar vooraf geweigerd te worden.
+  assert.match(ACTIE_SRC, /NIET_VIA_OPDRACHT\.includes\(type\)/);
+  assert.match(ACTIE_SRC, /error: 'stap_niet_via_opdracht'/);
+});
+
+test('GAT 4: het scherm zet het detail nooit uit een POST-antwoord', () => {
+  // Het POST-antwoord van 'maak' is { opdracht, plan, mag_direct, reden } en
+  // mist plan_regels, verloop_regels en na_uitvoeren_zin. Werd dat als detail
+  // gezet, dan stond er "Nog geen stappen — Iris wacht op een antwoord" onder
+  // een plan dat wél stappen had: plan_regels leeg, begrepen niet, dus het
+  // blok verscheen met de verkeerde boodschap. Precies wat er in productie
+  // gebeurde.
+  //
+  // Enige toegestane bron voor st.detail: het GET-detail (rechtstreeks of via
+  // herlaadDetail).
+  // Eerst de commentaren eruit. Deze toets zoekt naar CODE die st.detail zet;
+  // zonder dat strippen betrapt hij de uitleg hierboven, die het foute patroon
+  // letterlijk citeert — een toets die op proza meet, meet niets.
+  const zonderUitleg = SCHERM_SRC.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ');
+  const zetters = [...zonderUitleg.matchAll(/(?:st|S\.opdrachten)\.detail = ([^\n;]+)/g)].map((m) => m[1].trim());
+  assert.ok(zetters.length >= 3, 'de zetters horen vindbaar te zijn, anders meet dit niets');
+  for (const z of zetters) {
+    assert.ok(
+      z === 'null' || z.includes("haal('/api/iris-opdracht?actie=een"),
+      'st.detail mag alleen uit het GET-detail of op null: ' + z,
+    );
+  }
+  assert.match(SCHERM_SRC, /herlaadDetail\(st\.open\);/, 'na maken hoort het detail opgehaald te worden');
 });

@@ -324,3 +324,96 @@ limit 5;
 ```
 
 Draai je die, dan vul ik het antwoord hier in.
+
+## H1 — een plan met een geldige stap was onuitvoerbaar
+
+**Gemeten op productie, 12 oktober.** Opdracht `8bfadbe5-…` ("Hou het
+mailgesprek met Andy De Landtsheer in de gaten; verwittig mij als hij binnen
+3 dagen niet reageert") stond op `wacht_op_ok` met één stap
+`opvolging_instellen` (dagen 3) in `plan.stappen`, en `iris_acties = 0`. Het
+scherm toonde "Nog geen stappen — Iris wacht op een antwoord", en er was geen
+Uitvoeren-knop. Ook niet na herladen.
+
+Dat waren **vier gaten tegelijk**, en elk ervan was op zichzelf al genoeg om
+het plan onuitvoerbaar te maken.
+
+### Gat 1 — niemand maakte de stappen aan
+
+`api/iris-opdracht.js` (`maak` en `antwoord`) sloeg `plan` op als jsonb en
+maakte **nooit** een rij in `iris_acties`. `iris_acties = 0` was dus geen
+storing: er was simpelweg geen code die het deed.
+
+### Gat 2 — er was geen knop, en niets wees naar de server
+
+`modules/iris/iris.js` kende in `opdrachtDetail()` alleen Afbreken, Afsluiten
+en Terug openen, en riep `/api/iris-actie` **nergens** aan. De server kon het
+allemaal al — `klaarzetten`, `uitvoeren`, `voerUit` met rechten per staptype en
+een idempotentiesleutel — maar er was geen weg erheen. En
+`volgendeToestand()` geeft altijd `wacht_op_ok` terug, dus daar kwam een
+opdracht ook nooit vanzelf uit.
+
+### Gat 3 — de stap wist niet op wie hij sloeg
+
+`opvolging_instellen` heeft een gesprek of een contact nodig; `bouwOpvolging()`
+weigert expliciet zonder ("een opvolging zonder spoor zou ALTIJD afgaan").
+`iris_opdrachten` heeft geen contactkolom, en het plan noemt alleen
+`wie: "Andy De Landtsheer (andy@dl-interieur.be)"` — een naam, geen sleutel.
+Zelfs mét knop zou deze stap dus omvallen.
+
+### Gat 4 — het scherm gooide het antwoord van de server weg
+
+`__irisOpdrachtMaak` deed `st.detail = j`, met `j` het POST-antwoord van
+`maak`: `{ opdracht, plan, mag_direct, reden }`. Daar zitten de drie afgeleide
+velden niet in die het scherm leest — `plan_regels`, `verloop_regels`,
+`na_uitvoeren_zin`. Dus was `plan_regels` leeg terwijl `plan.begrepen` gevuld
+was, en verscheen het Plan-blok met precies de verkeerde boodschap erin. Dit
+was eerder al gerepareerd voor antwoorden, afsluiten en heropenen (die
+gebruiken `herlaadDetail`); `maak` was over het hoofd gezien.
+
+## Wat er nu gebeurt
+
+Eén nieuwe actie: `POST /api/iris-actie { actie: 'plan_uitvoeren', opdracht_id,
+gesprek_id?, contact_id? }`. Die staat in het bestand dat de rechten per
+staptype en de idempotentie al bewaakte — één plek waar iets écht gebeurt
+blijft één plek.
+
+**Eerst alle poorten, dan de eerste stap.** Type, rechten en doel worden voor
+*alle* stappen nagekeken voordat er één rij wordt klaargezet. Een plan dat
+halverwege op een rechtenfout stukloopt laat de klant met een halve afspraak
+zitten.
+
+**Daarna mag één stap misgaan.** Try/catch per stap, `continue` en geen
+`return` — de les uit CLAUDE.md over lussen. De opdracht blijft dan op
+`wacht_op_ok` staan met de fout per stap zichtbaar, en nog eens proberen is een
+geldige handeling: de idempotentiesleutel bevat de dag, dus een geslaagde stap
+wordt niet dubbel gedaan.
+
+**Status na uitvoeren:** alles gelukt → `uitgevoerd`, of `wacht_op_antwoord`
+als `na_uitvoeren = 'wacht'`. Ging er iets mis → `wacht_op_ok`, want dan is er
+nog werk en hoort de opdracht in de werkbak te blijven in plaats van er
+afgerond uit te zien.
+
+### Hoe het gesprek gevonden wordt — en wanneer niet
+
+`zoekDoelGesprek()`, met de zuivere tekstkant in `api/_lib/iris/doel.js`:
+
+1. **E-mailadres** uit `wie`, de oorspronkelijke vraag of de omschrijving →
+   `iris_contacten.emails`.
+2. **Telefoonnummer**, in de vormen waarin het in de databank kan staan
+   (`06…` wordt `+316…` en `+326…`; `0032…` wordt `+32…`) →
+   `iris_contacten.telefoons`.
+3. **Pas dan de naam** → `weergavenaam ilike`.
+
+De uitkomst loopt **altijd via het gesprek**, en er mag er precies **één**
+zijn. Dat is niet alleen principieel maar ook praktisch: in productie bestaan
+dubbele contacten — Andy heeft er twee met hetzelfde adres, allebei in gesprek
+`ee4ab5be-…`. Tellen op contacten zou daar "twee treffers, dus vragen" van
+maken terwijl het één en dezelfde draad is.
+
+Nul of meer dan één gesprek → **409 `doel_onbekend`** met het aantal erbij, en
+het scherm zegt: open het juiste gesprek en druk daar op Uitvoeren. Er is op
+dat moment nog niets klaargezet. Er wordt **nooit** een contact aangemaakt —
+dat zou een persoon verzinnen op grond van een stuk tekst. Hoe het gesprek
+gevonden is (`email` / `telefoon` / `naam` / `meegegeven`) komt in het verloop
+te staan, want "loopt deze opvolging op de juiste persoon?" is precies de vraag
+die je over een maand stelt.
