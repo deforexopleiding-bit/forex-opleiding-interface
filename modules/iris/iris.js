@@ -224,6 +224,8 @@
       detail: null,        // het volledige antwoord voor die opdracht
       antwoord: '',
       afsluitVraag: null,  // { id, uitleg, openstaand, keuzes } als er nog iets klaarstaat
+      voert: null,         // de opdracht die op dit moment draait
+      doelVraag: null,     // { id, uitleg, type, wie } als Iris niet weet op wie een stap slaat
       neemtOp: false,
       recorder: null,
       stukken: [],
@@ -1292,8 +1294,18 @@
       });
       st.nieuw = '';
       st.open = j.opdracht?.id || null;
-      st.detail = j;
+      // GAT 4 — NIET `st.detail = j`. Het POST-antwoord van 'maak' is
+      // { opdracht, plan, mag_direct, reden } en mist de drie afgeleide velden
+      // die het scherm leest: plan_regels, verloop_regels en na_uitvoeren_zin.
+      // Daardoor stond er "Nog geen stappen — Iris wacht op een antwoord"
+      // onder een plan dat wél stappen had: `plan_regels` was leeg, `begrepen`
+      // niet, dus het blok verscheen met de verkeerde boodschap erin.
+      //
+      // Zelfde val als bij antwoorden/afsluiten/heropenen, die daarvoor al
+      // herlaadDetail gebruiken. Hier was hij over het hoofd gezien.
+      st.detail = null;
       st.opgehaald = false;
+      herlaadDetail(st.open);
       haalOpdrachten();
     } catch (e) {
       st.fout = e?.message || 'Uitzoeken mislukt';
@@ -1410,6 +1422,81 @@
     }
     hertekenen();
   };
+
+  /**
+   * Het plan uitvoeren.
+   *
+   * ── WAAROM ÉÉN AANROEP EN NIET TWEE PER STAP ──────────────────────────────
+   * De server kan een stap klaarzetten en een stap uitvoeren, en dit scherm had
+   * ze allebei kunnen aanroepen. Dan zou de volgorde, de halve mislukking en
+   * het bijwerken van de opdracht hier liggen -- en als je halverwege wegklikt,
+   * blijft er een opdracht achter waarvan niemand weet hoe ver hij kwam.
+   *
+   * ── EN WAAROM ER EEN GESPREK BIJ KAN ──────────────────────────────────────
+   * Een plan noemt mensen bij naam, niet bij sleutel. De server zoekt die naam
+   * NIET op -- de eerste treffer pakken is hoe een opvolging op de verkeerde
+   * persoon komt te lopen. Weet hij het niet, dan komt er een 409 terug met de
+   * vraag, en hangt het antwoord aan het gesprek dat je in de Post open hebt.
+   */
+  window.__irisOpdrachtUitvoeren = async (id, meeGesprek) => {
+    const st = S.opdrachten;
+    if (st.voert) return;
+    st.voert = id;
+    st.doelVraag = null;
+    hertekenen();
+    try {
+      const lijf = { actie: 'plan_uitvoeren', opdracht_id: id };
+      const gesprek = meeGesprek || S.gekozen || null;
+      if (gesprek) lijf.gesprek_id = gesprek;
+      const j = await haalRuw('/api/iris-actie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(lijf),
+      });
+      st.opgehaald = false;
+      haalOpdrachten();
+      herlaadDetail(id);
+      if (j.mislukt) {
+        // Niet alles gelukt. De fout per stap staat in het plan; hier alleen
+        // het aantal, zodat je weet dat er nog werk is.
+        toast(`${j.gelukt} van ${j.gelukt + j.mislukt} stappen gelukt — zie het plan.`, 'error');
+      } else {
+        toast(j.gelukt === 1 ? 'Stap uitgevoerd.' : `${j.gelukt} stappen uitgevoerd.`, 'success');
+      }
+    } catch (e) {
+      // De 409 bij een onbekend doel is geen fout maar een vraag. Zelfde
+      // patroon als de afsluitvraag hierboven: we willen de vraag tonen, niet
+      // de tekst van een foutmelding.
+      const vraag = await haalDoelVraag(id);
+      if (vraag) st.doelVraag = { id, ...vraag };
+      else toast(e?.message || 'Uitvoeren mislukt', 'error');
+    } finally {
+      st.voert = null;
+      hertekenen();
+    }
+  };
+
+  /* Nog eens aankloppen om te zien of het een doel-vraag was. Dat is één
+     extra aanroep, en die kost niets: er is op dat moment nog niets
+     klaargezet -- de server weigert vóór hij iets aanmaakt. */
+  async function haalDoelVraag(id) {
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken
+        ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const r = await fetch('/api/iris-actie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+        body: JSON.stringify({ actie: 'plan_uitvoeren', opdracht_id: id }),
+      });
+      const j = await r.json();
+      if (r.status === 409 && j.error === 'doel_onbekend') {
+        return { uitleg: j.uitleg, type: j.type, wie: j.wie || null };
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   window.__irisOpdrachtHeropenen = async (id) => {
     try {
@@ -2308,12 +2395,41 @@
         </div>`
       : '';
 
+    // ── De Uitvoeren-knop ──────────────────────────────────────────────────
+    // Die ontbrak, en daarmee was elk plan onuitvoerbaar: de server kon de
+    // stappen al klaarzetten én doen, maar niets in dit scherm wees erheen.
+    // Je kreeg een plan, status "Wacht op jouw akkoord", en niets om op te
+    // drukken.
+    //
+    // Hij staat er alleen als hij ook iets kan: niet bij een afgesloten
+    // opdracht, niet terwijl Iris nog een vraag open heeft (dan is het plan
+    // nog niet af), en niet als er geen stappen zijn. Een knop die je
+    // aanklikt en die dan zegt dat het niet kan, kost je je vertrouwen.
     const klaar = o.status === 'geregeld' || o.status === 'afgebroken';
+    const planStappen = Array.isArray(o.plan?.stappen) ? o.plan.stappen : [];
+    const voert = st.voert === o.id;
+    const magUitvoeren = !klaar && !o.vraag_aan_maxim && planStappen.length > 0;
+
+    // De vraag "op wie slaat dit?" als de server het niet wist. Iris zoekt
+    // geen naam op -- de eerste treffer pakken is hoe een opvolging op de
+    // verkeerde persoon komt te lopen.
+    const doel = (st.doelVraag && st.doelVraag.id === o.id)
+      ? `<div style="border:1px solid var(--amber-line,var(--border));background:var(--amber-soft,var(--surface-2));border-radius:8px;padding:10px 12px;margin-bottom:9px;font-size:12px">
+          <div style="margin-bottom:6px">${esc(st.doelVraag.uitleg || 'Ik weet niet op wie deze stap slaat.')}</div>
+          ${st.doelVraag.wie ? `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Het plan noemt: ${esc(st.doelVraag.wie)}</div>` : ''}
+          <div style="font-size:11.5px;color:var(--text-2)">Open het gesprek in de Post en druk daar opnieuw op Uitvoeren.</div>
+        </div>`
+      : '';
+
     const knoppen = `<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
       ${klaar
         ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px" onclick="__irisOpdrachtHeropenen('${esc(o.id)}')">Terug openen</button>`
         : `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px" onclick="__irisOpdrachtAfbreken('${esc(o.id)}')">Afbreken</button>
-           <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px;color:var(--emerald)" onclick="__irisOpdrachtAfsluiten('${esc(o.id)}')">Afsluiten</button>`}
+           <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px;color:var(--emerald)" onclick="__irisOpdrachtAfsluiten('${esc(o.id)}')">Afsluiten</button>
+           ${magUitvoeren
+             ? `<button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 14px;font-weight:600"
+                  onclick="__irisOpdrachtUitvoeren('${esc(o.id)}')" ${voert ? 'disabled' : ''}>${voert ? 'Bezig…' : 'Uitvoeren'}</button>`
+             : ''}`}
     </div>`;
 
     // na_uitvoeren is 'wacht' of 'geregeld' -- een enum-waarde, geen zin. Die
@@ -2322,7 +2438,7 @@
     // een los woord.
     const naZin = d.na_uitvoeren_zin || null;
 
-    return `${vraag}${plan}${verloop}${afsluit}
+    return `${vraag}${plan}${verloop}${afsluit}${doel}
       ${naZin ? `<div style="font-size:11.5px;color:var(--text-2);margin-bottom:9px">${esc(naZin)}</div>` : ''}
       ${knoppen}`;
   }
