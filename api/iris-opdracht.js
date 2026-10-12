@@ -27,7 +27,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
 import { maakPlan, volgendeToestand, magDirectUitvoeren, verloopRegel, TOESTANDEN } from './_lib/iris/opdracht.js';
-import { bouwPlanRegels, bouwVerloop, naUitvoerenZin } from './_lib/iris/opdracht-tekst.js';
+import { bouwPlanRegels, bouwVerloop, naUitvoerenZin, SNELKNOPPEN, NIET_HIER_TEKST } from './_lib/iris/opdracht-tekst.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_VRAAG = 2000;
@@ -80,7 +80,15 @@ async function geefLijst(req, res) {
   // wel onderaan, en alleen als er niet op status gefilterd is.
   const { data, error } = await vraag;
   if (error) throw new Error('opdrachten: ' + error.message);
-  return res.status(200).json({ items: data || [], toestanden: TOESTANDEN });
+  // De snelknoppen komen mee met de lijst, zodat het scherm geen eigen kopie
+  // van "wat kan Iris" hoeft bij te houden. Eén lijst, op de server, met een
+  // test die hem gelijk houdt aan wat er ook echt uitgevoerd kan worden.
+  return res.status(200).json({
+    items: data || [],
+    toestanden: TOESTANDEN,
+    snelknoppen: SNELKNOPPEN,
+    niet_hier: NIET_HIER_TEKST,
+  });
 }
 
 async function geefEen(req, res) {

@@ -43,13 +43,41 @@ export const TOESTANDEN = Object.freeze([
   'wacht_op_antwoord', 'geregeld', 'afgebroken',
 ]);
 
-/** De stappen die Iris in een plan mag zetten. Gelijk aan iris_acties.type. */
+/** Alle staptypes die iris_acties.type kent. */
 export const STAPTYPES = Object.freeze([
   'wa_versturen', 'mail_versturen',
   'lms_toegang_verlengen', 'lms_uitnodiging', 'lms_on_hold',
   'belofte_vastleggen', 'afbetalingsplan',
   'taak_aanmaken', 'belrij_toevoegen', 'factuur_nakijken',
 ]);
+
+/**
+ * Staptypes die bij UITVOEREN een fout gooien (zie voerUit in iris-actie.js).
+ *
+ * ── WAAROM DIE NIET MEER VOORGESTELD WORDEN (O-3) ───────────────────────────
+ * Van de tien staptypes zijn er vijf die bij uitvoering meteen een `throw`
+ * doen. Iris kon ze wél in een plan zetten, dus je kreeg een plan, drukte op
+ * Uitvoeren, en kreeg dan pas te horen dat de stap niet bestaat. Een plan dat
+ * er af ziet maar niet kan draaien, is erger dan een plan dat eerlijk zegt dat
+ * het iets niet kan -- het eerste kost je twee klikken en je vertrouwen.
+ *
+ * Twee soorten:
+ *   - Versturen loopt via de Post, niet via een opdrachtstap.
+ *   - Drie stappen zijn simpelweg nog niet ingebouwd.
+ *
+ * Deze lijst staat gelijk aan de `throw`-takken in voerUit(); er staat een test
+ * op die het nakijkt. Wordt er iets ingebouwd, dan faalt die test totdat de
+ * naam hier weg is -- en dat is precies de bedoeling.
+ */
+export const NIET_VIA_OPDRACHT = Object.freeze([
+  'wa_versturen', 'mail_versturen',
+  'lms_uitnodiging', 'lms_on_hold', 'afbetalingsplan',
+]);
+
+/** De stappen die Iris in een plan mag zetten: alles wat ook echt kan. */
+export const WERKENDE_STAPTYPES = Object.freeze(
+  STAPTYPES.filter((t) => !NIET_VIA_OPDRACHT.includes(t))
+);
 
 export const GEREEDSCHAP_SCHEMA = {
   type: 'object',
@@ -68,7 +96,7 @@ export const GEREEDSCHAP_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: [...STAPTYPES] },
+          type: { type: 'string', enum: [...WERKENDE_STAPTYPES] },
           omschrijving: { type: 'string', description: 'Eén regel in gewone taal: wat deze stap doet.' },
           wie: { type: 'string', description: 'Naam of omschrijving van wie dit raakt. Leeg als het over een groep gaat.' },
           parameters: { type: 'object', description: 'De gegevens die de stap nodig heeft. Laat leeg wat je niet weet.' },
@@ -123,19 +151,24 @@ export const SYSTEEM_TEKST = [
   '   op, stel dan voor.',
   '',
   'Beschikbare stappen:',
-  '  wa_versturen           een WhatsApp-bericht',
-  '  mail_versturen         een mail',
   '  lms_toegang_verlengen  de einddatum van iemands toegang vooruit zetten',
-  '  lms_uitnodiging        de uitnodiging of inloglink opnieuw sturen',
-  '  lms_on_hold            iemand op pauze zetten of die pauze opheffen, met reden',
   '  belofte_vastleggen     een betaaltoezegging met datum en bedrag',
-  '  afbetalingsplan        een voorstel in termijnen',
   '  taak_aanmaken          een taak voor een mens',
   '  belrij_toevoegen       iemand op de belrij zetten',
   '  factuur_nakijken       laten nakijken of een factuur al betaald is',
   '',
   'Wat je NIET kunt, en ook niet moet voorstellen: iemand blokkeren, iemands',
   'toegang intrekken, een factuur op betaald zetten. Dat doet een mens.',
+  '',
+  'Een bericht sturen -- WhatsApp of mail -- loopt via de Post en NIET via een',
+  'stap hier. Vraagt de opdracht daarom, zet er dan geen stap voor neer. Zeg in',
+  '"begrepen" wat er gestuurd moet worden en aan wie, en dat het via de Post',
+  'gaat. Een lege stappenlijst met een duidelijke uitleg is beter dan een stap',
+  'die bij het uitvoeren stukloopt.',
+  '',
+  'Een uitnodiging opnieuw sturen, iemand op pauze zetten en een afbetalingsplan',
+  'voorstellen kun je (nog) niet. Zeg dat in "begrepen" in plaats van er een',
+  'stap voor te verzinnen.',
 ].join('\n');
 
 /**
@@ -157,7 +190,7 @@ export function keurPlan(ruw) {
   const geweigerd = [];
   for (const s of (Array.isArray(ruw.stappen) ? ruw.stappen : [])) {
     const type = String(s?.type || '').trim();
-    if (!STAPTYPES.includes(type)) { geweigerd.push(type || '(leeg)'); continue; }
+    if (!WERKENDE_STAPTYPES.includes(type)) { geweigerd.push(type || '(leeg)'); continue; }
     stappen.push({
       type,
       omschrijving: String(s.omschrijving || '').trim().slice(0, 300) || type,

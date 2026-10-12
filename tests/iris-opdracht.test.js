@@ -16,6 +16,7 @@ import {
   BULK_MAX,
   TOESTANDEN,
   STAPTYPES,
+  WERKENDE_STAPTYPES,
   SYSTEEM_TEKST,
   GEREEDSCHAP_SCHEMA,
   keurPlan,
@@ -26,11 +27,15 @@ import {
   verloopRegel,
 } from '../api/_lib/iris/opdracht.js';
 
+// Sinds O-3 mag een plan alleen stappen bevatten die ook echt uitgevoerd
+// kunnen worden. wa_versturen stond hier als voorbeeld, maar die gooit bij
+// uitvoeren een fout ("versturen loopt via de Post") -- precies wat O-3
+// wegneemt. Zie tests/iris-opdracht-snelknoppen.test.js.
 const PLAN = {
   titel: 'Kevin uitstel geven',
   begrepen: 'Kevin laten weten dat hij tot vrijdag de tijd heeft.',
   stappen: [
-    { type: 'wa_versturen', omschrijving: 'Stuur Kevin een bericht over vrijdag', wie: 'Kevin Peeters', parameters: { datum: '2026-09-25' } },
+    { type: 'belofte_vastleggen', omschrijving: 'Leg vast dat Kevin vrijdag betaalt', wie: 'Kevin Peeters', parameters: { datum: '2026-09-25' } },
   ],
   raakt_groep: false,
 };
@@ -42,14 +47,14 @@ test('een net plan komt er ongeschonden door', () => {
   assert.equal(r.ok, true);
   assert.equal(r.plan.titel, 'Kevin uitstel geven');
   assert.equal(r.plan.stappen.length, 1);
-  assert.equal(r.plan.stappen[0].type, 'wa_versturen');
+  assert.equal(r.plan.stappen[0].type, 'belofte_vastleggen');
 });
 
 test('een stap met een verzonnen type wordt WEGGEGOOID, niet doorgelaten', () => {
   const r = keurPlan({
     ...PLAN,
     stappen: [
-      { type: 'wa_versturen', omschrijving: 'bericht' },
+      { type: 'belofte_vastleggen', omschrijving: 'toezegging' },
       { type: 'klant_blokkeren', omschrijving: 'blokkeer hem' },
       { type: 'factuur_kwijtschelden', omschrijving: 'scheld kwijt' },
     ],
@@ -85,12 +90,12 @@ test('zonder titel wordt de eerste zin van "begrepen" de titel', () => {
 });
 
 test('een stap zonder omschrijving valt terug op zijn type', () => {
-  const r = keurPlan({ ...PLAN, stappen: [{ type: 'mail_versturen' }] });
-  assert.equal(r.plan.stappen[0].omschrijving, 'mail_versturen');
+  const r = keurPlan({ ...PLAN, stappen: [{ type: 'taak_aanmaken' }] });
+  assert.equal(r.plan.stappen[0].omschrijving, 'taak_aanmaken');
 });
 
 test('parameters die geen object zijn, worden een leeg object', () => {
-  const r = keurPlan({ ...PLAN, stappen: [{ type: 'wa_versturen', omschrijving: 'x', parameters: 'onzin' }] });
+  const r = keurPlan({ ...PLAN, stappen: [{ type: 'taak_aanmaken', omschrijving: 'x', parameters: 'onzin' }] });
   assert.deepEqual(r.plan.stappen[0].parameters, {});
 });
 
@@ -217,7 +222,9 @@ test('een verloopregel kan details dragen, maar hoeft niet', () => {
 // ── de instructie ───────────────────────────────────────────────────────────
 
 test('de instructie noemt elk beschikbaar staptype', () => {
-  for (const t of STAPTYPES) {
+  // WERKENDE_STAPTYPES, niet STAPTYPES: sinds O-3 staan de vijf stappen die bij
+  // uitvoeren een fout gooien niet meer bij de beschikbare stappen.
+  for (const t of WERKENDE_STAPTYPES) {
     assert.ok(SYSTEEM_TEKST.includes(t), `${t} ontbreekt in de uitleg aan het model`);
   }
 });
