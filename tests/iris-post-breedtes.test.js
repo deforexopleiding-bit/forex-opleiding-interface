@@ -173,6 +173,16 @@ test('de draad blijft een flex-kolom, zodat de schrijfbalk onderaan plakt', () =
   // kleiner te worden dan zijn inhoud, en dan scrollt de draad niet maar
   // groeit hij — met de schrijfbalk ergens onder de vouw.
   assert.match(blok, /\.iris-post > \*\{min-width:0;min-height:0;overflow:hidden\}/);
-  const fn = bron.slice(bron.indexOf('function draadKolom()'));
-  assert.match(fn.slice(0, 2000), /flex:1;overflow-y:auto/);
+  // Tot het EINDE van draadKolom(), niet de eerste 2000 tekens. Dat venster
+  // was willekeurig, en een toets die omvalt zodra iemand een regel uitleg
+  // toevoegt, meet de uitleg en niet de code.
+  const vanaf = bron.indexOf('function draadKolom()');
+  const fn = bron.slice(vanaf, bron.indexOf('\n  }', vanaf) + 4);
+  // H8-les: deze toets keek alleen naar de rastercel en naar `flex:1` ergens
+  // in draadKolom(). Precies de klacht die hij moest voorkomen kwam toch
+  // binnen (schrijfbalk onder de vouw bij 801 px), want het SCROLLENDE vak zit
+  // een laag dieper dan `.iris-post > *` en had zelf geen min-height:0. In een
+  // flex-kolom is de standaard min-height:auto, en dan weigert flex:1 kleiner
+  // te worden dan de inhoud. Dus nu op de regel zelf.
+  assert.match(fn, /flex:1;min-height:0;overflow-y:auto/);
 });

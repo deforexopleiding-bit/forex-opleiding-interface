@@ -26,6 +26,7 @@ import {
   normaliseerAutonomie,
   irisAan,
 } from './_lib/iris/instellingen.js';
+import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 
 /** Welke sleutels er mogen bestaan. Een onbekende sleutel is een typefout. */
 const TOEGESTANE_SLEUTELS = new Set([
@@ -209,6 +210,12 @@ export default async function handler(req, res) {
       instellingen: inst,
       ruw,
       aan: irisAan(),
+      // De vlag van de gesprekken-module. Hij hoort hier omdat dit het scherm
+      // is waar je opzoekt hoe het ingesteld staat — en omdat een feature die
+      // UIT staat zonder dat iets dat zegt, de stilste storing is die er is.
+      // Zie H9: de microfoon uit G1 ontbrak in productie en niemand kon zien
+      // waarom, want de knop verdwijnt gewoon als de vlag uit staat.
+      gesprekken_v2: gesprekkenV2Aan(),
       gelezen: inst.gelezen,
       categorieen: CATEGORIEEN,
       standen: STANDEN,
