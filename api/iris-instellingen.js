@@ -26,6 +26,7 @@ import {
   normaliseerAutonomie,
   irisAan,
   BELRIJ_BRONNEN,
+  BELRIJ_ESCALATIE_STANDEN,
 } from './_lib/iris/instellingen.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 
@@ -42,6 +43,7 @@ const TOEGESTANE_SLEUTELS = new Set([
   'ongedaan_seconden',
   'systeemafzenders',
   'belrij_eigenaar',
+  'belrij_escalatie',
 ]);
 
 const UUR_RX = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -193,6 +195,31 @@ export function keurWaardeGoed(sleutel, waarde) {
       return { ok: true, waarde: uit };
     }
 
+    case 'belrij_escalatie': {
+      // Wat Iris mag doen als iemand drie keer niet opnam, per bron. Hier geldt
+      // dezelfde strengheid als bij `autonomie`: een onbekende stand of een
+      // onbekende bron is een FOUT met uitleg, niet een stille val naar iets
+      // anders. Degene die dit zet, moet kunnen vertrouwen dat wat hij ziet er
+      // ook staat -- bij een instelling die berichten naar klanten losmaakt is
+      // "ik dachte dat het aan stond" de ergste uitkomst.
+      if (waarde === null || waarde === undefined) return { ok: true, waarde: {} };
+      if (typeof waarde !== 'object' || Array.isArray(waarde)) {
+        return { ok: false, fout: 'belrij_escalatie is een object met een bron als sleutel' };
+      }
+      const uit = {};
+      for (const [sleutel, v] of Object.entries(waarde)) {
+        if (!BELRIJ_BRONNEN.includes(sleutel)) {
+          return { ok: false, fout: `onbekende bron: ${sleutel}. Mag: ${BELRIJ_BRONNEN.join(', ')}` };
+        }
+        const stand = String(v ?? '').trim().toLowerCase();
+        if (!BELRIJ_ESCALATIE_STANDEN.includes(stand)) {
+          return { ok: false, fout: `${sleutel}: "${v}" is geen stand. Mag: ${BELRIJ_ESCALATIE_STANDEN.join(', ')}` };
+        }
+        uit[sleutel] = stand;
+      }
+      return { ok: true, waarde: uit };
+    }
+
     case 'ongedaan_seconden': {
       const n = Number(waarde);
       if (!Number.isInteger(n) || n < 5 || n > 300) {
@@ -266,6 +293,7 @@ export default async function handler(req, res) {
       standen: STANDEN,
       nooit_zelf: NOOIT_ZELF,
       belrij_bronnen: BELRIJ_BRONNEN,
+      belrij_escalatie_standen: BELRIJ_ESCALATIE_STANDEN,
       medewerkers,
     });
   }

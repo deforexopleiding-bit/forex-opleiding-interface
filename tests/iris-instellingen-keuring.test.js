@@ -166,13 +166,17 @@ test('een onbekende sleutel wordt geweigerd', () => {
   assert.match(fout, /onbekende sleutel/);
 });
 
-test('de toegestane sleutels zijn precies de negen die de keuring kent', () => {
+test('de toegestane sleutels zijn precies de tien die de keuring kent', () => {
   assert.deepEqual([...TOEGESTANE_SLEUTELS].sort(), [
     'autonomie',
     // Sinds taak 6 deel 2: wie belt er, per bron van de belrij. Leeg starten;
     // ik weet niet welk profiel Maxim is en welk Dave, en een verkeerde uuid
     // zet een rij op de lijst van niemand.
     'belrij_eigenaar',
+    // Sinds taak 6 deel 3: wat mag Iris doen als iemand drie keer niet opnam,
+    // per bron. Leeg betekent 'concept' voor elke bron -- een voorstel in de
+    // Post, nooit een bericht.
+    'belrij_escalatie',
     'dosering', 'escalatie', 'mailboxen',
     'model', 'ongedaan_seconden', 'stille_uren',
     // Sinds H3: afzenders die geen klantvraag zijn. Geen rij in de migratie

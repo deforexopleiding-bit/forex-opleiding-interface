@@ -36,6 +36,7 @@ import { verstuurConcept } from './iris-verstuur.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { haalSignalen } from './_lib/iris/signalen.js';
 import { vulBelrij } from './_lib/iris/belrij-vullen.js';
+import { escalatieRonde } from './_lib/iris/belrij-escalatie-ronde.js';
 import {
   OPNAME_PER_RONDE,
   bronSleutel,
@@ -73,6 +74,7 @@ export default async function handler(req, res) {
     verstuur_fouten: 0,
     signalen_nieuw: 0,
     belrij: null,
+    escalatie: null,
     overgeslagen_tijd: false,
     fouten: [],
     duur_ms: 0,
@@ -265,12 +267,33 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 8. Escalaties uit de belrij ──────────────────────────────────────────
+    // Drie keer niet opgenomen op drie verschillende dagen -> een concept in de
+    // Post. Standaard een CONCEPT: er gaat niets de deur uit zonder dat een
+    // mens erop klikt. De stand 'zelf' is gebouwd maar staat per bron uit, en
+    // ook dan gaat het bericht langs het bestaande verzendpad (stap 5) binnen
+    // het ongedaan-venster van G2 -- er is geen tweede verzendweg.
+    //
+    // Fail-soft, en NA stap 7: een concept dat deze ronde klaarstaat, mag pas
+    // volgende ronde vertrekken. Dat is een extra tussenpoos waarin iemand kan
+    // ingrijpen, en dat is hier precies de bedoeling.
+    if (opTijd()) {
+      try {
+        rapport.escalatie = await escalatieRonde(supabaseAdmin, { opTijd });
+        if (rapport.escalatie?.fouten?.length) {
+          for (const f of rapport.escalatie.fouten) meldFout('escalatie', new Error(f));
+        }
+      } catch (e) {
+        meldFout('escalatie', e);
+      }
+    }
+
     rapport.duur_ms = Date.now() - start;
     console.log('[cron-iris-werk]', JSON.stringify(rapport));
 
     // Een ronde zonder werk hoeft niet in het logboek — dat zou het logboek
     // vol zetten met stilte.
-    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.signalen_nieuw || rapport.belrij?.nieuw || rapport.belrij?.redenen_nieuw || rapport.belrij?.redenen_verwerkt || rapport.fouten.length) {
+    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.signalen_nieuw || rapport.belrij?.nieuw || rapport.belrij?.redenen_nieuw || rapport.belrij?.redenen_verwerkt || rapport.escalatie?.concepten || rapport.fouten.length) {
       const { error: logFout } = await supabaseAdmin.from('iris_log').insert({
         wat: 'werkronde',
         resultaat: rapport.fouten.length ? 'deels' : 'ok',
