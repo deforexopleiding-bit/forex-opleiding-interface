@@ -10,6 +10,9 @@
 //     actieve week en krijgen een nieuwe bevestiging) / Herstellen, en een
 //     afwijkende Zoom-link voor die week.
 //   - Aanmelders van een week, met per moment of mail/WhatsApp verstuurd is.
+//   - Fase 3 (2026-10-12): kaart "Resultaten" — per funnel (v1/v2) en totaal:
+//     aanmeldingen → calls → sales → commissie Karl (dry-run), plus calls via
+//     de QR zonder aanmelding (GET /api/webinar-admin?dashboard=1).
 //   - Fase 3 (2026-10-12): kolommen Nudge 1 / Nudge 2 per aanmelder (na-webinar
 //     opvolging aan wie geen call boekte; api/_lib/webinar-opvolging.js).
 //   - Fase 2 (2026-10-12): QR-code van de boekingslink /agenda/webinar (gratis
@@ -32,6 +35,7 @@
     loading: false, fetched: false, error: null, reeks: null, sessies: [], migratieNodig: false,
     open: null, aanm: { loading: false, error: null, rows: [] }, bezig: false, _seq: 0,
     qr: { loading: false, fout: null, data: null }, qrGroot: false,
+    dash: { loading: false, fout: null, data: null },
   };
 
   function rerender() { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); }
@@ -57,6 +61,21 @@
     st.loading = false; st.fetched = true;
     rerender();
   }
+
+  async function laadDashboard(force) {
+    if (st.dash.loading || (st.dash.data && !force)) return;
+    st.dash = { loading: true, fout: null, data: st.dash.data };
+    rerender();
+    try {
+      const j = await window.KV.authedJson('/api/webinar-admin?dashboard=1');
+      st.dash = { loading: false, fout: null, data: j };
+    } catch (e) {
+      console.error('[webinar-v2] dashboard laden mislukt:', e && e.status, e && (e.body || e.message));
+      st.dash = { loading: false, fout: 'Kon de resultaten niet laden', data: null };
+    }
+    rerender();
+  }
+  window.__wbDashVernieuw = function () { laadDashboard(true); };
 
   async function laadQr() {
     if (st.qr.loading || st.qr.data) return;
@@ -168,6 +187,35 @@
       </div></div>`;
   }
 
+  const euro = (n) => '€\u00a0' + Number(n || 0).toLocaleString('nl-NL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '—');
+  function dashboardHtml() {
+    if (!st.dash.data && !st.dash.loading && !st.dash.fout) queueMicrotask(() => laadDashboard(false));
+    const d = st.dash.data;
+    const kop = `<div class="card-head"><div class="card-title">Resultaten per funnel</div>
+      <button class="btn btn-ghost btn-sm" ${st.dash.loading ? 'disabled' : ''} onclick="__wbDashVernieuw()">Vernieuwen</button></div>`;
+    if (!d) {
+      return `<div class="card" style="margin-bottom:14px">${kop}<div class="card-body" style="font-size:12.5px;color:${st.dash.fout ? 'var(--rose)' : 'var(--text-3)'}">${esc(st.dash.fout || 'Resultaten laden…')}</div></div>`;
+    }
+    const naam = { 'webinar-v1': 'Funnel A (webinar-v1)', 'webinar-v2': 'Funnel B (webinar-v2)', overig: 'Overig' };
+    const rij = (label, r, sterk) => `<tr${sterk ? ' style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
+      <td>${esc(label)}</td>
+      <td class="r">${r.aanmeldingen}${r.personen !== r.aanmeldingen ? ` <span style="color:var(--text-3);font-weight:400" title="Unieke personen (e-mail)">(${r.personen} pers.)</span>` : ''}</td>
+      <td class="r">${r.calls} <span style="color:var(--text-3);font-weight:400">${pct(r.calls, r.personen)}</span></td>
+      <td class="r">${r.sales} <span style="color:var(--text-3);font-weight:400">${pct(r.sales, r.calls)}</span></td>
+      <td class="r" title="Geboekt ${euro(r.commissie_geboekt)} · zou nu boeken ${euro(r.commissie_te_boeken)}">${euro(r.commissie)}</td></tr>`;
+    const z = d.zonder_aanmelding;
+    const setter = d.setter && d.setter.naam ? esc(d.setter.naam) : 'de setter van de webinar-link';
+    return `<div class="card" style="margin-bottom:14px">${kop}
+      <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+        <thead><tr><th>Funnel</th><th class="r">Aanmeldingen</th><th class="r" title="Personen met een call via /agenda/webinar (na de aanmelding, niet geannuleerd) · % van de personen">Calls</th><th class="r" title="Deals met ${setter} als setter · % van de calls">Sales</th><th class="r">Commissie ${setter}</th></tr></thead>
+        <tbody>${d.funnels.map((r) => rij(naam[r.funnel] || r.funnel, r)).join('')}${rij('Totaal', d.totaal, true)}
+          <tr style="color:var(--text-3)"><td>Calls via de QR zonder aanmelding</td><td class="r">—</td><td class="r">${z.calls}</td><td class="r">${z.sales}</td><td class="r">${euro(z.commissie)}</td></tr>
+        </tbody></table></div>
+      <div style="font-size:11px;color:var(--text-3);padding:6px 12px 10px">${d.dry_run ? '⚠ Commissie in <b>dry-run</b>: dit is wat de commissie-cron zou boeken; er is nog niets geboekt. ' : ''}Calls = boeking via /agenda/webinar ná de aanmelding (niet geannuleerd). Sales = deals met ${setter} als setter. Geen opkomst/show-rate.</div>
+    </div>`;
+  }
+
   function qrHtml() {
     if (!st.qr.data && !st.qr.loading && !st.qr.fout) queueMicrotask(laadQr);
     const q = st.qr.data;
@@ -260,7 +308,7 @@
     if (st.migratieNodig || !st.reeks) {
       return '<div class="pad"><div class="card"><div class="card-body" style="font-size:12.5px">De webinar-tabellen ontbreken nog. Draai eerst de migratie <span class="mono">docs/sql-migrations/2026-10-09-webinar-fase1.sql</span>.</div></div></div>';
     }
-    return `<div class="pad">${instellingenHtml(st.reeks)}${qrHtml()}${sessiesHtml(st.reeks)}</div>`;
+    return `<div class="pad">${instellingenHtml(st.reeks)}${dashboardHtml()}${qrHtml()}${sessiesHtml(st.reeks)}</div>`;
   }
 
   window.DFO.VIEWS = window.DFO.VIEWS || {};

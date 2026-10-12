@@ -4,6 +4,9 @@
 //
 // GET                     → { reeks, sessies: [{ …, aantal }] }  (4 weken terug + komende 8)
 // GET ?sessie_id=<uuid>   → { sessie, aanmeldingen: [...] }
+// GET ?dashboard=1        → trechter per funnel (webinar-v1/v2 + totaal):
+//                           aanmeldingen → calls → sales → commissie setter
+//                           (fase 3; api/_lib/webinar-dashboard.js)
 // GET ?qr=1               → { url, png, svg } — QR van de boekingslink voor de
 //                           webinar (fase 2, 2026-10-12). Karl deelt 'm tijdens
 //                           het webinar; boekingen via die link krijgen
@@ -21,6 +24,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import QRCode from 'qrcode';
 import { haalReeks, zorgVoorSessies, slaSessieOver, nlNaarUtc, MIN } from './_lib/webinar.js';
+import { laadDashboard } from './_lib/webinar-dashboard.js';
 
 /** De boekingslink achter de QR (booking_sources.slug 'webinar'). */
 export const WEBINAR_BOEKINGSLINK = 'https://deforexopleiding.nl/agenda/webinar';
@@ -97,6 +101,7 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       if (!(await requirePermission(req, 'events.event.view'))) return res.status(403).json({ error: 'Geen rechten (events.event.view)' });
       if (req.query?.qr) return res.status(200).json(await webinarQr());
+      if (req.query?.dashboard) return res.status(200).json(await laadDashboard(supabaseAdmin));
       const reeks = await haalReeks(supabaseAdmin);
       if (!reeks) return res.status(200).json({ reeks: null, sessies: [], migratie_nodig: true });
 
