@@ -47,6 +47,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { STAPTYPES, NIET_VIA_OPDRACHT, verloopRegel } from './_lib/iris/opdracht.js';
+import { voegHandmatigToe } from './_lib/iris/belrij-vullen.js';
 import { haalHerkenningspunten, telefoonVormen, naamUit } from './_lib/iris/doel.js';
 import { bouwOpvolging } from './_lib/iris/opvolging.js';
 
@@ -629,21 +630,23 @@ async function voerUit(actie, user) {
     }
 
     case 'belrij_toevoegen': {
+      // De poort blijft hier staan, ook al gooit voegHandmatigToe() zelf ook.
+      // DOEL_NODIG wordt tegen DEZE regels afgelezen: staat de eis alleen nog
+      // in de helper, dan kan niemand -- toets noch lezer -- meer zien dat
+      // belrij_toevoegen een doel nodig heeft.
       if (!actie.contact_id) throw new Error('belrij zonder contact');
-      const { data, error } = await supabaseAdmin
-        .from('iris_belrij')
-        .insert({
-          contact_id: actie.contact_id,
-          reden: String(p.reden || 'handmatig toegevoegd').slice(0, 200),
-          reden_detail: p.detail || null,
-          eigenaar: p.eigenaar || null,
-          prioriteit: Number.isFinite(Number(p.prioriteit)) ? Number(p.prioriteit) : 50,
-          bron: ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'].includes(p.bron) ? p.bron : 'hand',
-        })
-        .select('id')
-        .single();
-      if (error) throw new Error('belrij opslaan: ' + error.message);
-      return { belrij_id: data.id };
+      // Deed een gewone INSERT en maakte dus een TWEEDE rij als die persoon er
+      // al op stond. Nu langs hetzelfde pad als de vuller: één rij per persoon,
+      // de reden erbij als regel.
+      const uit = await voegHandmatigToe(supabaseAdmin, {
+        contactId: actie.contact_id,
+        reden: p.reden || 'handmatig toegevoegd',
+        detail: p.detail || null,
+        eigenaar: p.eigenaar || null,
+        prioriteit: p.prioriteit,
+        bron: ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'].includes(p.bron) ? p.bron : 'hand',
+      });
+      return { belrij_id: uit.belrij_id, nieuw: uit.nieuw };
     }
 
     case 'lms_toegang_verlengen': {

@@ -48,7 +48,28 @@ export const SLEUTEL_PREFIX = Object.freeze({
   beltaak: 'pending_action',
   signaal: 'signaal',
   opvolging: 'opvolging',
+  hand: 'hand',
 });
+
+/**
+ * De prefixen die de VULLER beheert.
+ *
+ * Alleen deze mag hij afvinken als een bron ze niet meer aanlevert. Een reden
+ * die een mens met de hand heeft toegevoegd (`hand:…`) levert geen bron aan en
+ * zou dus bij elke ronde meteen op verwerkt gezet worden — die verdwijnt dan
+ * van de kaart terwijl degene die hem zette denkt dat hij er staat.
+ */
+export const BEHEERDE_PREFIXEN = Object.freeze([
+  SLEUTEL_PREFIX.beltaak,
+  SLEUTEL_PREFIX.signaal,
+  SLEUTEL_PREFIX.opvolging,
+]);
+
+/** Het systeem vóór de dubbele punt. Zonder prefix is het geen beheerde sleutel. */
+export function prefixVan(bronSleutel) {
+  const i = String(bronSleutel ?? '').indexOf(':');
+  return i > 0 ? String(bronSleutel).slice(0, i) : null;
+}
 
 const kort = (s, max = DETAIL_MAX) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -192,15 +213,22 @@ export function voegSamen(kandidaten) {
  *
  * `bestaand` zijn de onverwerkte redenen in de databank, `nu` de sleutels die de
  * bronnen deze ronde nog aanleveren. Wat in de eerste zit en niet in de tweede,
- * is afgehandeld in zijn bronsysteem en hoort `verwerkt_op` te krijgen.
+ * is afgehandeld in zijn bronsysteem en hoort `verwerkt_op` te krijgen — maar
+ * ALLEEN als het een sleutel is die de vuller beheert. Een reden die een mens
+ * met de hand toevoegde heeft geen bronsysteem dat hem kan aanleveren, en zou
+ * er dus bij de eerste ronde weer af vliegen.
  *
  * Dit is met opzet geen DELETE: een reden die ooit gold is een stuk geschiedenis
  * van waarom er gebeld is.
  */
-export function vervallenRedenen(bestaand, nu) {
+export function vervallenRedenen(bestaand, nu, { beheerd = BEHEERDE_PREFIXEN } = {}) {
   const nog = new Set((nu || []).filter(Boolean));
+  const mijn = new Set(beheerd || []);
   return (bestaand || [])
     .filter((r) => r && r.bron_sleutel && !nog.has(r.bron_sleutel))
+    // Alleen wat de vuller zelf beheert. Een `hand:`-reden levert geen bron
+    // aan en zou anders bij de eerste ronde verdwijnen van de kaart.
+    .filter((r) => mijn.has(prefixVan(r.bron_sleutel)))
     .map((r) => r.id)
     .filter(Boolean);
 }
