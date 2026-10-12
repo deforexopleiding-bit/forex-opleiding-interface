@@ -9,6 +9,9 @@
 //      vindLeadConv (direct op nummer); geen gesprek → logOutboundWa.
 //   3. Die route schreef berichten_log.meta_template (bestaat niet) → de
 //      insert faalde stil. Nu extern_id = wamid.
+//   4. (2026-10-12) De vrije-tekstroute (gesprek-antwoord) had dezelfde
+//      .limit(500)-opzoeking → 409 "Nog geen WhatsApp-gesprek" bij een bestaand
+//      gesprek. Nu vindLeadConv; de UI stuurt conversation_id als hint mee.
 
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -195,6 +198,101 @@ test('draad-log mislukt → in_draad=false en een echte foutregel (niet stil)', 
   assert.equal(r.status, 200);
   assert.equal(r.body.in_draad, false);
   assert.ok(r.fouten.some((f) => f.includes('logOutboundWa zonder bericht')));
+});
+
+// ── 4. Vrije-tekst WhatsApp (gesprek-antwoord) ─────────────────────────────
+const BINNEN = () => new Date(Date.now() - 2 * 3600e3).toISOString();   // 2 uur geleden
+const BUITEN = () => new Date(Date.now() - 30 * 3600e3).toISOString();  // 30 uur geleden
+function mockSendText(verzonden) {
+  return () => mock.module(url('api/_lib/meta-whatsapp.js'), {
+    namedExports: { sendText: async (a) => { verzonden.push(a); return { wamid: 'wamid.TEKST1' }; }, MetaNotConfiguredError: class extends Error {} },
+  });
+}
+const ANTWOORD = 'api/leadsonderhoud-gesprek-antwoord.js';
+
+test('vrije tekst op een drukke lijn (1100 gesprekken, dat van de lead achteraan): verstuurd + in de draad, geen 409', async () => {
+  const db = nepDb();
+  db.tab.whatsapp_conversations.find((c) => c.id === CONV.id).last_inbound_at = BINNEN();
+  const verzonden = [];
+  const r = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, body: 'Hoi Leads, top!' } }, db, mockSendText(verzonden));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body, { ok: true, wamid: 'wamid.TEKST1' });
+  assert.equal(verzonden.length, 1);
+  assert.equal(verzonden[0].to, CONV.phone_number);
+  assert.equal(verzonden[0].phoneNumberId, LIJN);
+  const msg = db.inserts.find((i) => i.t === 'whatsapp_messages');
+  assert.equal(msg.rij.conversation_id, CONV.id, 'in het gesprek van de lead');
+  assert.equal(msg.rij.direction, 'out');
+  assert.ok(!db.calls.some((c) => c.t === 'whatsapp_conversations' && c.limit === 500), 'geen ongesorteerde 500-opzoeking');
+  const d = await roep('api/leadsonderhoud-gesprek-berichten.js', { method: 'GET', query: { lead_id: LEAD.id } }, db);
+  const wa = d.body.items.filter((i) => i.channel === 'whatsapp');
+  assert.equal(wa[wa.length - 1].body, 'Hoi Leads, top!', 'staat als nieuwste in de draad');
+});
+
+test('vrije tekst met conversation_id-hint naast lead_id: gesprek direct op id, lead-pad (traject-gate) blijft', async () => {
+  const db = nepDb();
+  db.tab.whatsapp_conversations.find((c) => c.id === CONV.id).last_inbound_at = BINNEN();
+  const verzonden = [];
+  const r = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, conversation_id: CONV.id, body: 'Via de hint' } }, db, mockSendText(verzonden));
+  assert.equal(r.status, 200);
+  assert.ok(db.calls.some((c) => c.t === 'whatsapp_conversations' && c.eq.id === CONV.id), 'hint gebruikt');
+  // Hint van een ANDER gesprek (ander nummer) wordt genegeerd → toch het gesprek van de lead.
+  const db2 = nepDb();
+  db2.tab.whatsapp_conversations.find((c) => c.id === CONV.id).last_inbound_at = BINNEN();
+  const v2 = [];
+  const r2 = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, conversation_id: '00000000-0000-4000-8000-000000000999', body: 'x' } }, db2, mockSendText(v2));
+  db2.tab.whatsapp_conversations.push({ id: '00000000-0000-4000-8000-000000000999', phone_number: '+31699999999', phone_number_id: LIJN });
+  assert.equal(r2.status, 200);
+  assert.equal(v2[0].to, CONV.phone_number, 'nooit naar een ander nummer via een verkeerde hint');
+  // Lead buiten traject → 403, ook met hint (geen omweg via het lead-loze pad).
+  const db3 = nepDb(); db3.tab.leads[0] = { ...LEAD, traject: 'geen' };
+  const r3 = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, conversation_id: CONV.id, body: 'x' } }, db3, mockSendText([]));
+  assert.equal(r3.status, 403);
+});
+
+test('vrije tekst buiten het 24u-venster: 422 "24u-venster verlopen" (template-hint), niets verstuurd', async () => {
+  const db = nepDb();
+  db.tab.whatsapp_conversations.find((c) => c.id === CONV.id).last_inbound_at = BUITEN();
+  const verzonden = [];
+  const r = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, conversation_id: CONV.id, body: 'Te laat' } }, db, mockSendText(verzonden));
+  assert.equal(r.status, 422);
+  assert.equal(r.body.error, '24u-venster verlopen');
+  assert.equal(verzonden.length, 0);
+  assert.ok(!db.inserts.some((i) => i.t === 'whatsapp_messages'));
+});
+
+test('vrije tekst zonder gesprek: nog steeds 409 "Nog geen WhatsApp-gesprek"; lead-loze rij via conversation_id blijft werken', async () => {
+  const r = await roep(ANTWOORD, { method: 'POST', body: { lead_id: LEAD.id, body: 'x' } }, nepDb({ metConv: false }), mockSendText([]));
+  assert.equal(r.status, 409);
+  assert.equal(r.body.error, 'Nog geen WhatsApp-gesprek met deze lead');
+  const db = nepDb();
+  db.tab.whatsapp_conversations.find((c) => c.id === CONV.id).last_inbound_at = BINNEN();
+  const v = [];
+  const r2 = await roep(ANTWOORD, { method: 'POST', body: { conversation_id: CONV.id, body: 'Lead-loos' } }, db, mockSendText(v));
+  assert.equal(r2.status, 200);
+  assert.ok(!db.calls.some((c) => c.t === 'leads'), 'lead-loos pad: geen lead-opzoeking');
+});
+
+test('sjabloon met conversation_id-hint naast lead_id: blijft het lead-pad (berichten_log), niet het lead-loze pad', async () => {
+  const db = nepDb();
+  const r = await roep('api/leadsonderhoud-gesprek-template.js', { method: 'POST', body: { ...SJABLOON, conversation_id: CONV.id } }, db, mockWa());
+  assert.equal(r.status, 200);
+  assert.equal(r.body.in_draad, true);
+  assert.equal(db.tab.berichten_log.length, 1, 'berichten_log zoals het lead-pad (#1762)');
+  assert.equal(db.inserts.find((i) => i.t === 'whatsapp_messages').rij.conversation_id, CONV.id);
+});
+
+test('UI: _lsInbSendKeys stuurt bij een lead ook conversation_id (hint) mee', () => {
+  const v = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
+  const start = v.indexOf('function _lsInbSendKeys');
+  const fn = v.slice(start, v.indexOf('\n  }', start) + 4);
+  const keys = new Function(fn + '; return _lsInbSendKeys;')();
+  assert.deepEqual(keys({ lead_id: 'L', conversation_id: 'C' }), { lead_id: 'L', conversation_id: 'C' });
+  assert.deepEqual(keys({ lead_id: 'L' }), { lead_id: 'L' });
+  assert.deepEqual(keys({ conversation_id: 'C' }), { conversation_id: 'C' });
+  const code = lees(ANTWOORD).split('\n').filter((r) => !r.trim().startsWith('//')).join('\n');
+  assert.doesNotMatch(code, /\.limit\(500\)/);
+  assert.ok(code.includes('vindLeadConv(lijn, lead, convId || null'));
 });
 
 test('code: geen .limit(500)-opzoeking en geen meta_template meer; UI meldt in_draad=false; cache-buster', () => {
