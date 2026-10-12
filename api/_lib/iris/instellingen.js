@@ -153,6 +153,11 @@ export const STANDAARD = Object.freeze({
   // in Instellingen. Null = niet toegewezen, en dan staat de rij er gewoon
   // zonder eigenaar -- zichtbaar onder "alle", niet verstopt.
   belrij_eigenaar: Object.freeze({}),
+  // Wat er mag gebeuren als iemand drie keer niet opnam, per bron van de
+  // belrij. LEEG, en dat betekent 'concept' voor elke bron: Iris zet een
+  // voorstel in de Post en een mens klikt. 'zelf' is gebouwd maar zet je hier
+  // met de hand aan, per bron, nooit allemaal tegelijk.
+  belrij_escalatie: Object.freeze({}),
 });
 
 /** Staat de hoofdschakelaar aan? Alles behalve een uitdrukkelijke 'true' is nee. */
@@ -253,6 +258,7 @@ export async function haalInstellingen(supabase, env = process.env) {
     ongedaan_seconden: STANDAARD.ongedaan_seconden,
     systeemafzenders: [],
     belrij_eigenaar: {},
+    belrij_escalatie: {},
     fout: null,
   };
 
@@ -290,6 +296,7 @@ export async function haalInstellingen(supabase, env = process.env) {
     ongedaan_seconden: leesOngedaanSeconden(bron.ongedaan_seconden),
     systeemafzenders: leesSysteemafzenders(bron.systeemafzenders),
     belrij_eigenaar: leesBelrijEigenaren(bron.belrij_eigenaar),
+    belrij_escalatie: leesBelrijEscalatie(bron.belrij_escalatie, { aan }),
     fout: null,
   };
 }
@@ -382,4 +389,35 @@ export function eigenaarVoorBron(kaart, bron) {
   if (!BELRIJ_BRONNEN.includes(String(bron))) return null;
   const v = k[bron];
   return (typeof v === 'string' && UUID_RX.test(v)) ? v : null;
+}
+
+/** De standen voor een escalatie uit de belrij, in oplopende vrijheid. */
+export const BELRIJ_ESCALATIE_STANDEN = Object.freeze(['uit', 'concept', 'zelf']);
+
+/** Wat een bron doet als er niets is ingesteld. Een voorstel, nooit een bericht. */
+export const BELRIJ_ESCALATIE_STANDAARD = 'concept';
+
+/**
+ * Wat mag Iris doen bij een escalatie, per bron van de belrij?
+ *
+ * ── TWEE DINGEN DIE HIER MET OPZET STRENG ZIJN ───────────────────────────────
+ * 1. Rommel leest als 'concept', NOOIT als 'zelf'. Een instelling die ooit
+ *    'ZELF ' met een spatie bevat mag geen bericht naar een klant losmaken.
+ * 2. De hoofdschakelaar (`IRIS_AAN`) overrulet alles. Staat die uit, dan is
+ *    'zelf' onmogelijk -- dan wordt het een concept. Niet 'uit': het werk moet
+ *    zichtbaar blijven, alleen niet verzonden worden.
+ *
+ * Een bron die ontbreekt is 'concept'. Dat is het verschil tussen "nog niet
+ * ingesteld" en "hier gebeurt niets".
+ */
+export function leesBelrijEscalatie(ruw, { aan = false } = {}) {
+  const bron = (ruw && typeof ruw === 'object' && !Array.isArray(ruw)) ? ruw : {};
+  const uit = {};
+  for (const sleutel of BELRIJ_BRONNEN) {
+    const ruwe = String(bron[sleutel] ?? '').trim().toLowerCase();
+    let stand = BELRIJ_ESCALATIE_STANDEN.includes(ruwe) ? ruwe : BELRIJ_ESCALATIE_STANDAARD;
+    if (stand === 'zelf' && !aan) stand = 'concept';
+    uit[sleutel] = stand;
+  }
+  return uit;
 }

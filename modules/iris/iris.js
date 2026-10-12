@@ -2331,6 +2331,7 @@
       ${herkoppelBlok()}
       ${systeemafzendersBlok(inst)}
       ${belrijEigenaarBlok(inst)}
+      ${belrijEscalatieBlok(inst)}
       <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
         <div><b>uit</b> — Iris doet niets in deze categorie.</div>
         <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
@@ -2373,6 +2374,92 @@
    * staat onder "Iedereen" en wacht daar op wie hem oppakt. Dat is beter dan
    * hem aan de verkeerde persoon hangen.
    */
+  /**
+   * Wat mag Iris doen als iemand drie keer niet opnam?
+   *
+   * ── WAAROM 'zelf' ER WEL STAAT TERWIJL HIJ UIT MOET BLIJVEN ─────────────
+   * Een stand die niet in het scherm staat, is een stand die via SQL gezet moet
+   * worden — en dan staat er ergens een instelling aan die niemand kan zien.
+   * Hij staat hier dus wél, met de gevolgen erbij, en hij staat per bron uit.
+   *
+   * De vier poorten achter 'zelf' (kantooruren, afkoeling, geen betaalafspraak,
+   * geen tweede concept) zitten in CODE, niet in deze instelling. Ze staan er
+   * alleen bij zodat wie dit aanzet weet wat hem daarna nog tegenhoudt.
+   */
+  function belrijEscalatieBlok(inst) {
+    const bronnen = S.instellingen?.data?.belrij_bronnen
+      || ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'];
+    const standen = S.instellingen?.data?.belrij_escalatie_standen || ['uit', 'concept', 'zelf'];
+    const huidig = (inst?.belrij_escalatie && typeof inst.belrij_escalatie === 'object') ? inst.belrij_escalatie : {};
+    const st = S.instellingen || {};
+    const hoofd = inst?.aan === true;
+
+    const LABEL = {
+      wanbetaler: 'Openstaande factuur',
+      onboarding: 'Start niet op',
+      mentorsignaal: 'Signaal van de mentor',
+      geen_reactie: 'Reageert niet / opvolging verlopen',
+      hand: 'Met de hand toegevoegd',
+    };
+    const STAND_TEKST = { uit: 'niets doen', concept: 'voorstel in de Post', zelf: 'zelf sturen' };
+
+    const regels = bronnen.map((b) => {
+      const gekozen = huidig[b] || 'concept';
+      const opties = standen.map((v) =>
+        `<option value="${esc(v)}" ${v === gekozen ? 'selected' : ''}>${esc(STAND_TEKST[v] || v)}</option>`).join('');
+      return `<div style="display:flex;gap:9px;align-items:center;padding:4px 0;min-width:0">
+        <span style="font-size:11.5px;color:var(--text-2);flex:1;min-width:0">${esc(LABEL[b] || b)}</span>
+        ${gekozen === 'zelf' ? '<span title="Iris stuurt hier zelf" style="font-size:10.5px;color:var(--amber);font-weight:600">zelf</span>' : ''}
+        <select onchange="__irisBelrijEscalatieZet('${esc(b)}', this.value)" ${st.escalatieBezig ? 'disabled' : ''}
+          style="font-size:11.5px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);max-width:190px">
+          ${opties}
+        </select>
+      </div>`;
+    }).join('');
+
+    return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Na drie keer niet opgenomen</div>
+      <div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px">
+        Drie pogingen op drie <b>verschillende</b> dagen zonder contact. Standaard
+        zet Iris dan een WhatsApp en een mail als <b>voorstel</b> in de Post —
+        er gaat niets weg zonder dat jij erop klikt.
+      </div>
+      ${regels}
+      <div style="font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.5">
+        <b>Zelf sturen</b> stuurt zonder tussenkomst. Ook dan geldt: alleen tussen
+        8 en 20 uur, hoogstens één bericht per persoon per drie dagen, nooit
+        tijdens een lopende betaalafspraak of toezegging, en nooit een tweede
+        voorstel naast een eerste dat nog klaarstaat.
+        ${hoofd ? '' : '<br><b style="color:var(--amber)">De hoofdschakelaar staat uit</b> — "zelf sturen" wordt dan gelezen als "voorstel in de Post".'}
+      </div>
+      ${st.escalatieFout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:5px">⚠ ${esc(st.escalatieFout)}</div>` : ''}
+    </div>`;
+  }
+
+  window.__irisBelrijEscalatieZet = async (bron, stand) => {
+    const st = S.instellingen = S.instellingen || {};
+    const huidig = st.data?.instellingen?.belrij_escalatie || {};
+    const nieuw = { ...huidig, [bron]: stand };
+
+    st.escalatieBezig = true;
+    st.escalatieFout = null;
+    hertekenen();
+    try {
+      await haalRuw('/api/iris-instellingen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sleutel: 'belrij_escalatie', waarde: nieuw }),
+      });
+      st.bezig = false;
+      await haalInstellingen();
+    } catch (e) {
+      st.escalatieFout = e?.message || 'Opslaan mislukt';
+    } finally {
+      st.escalatieBezig = false;
+      hertekenen();
+    }
+  };
+
   function belrijEigenaarBlok(inst) {
     const bronnen = S.instellingen?.data?.belrij_bronnen
       || ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'];
