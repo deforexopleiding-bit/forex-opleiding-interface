@@ -208,7 +208,7 @@ test('callers geven customerId/module door aan de module-context', () => {
   const lees = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
   assert.match(lees('api/inbox-webhook.js'), /getModuleContextByPhoneNumberId\(supabaseAdmin, recvPhoneNumberId, \{ customerId: conv\.customerId \}\)/);
   for (const p of ['api/_lib/joost-suggest-core.js', 'api/_lib/onboarding-agent-core.js', 'api/_lib/simone-suggest-core.js',
-    'api/inbox-send.js', 'api/inbox-send-template.js', 'api/inbox-template-list.js', 'api/inbox-quick-replies-list.js']) {
+    'api/_lib/inbox-verzenden.js', 'api/inbox-send-template.js', 'api/inbox-template-list.js', 'api/inbox-quick-replies-list.js']) {
     assert.match(lees(p), /\{ customerId: conv\.customer_id \}/, p);
   }
   for (const p of ['api/_lib/onboarding-invite.js', 'api/_lib/onboarding-template-send.js']) {

@@ -222,9 +222,12 @@ test('events-vragenlijstuitnodiging: default is vragenlijst_herinnering_correct 
   assert.doesNotMatch(src, /\|\| 'vragenlijst_herinnering_v3'/);
 });
 
-test('inbox-send(-template) en de webhook gebruiken de lijn-helpers', () => {
-  for (const f of ['api/inbox-send.js', 'api/inbox-send-template.js']) {
-    assert.match(readFileSync(new URL('../' + f, import.meta.url), 'utf8'), /await hechtAanHuidigeLijn\(supabaseAdmin, conv\)/, f);
+test('het verzendpad en de webhook gebruiken de lijn-helpers', () => {
+  // Het verzendpad van inbox-send zit sinds de hergebruik-splitsing in
+  // api/_lib/inbox-verzenden.js; inbox-send.js is alleen nog het omhulsel.
+  // De eis is onveranderd: er wordt aangehecht vóór er iets vertrekt.
+  for (const f of ['api/_lib/inbox-verzenden.js', 'api/inbox-send-template.js']) {
+    assert.match(readFileSync(new URL('../' + f, import.meta.url), 'utf8'), /await hechtAanHuidigeLijn\((?:supabaseAdmin|db), conv\)/, f);
   }
   assert.match(readFileSync(new URL('../api/inbox-webhook.js', import.meta.url), 'utf8'), /vindOfHechtGesprek\(supabaseAdmin,/);
 });
