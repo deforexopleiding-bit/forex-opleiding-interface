@@ -21,9 +21,20 @@
 // nooit gebeurd is.
 //
 // ── DE FILTERS ───────────────────────────────────────────────────────────────
-// wacht_op_ons · wacht_op_klant · venster_bijna_dicht · niet_gekoppeld ·
-// belofte_vandaag · spam · alles. Dat zijn de vragen die iemand 's ochtends
-// stelt. "Alle open gesprekken" is er geen van.
+// wacht_op_ons · nog_in_te_delen · wacht_op_klant · venster_bijna_dicht ·
+// niet_gekoppeld · belofte_vandaag · spam · alles. Dat zijn de vragen die
+// iemand 's ochtends stelt. "Alle open gesprekken" is er geen van.
+//
+// 'wacht_op_ons' betekent sinds H3 ook écht dat: er kwam iets binnen NÁ ons
+// laatste bericht. Daarvoor keek het filter alleen naar de status, en stond het
+// bakje vol met gesprekken waarin wíj het laatste woord hadden — automatische
+// herinneringen, systeemmeldingen, antwoorden die al gegeven waren. Gemeten op
+// 12 oktober: 569 in het bakje, 225 waar de bal echt bij ons lag. Zie
+// _lib/iris/werkbak.js voor de regel en waarom hij een gegenereerde kolom is.
+//
+// 'nog_in_te_delen' is nieuw en is waar status 'nieuw' naartoe is verhuisd.
+// Nog-niet-ingedeeld is niet hetzelfde als op-ons-wachtend; dat is waarom
+// leveranciersmail (360dialog Support) tussen het werk stond.
 //
 // 'spam' is de tegenhanger van wat er uit wacht_op_ons weggehaald is: die
 // gesprekken verdwijnen niet, ze staan alleen niet meer tussen het werk.
@@ -39,6 +50,7 @@ import { vensterStand, magVersturen, BIJNA_DICHT_MINUTEN } from './_lib/iris/ven
 import { contactZoekFilter } from './_lib/iris/zoekfilter.js';
 import { aandachtsregel } from './_lib/iris/aandacht.js';
 import { leesOrdening, klokVenster, voegSamen, MAX_DRINGEND, ORDENINGEN } from './_lib/iris/ordening.js';
+import { ONINGEDEELD, MAX_KANDIDATEN, kiesWerkbak } from './_lib/iris/werkbak.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STANDAARD_LIMIET = 50;
@@ -47,6 +59,7 @@ const MAX_BERICHTEN = 100;
 
 export const FILTERS = Object.freeze([
   'wacht_op_ons',
+  'nog_in_te_delen',
   'wacht_op_klant',
   'venster_bijna_dicht',
   'niet_gekoppeld',
@@ -54,6 +67,66 @@ export const FILTERS = Object.freeze([
   'spam',
   'alles',
 ]);
+
+/**
+ * De gesprekken die in de werkbak KUNNEN staan, met wat de regel nodig heeft.
+ *
+ * Alleen het id en de twee tijdstempels: rond de honderd bytes per gesprek,
+ * dus bij de 569 van 12 oktober ~57 kB. Dat is de prijs voor het feit dat
+ * PostgREST twee kolommen van dezelfde rij niet met elkaar kan vergelijken en
+ * een gegenereerde kolom de tabel zou herschrijven onder een exclusief slot.
+ *
+ * De drie sloten zitten hier al in: de stand ('nieuw' hoort er sinds H3 NIET
+ * meer in), de categorie, en de systeemafzenders. Wat erna nog gebeurt is de
+ * bal-regel, en die staat in kiesWerkbak().
+ */
+async function haalWerkbakKandidaten({ systeemafzenders, contactIds = null, metId = true }) {
+  // Voor het TELLEN is het id niet nodig: dan gaat er alleen een paar
+  // tijdstempels per gesprek over de lijn. De balk staat op élke tab en
+  // ververst bij elke poll, dus elk veld dat niet mee hoeft, hoort niet mee —
+  // dezelfde afweging als bij G8 (54 MB/uur naar 7 MB/uur).
+  const kolommen = metId ? 'id, laatste_inbound, laatste_outbound' : 'laatste_inbound, laatste_outbound';
+  let vraag = supabaseAdmin
+    .from('iris_gesprekken')
+    .select(kolommen)
+    .eq('status', 'wacht_op_ons')
+    .or(werkbakCategorieFilter())
+    .order('laatste_inbound', { ascending: false, nullsFirst: false })
+    .limit(MAX_KANDIDATEN);
+  vraag = zonderSysteemafzenders(vraag, systeemafzenders);
+  if (contactIds) vraag = vraag.in('contact_id', contactIds);
+  const { data, error } = await vraag;
+  if (error) throw new Error('werkbak-kandidaten: ' + error.message);
+  const rijen = data || [];
+  if (rijen.length >= MAX_KANDIDATEN) {
+    // Luid, want vanaf hier is de lijst niet meer compleet en zou je dat
+    // stilletjes niet merken.
+    console.warn('[iris-post] werkbak afgekapt op', MAX_KANDIDATEN, 'kandidaten — de lijst is niet compleet.');
+  }
+  return rijen;
+}
+
+/**
+ * Afzenders die geen klantvraag zijn, uit een opvraging houden.
+ *
+ * Onze eigen systeemmeldingen ("Nieuwe afspraak ingeboekt. Naam: …") komen als
+ * INKOMENDE mail binnen, dus de bal-regel haalt ze er niet uit. Hetzelfde geldt
+ * voor leveranciersmail.
+ *
+ * Een volledig adres moet exact kloppen; een item dat met @ begint geldt voor
+ * het hele domein. Geen losse woorden: "info" zou anders ook
+ * klant-info@gmail.com raken, en dan verdwijnt een echte klantvraag uit de
+ * werkbak zonder dat iemand het merkt.
+ *
+ * De lijst begint LEEG, dus dit is standaard een no-op.
+ */
+function zonderSysteemafzenders(vraag, lijst) {
+  for (const item of (Array.isArray(lijst) ? lijst : [])) {
+    if (item.startsWith('@')) vraag = vraag.not('extern_id', 'ilike', '%' + item);
+    else vraag = vraag.neq('extern_id', item);
+  }
+  return vraag;
+}
 
 /** Klem een getal binnen grenzen. */
 function klem(v, standaard, min, max) {
@@ -177,15 +250,12 @@ async function geefAandacht(res) {
   }
   tellingen.melding_hangt = Number(cHangt || 0);
 
-  // 3. Werk dat wacht. Dezelfde twee sloten als het lijstfilter: spam telt niet
-  //    mee, want spam is geen werk (P-2).
-  const { count: cWacht, error: eWacht } = await supabaseAdmin
-    .from('iris_gesprekken')
-    .select('id', { count: 'exact', head: true })
-    .in('status', ['nieuw', 'wacht_op_ons'])
-    .or(werkbakCategorieFilter());
-  if (eWacht) throw new Error('werk tellen: ' + eWacht.message);
-  tellingen.wacht_op_ons = Number(cWacht || 0);
+  // 3. Werk dat wacht. EXACT dezelfde sloten als het lijstfilter: zou de teller
+  //    een andere regel gebruiken, dan zegt de badge 569 en toont de lijst 225
+  //    — en dan vertrouw je geen van de twee meer.
+  const inst = await haalInstellingen(supabaseAdmin);
+  const kandidaten = await haalWerkbakKandidaten({ systeemafzenders: inst.systeemafzenders, metId: false });
+  tellingen.wacht_op_ons = kiesWerkbak(kandidaten, { vanaf: 0, limiet: 1 }).totaal;
 
   return res.status(200).json({ tellingen, regel: aandachtsregel(tellingen) });
 }
@@ -208,17 +278,76 @@ async function geefLijst(q, res) {
     .select('id, contact_id, kanaal, categorie, status, toegewezen_aan, laatste_inbound, laatste_outbound, ongelezen', { count: 'exact' })
     .order('laatste_inbound', { ascending: false, nullsFirst: false });
 
+  // Zoeken gaat over de contactgegevens, niet over de gesprekstabel — daar
+  // staat geen naam in. Eerst de contacten zoeken, dan de gesprekken daarvan.
+  //
+  // Dit staat VÓÓR de filterkeuze omdat de werkbak zijn kandidaten zelf
+  // ophaalt, en die moeten met dezelfde zoekterm beperkt zijn. Anders zou je
+  // bij zoeken binnen "Wacht op ons" een bladzijde krijgen uit de ongefilterde
+  // kandidaten, en kloppen de aantallen niet.
+  let zoekContactIds = null;
+  if (zoek) {
+    // Het zoekwoord gaat door contactZoekFilter heen: een komma of een haakje
+    // in de invoer zou anders de or-tekenreeks van PostgREST in tweeën hakken.
+    // Zoeken op "Janssen, Jan" gaf zo een 400, en dat ziet er voor de
+    // gebruiker uit als "zoeken is kapot".
+    const zoekFilter = contactZoekFilter(zoek);
+    if (!zoekFilter) {
+      return res.status(200).json({ items: [], totaal: 0, filter, vanaf, limiet, filters: FILTERS });
+    }
+    const { data: gevonden } = await supabaseAdmin
+      .from('iris_contacten')
+      .select('id')
+      .or(zoekFilter)
+      .limit(200);
+    zoekContactIds = (gevonden || []).map((c) => c.id);
+    if (!zoekContactIds.length) {
+      return res.status(200).json({ items: [], totaal: 0, filter, vanaf, limiet, filters: FILTERS });
+    }
+  }
+
+  // De werkbak telt en pagineert zelf (zie hieronder); voor de andere filters
+  // doet PostgREST dat met .range() en een exact count.
+  let werkbakTotaal = null;
+
   if (filter === 'wacht_op_ons') {
-    // Twee sloten op hetzelfde. cron-iris-werk zet spam sinds P-2 niet meer op
-    // wacht_op_ons, maar de gesprekken die er VÓÓR die wijziging in zijn
-    // beland staan er nog. Dit filter haalt ze er alsnog uit, zonder dat er
-    // één rij in de databank aangeraakt hoeft te worden.
+    // Drie sloten.
     //
-    // Let op de or: zie werkbakCategorieFilter() voor waarom een kale
-    // .not('categorie','in',...) de nog-niet-ingedeelde gesprekken zou wissen.
-    vraag = vraag
-      .in('status', ['nieuw', 'wacht_op_ons'])
-      .or(werkbakCategorieFilter());
+    // 1. De stand. 'nieuw' zit er sinds H3 NIET meer in: nog-niet-ingedeeld is
+    //    niet hetzelfde als op-ons-wachtend, en dat is waarom leveranciersmail
+    //    tussen het werk stond. Die staat nu onder 'nog_in_te_delen'.
+    //
+    // 2. De categorie. cron-iris-werk zet spam sinds P-2 niet meer op
+    //    wacht_op_ons, maar de gesprekken die er VÓÓR die wijziging in zijn
+    //    beland staan er nog. Dit filter haalt ze er alsnog uit, zonder dat er
+    //    één rij in de databank aangeraakt hoeft te worden. Let op de or: zie
+    //    werkbakCategorieFilter() voor waarom een kale
+    //    .not('categorie','in',...) de nog-niet-ingedeelde gesprekken wist.
+    //
+    // 3. En de bal: er kwam iets binnen ná ons laatste bericht. Dat gaat NIET
+    //    in deze opvraging, want PostgREST kan twee kolommen van dezelfde rij
+    //    niet met elkaar vergelijken. Daarom worden de kandidaten eerst
+    //    opgehaald (id plus twee tijdstempels), wordt de regel daarop
+    //    toegepast, en halen we daarna alleen de ids van déze bladzijde op.
+    //
+    //    De regel moet op de VOLLEDIGE lijst, niet op een bladzijde: anders
+    //    haal je er vijftig op waarvan er dertig wegvallen, en dan klopt het
+    //    aantal niet en springt de cursor.
+    const inst = await haalInstellingen(supabaseAdmin);
+    const kandidaten = await haalWerkbakKandidaten({
+      systeemafzenders: inst.systeemafzenders,
+      contactIds: zoekContactIds,
+    });
+    const keuze = kiesWerkbak(kandidaten, { vanaf, limiet });
+    if (!keuze.ids.length) {
+      return res.status(200).json({ items: [], totaal: keuze.totaal, filter, vanaf, limiet, filters: FILTERS });
+    }
+    werkbakTotaal = keuze.totaal;
+    vraag = vraag.in('id', keuze.ids);
+  } else if (filter === 'nog_in_te_delen') {
+    // Wat Iris nog niet heeft ingedeeld. Geen werkbak: hier kijk je of er iets
+    // tussen zit dat wél werk is, en één klik zet de categorie goed.
+    vraag = vraag.eq('status', ONINGEDEELD);
   } else if (filter === 'spam') {
     // Niet weg, wel weg uit het werk. Hier kijk je na of Iris het goed zag, en
     // één klik zet een vergissing terug (iris-indeling).
@@ -254,28 +383,9 @@ async function geefLijst(q, res) {
 
   if (categorie) vraag = vraag.eq('categorie', categorie);
 
-  // Zoeken gaat over de contactgegevens, niet over de gesprekstabel — daar
-  // staat geen naam in. Eerst de contacten zoeken, dan de gesprekken daarvan.
-  if (zoek) {
-    // Het zoekwoord gaat door contactZoekFilter heen: een komma of een haakje
-    // in de invoer zou anders de or-tekenreeks van PostgREST in tweeën hakken.
-    // Zoeken op "Janssen, Jan" gaf zo een 400, en dat ziet er voor de
-    // gebruiker uit als "zoeken is kapot".
-    const filter = contactZoekFilter(zoek);
-    if (!filter) {
-      return res.status(200).json({ items: [], totaal: 0, filter: 'wacht_op_ons', vanaf, limiet, filters: FILTERS });
-    }
-    const { data: gevonden } = await supabaseAdmin
-      .from('iris_contacten')
-      .select('id')
-      .or(filter)
-      .limit(200);
-    const ids = (gevonden || []).map((c) => c.id);
-    if (!ids.length) {
-      return res.status(200).json({ items: [], totaal: 0, filter, vanaf, limiet, filters: FILTERS });
-    }
-    vraag = vraag.in('contact_id', ids);
-  }
+  // De zoekterm beperkt alle filters behalve de werkbak — die heeft hem al
+  // meegekregen bij het ophalen van zijn kandidaten.
+  if (zoekContactIds && filter !== 'wacht_op_ons') vraag = vraag.in('contact_id', zoekContactIds);
 
   // ── DE KLOK-GROEP ──────────────────────────────────────────────────────────
   // WhatsApp-gesprekken waarvan het venster bijna dichtgaat, kortste tijd
@@ -303,7 +413,12 @@ async function geefLijst(q, res) {
     else dringendRijen = data || [];
   }
 
-  const { data: gesprekken, error, count } = await vraag.range(vanaf, vanaf + limiet - 1);
+  // De werkbak heeft zijn bladzijde al gekozen (.in op precies die ids), dus
+  // daar geen .range() erbovenop — die zou een bladzijde uit een bladzijde
+  // nemen. De andere filters pagineren wél hier.
+  const { data: gesprekken, error, count } = werkbakTotaal === null
+    ? await vraag.range(vanaf, vanaf + limiet - 1)
+    : await vraag;
   if (error) throw new Error('gesprekken: ' + error.message);
 
   // Het AANTAL UIT DE HOOFDOPVRAGING, niet uit de samengevoegde lijst. De
@@ -332,9 +447,14 @@ async function geefLijst(q, res) {
     items = items.filter((i) => i.venster.bijna_dicht);
   }
 
+  // Het aantal waarop de cursor loopt. Bij de werkbak is dat het getal ná de
+  // bal-regel, want dát is de lijst die je doorbladert — het `count` van de
+  // id-opvraging is alleen de grootte van deze ene bladzijde.
+  const totaal = werkbakTotaal !== null ? werkbakTotaal : (count ?? hoofdAantal);
+
   return res.status(200).json({
     items,
-    totaal: count ?? hoofdAantal,
+    totaal,
     filter,
     categorie,
     ordening,
@@ -342,7 +462,7 @@ async function geefLijst(q, res) {
     vanaf,
     limiet,
     dringend_aantal: samen.dringend_aantal,
-    meer: (count ?? 0) > vanaf + hoofdAantal,
+    meer: totaal > vanaf + hoofdAantal,
     volgende_vanaf: vanaf + hoofdAantal,
     filters: FILTERS,
   });

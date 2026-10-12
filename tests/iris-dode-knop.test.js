@@ -107,6 +107,9 @@ test('beide gewijzigde bestanden hebben een nieuw nummer', () => {
   // Zonder bump laadt de browser de oude kopie en is de reparatie er voor
   // niemand — en dit is juist een reparatie die je pas ziet bij de eerste klik
   // na het laden.
-  assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=21/);
-  assert.match(INDEX, /klanten-v2\.js\?v=1f6/);
+  // Het nummer schuift mee met elke latere PR die deze bestanden aanraakt.
+  // Wat hier vastgepind moet worden is dat er een bump IS ten opzichte van
+  // de stand vóór H2 (iris.js?v=20, klanten-v2.js?v=1f5), niet welk getal.
+  assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=(2[1-9]|[3-9]\d)/);
+  assert.match(INDEX, /klanten-v2\.js\?v=1f[6-9a-f]/);
 });

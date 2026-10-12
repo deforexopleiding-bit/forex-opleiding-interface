@@ -165,8 +165,11 @@ test('de oude vorm -- status als vast veld in de update -- is weg', () => {
 });
 
 test('het werkbakfilter in de lijst gebruikt de or-vorm', () => {
-  const i = POST.indexOf("if (filter === 'wacht_op_ons')");
-  const blok = POST.slice(i, i + 900);
+  // Sinds H3 haalt de werkbak zijn kandidaten apart op (de bal-regel kan niet
+  // in PostgREST), en daar zit het categoriefilter in. Eén plek, dus ook de
+  // teller heeft hem.
+  const blok = POST.slice(POST.indexOf('async function haalWerkbakKandidaten'), POST.indexOf('function zonderSysteemafzenders'));
+  assert.ok(blok.length > 100, 'de kandidaat-opvraging hoort te bestaan');
   assert.match(blok, /\.or\(werkbakCategorieFilter\(\)\)/);
 });
 

@@ -36,6 +36,7 @@ const TOEGESTANE_SLEUTELS = new Set([
   'mailboxen',
   'model',
   'ongedaan_seconden',
+  'systeemafzenders',
 ]);
 
 const UUR_RX = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -52,6 +53,28 @@ const UUR_RX = /^([01]\d|2[0-3]):([0-5]\d)$/;
  */
 export function keurWaardeGoed(sleutel, waarde) {
   switch (sleutel) {
+    case 'systeemafzenders': {
+      // Afzenders die geen klantvraag zijn. Wie hier staat verdwijnt uit de
+      // werkbak, en dat is de stille kant: een gesprek dat eruit valt mist
+      // niemand tot de klant belt. Dus streng nakijken.
+      if (!Array.isArray(waarde)) return { ok: false, fout: 'systeemafzenders moet een lijst zijn' };
+      if (waarde.length > 100) return { ok: false, fout: 'hoogstens 100 afzenders' };
+      const uit = [];
+      for (const ruw of waarde) {
+        if (typeof ruw !== 'string') return { ok: false, fout: 'elke afzender is tekst' };
+        const v = ruw.trim().toLowerCase();
+        if (!v) continue;
+        // Een volledig adres of een domein met @ ervoor. GEEN los woord: 'info'
+        // zou ook klant-info@gmail.com raken, en dan valt een echte klantvraag
+        // weg zonder dat iemand het merkt.
+        if (!/^@[a-z0-9.-]+\.[a-z]{2,}$/.test(v)
+          && !/^[^@\s]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(v)) {
+          return { ok: false, fout: `"${ruw}" is geen adres of @domein` };
+        }
+        if (!uit.includes(v)) uit.push(v);
+      }
+      return { ok: true, waarde: uit };
+    }
     case 'autonomie': {
       if (!waarde || typeof waarde !== 'object' || Array.isArray(waarde)) {
         return { ok: false, fout: 'autonomie moet een object zijn met een stand per categorie' };

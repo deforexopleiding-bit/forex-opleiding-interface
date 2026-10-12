@@ -101,15 +101,32 @@ test('een getal boven de lijst, en niets bij een lege lijst', () => {
 const POST = readFileSync(new URL('../api/iris-post.js', import.meta.url), 'utf8');
 const SCHERM = readFileSync(new URL('../modules/iris/iris.js', import.meta.url), 'utf8');
 
-test('de tellingen zijn head-queries en halen geen rijen op', () => {
-  // De balk staat op élke tab en ververst bij elke poll. Zonder head:true is
-  // dat het verschil tussen een regel tekst en een halve megabyte.
+test('de tellingen halen geen rijen op die ze niet nodig hebben', () => {
+  // De balk staat op élke tab en ververst bij elke poll. Elk veld dat niet mee
+  // hoeft, hoort niet mee — dat is het verschil tussen een regel tekst en een
+  // halve megabyte. Dezelfde afweging als bij G8 (54 MB/uur naar 7 MB/uur).
   const i = POST.indexOf('async function geefAandacht');
   assert.ok(i > 0);
   const blok = POST.slice(i, POST.indexOf('\n}', i));
+
+  // Twee van de drie tellingen zijn nog gewone head-queries.
   const heads = blok.match(/head: true/g) || [];
-  assert.equal(heads.length, 3, 'drie tellingen, drie head-queries');
+  assert.equal(heads.length, 2, 'venster en meldingen tellen met head:true');
+
+  // De derde (de werkbak) kán dat niet: zijn regel vergelijkt twee kolommen
+  // van dezelfde rij met elkaar, en PostgREST neemt in een filter een WAARDE
+  // en geen kolomverwijzing. De nette SQL-oplossing zou een gegenereerde
+  // kolom zijn, maar die toevoegen herschrijft de hele tabel onder een
+  // exclusief slot — niet te doen op een tabel waar twee mensen de hele dag
+  // in werken.
+  //
+  // Dus haalt hij rijen op, en dan is de eis: ALLEEN wat de regel nodig heeft
+  // (twee tijdstempels, geen id), en met een harde grens erop.
+  assert.match(blok, /metId: false/, 'de teller heeft het id niet nodig');
   assert.doesNotMatch(blok, /\.select\('\*'\)/);
+  const KAND = POST.slice(POST.indexOf('async function haalWerkbakKandidaten'), POST.indexOf('function zonderSysteemafzenders'));
+  assert.match(KAND, /metId \? 'id, laatste_inbound, laatste_outbound' : 'laatste_inbound, laatste_outbound'/);
+  assert.match(KAND, /\.limit\(MAX_KANDIDATEN\)/, 'en een grens, anders is "geen rijen ophalen" alleen een woord');
 });
 
 test('de venstertelling kijkt alleen naar WhatsApp', () => {
@@ -123,9 +140,16 @@ test('de venstertelling kijkt alleen naar WhatsApp', () => {
 test('de werktelling gebruikt hetzelfde filter als de lijst', () => {
   // Spam telt niet mee, want spam is geen werk (P-2). Twee tellingen die
   // verschillend rekenen, geven een balk die iets anders zegt dan de lijst.
+  //
+  // Sinds H3 lopen ze allebei door dezelfde twee functies, en dát is de
+  // garantie: niet "beide bevatten dezelfde regel", maar "er is maar één
+  // regel".
   const i = POST.indexOf('async function geefAandacht');
   const blok = POST.slice(i, POST.indexOf('\n}', i));
-  assert.match(blok, /\.or\(werkbakCategorieFilter\(\)\)/);
+  assert.match(blok, /haalWerkbakKandidaten\(/);
+  assert.match(blok, /kiesWerkbak\(kandidaten/);
+  const KAND = POST.slice(POST.indexOf('async function haalWerkbakKandidaten'), POST.indexOf('function zonderSysteemafzenders'));
+  assert.match(KAND, /\.or\(werkbakCategorieFilter\(\)\)/);
 });
 
 test('een ontbrekende opvolgingentabel is geen storing', () => {

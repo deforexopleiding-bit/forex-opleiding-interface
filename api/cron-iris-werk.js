@@ -307,6 +307,7 @@ async function neemWaOp(rij, rapport) {
     if (String(error.code) === '23505') return false;
     throw new Error('bericht opslaan: ' + error.message);
   }
+  if (vorm.richting === 'out') await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
   return true;
 }
 
@@ -370,7 +371,54 @@ async function neemMailOp(rij, rapport) {
     if (String(error.code) === '23505') return false;
     throw new Error('mail opslaan: ' + error.message);
   }
+  if (vorm.richting === 'out') await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
   return true;
+}
+
+/**
+ * Zet laatste_outbound op het gesprek.
+ *
+ * ── WAAROM DIT ER NIET WAS, EN WAT HET KOSTTE ────────────────────────────────
+ * `iris_gesprekken.laatste_outbound` werd alléén gezet door iris-verstuur.js —
+ * het verzendpad van Iris zelf, dat nauwelijks gedraaid heeft. Al het échte
+ * uitgaande verkeer (automaties, aanmaningen, Joost, mail) kwam via deze
+ * synchronisatie binnen, en die raakte de kolom nooit aan. Gemeten op 12
+ * oktober: van de 569 gesprekken in de werkbak was de kolom in NUL rijen
+ * gevuld.
+ *
+ * Daarmee was "wacht er iemand op ons?" niet te beantwoorden. De werkbak toonde
+ * 569 gesprekken; op basis van het laatste bericht waren er maar 225 waar de
+ * bal echt bij ons lag. De andere 344 eindigden met een bericht van ons — een
+ * automatische herinnering, een systeemmelding, een antwoord dat al gegeven
+ * was. Een bakje dat voor 60% uit afgehandelde dingen bestaat, wordt een bakje
+ * waar je niet meer in kijkt.
+ *
+ * Alleen vooruit: een oudere stempel mag een nieuwere niet overschrijven. De
+ * synchronisatie leest met een terugblik van een aantal dagen, dus berichten
+ * komen niet gegarandeerd in volgorde langs.
+ *
+ * Faalzacht: lukt de stempel niet, dan is het bericht nog steeds opgenomen. Een
+ * ontbrekende stempel kost een verkeerde plek in de werkbak; een uitzondering
+ * hier zou de hele ronde laten vallen.
+ */
+async function stempelOutbound(gesprekId, wanneer) {
+  if (!gesprekId || !wanneer) return;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('iris_gesprekken')
+      .select('laatste_outbound')
+      .eq('id', gesprekId)
+      .maybeSingle();
+    if (error) { console.warn('[cron-iris-werk] outbound-stempel lezen:', error.message); return; }
+    if (data?.laatste_outbound && data.laatste_outbound >= wanneer) return;
+    const { error: zetFout } = await supabaseAdmin
+      .from('iris_gesprekken')
+      .update({ laatste_outbound: wanneer, bijgewerkt_op: new Date().toISOString() })
+      .eq('id', gesprekId);
+    if (zetFout) console.warn('[cron-iris-werk] outbound-stempel zetten:', zetFout.message);
+  } catch (e) {
+    console.warn('[cron-iris-werk] outbound-stempel:', e?.message || e);
+  }
 }
 
 // ── Het gesprek ──────────────────────────────────────────────────────────────
