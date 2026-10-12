@@ -35,6 +35,7 @@ import { deelIn } from './_lib/iris/classificeer.js';
 import { verstuurConcept } from './iris-verstuur.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { haalSignalen } from './_lib/iris/signalen.js';
+import { vulBelrij } from './_lib/iris/belrij-vullen.js';
 import {
   OPNAME_PER_RONDE,
   bronSleutel,
@@ -71,6 +72,7 @@ export default async function handler(req, res) {
     verstuurd: 0,
     verstuur_fouten: 0,
     signalen_nieuw: 0,
+    belrij: null,
     overgeslagen_tijd: false,
     fouten: [],
     duur_ms: 0,
@@ -244,12 +246,31 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 7. De belrij vullen uit de drie bronnen ──────────────────────────────
+    // Bel-taken van de wanbetalers, mentorsignalen en verlopen opvolgingen. Alle
+    // drie ALLEEN LEZEN; er wordt uitsluitend naar iris_belrij en
+    // iris_belrij_redenen geschreven. Fail-soft: een bron die stuk is mag de
+    // ronde niet stilleggen, net als bij de signalen hierboven.
+    //
+    // Dit stuurt niets. Op de lijst komen is nog geen bericht; dat is deel 3 en
+    // staat daar achter een stand die uit staat.
+    if (opTijd()) {
+      try {
+        rapport.belrij = await vulBelrij(supabaseAdmin, { opTijd });
+        if (rapport.belrij?.fouten?.length) {
+          for (const f of rapport.belrij.fouten) meldFout('belrij vullen', new Error(f));
+        }
+      } catch (e) {
+        meldFout('belrij vullen', e);
+      }
+    }
+
     rapport.duur_ms = Date.now() - start;
     console.log('[cron-iris-werk]', JSON.stringify(rapport));
 
     // Een ronde zonder werk hoeft niet in het logboek — dat zou het logboek
     // vol zetten met stilte.
-    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.signalen_nieuw || rapport.fouten.length) {
+    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.signalen_nieuw || rapport.belrij?.nieuw || rapport.belrij?.redenen_nieuw || rapport.belrij?.redenen_verwerkt || rapport.fouten.length) {
       const { error: logFout } = await supabaseAdmin.from('iris_log').insert({
         wat: 'werkronde',
         resultaat: rapport.fouten.length ? 'deels' : 'ok',

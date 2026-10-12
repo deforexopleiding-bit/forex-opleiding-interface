@@ -160,6 +160,14 @@ export const VOORSTEL_PER_TYPE = Object.freeze({
     actie: 'belrij_toevoegen',
     toelichting: 'Een student die zijn taken niet doet, haakt meestal af voordat hij het zelf zegt.',
   },
+  // Stond hier niet, en viel daardoor op het neutrale "laat een mens kijken".
+  // Dat is precies het type waar bellen het enige is dat helpt: iemand die
+  // betaald heeft en niet begint, komt er zonder telefoontje ook niet.
+  start_niet_op: {
+    voorstel: 'op de belrij',
+    actie: 'belrij_toevoegen',
+    toelichting: 'Betaald en niet begonnen. Een bericht is hier al een keer langsgekomen; bellen is wat overblijft.',
+  },
 });
 
 export function voorstelVoor(type) {
