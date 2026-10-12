@@ -2181,6 +2181,28 @@
       </div>
     </div>`;
 
+    /* De vlag van de gesprekken-module.
+
+       ── WAAROM DIT HIER STAAT ──────────────────────────────────────────────
+       Staat GESPREKKEN_V2 uit, dan verdwijnt er in de gesprekken-module
+       gewoon een knop — de microfoon uit G1 bijvoorbeeld. Geen melding, geen
+       foutmelding, niets. In productie kostte dat een halve zoektocht: de
+       knop was er niet, het script was geladen, de functie bestond, en
+       niemand kon zien dat de vlag de oorzaak was.
+
+       Een feature die uit staat zonder dat iets dat zegt, is de stilste
+       storing die er is. Dus staat het hier, naast de andere hoofdschakelaar,
+       op het scherm waar je opzoekt hoe het ingesteld staat. */
+    const gv2 = `<div style="padding:10px 13px;border-radius:8px;border:1px solid ${d.gesprekken_v2 ? 'var(--emerald-line,var(--border))' : 'var(--amber-line,var(--border))'};
+      background:${d.gesprekken_v2 ? 'var(--emerald-soft,var(--surface-2))' : 'var(--amber-soft,var(--surface-2))'};margin-bottom:18px;font-size:12px">
+      <b>${d.gesprekken_v2 ? 'Gesprekken-v2 staat aan' : 'Gesprekken-v2 staat uit'}</b>
+      <div style="font-size:11.5px;margin-top:4px;opacity:.9">
+        ${d.gesprekken_v2
+          ? 'De vernieuwde gesprekken-module is actief: venster-aftelling, verzendstatus, werkstand, toewijzing, de microfoon en het ongedaan-venster op de server.'
+          : 'GESPREKKEN_V2 staat uit in Vercel. De gesprekken-module valt dan terug op de oude opmaak: geen venster-aftelling, geen microfoon, en het ongedaan-venster wacht in je browser in plaats van op de server. Dat is geen storing — maar het verklaart wel waarom een knop die je verwacht er niet staat.'}
+      </div>
+    </div>`;
+
     const droogtestKop = dt
       ? `<div style="margin-bottom:14px;padding:11px 13px;border-radius:8px;background:var(--surface-2);font-size:12px">
           <b>Droogtest over ${esc(String(dt.dagen))} dagen</b> — ${esc(String(dt.totaal_berichten))} binnengekomen berichten.
@@ -2233,6 +2255,7 @@
 
     return `<div style="padding:20px;max-width:880px">
       ${hoofd}
+      ${gv2}
       ${!inst.gelezen ? foutBlok('De instellingen konden niet gelezen worden. Wat hieronder staat is de standaard, niet wat er ingesteld is.') : ''}
       ${droogtestKop}
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:8px">Autonomie per categorie</div>

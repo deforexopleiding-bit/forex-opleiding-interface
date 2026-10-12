@@ -132,9 +132,11 @@ test('H10: een kanaalwissel hertekent alleen de schrijfbalk', () => {
 
 test('beide gewijzigde schermen hebben een nieuw nummer', () => {
   // Zonder bump laadt de browser de oude kopie en is de reparatie er voor
-  // niemand.
-  assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=23/);
-  assert.match(INDEX, /views\/wanbetalers-v2\.js\?v=67/);
+  // niemand. Het GETAL pinnen is wel een val: dan valt deze toets om op
+  // precies de bump die hij zelf eist, zodra er een volgende PR langskomt.
+  // Dus: een bump, niet een getal.
+  assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=(2[4-9]|[3-9]\d)/);
+  assert.match(INDEX, /views\/wanbetalers-v2\.js\?v=(6[7-9]|[7-9]\d)/);
 });
 
 // ── H11 — kandidaat, geen bewezen fix ───────────────────────────────────────
@@ -157,4 +159,36 @@ test('H11-kandidaat: de schrijfbalk mag krimpen', () => {
   assert.match(WBX, /id="wbxInboxCompose" style="min-width:0"/);
   // En de middenkolom zelf had hem al — anders zou krimpen daar al stoppen.
   assert.match(WBX, /<div style="flex:1;display:flex;flex-direction:column;min-width:0">/);
+});
+
+// ── H9-nasleep: een vlag die uit staat, zegt dat ────────────────────────────
+
+test('Instellingen zegt of gesprekken-v2 aan of uit staat', () => {
+  // H9 kostte een halve zoektocht: de microfoon uit G1 was er in productie
+  // niet, het script was geladen, de functie bestond — en niemand kon zien
+  // dat GESPREKKEN_V2 de oorzaak was, want de knop verdwijnt gewoon als die
+  // vlag uit staat.
+  //
+  // Een feature die uit staat zonder dat iets dat zegt, is de stilste storing
+  // die er is. Daarom staat het nu op het scherm waar je opzoekt hoe het
+  // ingesteld staat, naast de andere hoofdschakelaar.
+  const ENDPOINT = readFileSync(new URL('../api/iris-instellingen.js', import.meta.url), 'utf8');
+  assert.match(ENDPOINT, /import \{ gesprekkenV2Aan \} from '\.\/_lib\/gesprekken-vlag\.js';/);
+  assert.match(ENDPOINT, /gesprekken_v2: gesprekkenV2Aan\(\),/);
+
+  assert.match(IRIS, /Gesprekken-v2 staat aan/);
+  assert.match(IRIS, /Gesprekken-v2 staat uit/);
+  // En het zegt WAAR de schakelaar staat plus wat je mist — anders weet je nog
+  // niet wat je eraan kunt doen.
+  assert.match(IRIS, /GESPREKKEN_V2 staat uit in Vercel/);
+  assert.match(IRIS, /geen microfoon/);
+  // De regel staat ook echt in de tab, niet alleen gedefinieerd.
+  assert.match(IRIS, /\$\{hoofd\}\s*\n\s*\$\{gv2\}/);
+});
+
+test('de vlag wordt op één plek gelezen, ook hier', () => {
+  // gesprekken-vlag.js is met opzet de enige plek die GESPREKKEN_V2 leest.
+  // Dit endpoint mag daar geen tweede lezing naast zetten.
+  const ENDPOINT = readFileSync(new URL('../api/iris-instellingen.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(ENDPOINT, /process\.env\.GESPREKKEN_V2/);
 });
