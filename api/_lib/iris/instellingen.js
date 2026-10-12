@@ -147,6 +147,12 @@ export const STANDAARD = Object.freeze({
   // binnen ná ons laatste bericht" haalt ze er niet uit. Leveranciersmail
   // (360dialog Support) is hetzelfde geval.
   systeemafzenders: Object.freeze([]),
+  // Wie belt er, per bron van de belrij. LEEG, en dat is met opzet: ik weet
+  // niet welk profiel Maxim is en welk Dave, en een verkeerd ingevulde uuid
+  // zet iemands werk stil op een lijst waar hij niet in kijkt. Maxim vult hem
+  // in Instellingen. Null = niet toegewezen, en dan staat de rij er gewoon
+  // zonder eigenaar -- zichtbaar onder "alle", niet verstopt.
+  belrij_eigenaar: Object.freeze({}),
 });
 
 /** Staat de hoofdschakelaar aan? Alles behalve een uitdrukkelijke 'true' is nee. */
@@ -246,6 +252,7 @@ export async function haalInstellingen(supabase, env = process.env) {
     model: { ...STANDAARD.model },
     ongedaan_seconden: STANDAARD.ongedaan_seconden,
     systeemafzenders: [],
+    belrij_eigenaar: {},
     fout: null,
   };
 
@@ -282,6 +289,7 @@ export async function haalInstellingen(supabase, env = process.env) {
     model: { ...STANDAARD.model, ...(objOf(bron.model)) },
     ongedaan_seconden: leesOngedaanSeconden(bron.ongedaan_seconden),
     systeemafzenders: leesSysteemafzenders(bron.systeemafzenders),
+    belrij_eigenaar: leesBelrijEigenaren(bron.belrij_eigenaar),
     fout: null,
   };
 }
@@ -334,4 +342,44 @@ export function isSysteemafzender(adres, lijst) {
 /** Een jsonb-waarde die een object hoort te zijn, of een leeg object. */
 function objOf(v) {
   return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+
+/** De bronnen van de belrij waar een eigenaar op ingesteld kan worden. Gelijk aan iris_belrij.bron. */
+export const BELRIJ_BRONNEN = Object.freeze(['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand']);
+
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Wie belt er, per bron.
+ *
+ * Streng, en om dezelfde reden als bij systeemafzenders: dit is een STILLE
+ * instelling. Staat er een uuid die niet bestaat, dan komt de rij op de lijst
+ * van niemand te staan — hij is niet weg, maar wel onvindbaar voor wie op "mijn
+ * belrij" filtert. Dus: alleen sleutels die een bron zijn, alleen waarden die
+ * een uuid zijn, en al het andere valt eruit in plaats van er half in te komen.
+ *
+ * Een bron die ontbreekt is "niet toegewezen", niet "aan de eerste de beste".
+ */
+export function leesBelrijEigenaren(ruw) {
+  const bron = (ruw && typeof ruw === 'object' && !Array.isArray(ruw)) ? ruw : {};
+  const uit = {};
+  for (const sleutel of BELRIJ_BRONNEN) {
+    const v = bron[sleutel];
+    if (typeof v === 'string' && UUID_RX.test(v.trim())) uit[sleutel] = v.trim().toLowerCase();
+  }
+  return uit;
+}
+
+/**
+ * De eigenaar voor één bron, of null.
+ *
+ * Null is een geldig antwoord en geen fout: een rij zonder eigenaar staat onder
+ * "alle" en wacht daar op iemand. Dat is beter dan hem aan de verkeerde persoon
+ * hangen.
+ */
+export function eigenaarVoorBron(kaart, bron) {
+  const k = (kaart && typeof kaart === 'object') ? kaart : {};
+  if (!BELRIJ_BRONNEN.includes(String(bron))) return null;
+  const v = k[bron];
+  return (typeof v === 'string' && UUID_RX.test(v)) ? v : null;
 }

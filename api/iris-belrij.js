@@ -77,9 +77,11 @@ async function geefLijst(req, res, user) {
   const rijen = sorteerBelrij(data || []);
   const contactIds = [...new Set(rijen.map((r) => r.contact_id).filter(Boolean))];
 
-  const [contacten, pogingen] = await Promise.all([
+  const [contacten, pogingen, redenen, namen] = await Promise.all([
     haalContacten(contactIds),
     haalPogingen(contactIds),
+    haalRedenen(rijen.map((r) => r.id)),
+    haalNamen(rijen.map((r) => r.eigenaar)),
   ]);
 
   const instellingen = await haalInstellingen(supabaseAdmin);
@@ -95,8 +97,19 @@ async function geefLijst(req, res, user) {
       telefoon: c?.telefoons?.[0] || null,
       customer_id: c?.customer_id || null,
       reden: redenTekst(r.bron, r.reden_detail || r.reden),
+      // Alle redenen, niet alleen die van de zwaarste. Eén rij per persoon was
+      // het punt van taak 6; dan moet die rij ook zeggen WAAROM hij er staat,
+      // en niet alleen de bovenste reden tonen terwijl er drie zijn.
+      redenen: (redenen.get(r.id) || []).map((d) => ({
+        bron: d.bron,
+        tekst: redenTekst(d.bron, d.reden_detail),
+        link: d.bron_link || null,
+      })),
       bron: r.bron,
       eigenaar: r.eigenaar,
+      // De uuid zelf stond op het scherm. Dat zegt niemand iets, en het is
+      // bovendien een id in een schermafdruk.
+      eigenaar_naam: r.eigenaar ? (namen.get(r.eigenaar) || 'onbekende medewerker') : null,
       prioriteit: r.prioriteit,
       status: r.status,
       telefoon_kort: nummerAfgeschermd(c?.telefoons?.[0]),
@@ -122,6 +135,55 @@ async function haalContacten(ids) {
     .select('id, customer_id, emails, telefoons, weergavenaam')
     .in('id', ids);
   for (const c of (data || [])) kaart.set(c.id, c);
+  return kaart;
+}
+
+/**
+ * De redenen per belrij-rij.
+ *
+ * Alleen de ONVERWERKTE: een reden die niet meer geldt blijft in de databank
+ * staan als geschiedenis, maar hoort niet meer op de kaart. Anders groeit de
+ * kaart van een persoon die je vaker belt elke ronde verder aan met redenen die
+ * al afgehandeld zijn.
+ */
+async function haalRedenen(belrijIds) {
+  const kaart = new Map();
+  const ids = [...new Set((belrijIds || []).filter(Boolean))];
+  if (!ids.length) return kaart;
+  const { data, error } = await supabaseAdmin
+    .from('iris_belrij_redenen')
+    .select('belrij_id, bron, reden, reden_detail, bron_link, toegevoegd_op')
+    .in('belrij_id', ids)
+    .is('verwerkt_op', null)
+    .order('toegevoegd_op', { ascending: true });
+  // Fail-soft: staat de migratie nog niet, dan is er geen tabel en toont de
+  // kaart gewoon de ene reden die er altijd al stond. Geen 500 voor de
+  // hele lijst om een kolom die er nog niet is.
+  if (error) {
+    console.warn('[iris-belrij] redenen lezen:', error.message);
+    return kaart;
+  }
+  for (const d of (data || [])) {
+    if (!kaart.has(d.belrij_id)) kaart.set(d.belrij_id, []);
+    kaart.get(d.belrij_id).push(d);
+  }
+  return kaart;
+}
+
+/** Naam per profiel-uuid. Fail-soft: geen naam is beter dan geen lijst. */
+async function haalNamen(ids) {
+  const kaart = new Map();
+  const uniek = [...new Set((ids || []).filter(Boolean))];
+  if (!uniek.length) return kaart;
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('id, full_name')
+    .in('id', uniek);
+  if (error) {
+    console.warn('[iris-belrij] namen lezen:', error.message);
+    return kaart;
+  }
+  for (const p of (data || [])) if (p?.id && p.full_name) kaart.set(p.id, p.full_name);
   return kaart;
 }
 

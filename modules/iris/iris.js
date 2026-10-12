@@ -2264,6 +2264,7 @@
       </div>
       ${herkoppelBlok()}
       ${systeemafzendersBlok(inst)}
+      ${belrijEigenaarBlok(inst)}
       <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
         <div><b>uit</b> — Iris doet niets in deze categorie.</div>
         <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
@@ -2292,6 +2293,92 @@
    * dat eruit valt mist niemand tot de klant belt. Dus staat de lijst hier, en
    * begint hij leeg.
    */
+  /**
+   * Wie belt er, per bron van de belrij.
+   *
+   * ── WAAROM EEN KEUZELIJST EN GEEN INVOERVELD ───────────────────────────
+   * Dit is een STILLE instelling. Staat er een uuid die niet bestaat, dan komt
+   * de rij op de lijst van niemand te staan — hij is niet weg, maar wel
+   * onvindbaar voor wie op "Van mij" filtert, en dat merkt niemand tot een
+   * klant belt. Een uuid met de hand intypen is dus geen optie; de namen komen
+   * mee uit het endpoint.
+   *
+   * Leeg is een geldige keuze en niet "nog niet af": een rij zonder eigenaar
+   * staat onder "Iedereen" en wacht daar op wie hem oppakt. Dat is beter dan
+   * hem aan de verkeerde persoon hangen.
+   */
+  function belrijEigenaarBlok(inst) {
+    const bronnen = S.instellingen?.data?.belrij_bronnen
+      || ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'];
+    const mensen = S.instellingen?.data?.medewerkers || [];
+    const huidig = (inst?.belrij_eigenaar && typeof inst.belrij_eigenaar === 'object') ? inst.belrij_eigenaar : {};
+    const st = S.instellingen || {};
+
+    const LABEL = {
+      wanbetaler: 'Openstaande factuur',
+      onboarding: 'Start niet op',
+      mentorsignaal: 'Signaal van de mentor',
+      geen_reactie: 'Reageert niet / opvolging verlopen',
+      hand: 'Met de hand toegevoegd',
+    };
+
+    const regels = bronnen.map((b) => {
+      const gekozen = huidig[b] || '';
+      const opties = [`<option value="">— niemand —</option>`]
+        .concat(mensen.map((m) => `<option value="${esc(m.id)}" ${m.id === gekozen ? 'selected' : ''}>${esc(m.naam)}</option>`))
+        .join('');
+      return `<div style="display:flex;gap:9px;align-items:center;padding:4px 0;min-width:0">
+        <span style="font-size:11.5px;color:var(--text-2);flex:1;min-width:0">${esc(LABEL[b] || b)}</span>
+        <select onchange="__irisBelrijEigenaarZet('${esc(b)}', this.value)" ${st.eigenaarBezig ? 'disabled' : ''}
+          style="font-size:11.5px;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);max-width:190px">
+          ${opties}
+        </select>
+      </div>`;
+    }).join('');
+
+    return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Wie belt er</div>
+      <div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px">
+        Per bron van de belrij. Wie hier staat, krijgt nieuwe rijen uit die bron
+        onder "Van mij". Leeg laten mag: dan staat de rij onder "Iedereen".
+        Een rij die al door iemand is opgepakt, verandert hier niet van eigenaar.
+      </div>
+      ${mensen.length ? regels : `<div style="font-size:11.5px;color:var(--text-3)">De medewerkerslijst kon niet gelezen worden.</div>`}
+      ${st.eigenaarFout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:5px">⚠ ${esc(st.eigenaarFout)}</div>` : ''}
+    </div>`;
+  }
+
+  /* De hele kaart gaat als één waarde terug, net als bij de afzenders: het
+     endpoint keurt hem in zijn geheel en geeft hem genormaliseerd terug, zodat
+     er geen tweede plek is die bepaalt wat een geldige bron is. */
+  window.__irisBelrijEigenaarZet = async (bron, wie) => {
+    const st = S.instellingen = S.instellingen || {};
+    const huidig = st.data?.instellingen?.belrij_eigenaar || {};
+    const nieuw = { ...huidig };
+    if (wie) nieuw[bron] = wie; else delete nieuw[bron];
+
+    st.eigenaarBezig = true;
+    st.eigenaarFout = null;
+    hertekenen();
+    try {
+      await haalRuw('/api/iris-instellingen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sleutel: 'belrij_eigenaar', waarde: nieuw }),
+      });
+      st.bezig = false;
+      await haalInstellingen();
+      // De belrij toont nu andere eigenaars; hem laten staan zou een lijst
+      // opleveren die niet klopt met wat er net is ingesteld.
+      S.belrij.opgehaald = false;
+    } catch (e) {
+      st.eigenaarFout = e?.message || 'Opslaan mislukt';
+    } finally {
+      st.eigenaarBezig = false;
+      hertekenen();
+    }
+  };
+
   function systeemafzendersBlok(inst) {
     const lijst = Array.isArray(inst?.systeemafzenders) ? inst.systeemafzenders : [];
     const st = S.instellingen || {};
@@ -2771,15 +2858,32 @@
              ${esc(r.voortgang.tekst)}${t.laatste_contact ? ' · gesproken ' + esc(tijdKort(t.laatste_contact)) : ''}
            </div>`
         : '';
+      // Eén rij per persoon was het punt; dan moet die rij ook alle redenen
+      // noemen. Eén reden tonen terwijl er drie zijn, is precies hoe iemand
+      // ophangt na het factuurverhaal zonder het mentorsignaal te noemen.
+      const lijst = Array.isArray(r.redenen) ? r.redenen : [];
+      const redenen = lijst.length
+        ? `<div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">
+             ${lijst.map((d) => `<div style="font-size:11.5px;color:var(--text-2);min-width:0">
+               <span style="color:var(--text-3)">·</span>
+               ${d.link ? `<a href="${esc(d.link)}" style="color:inherit;text-decoration:underline;text-decoration-color:var(--border)">${esc(d.tekst || '')}</a>` : esc(d.tekst || '')}
+             </div>`).join('')}
+           </div>`
+        // Geen redenen betekent een rij die een mens zelf heeft gezet, of een
+        // rij van vóór de migratie. Dan staat er wat er altijd al stond.
+        : `<div style="font-size:11.5px;color:var(--text-2);margin-top:2px">${esc(r.reden || '')}</div>`;
+      const wie = r.eigenaar_naam
+        ? `<span title="wie belt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(r.eigenaar_naam)}</span>`
+        : `<span title="nog niemand toegewezen — zie Instellingen" style="font-size:10.5px;color:var(--text-3);white-space:nowrap">niemand</span>`;
       return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:7px;padding:10px 12px;background:var(--surface);display:flex;gap:10px;align-items:baseline">
         <div style="min-width:0;flex:1">
           <div style="font-size:12.5px;font-weight:600">${esc(r.naam || 'Onbekend')}</div>
-          <div style="font-size:11.5px;color:var(--text-2);margin-top:2px">${esc(r.reden || '')}</div>
+          ${redenen}
           ${stand}
         </div>
         ${esc8}${opTijd}
         ${belKnop(r, i)}
-        <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(r.eigenaar || '')}</span>
+        ${wie}
       </div>`;
     }).join('');
 

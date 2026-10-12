@@ -166,9 +166,14 @@ test('een onbekende sleutel wordt geweigerd', () => {
   assert.match(fout, /onbekende sleutel/);
 });
 
-test('de toegestane sleutels zijn precies de acht die de keuring kent', () => {
+test('de toegestane sleutels zijn precies de negen die de keuring kent', () => {
   assert.deepEqual([...TOEGESTANE_SLEUTELS].sort(), [
-    'autonomie', 'dosering', 'escalatie', 'mailboxen',
+    'autonomie',
+    // Sinds taak 6 deel 2: wie belt er, per bron van de belrij. Leeg starten;
+    // ik weet niet welk profiel Maxim is en welk Dave, en een verkeerde uuid
+    // zet een rij op de lijst van niemand.
+    'belrij_eigenaar',
+    'dosering', 'escalatie', 'mailboxen',
     'model', 'ongedaan_seconden', 'stille_uren',
     // Sinds H3: afzenders die geen klantvraag zijn. Geen rij in de migratie
     // nodig — haalInstellingen valt terug op een lege lijst, en een lege lijst

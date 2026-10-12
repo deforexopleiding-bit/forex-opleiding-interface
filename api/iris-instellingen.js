@@ -25,8 +25,11 @@ import {
   haalInstellingen,
   normaliseerAutonomie,
   irisAan,
+  BELRIJ_BRONNEN,
 } from './_lib/iris/instellingen.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
+
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Welke sleutels er mogen bestaan. Een onbekende sleutel is een typefout. */
 const TOEGESTANE_SLEUTELS = new Set([
@@ -38,6 +41,7 @@ const TOEGESTANE_SLEUTELS = new Set([
   'model',
   'ongedaan_seconden',
   'systeemafzenders',
+  'belrij_eigenaar',
 ]);
 
 const UUR_RX = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -166,6 +170,29 @@ export function keurWaardeGoed(sleutel, waarde) {
       return { ok: true, waarde: { redeneren: r, transcriptie: t, temperatuur: temp } };
     }
 
+    case 'belrij_eigenaar': {
+      // Wie belt er, per bron. Streng nakijken om dezelfde reden als bij
+      // systeemafzenders: een uuid die niet bestaat zet de rij op de lijst van
+      // niemand. Dat valt niemand op, want "mijn belrij" is dan gewoon leeg.
+      if (waarde === null || waarde === undefined) return { ok: true, waarde: {} };
+      if (typeof waarde !== 'object' || Array.isArray(waarde)) {
+        return { ok: false, fout: 'belrij_eigenaar is een object met een bron als sleutel' };
+      }
+      const uit = {};
+      for (const [sleutel, v] of Object.entries(waarde)) {
+        if (!BELRIJ_BRONNEN.includes(sleutel)) {
+          return { ok: false, fout: `onbekende bron: ${sleutel}. Mag: ${BELRIJ_BRONNEN.join(', ')}` };
+        }
+        // Leeg of null is "niet toegewezen", en dat is een geldige keuze.
+        if (v === null || v === undefined || v === '') continue;
+        if (typeof v !== 'string' || !UUID_RX.test(v.trim())) {
+          return { ok: false, fout: `${sleutel}: dit moet een profiel-uuid zijn of leeg` };
+        }
+        uit[sleutel] = v.trim().toLowerCase();
+      }
+      return { ok: true, waarde: uit };
+    }
+
     case 'ongedaan_seconden': {
       const n = Number(waarde);
       if (!Number.isInteger(n) || n < 5 || n > 300) {
@@ -206,6 +233,24 @@ export default async function handler(req, res) {
       console.warn('[iris-instellingen] ruwe rijen niet gelezen:', e?.message || e);
     }
 
+    // De medewerkers gaan mee, zodat de eigenaarsregel per bron een keuzelijst
+    // met NAMEN kan tonen in plaats van een invoerveld voor een uuid. Een uuid
+    // met de hand intypen is een instelling die stil fout gaat: de rij komt dan
+    // op de lijst van niemand, en dat valt niemand op.
+    let medewerkers = [];
+    try {
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id, full_name, role')
+        .eq('is_active', true)
+        .order('full_name', { ascending: true });
+      medewerkers = (data || [])
+        .filter((p) => p?.id && typeof p.full_name === 'string' && p.full_name.trim())
+        .map((p) => ({ id: p.id, naam: p.full_name, rol: p.role || null }));
+    } catch (e) {
+      console.warn('[iris-instellingen] medewerkers niet gelezen:', e?.message || e);
+    }
+
     return res.status(200).json({
       instellingen: inst,
       ruw,
@@ -220,6 +265,8 @@ export default async function handler(req, res) {
       categorieen: CATEGORIEEN,
       standen: STANDEN,
       nooit_zelf: NOOIT_ZELF,
+      belrij_bronnen: BELRIJ_BRONNEN,
+      medewerkers,
     });
   }
 
