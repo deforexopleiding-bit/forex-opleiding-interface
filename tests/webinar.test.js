@@ -369,7 +369,7 @@ test('bedrading: cron elke minuut, eigen module, bronlijsten, cache-busters, SQL
   assert.match(view, /window\.KV_V2_ADD\('webinar'\)/);
   assert.doesNotMatch(view, /VIEWS\['events\/Webinar'\]/);
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /<script src="views\/webinar-v2\.js\?v=2"><\/script>/);
+  assert.ok(Number((html.match(/<script src="views\/webinar-v2\.js\?v=(\d+)"><\/script>/) || [])[1]) >= 2, 'webinar-v2 minstens v2');
   for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e0'], ['klanten-v2', '1f5']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
   // Minstens de versie van de webinar-PR (latere PR's mogen verder ophogen).
   for (const [f, v] of [['leads-v2.js', 28], ['funnel-dashboard-v2.js', 3], ['leadsonderhoud-v2.js', 66]]) {
