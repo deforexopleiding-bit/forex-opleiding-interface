@@ -24,6 +24,7 @@
 // (belrij_id, bron_sleutel).
 
 import { voorstelVoor } from './signalen.js';
+import { haalInstellingen, eigenaarVoorBron } from './instellingen.js';
 import {
   uitBeltaak, uitSignaal, uitOpvolging, voegSamen, vervallenRedenen,
 } from './belrij-bronnen.js';
@@ -159,13 +160,13 @@ export async function contactPerGesprek(db, gesprekIds) {
  * Geeft terug wat er gebeurd is, zodat de cron-ronde kan tellen zonder zelf te
  * hoeven kijken.
  */
-export async function schrijfPersoon(db, rij, { nu = new Date() } = {}) {
+export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} } = {}) {
   const uit = { nieuw: 0, bijgewerkt: 0, redenen_nieuw: 0, redenen_verwerkt: 0 };
   if (!rij?.contact_id || !Array.isArray(rij.redenen) || !rij.redenen.length) return uit;
 
   const { data: bestaand, error: leesFout } = await db
     .from('iris_belrij')
-    .select('id, prioriteit, status, bron')
+    .select('id, prioriteit, status, bron, eigenaar')
     .eq('contact_id', rij.contact_id)
     .in('status', OPEN_STATUS)
     .order('aangemaakt_op', { ascending: true })
@@ -179,6 +180,13 @@ export async function schrijfPersoon(db, rij, { nu = new Date() } = {}) {
     const hoogste = Math.max(Number(bestaand.prioriteit) || 0, Number(rij.prioriteit) || 0);
     const velden = { bijgewerkt_op: nu.toISOString() };
     if (hoogste !== Number(bestaand.prioriteit)) velden.prioriteit = hoogste;
+    // Een eigenaar die er al staat blijft staan -- ook als de regel nu iemand
+    // anders aanwijst. Wie een rij heeft opgepakt, raakt hem niet kwijt doordat
+    // er een tweede reden bij komt uit een bron met een andere eigenaar.
+    if (!bestaand.eigenaar) {
+      const volgensRegel = eigenaarVoorBron(eigenaren, rij.bron);
+      if (volgensRegel) velden.eigenaar = volgensRegel;
+    }
     const { error } = await db.from('iris_belrij').update(velden).eq('id', belrijId);
     if (error) throw new Error(`belrij bijwerken: ${error.message}`);
     uit.bijgewerkt = 1;
@@ -192,6 +200,10 @@ export async function schrijfPersoon(db, rij, { nu = new Date() } = {}) {
         reden_detail: kop.reden_detail || null,
         prioriteit: Number(rij.prioriteit) || 50,
         bron: rij.bron || 'hand',
+        // Wie belt er. Null als de regel voor deze bron niet is ingesteld; dan
+        // staat de rij onder "alle" en wacht hij daar op iemand. Dat is beter
+        // dan hem aan de verkeerde persoon hangen.
+        eigenaar: eigenaarVoorBron(eigenaren, rij.bron),
         // Expliciet, al staat er een DEFAULT op de kolom: de SELECT hierboven
         // zoekt op status, dus een rij die om wat voor reden ook zonder status
         // wordt aangemaakt, wordt de volgende ronde niet teruggevonden en
@@ -262,11 +274,16 @@ export async function vulBelrij(db, { nu = new Date(), max = PER_BRON_MAX, opTij
     fouten: [], afgekapt: false,
   };
 
-  const [beltaken, signalen, opvolgingen] = await Promise.all([
+  const [beltaken, signalen, opvolgingen, instellingen] = await Promise.all([
     leesBeltaken(db, { max }),
     leesSignalen(db, { max }),
     leesVerlopenOpvolgingen(db, { max }),
+    // Fail-soft: haalInstellingen geeft bij een leesfout de standaard terug, en
+    // die is een LEGE eigenaarskaart. Dan komt een rij zonder eigenaar op de
+    // lijst -- zichtbaar onder "alle". Niet aan de verkeerde persoon hangen.
+    haalInstellingen(db),
   ]);
+  const eigenaren = instellingen?.belrij_eigenaar || {};
 
   const { kaart: perKlant, meerdere } = await contactPerKlant(db, beltaken.map((t) => t.customer_id));
   rapport.meerdere_contacten = meerdere.length;
@@ -295,7 +312,7 @@ export async function vulBelrij(db, { nu = new Date(), max = PER_BRON_MAX, opTij
   for (const rij of rijen) {
     if (!opTijd()) { rapport.afgekapt = true; break; }
     try {
-      const uit = await schrijfPersoon(db, rij, { nu });
+      const uit = await schrijfPersoon(db, rij, { nu, eigenaren });
       rapport.nieuw += uit.nieuw;
       rapport.bijgewerkt += uit.bijgewerkt;
       rapport.redenen_nieuw += uit.redenen_nieuw;
