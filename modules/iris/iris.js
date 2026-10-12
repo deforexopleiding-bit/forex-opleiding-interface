@@ -526,13 +526,77 @@
 
   /* ── Schrijven, inspreken, versturen ──────────────────────────────────── */
 
+  /** Hoelang we op een token wachten voor we het opgeven. */
+  const TOKEN_WACHT_MS = 8000;
+
+  /** Hoelang een aanroep mag duren. Ruim boven de 60 s die Vercel toestaat. */
+  const AANROEP_WACHT_MS = 70000;
+
+  /**
+   * Een belofte met een plafond erop.
+   *
+   * ── WAAROM DIT ER MOET ZIJN ───────────────────────────────────────────────
+   * Een belofte die nooit afloopt is het ergste soort storing: er is geen
+   * fout, geen melding, geen log — alleen een knop die op "Bezig…" blijft
+   * staan. Dat is precies wat er gebeurde bij de eerste klik op Uitzoeken
+   * direct na het laden: de knop werd uitgeschakeld, er vertrok geen enkel
+   * verzoek, en na tachtig seconden stond het er nog zo.
+   *
+   * Een plafond maakt van een vastloper een zichtbare fout die je kúnt
+   * oplossen (herladen), in plaats van een scherm dat niets zegt.
+   */
+  async function metPlafond(belofte, ms, bijTeLang) {
+    let klok;
+    try {
+      return await Promise.race([
+        Promise.resolve(belofte),
+        new Promise((_, af) => { klok = setTimeout(() => af(new Error(bijTeLang)), ms); }),
+      ]);
+    } finally {
+      clearTimeout(klok);
+    }
+  }
+
+  /**
+   * Het token van de aangemelde gebruiker.
+   *
+   * ── DE HUISREGEL DIE HIER ONTBRAK ─────────────────────────────────────────
+   * `window._authSharedReady` is de belofte van de async-IIFE in
+   * supabase-client.js, en CLAUDE.md zegt er ALTIJD over: die hoort geawait te
+   * worden vóór je AuthShared aanspreekt. Dat gebeurde hier niet. Vlak na het
+   * laden bestaat `window.supabase` soms nog niet, en houdt supabase-js een
+   * slot vast terwijl het de sessie vernieuwt — dan geeft getAccessToken()
+   * nooit antwoord en hangt alles erachter.
+   *
+   * Dus: eerst wachten tot de aanmelding klaar is, dan het token vragen, en om
+   * allebei een plafond. Geen token betekent GEEN aanroep zonder token: dat
+   * zou een 401 geven en eruitzien als een rechtenprobleem, terwijl het een
+   * vastgelopen sessie is. Liever de echte reden.
+   */
+  async function haalToken() {
+    await metPlafond(
+      window._authSharedReady,
+      TOKEN_WACHT_MS,
+      'De aanmelding reageert niet. Herlaad de pagina.',
+    );
+    if (!window.AuthShared || !window.AuthShared.getAccessToken) return null;
+    return await metPlafond(
+      window.AuthShared.getAccessToken(),
+      TOKEN_WACHT_MS,
+      'Je sessie reageert niet. Herlaad de pagina.',
+    );
+  }
+
   async function haalRuw(url, opties) {
-    const token = await (window.AuthShared && window.AuthShared.getAccessToken
-      ? window.AuthShared.getAccessToken() : Promise.resolve(null));
-    const r = await fetch(url, {
-      ...opties,
-      headers: { ...(opties?.headers || {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-    });
+    const token = await haalToken();
+    const r = await metPlafond(
+      fetch(url, {
+        ...opties,
+        headers: { ...(opties?.headers || {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      }),
+      AANROEP_WACHT_MS,
+      'Dit duurt te lang. Probeer het nog eens.',
+    );
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.uitleg || j?.error || ('Fout ' + r.status));
     return j;
@@ -1403,8 +1467,7 @@
       // De 409 met de keuzes komt hier binnen als een fout met uitleg. We
       // halen hem apart op omdat we de knoppen willen tonen, niet de tekst.
       try {
-        const token = await (window.AuthShared && window.AuthShared.getAccessToken
-          ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+        const token = await haalToken();
         const r = await fetch('/api/iris-opdracht', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
@@ -2207,6 +2270,10 @@
           onclick="__irisOpdrachtMaak()" ${st.maakt || !(st.nieuw || '').trim() ? 'disabled' : ''}>${st.maakt ? 'Bezig…' : 'Uitzoeken'}</button>
       </div>
       ${neemtOp ? `<div style="font-size:11px;color:var(--rose);margin-top:6px">● Aan het opnemen — klik nog eens om te stoppen.</div>` : ''}
+      ${st.maakt ? `<div style="font-size:11.5px;color:var(--text-2);margin-top:7px;display:flex;align-items:center;gap:7px">
+          <span style="animation:irisPuls 1.2s ease-in-out infinite">◍</span>
+          <span>Iris zoekt het uit — dit duurt meestal tien tot twintig seconden.</span>
+        </div>` : ''}
       ${snelknoppen()}
     </div>`;
 

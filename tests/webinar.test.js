@@ -370,7 +370,11 @@ test('bedrading: cron elke minuut, eigen module, bronlijsten, cache-busters, SQL
   assert.doesNotMatch(view, /VIEWS\['events\/Webinar'\]/);
   const html = lees('modules/klanten-v2/index.html');
   assert.ok(Number((html.match(/<script src="views\/webinar-v2\.js\?v=(\d+)"><\/script>/) || [])[1]) >= 2, 'webinar-v2 minstens v2');
-  for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e0'], ['klanten-v2', '1f5']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
+  // klanten-v2.js ging van 1f5 naar 1f6 omdat authedFetch + doRoleSwitch
+  // gewijzigd zijn (de dode knop, H2). Dit pint een exacte waarde, dus hij
+  // schuift mee bij elke bump -- dat is de bedoeling: het dwingt af dat er
+  // een bump IS zodra het bestand verandert.
+  for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e0'], ['klanten-v2', '1f6']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
   // Minstens de versie van de webinar-PR (latere PR's mogen verder ophogen).
   for (const [f, v] of [['leads-v2.js', 28], ['funnel-dashboard-v2.js', 3], ['leadsonderhoud-v2.js', 66]]) {
     const m = html.match(new RegExp(`views/${f.replace('.', '\\.')}\\?v=(\\d+)"`));
