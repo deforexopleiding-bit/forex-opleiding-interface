@@ -296,6 +296,35 @@ afgerond werd (ruim boven de 60 s die een Vercel-functie mag draaien):
 | leeg | `mislukt` | "Dit bericht is niet verstuurd" — met zekerheid niets vertrokken, opnieuw sturen is veilig |
 | gevuld | `onbekend` | "Niet zeker of dit vertrok" — kijk de draad na vóór je het opnieuw stuurt |
 
+#### En als de transportlaag wél antwoordt, maar met een fout
+
+Dan is het dezelfde vraag, en hangt het antwoord aan wát voor fout. Dat
+onderscheid wordt gemaakt door `zekerheidVanFout()` in
+`_lib/inbox-wachtrij.js` (zuiver, dus na te rekenen zonder databank);
+`leverAfBijMeta()` hangt de uitkomst als veld `zekerheid` náást de payload, en
+het endpoint en de cron kiezen daarop de eindstand.
+
+| Wat er terugkomt | zekerheid | stand |
+|---|---|---|
+| 4xx mét een echte providercode (131047 buiten het venster, 131026 niet bezorgbaar, 100 ongeldig) | `geweigerd` | `mislukt` |
+| niets aangeboden (geen configuratie — de transportlaag gooit vóór de aanroep) | `geweigerd` | `mislukt` |
+| geen antwoord: timeout, netwerkfout, verbinding weg | `onzeker` | `onbekend` |
+| 5xx — een storing bij hen | `onzeker` | `onbekend` |
+| 4xx waarvan het foutlichaam onleesbaar is | `onzeker` | `onbekend` |
+
+Die laatste rij is subtieler dan hij lijkt. De transportlaag doet
+`err?.code ?? res.status`, dus bij een onleesbaar foutlichaam ís `metaCode`
+diezelfde HTTP-status nog een keer. Een code die gelijk is aan de status is
+daarom géén providercode, en dan weten we niets — er staat een toets op die dat
+vastpint, inclusief de regel in `meta-whatsapp.js` waar die terugval staat.
+
+Waarom het verschil ertoe doet: een 4xx met code 131047 bestáát omdat het
+bericht niet is aangenomen. Een 502 van een tussenliggende laag zegt daar niets
+over — het verzoek kan de overkant wél bereikt hebben en pas het antwoord kan
+verdwenen zijn. "Mislukt" zeggen zou daar een zekerheid beweren die we niet
+hebben, en de knop "stuur het gerust opnieuw" naast een bericht zetten dat de
+klant al heeft.
+
 Beide zijn **eindstanden**. Geen cron, geen scherm en geen endpoint raakt zo'n
 rij nog aan; er is niet eens een actie voor. Wil je het bericht alsnog sturen,
 dan zet het scherm de tekst terug in het veld en doe je het als nieuw bericht —

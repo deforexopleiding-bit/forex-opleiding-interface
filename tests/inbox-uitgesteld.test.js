@@ -404,3 +404,98 @@ test('een claim geldt pas als hangend ruim na de Vercel-tijdslimiet', () => {
   // melding in het scherm over een bericht dat even later gewoon vertrekt.
   assert.ok(CLAIM_VERVAL_MINUTEN * 60 > 60, 'de grens hoort ruim boven de 60 s te liggen');
 });
+
+// ── GEWEIGERD OF ONZEKER: de eindstand na een fout van de transportlaag ──────
+//
+// De vraag van Maxim bij de review: de stempel meta_aangeroepen_op staat, we
+// hebben het bericht aangeboden, en er komt een fout terug. Welke stand krijgt
+// de rij?
+//
+// De regel: alleen een DUIDELIJKE weigering van 360dialog mag 'mislukt' worden
+// — een 4xx met een echte providercode (131047 buiten het venster, 131026 niet
+// bezorgbaar, 100 ongeldige parameter). Die codes bestaan omdat het bericht
+// niet is aangenomen; dan mag het scherm zeggen dat je het gerust opnieuw
+// stuurt.
+//
+// Alles anders is 'onbekend': een timeout, een netwerkfout, een 5xx, of een
+// 4xx waarvan het foutlichaam onleesbaar is. Daar kan het verzoek de overkant
+// wél bereikt hebben, en 'mislukt' zeggen zou een zekerheid beweren die we
+// niet hebben — met als gevolg dat iemand het nog eens stuurt.
+//
+// Waar het beslist wordt: zekerheidVanFout() in _lib/inbox-wachtrij.js
+// (zuiver), aangeroepen door leverAfBijMeta() in _lib/inbox-verzenden.js, die
+// het als veld `zekerheid` náást de payload meegeeft. Het endpoint en de cron
+// kiezen daarop markeerMislukt of markeerOnbekend.
+
+const GEVALLEN = [
+  // [naam, wat de transportlaag gooit, verwachte stand]
+  ['131047 — buiten het 24-uursvenster', { httpStatus: 400, metaCode: 131047 }, 'geweigerd'],
+  ['131026 — niet te bezorgen',          { httpStatus: 400, metaCode: 131026 }, 'geweigerd'],
+  ['100 — ongeldige parameter',          { httpStatus: 400, metaCode: 100 },    'geweigerd'],
+  ['131051 — ander re-engagement-geval', { httpStatus: 400, metaCode: 131051 }, 'geweigerd'],
+  ['429 MET providercode',               { httpStatus: 429, metaCode: 130429 }, 'geweigerd'],
+  ['nooit aangeboden (geen config)',     { nooitAangeboden: true },             'geweigerd'],
+
+  ['timeout — geen antwoord',            {},                                   'onzeker'],
+  ['netwerkfout — geen status',          { httpStatus: 0 },                    'onzeker'],
+  ['onleesbare status',                  { httpStatus: NaN, metaCode: 131047 }, 'onzeker'],
+  ['500 — storing bij hen',              { httpStatus: 500, metaCode: 500 },   'onzeker'],
+  ['503 — tijdelijk weg',                { httpStatus: 503, metaCode: 503 },   'onzeker'],
+  ['502 van een tussenliggende laag',    { httpStatus: 502, metaCode: 502 },   'onzeker'],
+  ['4xx met ONLEESBAAR lichaam',         { httpStatus: 400, metaCode: 400 },   'onzeker'],
+  ['429 ZONDER providercode',            { httpStatus: 429, metaCode: 429 },   'onzeker'],
+  ['4xx zonder code',                    { httpStatus: 403 },                  'onzeker'],
+];
+
+for (const [naam, fout, verwacht] of GEVALLEN) {
+  test(`zekerheid — ${naam} → ${verwacht}`, async () => {
+    const { zekerheidVanFout } = await import('../api/_lib/inbox-wachtrij.js');
+    assert.equal(zekerheidVanFout(fout), verwacht, naam);
+  });
+}
+
+test('een metaCode die GELIJK is aan de httpStatus is geen providercode', () => {
+  // Dit is waar het hele onderscheid aan hangt. De transportlaag doet
+  // `err?.code ?? res.status`: bij een onleesbaar foutlichaam is metaCode dus
+  // diezelfde HTTP-status nog een keer. Wie dat als providercode leest, noemt
+  // een onzeker geval 'mislukt'.
+  const TRANSPORT = readFileSync(new URL('../api/_lib/meta-whatsapp.js', import.meta.url), 'utf8');
+  assert.match(TRANSPORT, /const code\s+= err\?\.code \?\? res\.status;/,
+    'verandert dit, dan moet zekerheidVanFout mee');
+  const WACHTRIJ = readFileSync(new URL('../api/_lib/inbox-wachtrij.js', import.meta.url), 'utf8');
+  assert.match(WACHTRIJ, /if \(code === http\) return 'onzeker';/);
+});
+
+test('de transportlaag geeft bij ELKE weigering een zekerheid mee', () => {
+  // Ontbreekt het veld op één pad, dan valt dat pad stil terug op 'mislukt' —
+  // en dat is precies het geval dat we niet willen missen.
+  const VERZ = readFileSync(new URL('../api/_lib/inbox-verzenden.js', import.meta.url), 'utf8');
+  const i = VERZ.indexOf('export async function leverAfBijMeta');
+  const lijf = VERZ.slice(i, VERZ.indexOf('export async function boekAchteraf'));
+  // De wikkel mag over een regeleinde staan, dus whitespace toestaan.
+  const weigeringen = [...lijf.matchAll(/return\s+(metZekerheid\(\s*)?afwijzing\(/g)];
+  assert.ok(weigeringen.length >= 3, `er horen 3 weigeringspaden te zijn, gevonden: ${weigeringen.length}`);
+  for (const m of weigeringen) {
+    assert.ok(m[1], 'elk weigeringspad hoort door metZekerheid te gaan: ' + lijf.slice(m.index, m.index + 60));
+  }
+});
+
+test('het endpoint en de cron kiezen op die zekerheid, en loggen hem', () => {
+  for (const [naam, src] of [['actie', ACTIE], ['cron', CRON]]) {
+    assert.match(src, /if \(uitkomst\.zekerheid === 'onzeker'\)/, naam);
+    assert.match(src, /markeerOnbekend\(id,/, naam);
+    assert.match(src, /markeerMislukt\(id, reden\)/, naam);
+  }
+  // En de cron logt hem, want een verkeerde stand is anders later niet na te
+  // gaan.
+  assert.match(CRON, /uitkomst\.zekerheid \|\| 'geweigerd', reden\)/);
+  assert.match(CRON, /onbekend: 0/, 'de ronde hoort te tellen hoeveel er onbekend werden');
+});
+
+test('markeerOnbekend bestaat en zet de stand onbekend', () => {
+  assert.match(LIB, /export async function markeerOnbekend\(id, reden, db = supabaseAdmin\)/);
+  const i = LIB.indexOf('export async function markeerOnbekend');
+  const lijf = LIB.slice(i, i + 600);
+  assert.match(lijf, /status: ONBEKEND/);
+  assert.match(lijf, /afgehandeld_op/, 'onbekend is een eindstand, dus afgehandeld');
+});

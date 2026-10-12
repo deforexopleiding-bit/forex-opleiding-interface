@@ -41,7 +41,8 @@ import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { verstuurInGesprek } from './_lib/inbox-verzenden.js';
 import {
   claim, uitWachtrij, klaarVoorVertrek,
-  markeerMetaAangeroepen, markeerVerstuurd, markeerMislukt, sluitHangendeClaimsAf,
+  markeerMetaAangeroepen, markeerVerstuurd, markeerMislukt, markeerOnbekend,
+  sluitHangendeClaimsAf,
 } from './_lib/inbox-uitgesteld.js';
 
 // Ruim binnen de 60 s die een Vercel-functie mag draaien, ook als de
@@ -59,7 +60,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, overgeslagen: 'GESPREKKEN_V2 staat uit' });
   }
 
-  const telling = { bekeken: 0, verstuurd: 0, mislukt: 0, overgeslagen: 0 };
+  const telling = { bekeken: 0, verstuurd: 0, mislukt: 0, onbekend: 0, overgeslagen: 0 };
 
   try {
     // Eerst afsluiten wat blijft hangen. Dat is bewust géén voorbereiding voor
@@ -105,11 +106,20 @@ export default async function handler(req, res) {
           telling.verstuurd++;
         } else {
           const reden = uitkomst.payload?.message || uitkomst.payload?.error || 'onbekende fout';
-          // ALTIJD de reden erbij loggen. Een teller zonder tekst maakt
-          // zoeken in de Vercel-logs onmogelijk — ook een les uit CLAUDE.md.
-          console.warn('[cron-inbox-uitgesteld] niet verstuurd:', id, uitkomst.http, reden);
-          await markeerMislukt(id, reden);
-          telling.mislukt++;
+          // ALTIJD de reden erbij loggen, mét de zekerheid. Een teller zonder
+          // tekst maakt zoeken in de Vercel-logs onmogelijk — ook een les uit
+          // CLAUDE.md. En de zekerheid erbij, want dat is wat de eindstand
+          // bepaalt; zonder dat veld in de log is een verkeerde stand later
+          // niet na te gaan.
+          console.warn('[cron-inbox-uitgesteld] niet verstuurd:', id, uitkomst.http,
+            uitkomst.zekerheid || 'geweigerd', reden);
+          if (uitkomst.zekerheid === 'onzeker') {
+            await markeerOnbekend(id, `Het versturen gaf geen duidelijk antwoord (${reden}). Wij weten NIET of de klant dit bericht heeft gekregen — kijk de draad na voordat je het opnieuw stuurt.`);
+            telling.onbekend++;
+          } else {
+            await markeerMislukt(id, reden);
+            telling.mislukt++;
+          }
         }
       } catch (e) {
         console.error('[cron-inbox-uitgesteld] rij mislukt:', id, e?.message || e);

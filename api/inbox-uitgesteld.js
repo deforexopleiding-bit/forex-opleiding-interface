@@ -39,7 +39,7 @@ import { UUID_RE } from './_lib/inbox-verzendopdracht.js';
 import { verstuurInGesprek } from './_lib/inbox-verzenden.js';
 import {
   claim, annuleer, uitWachtrij,
-  markeerMetaAangeroepen, markeerVerstuurd, markeerMislukt,
+  markeerMetaAangeroepen, markeerVerstuurd, markeerMislukt, markeerOnbekend,
 } from './_lib/inbox-uitgesteld.js';
 
 const ACTIES = ['nu', 'annuleer'];
@@ -134,12 +134,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...uitkomst.payload });
     }
 
-    // Niet gelukt, maar wél met een antwoord: venster dicht, geen rechten, een
-    // weigering van de transportlaag. Dat is een eerlijke 'mislukt' — de reden
-    // komt in de rij en daarmee in het gesprek. Een bericht dat niet vertrok,
-    // mag nooit stil blijven; dat is het gat dat deze hele bouw dicht.
+    // Niet gelukt. WELKE eindstand hangt af van wat we weten — en dat is de
+    // hele reden dat leverAfBijMeta een `zekerheid` meegeeft.
+    //
+    //   'geweigerd' -> mislukt : een duidelijke weigering (4xx met een echte
+    //                            providercode: 131047 buiten het venster,
+    //                            131026 niet bezorgbaar, 100 ongeldig), of een
+    //                            weigering van ons zelf vóór het aanbieden.
+    //                            Er is niets vertrokken; opnieuw sturen is
+    //                            veilig.
+    //   'onzeker'   -> onbekend: timeout, netwerkfout, 5xx, of een 4xx zonder
+    //                            leesbare code. Het verzoek kan de overkant
+    //                            wél bereikt hebben. 'mislukt' zeggen zou een
+    //                            zekerheid beweren die we niet hebben.
     const reden = uitkomst.payload?.message || uitkomst.payload?.error || 'onbekende fout';
-    await markeerMislukt(id, reden);
+    if (uitkomst.zekerheid === 'onzeker') {
+      await markeerOnbekend(id, `Het versturen gaf geen duidelijk antwoord (${reden}). Wij weten NIET of de klant dit bericht heeft gekregen — kijk de draad na voordat je het opnieuw stuurt.`);
+    } else {
+      await markeerMislukt(id, reden);
+    }
     return res.status(uitkomst.http).json(uitkomst.payload);
   } catch (e) {
     console.error('[inbox-uitgesteld]', actie, id, e?.message || e);

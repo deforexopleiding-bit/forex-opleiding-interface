@@ -131,6 +131,25 @@ export async function markeerMislukt(id, reden, db = supabaseAdmin) {
 }
 
 /**
+ * Leg vast dat we het NIET weten.
+ *
+ * Dit is de stand die er eerder niet was, en waardoor elke afgebroken
+ * verzending "mislukt" werd — een zekerheid die we niet hadden, met als
+ * gevolg dat iemand het nog eens stuurde.
+ */
+export async function markeerOnbekend(id, reden, db = supabaseAdmin) {
+  const { error } = await db
+    .from('inbox_uitgesteld')
+    .update({
+      status: ONBEKEND,
+      reden: String(reden || 'wij weten niet of dit bericht is aangekomen').slice(0, 500),
+      afgehandeld_op: new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (error) console.error('[inbox-uitgesteld] onbekend-markering mislukt:', id, error.message);
+}
+
+/**
  * Haal een bericht terug dat nog niet onderweg is.
  *
  * Let op de voorwaarden: alleen als hij nog op 'gepland' staat én nog niet

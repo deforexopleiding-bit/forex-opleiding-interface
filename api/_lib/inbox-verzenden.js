@@ -39,6 +39,7 @@ import { renderTemplatePreview } from './render-template-preview.js';
 import { unpauseRunsForConversation } from './dunning-arrangement-hooks.js';
 import { gesprekkenV2Aan } from './gesprekken-vlag.js';
 import { werkSleutel } from './gesprekken-werkstand.js';
+import { zekerheidVanFout } from './inbox-wachtrij.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { hechtAanHuidigeLijn } from './wa-gesprek-lijn.js';
 import { TWENTY_FOUR_HOURS_MS, afwijzing } from './inbox-verzendopdracht.js';
@@ -166,8 +167,25 @@ export async function leverAfBijMeta(opdracht, conv, outboundPnId) {
     }
     return { ok: true, wamid: metaResult && metaResult.wamid ? String(metaResult.wamid) : null };
   } catch (metaErr) {
+    // ── WAT ER BIJ ELKE WEIGERING MEEGAAT ────────────────────────────────────
+    // `zekerheid` zegt of we WETEN dat het bericht niet is aangenomen. Het
+    // uitgestelde versturen hangt daaraan: 'geweigerd' wordt de eindstand
+    // mislukt ("stuur het gerust opnieuw"), 'onzeker' wordt onbekend ("kijk de
+    // draad na"). Dat onderscheid hoort HIER gemaakt te worden, want dit is de
+    // enige plek die de HTTP-status en de providercode nog ziet; een laag hoger
+    // is er alleen nog een statuscode van ons zelf.
+    //
+    // Het bericht naar de afzender verandert niet. Dit is een veld náást de
+    // payload, geen nieuw veld erin: vijf schermen kennen die payload-vormen
+    // uit hun hoofd.
+    const metZekerheid = (afw, fout) => ({ ...afw, zekerheid: zekerheidVanFout(fout) });
+
     if (metaErr instanceof MetaNotConfiguredError) {
-      return afwijzing(503, { error: 'Meta WhatsApp niet geconfigureerd', missing: metaErr.missing });
+      // Er is nooit iets aangeboden: de transportlaag gooit vóór de aanroep.
+      return metZekerheid(
+        afwijzing(503, { error: 'Meta WhatsApp niet geconfigureerd', missing: metaErr.missing }),
+        { nooitAangeboden: true },
+      );
     }
     const metaCode = Number(metaErr?.metaCode);
     if (metaCode === 131047 || metaCode === 131051 || metaCode === 131026) {
@@ -177,17 +195,21 @@ export async function leverAfBijMeta(opdracht, conv, outboundPnId) {
         meta_message: metaErr.metaMessage,
         fbtrace_id  : metaErr.metaFbtrace,
       });
-      return afwijzing(422, {
+      return metZekerheid(afwijzing(422, {
         error  : '24h_window_expired',
         source : 'meta',
         message: mediaKind
           ? `Meta's 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Vrij ${mediaKind} versturen kan niet meer — gebruik de Template-knop voor een goedgekeurde template met ${mediaKind}-header.`
           : 'Meta\'s 24-uurs venster is verlopen (de klant heeft niet binnen 24u geantwoord). Gebruik de Template-knop om een goedgekeurde template te sturen.',
         meta_code: metaErr.metaCode,
-      });
+      }), metaErr);
     }
-    console.error('[inbox-verzenden] Meta API fout:', metaErr.message);
-    return afwijzing(502, { error: 'Meta API fout', meta_error: metaErr.message });
+    console.error('[inbox-verzenden] Meta API fout:', metaErr.message, {
+      http_status: metaErr?.httpStatus ?? null,
+      meta_code  : metaErr?.metaCode ?? null,
+      zekerheid  : zekerheidVanFout(metaErr),
+    });
+    return metZekerheid(afwijzing(502, { error: 'Meta API fout', meta_error: metaErr.message }), metaErr);
   }
 }
 

@@ -122,3 +122,52 @@ export function uitWachtrij(rij) {
     mediaFilename     : r.media_filename || '',
   };
 }
+
+/**
+ * Is dit een weigering, of weten we het niet?
+ *
+ * ── DE VRAAG DIE HIERACHTER ZIT ──────────────────────────────────────────────
+ * De stempel meta_aangeroepen_op staat. We hebben het bericht aangeboden. Er
+ * komt een fout terug. Is dat bericht nu wél of niet bij de klant?
+ *
+ * Soms weten we het zeker. 360dialog geeft bij een echte weigering een 4xx MET
+ * een eigen foutcode: 131047 (buiten het 24-uursvenster), 131026 (niet te
+ * bezorgen), 100 (ongeldige parameter). Die codes bestaan omdat het bericht
+ * NIET is aangenomen. Dan is 'mislukt' een waarheid, en mag het scherm zeggen
+ * dat je het gerust opnieuw stuurt.
+ *
+ * En soms weten we het niet:
+ *   - geen antwoord (timeout, netwerkfout, verbinding weggevallen) — het
+ *     verzoek kan de overkant wél bereikt hebben;
+ *   - een 5xx — dat is een storing bij hén, en een storing na aanname bestaat;
+ *   - een 4xx zonder leesbare foutcode — dan is het enige wat we hebben de
+ *     HTTP-status, en die zegt niet of het bericht is aangenomen.
+ *
+ * In al die gevallen is 'onbekend' het eerlijke antwoord. 'mislukt' zeggen zou
+ * een zekerheid beweren die we niet hebben, en iemand uitnodigen het nog eens
+ * te sturen. Van de twee manieren waarop dit mis kan gaan is er één veel erger
+ * dan de andere.
+ *
+ * ── HOE "ECHTE CODE" HERKEND WORDT ───────────────────────────────────────────
+ * De transportlaag valt bij een onleesbaar foutlichaam terug op de HTTP-status
+ * als code (`err?.code ?? res.status`). Een metaCode die GELIJK is aan de
+ * httpStatus is dus geen providercode maar diezelfde status nog een keer — en
+ * dan weten we niets. Daar hangt het hele onderscheid aan.
+ *
+ * @param {{httpStatus?: number, metaCode?: number|string, nooitAangeboden?: boolean}} fout
+ * @returns {'geweigerd'|'onzeker'}
+ */
+export function zekerheidVanFout(fout = {}) {
+  // Nooit aangeboden is de scherpste zekerheid die er is: er is niets vertrokken.
+  if (fout.nooitAangeboden) return 'geweigerd';
+
+  const http = Number(fout.httpStatus);
+  if (!Number.isFinite(http) || http <= 0) return 'onzeker';   // geen antwoord
+  if (http >= 500) return 'onzeker';                            // storing bij hen
+  if (http < 400) return 'onzeker';                             // 2xx/3xx met een fout eraan: onduidelijk
+
+  const code = Number(fout.metaCode);
+  if (!Number.isFinite(code) || code <= 0) return 'onzeker';    // geen code
+  if (code === http) return 'onzeker';                          // de status, niet een providercode
+  return 'geweigerd';
+}
