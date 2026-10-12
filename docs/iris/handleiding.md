@@ -177,9 +177,23 @@ Een afgesloten opdracht blijft staan en is **terug te openen**. Weg is nergens.
 
 Wie gebeld moet worden, door wie, en waarom.
 
-Per persoon staat er: **"2× niet bereikt op 2 dagen"**. Die twee getallen zijn
-niet hetzelfde, en dat is met opzet — drie keer bellen op één ochtend is geen
-drie dagen proberen.
+De lijst **vult zichzelf** uit drie bronnen: de bel-taken van de wanbetalers
+(inclusief wat de aanmaanmotor als bellen markeert), de mentorsignalen uit het
+LMS, en opvolgingen die verlopen zijn. Je hoeft er niemand met de hand op te
+zetten — dat kan nog wel, maar het hoeft niet meer.
+
+Per persoon staat er **één** rij, met **alle** redenen eronder. Wie om een
+openstaande factuur én een mentorsignaal gebeld moet worden, ziet dat allebei
+staan — anders hang je op na het factuurverhaal zonder het signaal te noemen.
+Elke reden is een link naar waar hij vandaan komt.
+
+Daaronder staat: **"2× niet bereikt op 2 dagen"**. Die twee getallen zijn niet
+hetzelfde, en dat is met opzet — drie keer bellen op één ochtend is geen drie
+dagen proberen.
+
+Rechts staat wie belt. Staat daar **niemand**, dan is er voor die bron nog geen
+regel ingesteld; de rij staat dan onder "Iedereen" en wacht daar op wie hem
+oppakt. Zie *Wie belt er* bij Instellingen.
 
 **Bel** opent de gewone softphone. Daarna klik je **Nam niet op** of
 **Gesproken**.
@@ -192,13 +206,22 @@ poging.
 
 ### Escalatie
 
-Na drie niet-opgenomen pogingen op drie **verschillende** dagen verschijnt er
-een oranje blok. Dan zet je in de Post een bericht klaar. Het venster is dan
-meestal dicht, dus dat wordt een template.
+Na drie niet-opgenomen pogingen op drie **verschillende** dagen zet Iris
+**zelf een voorstel in de Post**: een WhatsApp en een mail. Jij leest het en
+drukt op Verstuur, of je annuleert het. Het venster is dan meestal dicht, dus de
+WhatsApp wordt een template; is die template niet goedgekeurd, dan staat er
+alleen een mail.
+
+Twee voorstellen betekent niet twee berichten — kies er één en annuleer de
+ander.
 
 Heeft iemand de afgelopen drie dagen nog een bericht gestuurd, dan escaleert
 Iris niet. Wie gisteren nog appte is niet onbereikbaar, en "we proberen je te
 bereiken" is dan een belediging.
+
+Heeft iemand twee gesprekken op hetzelfde kanaal, dan komt er **geen** voorstel:
+Iris weet dan niet aan welke draad het hoort en gokt niet. De rij blijft op de
+belrij staan met die reden erbij.
 
 ---
 
@@ -226,6 +249,35 @@ Het advies zegt nooit "zet hem op zelf". Hooguit "dit ziet er goed uit, lees de
 voorbeelden na en beslis". Dat is met opzet: een programma dat adviseert
 zichzelf meer bevoegdheid te geven, is een programma waarvan je dat advies niet
 meer los kunt zien van wat het voor zichzelf wil.
+
+### Wie belt er
+
+Per bron van de belrij kies je uit de lijst wie nieuwe rijen krijgt. Leeg laten
+mag: dan staat de rij onder "Iedereen".
+
+Een rij die al door iemand is opgepakt verandert hier **niet** van eigenaar. Dat
+is met opzet — anders verdwijnt werk uit iemands "Van mij" doordat er een tweede
+reden bij kwam, en daar is geen melding voor.
+
+### Na drie keer niet opgenomen
+
+Per bron wat Iris mag doen als de escalatiedrempel gehaald is:
+
+| | |
+|---|---|
+| **niets doen** | Er gebeurt niets. Jij ziet het oranje blok en handelt zelf. |
+| **voorstel in de Post** | Standaard. Iris zet een WhatsApp en een mail klaar; jij klikt. |
+| **zelf sturen** | Iris stuurt zonder tussenkomst. |
+
+**Zelf sturen staat uit**, per bron. Zet je het aan, dan gelden daarna nog vier
+dingen die in de code staan en niet in dit scherm: alleen tussen 8 en 20 uur,
+hoogstens één bericht per persoon per drie dagen, nooit tijdens een lopende
+betaalafspraak of toezegging, en nooit een tweede voorstel naast een eerste dat
+nog klaarstaat. Valt een van die vier dicht, dan wordt het alsnog een voorstel —
+het werk verdwijnt niet, het wacht op jou.
+
+Staat de hoofdschakelaar uit, dan wordt "zelf sturen" gelezen als "voorstel in
+de Post".
 
 ### Wat je niet kunt aanzetten
 
@@ -280,6 +332,15 @@ nakijken. Dat is iets anders dan "er is niets aan de hand".
 - 's Avonds na negenen of op zondag automatisch iets sturen. Jij mag dat wel —
   die afspraak gaat over software, niet over mensen.
 - Twee keer hetzelfde versturen. Elke knop kan maar één keer.
+- Een mentorsignaal afsluiten in het LMS. De knop **Afgehandeld** op de
+  dossierkaart zet alleen onze eigen stand; de mentor sluit zijn signaal daar
+  zelf af. Die knop kan trouwens terug — klik je mis, dan zet **Heropen** hem
+  weer open.
+- Een bericht sturen naar iemand met wie een betaalafspraak of toezegging loopt.
+  Ook niet als "zelf sturen" aan staat, en ook niet als we het even niet kunnen
+  nakijken: bij twijfel gaat er niets weg.
+- Gokken op wie iemand is. Heeft een contact twee gesprekken op hetzelfde
+  kanaal, dan komt er geen voorstel en blijft het op jouw bord.
 
 ---
 
