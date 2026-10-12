@@ -75,16 +75,52 @@ export const WEBINAR_TEMPLATES = Object.freeze({
 
 export const WEBINAR_TEMPLATE_NAMEN = Object.freeze(Object.keys(WEBINAR_TEMPLATES));
 
+// Fase 3 (2026-10-12): na-webinar opvolging — MARKETING (aanbod + urgentie),
+// daarom apart van de vier UTILITY-templates hierboven. Ingediend en APPROVED
+// op de lead-WABA; de tekst staat vast (Meta), hier alleen ter referentie voor
+// de parametervolgorde en het gesprekslog. URL-knop naar de boekingslink.
+const AGENDA_KNOP = Object.freeze({ type: 'URL', text: 'Plan je gratis scan', url: 'https://deforexopleiding.nl/agenda/webinar' });
+export const OPVOLG_TEMPLATES = Object.freeze({
+  webinar_opvolging_1: Object.freeze({
+    name: 'webinar_opvolging_1',
+    language: 'nl',
+    category: 'MARKETING',
+    header_type: 'NONE',
+    body_text:
+      'Hoi {{1}}! 👋\n\n'
+      + 'Je had je aangemeld voor onze webinar. De volgende stap is je gratis strategie-scan: een persoonlijk plan om binnen 90 dagen je eerste winsten te maken met traden.\n\n'
+      + "Er zijn maar een paar scan-plekken. Plan 'm hieronder in 👇",
+    body_examples: { 1: 'Jeffrey' },
+    footer_text: null,
+    buttons: Object.freeze([AGENDA_KNOP]),
+    vars: Object.freeze(['voornaam']),
+  }),
+  webinar_opvolging_2: Object.freeze({
+    name: 'webinar_opvolging_2',
+    language: 'nl',
+    category: 'MARKETING',
+    header_type: 'NONE',
+    body_text:
+      'Hoi {{1}}, laatste kans ⏳\n\n'
+      + 'De gratis scan-plekken van deze week zijn bijna vol. Wil je jouw persoonlijke 90-dagen-plan? Plan dan nu je gratis strategie-scan in 👇',
+    body_examples: { 1: 'Jeffrey' },
+    footer_text: null,
+    buttons: Object.freeze([AGENDA_KNOP]),
+    vars: Object.freeze(['voornaam']),
+  }),
+});
+const ALLE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES, ...OPVOLG_TEMPLATES });
+
 /** Parameters in template-volgorde uit een context { voornaam, datum, tijd, zoom }. */
 export function templateVariabelen(naam, ctx) {
-  const t = WEBINAR_TEMPLATES[naam];
+  const t = ALLE_TEMPLATES[naam];
   if (!t) throw new Error('Onbekende webinar-template: ' + naam);
   return t.vars.map((k) => String(ctx?.[k] ?? '').trim() || '-');
 }
 
 /** De body met ingevulde parameters (voor het gesprekslog in de inbox). */
 export function renderTemplateTekst(naam, ctx) {
-  const t = WEBINAR_TEMPLATES[naam];
+  const t = ALLE_TEMPLATES[naam];
   const vals = templateVariabelen(naam, ctx);
   return t.body_text.replace(/\{\{(\d+)\}\}/g, (_, n) => vals[Number(n) - 1] ?? '');
 }

@@ -32,6 +32,8 @@ import { sendEmailViaSmtp } from './send-email-core.js';
 import { logOutboundWa } from './wa-outbound-log.js';
 import { renderAfspraakMail, platteTekstAfspraak } from './mail-shell-afspraak.js';
 import { templateVariabelen, renderTemplateTekst } from './webinar-templates.js';
+// Fase 3: na-webinar opvolging (cyclische import is veilig: alleen in functies gebruikt).
+import { opvolgRonde } from './webinar-opvolging.js';
 
 export const ZONE = 'Europe/Amsterdam';
 export const MIN = 60 * 1000;
@@ -73,7 +75,7 @@ export function nlDatum(date = new Date()) {
   return `${g('year')}-${g('month')}-${g('day')}`;
 }
 
-function plusDagen(ymd, n) {
+export function plusDagen(ymd, n) {
   const [y, m, d] = ymd.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + n, 12));
   return dt.toISOString().slice(0, 10);
@@ -221,7 +223,7 @@ async function waLijn(sb) {
 const wacht = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const isTijdelijk = (e) => /429|too many|rate|throughput|timeout|ETIMEDOUT|ECONNRESET|5\d\d/i.test(String(e?.message || e || ''));
 
-async function verstuurWa(sb, { telefoon, templateNaam, ctx, wachtMs = 7000 }) {
+export async function verstuurWa(sb, { telefoon, templateNaam, ctx, wachtMs = 7000 }) {
   if (!telefoon) return { ok: false, overgeslagen: 'geen_telefoon' };
   const pnId = await waLijn(sb);
   if (!pnId) return { ok: false, overgeslagen: 'geen_wa_lijn' };
@@ -386,7 +388,7 @@ export async function haalReeksOpId(sb, id) {
  * bleef liggen pakt de volgende (cron draait elke minuut, de vensters zijn ruim).
  */
 export async function cronRonde(sb, { nu = new Date(), wachtMs, budgetMs = 45 * 1000 } = {}) {
-  const uit = { sessies_aangemaakt: 0, bevestiging: 0, dag: 0, uur: 0, live: 0, fouten: 0, eerste_fouten: [], afgebroken: false };
+  const uit = { sessies_aangemaakt: 0, bevestiging: 0, dag: 0, uur: 0, live: 0, opvolging_1: 0, opvolging_2: 0, opvolging_overgeslagen: 0, fouten: 0, eerste_fouten: [], afgebroken: false };
   const deadline = Date.now() + budgetMs;
   const tijdOp = () => { if (Date.now() > deadline) { uit.afgebroken = true; return true; } return false; };
   const fout = (ctx, e) => {
@@ -445,6 +447,11 @@ export async function cronRonde(sb, { nu = new Date(), wachtMs, budgetMs = 45 * 
         }
       }
     }
+  }
+  // Fase 3: na-webinar opvolging (na de reminders — die zijn tijdkritischer).
+  for (const reeks of reeksen || []) {
+    if (tijdOp()) return uit;
+    try { await opvolgRonde(sb, reeks, { nu, wachtMs, tijdOp, fout, uit }); } catch (e) { fout('opvolging', e); }
   }
   return uit;
 }
