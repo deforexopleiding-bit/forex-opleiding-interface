@@ -313,11 +313,34 @@ export async function boekAchteraf(opdracht, conv, wamid, userId, { db = supabas
 /**
  * De hele weg: keuren, versturen, boeken.
  *
+ * ── voorAflevering ───────────────────────────────────────────────────────────
+ * Een haakje tussen het keuren en het aanbieden. Het uitgestelde versturen
+ * gebruikt het om vast te leggen dat de transportlaag NU aangeroepen wordt, en
+ * dat moet precies hier: na de keuring (anders stempel je rijen die alsnog
+ * geweigerd worden) en vóór de aanroep (anders is de stempel waardeloos — hij
+ * bestaat juist om het geval te dekken waarin er daarna niets meer gebeurt).
+ *
+ * Geeft het haakje false terug, dan wordt er NIET afgeleverd. Dat is de veilige
+ * kant: liever een bericht dat niet vertrok en dat luid zegt, dan een bericht
+ * waarvan niemand meer kan vaststellen wat ermee gebeurd is.
+ *
+ * Zonder haakje — zoals /api/inbox-send het aanroept — is dit pad ongewijzigd.
+ *
  * @returns {Promise<{ok: true, payload: object} | {ok: false, http: number, payload: object}>}
  */
-export async function verstuurInGesprek(opdracht, rechten, userId, { db = supabaseAdmin, ip = null } = {}) {
+export async function verstuurInGesprek(opdracht, rechten, userId, { db = supabaseAdmin, ip = null, voorAflevering = null } = {}) {
   const gekeurd = await keurGesprek(opdracht, rechten, { db });
   if (!gekeurd.ok) return gekeurd;
+
+  if (typeof voorAflevering === 'function') {
+    const mag = await voorAflevering();
+    if (mag === false) {
+      return afwijzing(500, {
+        error: 'verzending_niet_vastgelegd',
+        message: 'Het vastleggen van de verzending lukte niet, dus er is niets verstuurd. Probeer het opnieuw.',
+      });
+    }
+  }
 
   const afgeleverd = await leverAfBijMeta(opdracht, gekeurd.conv, gekeurd.outboundPnId);
   if (!afgeleverd.ok) return afgeleverd;

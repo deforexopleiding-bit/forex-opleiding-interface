@@ -3406,6 +3406,27 @@
     });
   }
 
+  /* Wat staat er geparkeerd, en wat ging er mis?
+
+     Faalt dit — vlag uit (404), tabel nog niet gemigreerd, netwerk — dan blijft
+     het stil. Dat is met opzet: zonder uitgesteld versturen is er ook niets te
+     melden, en een rode balk voor een stand die niet bestaat is erger dan geen
+     balk. De console zegt het wel, zodat het niet ongemerkt blijft. */
+  async function _fetchParkeerStand(convId, mySeq) {
+    if (!convId) return;
+    const j = await tryFetch('inbox:parkeer:' + convId,
+      `/api/inbox-parkeer?conversation_id=${encodeURIComponent(convId)}`, 8000);
+    if (mySeq != null && mySeq !== _ui.inbox._selectSeq) return;
+    // Geen antwoord of een foutlichaam: stil blijven. tryFetch heeft het al in
+    // de console gezet.
+    if (!j || j.error) return;
+    const bag = _live.inbox.thread.byConv[convId];
+    if (!bag) return;
+    bag.wacht = asArr(j.wacht);
+    bag.aandacht = asArr(j.aandacht);
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+
   // BROK 5-fix (v=11): stale-guard via _seq per __wbxInboxSelect.
   // Snel klikken A → B → A → fetches van eerder-verlaten convs die later
   // returnen mogen state niet meer overschrijven. Elke fetch capturet
@@ -3430,6 +3451,11 @@
       bag.oudsteAt  = j?.oudste_at || null;
       bag.ouderOp   = false;   // niets aan het ophalen
       bag.ouderEind = false;   // en we zijn nog niet bij het begin
+      // G2 — staat er voor dit gesprek nog iets geparkeerd, en is er iets
+      // misgegaan? Dat tweede is de reden dat dit hier staat en niet alleen in
+      // het geheugen van het tabblad: een bericht dat niet vertrok terwijl jij
+      // je laptop dichtklapte, hoort je op te wachten als je terugkomt.
+      _fetchParkeerStand(convId, mySeq);
       // Als 24u-venster nog niet expired volgens conv, reset de UI-toggle.
       if (bag.conversation && bag.conversation.can_send_text) _ui.inbox.compose.waWindowExpired = false;
       else if (bag.conversation && bag.conversation.can_send_text === false) _ui.inbox.compose.waWindowExpired = true;
@@ -3751,13 +3777,34 @@
    * @param {Function} verstuur  wat er moet gebeuren als de teller afloopt
    * @param {Function} herstel   zet de schrijfbalk terug bij "Toch niet"
    */
-  function _uitstelStart(convId, verstuur, herstel) {
+  async function _uitstelStart(convId, verstuur, herstel, parkeerOpdracht = null) {
     const gv = _gv2();
     if (!gv) { verstuur(); return; }          // vlag uit: gewoon versturen
 
     _uitstelStop();
+
+    // ── Eerst proberen te PARKEREN op de server ──────────────────────────
+    // Wachtte dit venster alleen in het scherm, dan vertrok het bericht nooit
+    // als je het tabblad binnen die dertig seconden sloot — en niets zei dat.
+    // Je denkt dat je geantwoord hebt, en de klant wacht.
+    //
+    // Lukt parkeren niet (vlag net uit, tabel nog niet gemigreerd, netwerk),
+    // dan valt dit terug op precies wat het hiervoor deed. Geen foutmelding
+    // voor iets dat de gebruiker niet kan oplossen; wel een regel in de console
+    // zodat het niet ongemerkt blijft.
+    let geparkeerdId = null;
+    if (parkeerOpdracht) {
+      try {
+        const p = await apiPost('/api/inbox-parkeer', parkeerOpdracht);
+        if (p.ok && p.json?.id) geparkeerdId = String(p.json.id);
+        else console.warn('[wbx uitstel] parkeren niet gelukt, terug naar wachten in het scherm:', p.error || p.status);
+      } catch (e) {
+        console.warn('[wbx uitstel] parkeren mislukte:', e?.message || e);
+      }
+    }
+
     const tot = Date.now() + gv.UITSTEL_MS;
-    const u = { convId, tot, timer: null, tikker: null, verstuur, herstel };
+    const u = { convId, tot, timer: null, tikker: null, verstuur, herstel, geparkeerdId };
     _ui.inbox.uitstel = u;
 
     // Elke seconde hertekenen zodat de teller loopt. Alleen de schrijfbalk,
@@ -3773,18 +3820,61 @@
       if (_ui.inbox.uitstel !== u) return;
       _uitstelStop();
       try { window.DFO?.render?.(); } catch (_) {}
-      verstuur();
+      _uitstelVertrek(u);
     }, gv.UITSTEL_MS);
 
     try { window.DFO?.render?.(); } catch (_) {}
   }
 
+  /* Het startsein. Staat het bericht geparkeerd op de server, dan zeggen we
+     dáár dat het weg mag — en dan is het venster exact dertig seconden, want
+     een cron draait maar per minuut. Staat het niet geparkeerd, dan versturen
+     we zoals vroeger.
+
+     De cron is het vangnet voor als dit scherm er niet meer is. Komen ze elkaar
+     tegen, dan wint er precies één: de claim op de server slaagt maar één keer. */
+  async function _uitstelVertrek(u) {
+    if (!u) return;
+    if (!u.geparkeerdId) { try { u.verstuur(); } catch (_) {} return; }
+    const r = await apiPost('/api/inbox-uitgesteld', { id: u.geparkeerdId, actie: 'nu' });
+    if (r.ok) { _wbxNaVerzending(u.convId); return; }
+    if (r.json?.error === 'al_opgepakt') {
+      // De cron was net sneller. Het bericht is wél weg — dat is geen fout om
+      // een rode melding voor te tonen.
+      _wbxNaVerzending(u.convId);
+      return;
+    }
+    // Echt niet gelukt. De reden staat ook op de rij, dus hij is straks in het
+    // gesprek terug te vinden; hier tonen we 'm meteen, en we halen de stand
+    // opnieuw op zodat de balk erboven er ook staat als je wegklikt en terugkomt.
+    _toast('Versturen mislukt: ' + (r.json?.message || r.error || 'onbekend'), 'error');
+    try { u.herstel && u.herstel(); } catch (_) {}
+    _fetchParkeerStand(u.convId, _ui.inbox._selectSeq);
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+
   /* "Toch niet". Zet de tekst terug in de schrijfbalk, want negen van de tien
      keer wil je 'em aanpassen en niet weggooien. */
-  window.__wbxInboxUitstelTerug = () => {
+  window.__wbxInboxUitstelTerug = async () => {
     const u = _ui.inbox.uitstel;
     if (!u) return;
     const herstel = u.herstel;
+
+    // Staat hij geparkeerd, dan moet de server hem terughalen — anders stuurt
+    // de cron hem straks alsnog, terwijl jij denkt dat je 'm tegenhield.
+    if (u.geparkeerdId) {
+      const r = await apiPost('/api/inbox-uitgesteld', { id: u.geparkeerdId, actie: 'annuleer' });
+      if (!r.ok) {
+        // Te laat: hij is al onderweg. Dat zeggen we, want een melding
+        // "teruggehaald" terwijl de klant het bericht heeft, is erger dan
+        // geen knop.
+        _uitstelStop();
+        _toast(r.json?.message || 'Te laat — dit bericht is al onderweg.', 'warn');
+        _wbxNaVerzending(u.convId);
+        return;
+      }
+    }
+
     _uitstelStop();
     try { herstel && herstel(); } catch (_) {}
     _toast('Teruggehaald. Er is niets verstuurd.', 'success');
@@ -3795,17 +3885,20 @@
   window.__wbxInboxUitstelNu = () => {
     const u = _ui.inbox.uitstel;
     if (!u) return;
-    const verstuur = u.verstuur;
     _uitstelStop();
     try { window.DFO?.render?.(); } catch (_) {}
-    verstuur();
+    _uitstelVertrek(u);
   };
 
-  // Een openstaande teller mag niet ongemerkt verdampen. De browser toont zijn
-  // eigen "weet je het zeker dat je weggaat?" — en dat is precies de vraag,
-  // want weggaan betekent hier: het bericht gaat niet.
+  // Een openstaande teller mag niet ongemerkt verdampen — TENZIJ het bericht
+  // op de server geparkeerd staat. Dan is weggaan niet erg: de cron pikt het
+  // op en het vertrekt alsnog. De waarschuwing hoort dus precies zo lang te
+  // bestaan als het risico, en geen seconde langer. Een browser die het altijd
+  // vraagt, leert je "ja hoor" te klikken zonder te lezen.
   window.addEventListener('beforeunload', (e) => {
-    if (!_ui.inbox.uitstel) return;
+    const u = _ui.inbox.uitstel;
+    if (!u) return;
+    if (u.geparkeerdId) return;   // staat veilig op de server
     e.preventDefault();
     e.returnValue = '';
     return '';
@@ -3930,9 +4023,13 @@
           const tekstVoorHerstel = body;
           c.text = '';
           c.error = null;
+          // De vierde meegave is wat er op de server geparkeerd wordt. Zonder
+          // die valt het venster terug op wachten in het scherm — en dan is
+          // het tabblad sluiten weer hetzelfde als het bericht weggooien.
           _uitstelStart(convId,
             async () => { await _wbxWaTekstVerstuur(convId, body); },
-            () => { _ui.inbox.compose.text = tekstVoorHerstel; });
+            () => { _ui.inbox.compose.text = tekstVoorHerstel; },
+            { conversation_id: convId, mode: 'text', body });
           return;
         }
         const ok = await _askConfirm(`Bericht versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
@@ -4730,13 +4827,70 @@
           onclick="__wbxInboxUitstelNu()" title="Niet wachten">Nu versturen</button>
       </div>
       <div style="font-size:10.5px;color:var(--text-3);margin-top:6px">
-        Laat dit scherm open tot de teller op nul staat — anders vertrekt het bericht niet.
+        ${_ui.inbox.uitstel?.geparkeerdId
+          ? 'Staat klaar op de server — dit scherm mag dicht, het bericht vertrekt hoe dan ook.'
+          : 'Laat dit scherm open tot de teller op nul staat — anders vertrekt het bericht niet.'}
       </div>
     </div>`;
   }
 
+  /* Wat er misging, bovenaan de schrijfbalk.
+
+     ── WAAROM TWEE VERSCHILLENDE TEKSTEN ────────────────────────────────────
+     'mislukt' betekent dat het versturen nooit begon: er is met zekerheid niets
+     vertrokken, dus "stuur het gerust opnieuw" is een eerlijk advies.
+     'onbekend' betekent dat we het hebben aangeboden en geen antwoord zagen. Dan
+     weten wij niet of de klant het heeft, en dat is precies wat er moet staan —
+     geen knop die suggereert dat opnieuw sturen veilig is, maar de vraag om
+     eerst de draad na te kijken.
+
+     Er is in beide gevallen geen knop die de server opnieuw laat versturen. Die
+     rij is een eindstand; alleen een MENS stuurt dit nog, als nieuw bericht, met
+     zijn ogen open. "Zet de tekst terug" is dus letterlijk alles wat de knop
+     doet: hij vult het veld, hij verstuurt niets. */
+  function _aandachtBalkHtml(convId) {
+    const bag = _live.inbox.thread.byConv[convId];
+    const rijen = asArr(bag?.aandacht);
+    if (!rijen.length) return '';
+    return rijen.map((r) => {
+      const onbekend = String(r.status) === 'onbekend';
+      const kleur = onbekend ? 'var(--amber)' : 'var(--rose)';
+      const kop = onbekend
+        ? 'Niet zeker of dit vertrok'
+        : 'Dit bericht is niet verstuurd';
+      const tekst = String(r.body || r.template_name || '').trim();
+      const knop = tekst
+        ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px;margin-top:6px"
+             onclick="__wbxAandachtTekstTerug('${esc(String(r.id))}')"
+             title="Vult alleen het veld. Er wordt niets verstuurd.">Zet de tekst terug in het veld</button>`
+        : '';
+      return `<div style="padding:9px 14px;border-top:1px solid var(--border);background:var(--surface-2)">
+        <div style="font-size:12px;color:${kleur};font-weight:600">${onbekend ? '?' : '⚠'} ${esc(kop)}</div>
+        <div style="font-size:11.5px;color:var(--text-2);margin-top:3px">${esc(String(r.reden || ''))}</div>
+        ${tekst ? `<div style="font-size:12px;color:var(--text-1);margin-top:5px;padding:6px 9px;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-sm);white-space:pre-wrap;word-break:break-word">${esc(tekst)}</div>` : ''}
+        ${knop}
+      </div>`;
+    }).join('');
+  }
+
+  /* Zet de tekst van een mislukt of onbekend bericht terug in het veld. Dit
+     raakt de server niet aan: de rij blijft staan als wat hij is, en wat er nu
+     gebeurt is dat jij een nieuw bericht typt. */
+  window.__wbxAandachtTekstTerug = (id) => {
+    const convId = _ui.inbox.selectedConv;
+    const bag = _live.inbox.thread.byConv[convId];
+    const rij = asArr(bag?.aandacht).find((r) => String(r.id) === String(id));
+    if (!rij) return;
+    _ui.inbox.compose.channel = 'wa';
+    _ui.inbox.compose.text = String(rij.body || '');
+    _ui.inbox.compose.error = null;
+    try { window.DFO?.render?.(); } catch (_) {}
+    try { document.getElementById('wbxComposeTxt')?.focus(); } catch (_) {}
+  };
+
   function _inboxComposeHtml(convId) {
     if (!convId) return '';
+    const aandacht = _aandachtBalkHtml(convId);
 
     // G2 — telt er een bericht af? Dan staat de schrijfbalk op de teller en
     // is er niets anders te doen dan wachten, terughalen of alsnog drukken.
@@ -4746,7 +4900,7 @@
     const gvU = _gv2();
     if (u && gvU && String(u.convId) === String(convId)) {
       const rest = gvU.uitstelRest(u.tot);
-      if (rest.loopt) return _uitstelBalkHtml(rest);
+      if (rest.loopt) return aandacht + _uitstelBalkHtml(rest);
     }
 
     const c = _ui.inbox.compose;
@@ -4804,7 +4958,7 @@
     const moreBtn = `<button class="btn btn-ghost btn-sm" style="font-size:12.5px;padding:4px 9px;font-weight:700;position:relative" onclick="event.stopPropagation();__wbxInboxComposeMenu()" title="Meer">⋮${composeMenu}</button>`;
     const micBtn = _inboxMicHtml();
 
-    return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
+    return aandacht + `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
         ${chBtn('wa', '💬 WhatsApp')}
         ${chBtn('mail', '✉ E-mail')}
