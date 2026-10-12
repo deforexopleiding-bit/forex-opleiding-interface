@@ -28,7 +28,6 @@
 // verzending wordt opnieuw gekeken (wie zich na het inplannen afmeldt, wordt
 // alsnog overgeslagen).
 
-import crypto from 'node:crypto';
 import {
   EMAIL_RE, schoonHtml, onbekendeVariabelen, leadVariabelen, vulMailVariabelen, verstuurMail, LeadBerichtFout,
   verstuurWaTemplate, isLeadTemplate, waVerstuurbaar, renderWaTekst,
@@ -39,11 +38,15 @@ import { renderLeadMail, htmlNaarTekst } from './mail-shell-lead.js';
 import { normaliseerBlokken, compileerBlokken } from '../../modules/shared/mail-blokken.js';
 import { bepaalCategorieen } from './inbox-categorie.js';
 import { sluitSmtpPools } from './send-email-core.js';
+import { WEBSITE_URL, nieuwToken, voorkeurenUrl, afmeldUrl, magOntvangen, zorgVoorkeur } from './mail-voorkeuren.js';
+
+// Voorkeur-helpers wonen sinds 2026-10-12 in mail-voorkeuren.js (ook gebruikt
+// door de webinar-opvolging); hier her-geëxporteerd voor bestaande importeurs.
+export { WEBSITE_URL, nieuwToken, voorkeurenUrl, afmeldUrl, magOntvangen, zorgVoorkeur };
 
 export const MIGRATIE = '2026-10-10-massa-mail-fase2a.sql';
 export const MIGRATIE_2B = '2026-10-11-massa-whatsapp-fase2b.sql';
 export const MIGRATIE_BOUWER = '2026-10-11-mail-bouwer.sql';
-export const WEBSITE_URL = String(process.env.WEBSITE_URL || 'https://www.deforexopleiding.nl').replace(/\/+$/, '');
 export const MASSA_SOORTEN = Object.freeze({
   tips: 'Tips & lessen over traden',
   events: 'Webinars & events',
@@ -67,38 +70,6 @@ export class MassaFout extends Error {
 
 // ── Voorkeuren (token) ───────────────────────────────────────────────────────
 
-export const nieuwToken = () => crypto.randomBytes(32).toString('base64url');
-export const voorkeurenUrl = (token) => `${WEBSITE_URL}/voorkeuren?token=${encodeURIComponent(token)}`;
-/** One-click afmelden (RFC 8058, POST) — de List-Unsubscribe-header. */
-export const afmeldUrl = (token) => `${WEBSITE_URL}/api/voorkeuren?token=${encodeURIComponent(token)}`;
-
-/** Mag dit adres een mail van deze soort krijgen? PURE. */
-export function magOntvangen(voorkeur, soort) {
-  if (!voorkeur) return { ok: true, reden: null };
-  if (voorkeur.afgemeld) return { ok: false, reden: 'afgemeld' };
-  const v = voorkeur.voorkeuren && typeof voorkeur.voorkeuren === 'object' ? voorkeur.voorkeuren : {};
-  if (soort && v[soort] === false) return { ok: false, reden: 'voorkeur_uit' };
-  return { ok: true, reden: null };
-}
-
-/** De voorkeur-rij van een adres; maakt hem (met token) aan als hij er nog niet is. */
-export async function zorgVoorkeur(sb, email, leadId = null) {
-  const adres = String(email || '').trim().toLowerCase();
-  const lees = () => sb.from('lead_mail_voorkeuren').select('id, email, token, afgemeld, voorkeuren').eq('email', adres).maybeSingle();
-  const { data, error } = await lees();
-  if (error) throw new Error('voorkeur lezen: ' + error.message);
-  if (data) return data;
-  const { data: nieuw, error: insErr } = await sb.from('lead_mail_voorkeuren')
-    .insert({ email: adres, lead_id: leadId, token: nieuwToken() })
-    .select('id, email, token, afgemeld, voorkeuren').single();
-  if (!insErr) return nieuw;
-  if (insErr.code === '23505') { // gelijktijdig aangemaakt → die gebruiken
-    const { data: d2, error: e2 } = await lees();
-    if (e2 || !d2) throw new Error('voorkeur na conflict lezen: ' + (e2?.message || 'leeg'));
-    return d2;
-  }
-  throw new Error('voorkeur aanmaken: ' + insErr.message);
-}
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 

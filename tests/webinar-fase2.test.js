@@ -75,7 +75,7 @@ test('Webinar-module: QR-kaart met groot tonen + PNG-download; cache-buster', ()
   assert.match(v, /download="webinar-strategie-scan-qr\.png"/);
   assert.match(v, /__wbQrGroot\(true\)/);
   assert.match(v, /\$\{qrHtml\(\)\}/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/webinar-v2\.js\?v=3"/);
+  assert.ok(Number((lees('modules/klanten-v2/index.html').match(/views\/webinar-v2\.js\?v=(\d+)"/) || [])[1]) >= 3, 'webinar-v2 minstens v3');
   assert.match(lees('package.json'), /"qrcode": "\^1\.5\.4"/);
 });
 

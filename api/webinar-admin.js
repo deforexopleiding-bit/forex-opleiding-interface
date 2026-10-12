@@ -106,8 +106,9 @@ export default async function handler(req, res) {
         const { data: sessie, error: sErr } = await supabaseAdmin.from('webinar_sessies').select('*').eq('id', sessieId).maybeSingle();
         if (sErr) throw new Error(sErr.message);
         if (!sessie) return res.status(404).json({ error: 'Sessie niet gevonden' });
+        // select('*'): ook opvolging_1_op/_2_op (fase 3) als de migratie gedraaid is — zonder migratie geen fout.
         const { data: aanm, error: aErr } = await supabaseAdmin.from('webinar_aanmeldingen')
-          .select('id, voornaam, email, telefoon, bron, lead_id, is_test, aangemeld_op, verplaatst_van_sessie_id, bevestiging_op, reminder_dag_op, reminder_uur_op, live_op, berichten')
+          .select('*')
           .eq('sessie_id', sessieId).order('aangemeld_op', { ascending: false }).limit(1000);
         if (aErr) throw new Error(aErr.message);
         return res.status(200).json({ sessie, aanmeldingen: aanm || [] });

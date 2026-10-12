@@ -10,6 +10,8 @@
 //     actieve week en krijgen een nieuwe bevestiging) / Herstellen, en een
 //     afwijkende Zoom-link voor die week.
 //   - Aanmelders van een week, met per moment of mail/WhatsApp verstuurd is.
+//   - Fase 3 (2026-10-12): kolommen Nudge 1 / Nudge 2 per aanmelder (na-webinar
+//     opvolging aan wie geen call boekte; api/_lib/webinar-opvolging.js).
 //   - Fase 2 (2026-10-12): QR-code van de boekingslink /agenda/webinar (gratis
 //     strategie-scan met Dave), groot te tonen en te downloaden als PNG. De
 //     link staat in Leadsonderhoud → Bronnen op setter Karl → zijn 3%.
@@ -175,7 +177,7 @@
     const groot = q && st.qrGroot ? `
       <div onclick="if(event.target===this)__wbQrGroot(false)" style="position:fixed;inset:0;z-index:9000;background:rgba(10,20,35,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px">
         <img src="${esc(q.png)}" alt="QR-code naar ${esc(q.url)}" style="width:min(80vh,90vw);height:auto;background:#fff;border-radius:12px">
-        <div style="color:#fff;font-size:18px;font-weight:600">Plan je gratis strategie-scan · deforexopleiding.nl/agenda/webinar</div>
+        <div style="color:#fff;font-size:18px;font-weight:600">Plan je gratis strategie-scan (t.w.v. €99) · deforexopleiding.nl/agenda/webinar</div>
         <button class="btn btn-ghost btn-sm" style="background:#fff" onclick="__wbQrGroot(false)">Sluiten</button>
       </div>` : '';
     return `<div class="card" style="margin-bottom:14px">
@@ -183,7 +185,7 @@
       <div class="card-body" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
         ${beeld}
         <div style="flex:1;min-width:220px;font-size:12.5px;line-height:1.55">
-          <div>Laat deze QR tijdens het webinar zien. Deelnemers plannen er een gratis strategie-scan mee bij Dave.</div>
+          <div>Laat deze QR tijdens het webinar zien. Deelnemers plannen er een gratis strategie-scan (t.w.v. €99) mee bij Dave.</div>
           <div style="margin:6px 0"><a href="${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}" target="_blank" rel="noopener" class="mono">${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}</a></div>
           <div style="color:var(--text-3);font-size:11.5px">Boekingen via deze link krijgen bron "webinar" en de setter van die link (Leadsonderhoud → Bronnen) — die ontvangt de commissie.</div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -196,9 +198,13 @@
 
   function vinkje(a, key) {
     const b = (a.berichten || {})[key];
-    const kolom = { bevestiging: 'bevestiging_op', dag: 'reminder_dag_op', uur: 'reminder_uur_op', live: 'live_op' }[key];
+    const kolom = { bevestiging: 'bevestiging_op', dag: 'reminder_dag_op', uur: 'reminder_uur_op', live: 'live_op', opvolging_1: 'opvolging_1_op', opvolging_2: 'opvolging_2_op' }[key];
     if (!a[kolom]) return '<span style="color:var(--text-3)">—</span>';
     if (!b) return '<span title="bezig">…</span>';
+    if (b.overgeslagen) {
+      const uitleg = { geboekt: 'heeft al een webinar-call geboekt', aankomende_afspraak: 'heeft al een aankomende afspraak' }[b.overgeslagen] || b.overgeslagen;
+      return `<span title="Overgeslagen: ${esc(uitleg)}" style="font-size:11px;color:var(--text-3)">overgeslagen</span>`;
+    }
     const m = b.mail && b.mail.ok ? '✉✓' : '✉✗';
     const w = b.wa && b.wa.ok ? 'WA✓' : (b.wa && b.wa.overgeslagen ? 'WA–' : 'WA✗');
     const titel = `mail: ${b.mail && b.mail.ok ? 'verstuurd' : (b.mail && b.mail.fout) || '?'} · WhatsApp: ${b.wa && b.wa.ok ? 'verstuurd' : (b.wa && (b.wa.overgeslagen || b.wa.fout)) || '?'}`;
@@ -210,14 +216,14 @@
     if (st.aanm.error) return `<div style="padding:12px;color:var(--rose);font-size:12px">${esc(st.aanm.error)}</div>`;
     if (!st.aanm.rows.length) return '<div style="padding:12px;color:var(--text-3);font-size:12px">Nog geen aanmelders voor deze week.</div>';
     return `<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr><th>Naam</th><th>E-mail</th><th>Telefoon</th><th>Bron</th><th>Aangemeld</th><th>Bevestiging</th><th>Dag ervoor</th><th>Uur ervoor</th><th>Live</th></tr></thead>
+      <thead><tr><th>Naam</th><th>E-mail</th><th>Telefoon</th><th>Bron</th><th>Aangemeld</th><th>Bevestiging</th><th>Dag ervoor</th><th>Uur ervoor</th><th>Live</th><th title="Na-webinar opvolging, de webinar-avond (alleen wie geen call boekte)">Nudge 1</th><th title="Na-webinar opvolging, de dag erna">Nudge 2</th></tr></thead>
       <tbody>${st.aanm.rows.map((a) => `<tr${a.is_test ? ' style="opacity:.55"' : ''}>
         <td>${esc(a.voornaam || '—')}${a.verplaatst_van_sessie_id ? ' <span class="pill pill-neutral nodot" title="Doorgeschoven van een overgeslagen week">verplaatst</span>' : ''}${a.is_test ? ' <span class="pill pill-neutral nodot">test</span>' : ''}</td>
         <td class="mono">${esc(a.email)}</td><td class="mono">${esc(a.telefoon || '—')}</td><td>${esc(a.bron || '—')}</td>
         <td>${esc(fmtMoment(a.aangemeld_op))}</td>
-        <td>${vinkje(a, 'bevestiging')}</td><td>${vinkje(a, 'dag')}</td><td>${vinkje(a, 'uur')}</td><td>${vinkje(a, 'live')}</td>
+        <td>${vinkje(a, 'bevestiging')}</td><td>${vinkje(a, 'dag')}</td><td>${vinkje(a, 'uur')}</td><td>${vinkje(a, 'live')}</td><td>${vinkje(a, 'opvolging_1')}</td><td>${vinkje(a, 'opvolging_2')}</td>
       </tr>`).join('')}</tbody></table></div>
-      <div style="font-size:11px;color:var(--text-3);padding:6px 2px">✉ = mail · WA = WhatsApp · ✓ verstuurd · ✗ mislukt · – overgeslagen (bv. template nog niet goedgekeurd of geen telefoon). Hover voor details.</div>`;
+      <div style="font-size:11px;color:var(--text-3);padding:6px 2px">✉ = mail · WA = WhatsApp · ✓ verstuurd · ✗ mislukt · – overgeslagen (bv. template nog niet goedgekeurd of geen telefoon). Nudge 1/2 = opvolging na het webinar voor wie geen call boekte ("overgeslagen" = al geboekt of al een afspraak). Hover voor details.</div>`;
   }
 
   function sessiesHtml(r) {
