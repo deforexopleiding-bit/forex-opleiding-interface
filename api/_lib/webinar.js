@@ -40,6 +40,8 @@ export const MAIL_VAN = 'events@deforexopleiding.nl';
 export const AANTAL_WEKEN_VOORUIT = 6;
 export const WA_MODULE = 'events';
 const ZOOM_ONTBREEKT = 'volgt vóór de start';
+/** Embed van de sessie van een aanmelding — expliciet via sessie_id (zie cronRonde). */
+export const SESSIE_EMBED = 'webinar_sessies!webinar_aanmeldingen_sessie_id_fkey!inner';
 
 // ── Tijd (puur) ──────────────────────────────────────────────────────────────
 
@@ -403,8 +405,13 @@ export async function cronRonde(sb, { nu = new Date(), wachtMs, budgetMs = 45 * 
       .lte('starts_at', new Date(nu.getTime() + 25 * UUR).toISOString());
     if (sErr) { fout('sessies lezen', sErr); continue; }
     // Bevestigingen die nog openstaan (endpoint faalde / doorgeschoven) — ook verder vooruit.
+    // De koppeling MOET bij naam: webinar_aanmeldingen heeft twee FK's naar
+    // webinar_sessies (sessie_id én verplaatst_van_sessie_id). Een kale
+    // webinar_sessies!inner gaf PGRST201 ("more than one relationship") en dus
+    // nooit een bevestiging na doorschuiven (2026-10-12). Resultaatsleutel blijft
+    // 'webinar_sessies'.
     const { data: open, error: oErr } = await sb.from('webinar_aanmeldingen')
-      .select('*, webinar_sessies!inner(*)')
+      .select(`*, ${SESSIE_EMBED}(*)`)
       .is('bevestiging_op', null).eq('is_test', false)
       .eq('webinar_sessies.status', 'gepland').eq('webinar_sessies.reeks_id', reeks.id)
       .gt('webinar_sessies.starts_at', nu.toISOString())

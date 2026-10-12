@@ -182,7 +182,14 @@ function nepDb() {
       then(ok, nok) {
         const rijen = tab[t];
         let res;
-        const verrijk = (r) => (kolommen.includes('webinar_sessies!inner') ? { ...r, webinar_sessies: tab.webinar_sessies.find((s) => s.id === r.sessie_id) } : { ...r });
+        // Zoals PostgREST: webinar_aanmeldingen heeft twee FK's naar webinar_sessies
+        // (sessie_id + verplaatst_van_sessie_id). Een embed zonder FK-naam is
+        // dubbelzinnig → PGRST201; met de sessie_id-FK → de sessie van de aanmelding.
+        const embed = t === 'webinar_aanmeldingen' && /(^|[\s,])webinar_sessies[!(]/.test(kolommen) ? kolommen.match(/webinar_sessies(![^(]*)?\(/) : null;
+        if (embed && !/^!webinar_aanmeldingen_sessie_id_fkey(!inner)?$/.test(embed[1] || '')) {
+          return Promise.resolve({ data: null, error: { code: 'PGRST201', message: "Could not embed because more than one relationship was found for 'webinar_aanmeldingen' and 'webinar_sessies'" } }).then(ok, nok);
+        }
+        const verrijk = (r) => (embed ? { ...r, webinar_sessies: tab.webinar_sessies.find((s) => s.id === r.sessie_id) } : { ...r });
         if (op === 'insert') {
           const nieuw = { id: id(), aangemeld_op: new Date().toISOString(), bevestiging_op: null, reminder_dag_op: null, reminder_uur_op: null, live_op: null, berichten: {}, is_test: false, verplaatst_van_sessie_id: null, ...data };
           if (t === 'webinar_aanmeldingen' && rijen.some((r) => r.sessie_id === nieuw.sessie_id && r.email.toLowerCase() === nieuw.email.toLowerCase())) {
@@ -301,7 +308,10 @@ test('overslaan: aanmelders schuiven door, nieuwe bevestiging via de cron, de ov
   assert.equal(thomas.bevestiging_op, null);
 
   const uit = await W.cronRonde(db, { nu: new Date('2026-10-08T10:01:00Z'), wachtMs: 0 });
+  assert.equal(uit.fouten, 0, 'geen PGRST201 op de bevestigingsquery: ' + uit.eerste_fouten.join(' | '));
   assert.equal(uit.bevestiging, 1, 'nieuwe bevestiging voor de doorgeschoven aanmelder');
+  assert.ok(thomas.bevestiging_op, 'bevestiging_op gezet → niet nog eens');
+  assert.equal((await W.cronRonde(db, { nu: new Date('2026-10-08T10:02:00Z'), wachtMs: 0 })).bevestiging, 0, 'volgende minuut niets dubbel');
   assert.match(verzonden.mails[0].subject, /verplaatst naar maandag 19 oktober/);
   assert.deepEqual(verzonden.wa[0].variables.slice(1, 3), ['maandag 19 oktober', '19:00']);
 
@@ -314,6 +324,25 @@ test('overslaan: aanmelders schuiven door, nieuwe bevestiging via de cron, de ov
   // Nieuwe aanmelders zien 12 okt niet meer.
   const n = await W.meldAan(db, { voornaam: 'Mlak', email: 'm@example.com', telefoon: null, bron: 'webinar-v1', nu: DONDERDAG });
   assert.equal(n.sessie.datum, '2026-10-19');
+});
+
+test('cron: openstaande bevestiging (endpoint faalde) wordt alsnog verstuurd; query noemt de sessie_id-FK', async () => {
+  reset();
+  const db = nieuweDb();
+  const r = await W.meldAan(db, { voornaam: 'Iris', email: 'i@example.com', telefoon: '+31600000055', bron: 'webinar-v2', nu: DONDERDAG });
+  // Bevestiging bij aanmelden "mislukt": kolom terug op NULL, zoals na een fout.
+  db.tab.webinar_aanmeldingen.find((a) => a.id === r.aanmelding.id).bevestiging_op = null;
+  reset();
+  const uit = await W.cronRonde(db, { nu: new Date('2026-10-08T10:05:00Z'), wachtMs: 0 });
+  assert.equal(uit.fouten, 0, uit.eerste_fouten.join(' | '));
+  assert.equal(uit.bevestiging, 1);
+  assert.equal(verzonden.mails.length, 1);
+  assert.equal(W.SESSIE_EMBED, 'webinar_sessies!webinar_aanmeldingen_sessie_id_fkey!inner');
+  // Bron: de bevestigingsquery gebruikt de benoemde embed; de reminder-query is ongewijzigd (geen embed).
+  const src = readFileSync(join(ROOT, 'api/_lib/webinar.js'), 'utf8');
+  assert.match(src, /\.select\(`\*, \$\{SESSIE_EMBED\}\(\*\)`\)/);
+  assert.doesNotMatch(src, /select\(['`][^'`]*webinar_sessies!inner/, 'geen kale (dubbelzinnige) embed meer in een query');
+  assert.match(src, /from\('webinar_aanmeldingen'\)\.select\('\*'\)\s*\n\s*\.eq\('sessie_id', sessie\.id\)\.eq\('is_test', false\)/, 'reminder-query ongewijzigd');
 });
 
 test('geen actieve reeks of alles overgeslagen → geenSessie', async () => {
