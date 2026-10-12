@@ -1544,8 +1544,7 @@
      klaargezet -- de server weigert vóór hij iets aanmaakt. */
   async function haalDoelVraag(id) {
     try {
-      const token = await (window.AuthShared && window.AuthShared.getAccessToken
-        ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const token = await haalToken();
       const r = await fetch('/api/iris-actie', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
