@@ -5213,8 +5213,15 @@
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-width:0">
           ${_inboxThreadHeaderHtml(convId)}
+          <!-- min-height:0 op de draad (H6) en min-width:0 op de schrijfbalk (H11-
+               kandidaat): derde keer dezelfde val in dit bestand. In een
+               flexkolom is de standaard min-*:auto, en dan weigert een vak
+               kleiner te worden dan zijn inhoud. De schrijfbalk heeft bij een
+               dicht 24-uursvenster een <select> waarvan de breedte door de
+               langste optietekst bepaald wordt; zonder min-width:0 duwt die de
+               kolom op en loopt het rechterpaneel uit beeld. -->
           <div id="wbxInboxThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
-          <div id="wbxInboxCompose">${_inboxComposeHtml(convId)}</div>
+          <div id="wbxInboxCompose" style="min-width:0">${_inboxComposeHtml(convId)}</div>
         </div>
         <div id="wbxInboxRightPane" style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
           ${_inboxKlantgegevensHtml(convId)}

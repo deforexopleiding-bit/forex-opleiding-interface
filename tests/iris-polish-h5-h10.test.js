@@ -122,7 +122,7 @@ test('H10: een kanaalwissel hertekent alleen de schrijfbalk', () => {
   const blok = WBX.slice(i, WBX.indexOf('\n  };', i));
   assert.match(blok, /_repaintInboxCompose\(\)/);
   assert.match(WBX, /function _repaintInboxCompose\(\)/);
-  assert.match(WBX, /<div id="wbxInboxCompose">/, 'de schrijfbalk heeft een eigen node nodig');
+  assert.match(WBX, /<div id="wbxInboxCompose" style="min-width:0">/, 'de schrijfbalk heeft een eigen node nodig');
   // En een terugval, want niets doen is erger dan te veel hertekenen.
   assert.match(blok, /if \(!_repaintInboxCompose\(\)\) \{/);
   assert.match(blok, /window\.DFO\?\.render\?\.\(\)/);
@@ -135,4 +135,26 @@ test('beide gewijzigde schermen hebben een nieuw nummer', () => {
   // niemand.
   assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=23/);
   assert.match(INDEX, /views\/wanbetalers-v2\.js\?v=67/);
+});
+
+// ── H11 — kandidaat, geen bewezen fix ───────────────────────────────────────
+
+test('H11-kandidaat: de schrijfbalk mag krimpen', () => {
+  // Derde keer dezelfde val in dit bestand: in een flexkolom is de standaard
+  // min-*:auto, en dan WEIGERT een vak kleiner te worden dan zijn inhoud.
+  //
+  // Bij een dicht 24-uursvenster rendert de schrijfbalk een <select> met de
+  // templatelijst, en de breedte van een <select> wordt bepaald door zijn
+  // langste optietekst ("<naam> · UTILITY"). De middenkolom mág krimpen
+  // (min-width:0), zijn inhoud niet — dus loopt die over en wordt het
+  // rechterpaneel uit beeld geduwd.
+  //
+  // Dit is een KANDIDAAT. Het ⋮-paneel is position:absolute en kan de
+  // kolommen niet verzetten, en de buitenste rij heeft geen flex-wrap met
+  // minima 260+0+260 — dus wrappen kan hij niet. Deze regel haalt de enige
+  // oorzaak weg die ik uit de bron kan aanwijzen; gebeurt het daarna nog,
+  // dan weten we dat het de select niet was.
+  assert.match(WBX, /id="wbxInboxCompose" style="min-width:0"/);
+  // En de middenkolom zelf had hem al — anders zou krimpen daar al stoppen.
+  assert.match(WBX, /<div style="flex:1;display:flex;flex-direction:column;min-width:0">/);
 });
