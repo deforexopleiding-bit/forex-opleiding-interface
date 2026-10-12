@@ -19,7 +19,8 @@ new Function('window', 'module', src)(win, mod);
 const G = mod.exports;
 
 const LIJST = readFileSync(new URL('../api/inbox-conversations-list.js', import.meta.url), 'utf8');
-const SEND  = readFileSync(new URL('../api/inbox-send.js', import.meta.url), 'utf8');
+// Het verzendpad zelf staat in de lib; api/inbox-send.js is het omhulsel.
+const SEND  = readFileSync(new URL('../api/_lib/inbox-verzenden.js', import.meta.url), 'utf8');
 const SCHERM = readFileSync(new URL('../modules/klanten-v2/views/wanbetalers-v2.js', import.meta.url), 'utf8');
 
 const G1 = { id: '1', customer_id: 'k', iris_status: 'wacht_op_ons' };
