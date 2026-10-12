@@ -243,15 +243,31 @@ test('de timers worden opgeruimd', () => {
   assert.match(b, /if \(!document\.getElementById\('wbxInboxList'\)\) \{ _uitstelStop\(\); return; \}/);
 });
 
-test('weggaan met een lopende teller vraagt om bevestiging', () => {
-  // Weggaan betekent hier: het bericht gaat niet. Dat mag je weten.
+test('weggaan vraagt om bevestiging — maar alleen als het bericht NIET geparkeerd staat', () => {
+  // Zolang het venster in het scherm wachtte, betekende weggaan: het bericht
+  // gaat niet. Sinds het op de server geparkeerd wordt, is dat niet meer waar —
+  // dan pikt de cron het op en vertrekt het alsnog.
+  //
+  // De waarschuwing hoort dus precies zo lang te bestaan als het risico. Een
+  // browser die het altijd vraagt, leert je "ja hoor" te klikken zonder te
+  // lezen, en dan werkt hij ook niet meer op het moment dat het wél uitmaakt.
   const b = lees(SCHERM);
-  assert.match(b, /addEventListener\('beforeunload'[\s\S]{0,200}if \(!_ui\.inbox\.uitstel\) return;/);
+  const i = b.indexOf("addEventListener('beforeunload'");
+  assert.ok(i > 0, 'de waarschuwing hoort te bestaan');
+  const blok = b.slice(i, i + 400);
+  assert.match(blok, /if \(!u\) return;/, 'geen teller, geen waarschuwing');
+  assert.match(blok, /if \(u\.geparkeerdId\) return;/, 'wel geparkeerd, geen waarschuwing');
+  assert.match(blok, /preventDefault\(\)/);
 });
 
-test('de balk zegt erbij dat het scherm open moet blijven', () => {
-  // De beperking hoort op het scherm te staan waar hij geldt, niet alleen in
-  // een commit-bericht.
+test('de balk zegt de waarheid over of het scherm open moet blijven', () => {
+  // Twee verschillende situaties, twee verschillende teksten. Zou er altijd
+  // "laat dit scherm open" staan terwijl het bericht veilig op de server
+  // staat, dan blijft iemand zitten wachten voor niets — en erger: dan leert
+  // hij die regel te negeren, ook als hij wél klopt.
   const b = lees(SCHERM);
   assert.match(b, /Laat dit scherm open tot de teller op nul staat/);
+  assert.match(b, /Staat klaar op de server/);
+  assert.match(b, /_ui\.inbox\.uitstel\?\.geparkeerdId/,
+    'welke van de twee er staat, hoort van het parkeren af te hangen');
 });

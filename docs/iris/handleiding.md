@@ -66,6 +66,30 @@ Na Verstuur telt er dertig seconden af, met een knop **Toch niet**. Binnen die
 dertig seconden kun je het nog tegenhouden. Daarna is het weg, en dan is het
 ook echt weg — er is geen terughalen.
 
+**Je mag het scherm intussen sluiten.** Het bericht staat op de server klaar,
+niet in je browser. Klap je je laptop dicht of valt je verbinding weg, dan
+vertrekt het gewoon op tijd. Dat stond er vroeger anders: toen betekende het
+tabblad sluiten dat het bericht nooit wegging, en niets zei dat. De balk zegt
+nu zelf welke van de twee situaties geldt.
+
+Eén gevolg daarvan: druk je op **Toch niet** op het moment dat hij net vertrekt,
+dan krijg je te horen dat het te laat is. Dat is met opzet — een melding
+"teruggehaald" terwijl de klant het bericht al heeft, is erger dan geen knop.
+
+**Ging er iets mis, dan staat dat boven de schrijfbalk.** Twee soorten, en het
+verschil is belangrijk:
+
+* **"Dit bericht is niet verstuurd"** — het versturen is nooit begonnen. Er is
+  met zekerheid niets bij de klant aangekomen. Je kunt het gerust opnieuw sturen.
+* **"Niet zeker of dit vertrok"** — we hebben het aangeboden en geen antwoord
+  gekregen. Wij weten dus niet of de klant het heeft. Kijk eerst het gesprek na;
+  stuur het pas opnieuw als je ziet dat het er niet staat.
+
+In beide gevallen is er een knop **Zet de tekst terug in het veld**. Die vult
+alleen het tekstvak — hij verstuurt niets. Dat is met opzet: niets in het systeem
+stuurt een bericht nog een tweede keer, want één keer te weinig is op te lossen
+en twee keer te veel niet. De melding verdwijnt na een dag van zichzelf.
+
 Klopt het antwoord niet? Spreek gewoon in wat er anders moet en druk op
 **Opnieuw**. Iris overschrijft het concept; er komt geen tweede versie naast.
 

@@ -211,22 +211,146 @@ je 'm niet meer. Het ongedaan-venster grijpt in op het moment dat het inzicht
 kómt — één seconde later, als je je eigen zin ziet staan. Bijkomend: het scheelt
 een klik per antwoord, en de audit telde er vier.
 
-#### De beperking, en waarom hij de goede kant op valt
-
-Het wachten gebeurt **in het scherm**, niet op de server. Sluit je het tabblad
-binnen die dertig seconden, dan vertrekt het bericht niet. De balk zegt dat er
-zelf bij, en bij het wegklikken vraagt de browser om bevestiging.
-
-Dat is een echte beperking. Hij valt alleen de goede kant op: er gaat niets
-ongewild wég. Het alternatief — de verzending op de server parkeren — vraagt een
-tabel, een cron en een ingreep in de verzendweg die Joost deelt. Dat is een
-aparte beslissing en een aparte PR; deze versie lost het geval op waar de klacht
-over ging (je klikt, je ziet het, je haalt het terug) zonder één regel aan die
-verzendweg te veranderen.
-
 Eén bericht tegelijk: zolang er eentje aftelt, staat de schrijfbalk op de teller.
 Een tweede beginnen terwijl de eerste nog terug kan, maakt van "welke haal ik
 terug?" een raadsel.
+
+#### G2 op de server — de beperking is weg
+
+De eerste versie liet het venster **in het scherm** wachten. Sloot je het tabblad
+binnen die dertig seconden, dan vertrok het bericht nooit. De balk zei dat erbij
+en de browser vroeg om bevestiging, maar het bleef een gat: je dénkt dat je
+geantwoord hebt, en de klant wacht.
+
+**Nu parkeert de server het bericht meteen** in `inbox_uitgesteld`. Daarna zijn
+er twee wegen, en dat is met opzet:
+
+| Situatie | Wie geeft het startsein | Wanneer |
+|---|---|---|
+| tabblad blijft open | het scherm zelf | **exact** 30 s |
+| tabblad is dicht | een cron | binnen de minuut erna |
+
+**Waarom hybride en niet gewoon een cron.** Een Vercel-cron draait hooguit één
+keer per minuut. Alles aan de cron overlaten zou betekenen dat het venster in de
+praktijk tussen de 30 en 90 seconden ligt. Dat is niet "ongeveer dertig
+seconden" — dat is een venster waarvan je niet weet wanneer het dicht is, en dan
+blijf je ernaar kijken in plaats van door te werken.
+
+**Het ding dat nooit mag gebeuren.** Het scherm en de cron kunnen tegelijk
+besluiten dat dit bericht nú weg mag. Zonder bescherming vertrekt het dan twee
+keer, en bij een klant met een achterstand is dat geen dubbel berichtje maar een
+reden om te twijfelen aan alles wat je stuurt.
+
+De bescherming is één UPDATE die alleen slaagt als de rij nog op `gepland` staat
+én nog van niemand is. Twee die tegelijk komen: één krijgt een rij, de ander
+niets. Hetzelfde patroon als `cron-lisa-delayed`. Drie gevallen liggen vast in
+tests: scherm en cron tegelijk, twee cron-runs tegelijk, en annuleren ná de
+claim.
+
+**Annuleren ná de claim lukt niet, en dat is met opzet.** Op dat moment is het
+bericht onderweg. Een knop die zegt dat hij het tegenhield terwijl de klant het
+al heeft, is erger dan een knop die zegt dat het te laat is.
+
+**Parkeren keurt met letterlijk dezelfde code als versturen** — `keurGesprek()`
+uit `_lib/inbox-verzenden.js`. Bestaat het gesprek, bij welke module hoort het
+(via de **klant**, want het 360dialog-hoofdnummer draagt er meerdere), mag deze
+medewerker daarin, en staat het venster open? Iets parkeren dat straks tóch
+geweigerd wordt, geeft dertig seconden hoop en is dan alsnog nergens.
+
+Dat het 24-uursvenster daardoor óók bij het parkeren gekeurd wordt, is geen
+probleem: een venster dat nu dicht is, is over dertig seconden zeker dicht. Het
+omgekeerde — nu open, straks dicht — wordt bij het versturen alsnog gezien, want
+daar draait precies dezelfde keuring nog een keer. Is het dan dicht, dan komt de
+rij op `mislukt` met een leesbare reden die in het gesprek te zien is. Nooit
+stil.
+
+**De waarschuwing bij het wegklikken is er nog, maar alleen als hij waar is.**
+Staat het bericht geparkeerd, dan mag je het scherm dicht doen en zegt de balk
+dat ook. Een browser die het altijd vraagt, leert je "ja hoor" te klikken zonder
+te lezen — en dan werkt hij ook niet meer op het moment dat het wél uitmaakt.
+
+#### Liever niet dan dubbel
+
+Dit is de regel die boven alle andere staat: **een bericht in onbekende toestand
+wordt nooit automatisch opnieuw verstuurd.**
+
+Het geval: een proces claimt een rij, roept de transportlaag aan, en valt om
+vóór het de status kan wegschrijven. De voor de hand liggende oplossing is de
+claim wissen zodat iemand anders hem oppakt. Die deur zit hier dicht. Op het
+moment dat zo'n proces omviel, kán het bericht al geaccepteerd zijn, en dan is
+vrijgeven hetzelfde als twee keer versturen.
+
+Een eerdere opzet keek of er ná het claim-moment een uitgaand bericht in de
+draad stond, en gaf de rij vrij als dat er niet was. Dat is twee keer gokken in
+één beweging: een uitgaand bericht van iemand ánders leest als "dit is
+verstuurd", en géén uitgaand bericht sluit niet uit dat de transportlaag het wél
+aannam en alleen het wegschrijven misging.
+
+Daarom kijken we naar het enige dat we zeker weten. `meta_aangeroepen_op` wordt
+in een eigen UPDATE gezet **vóór** de transportlaag wordt aangeroepen — lukt die
+UPDATE niet, dan bieden we ook niets aan. Vijf minuten na een claim die nooit
+afgerond werd (ruim boven de 60 s die een Vercel-functie mag draaien):
+
+| `meta_aangeroepen_op` | stand | wat het scherm zegt |
+|---|---|---|
+| leeg | `mislukt` | "Dit bericht is niet verstuurd" — met zekerheid niets vertrokken, opnieuw sturen is veilig |
+| gevuld | `onbekend` | "Niet zeker of dit vertrok" — kijk de draad na vóór je het opnieuw stuurt |
+
+#### En als de transportlaag wél antwoordt, maar met een fout
+
+Dan is het dezelfde vraag, en hangt het antwoord aan wát voor fout. Dat
+onderscheid wordt gemaakt door `zekerheidVanFout()` in
+`_lib/inbox-wachtrij.js` (zuiver, dus na te rekenen zonder databank);
+`leverAfBijMeta()` hangt de uitkomst als veld `zekerheid` náást de payload, en
+het endpoint en de cron kiezen daarop de eindstand.
+
+| Wat er terugkomt | zekerheid | stand |
+|---|---|---|
+| 4xx mét een echte providercode (131047 buiten het venster, 131026 niet bezorgbaar, 100 ongeldig) | `geweigerd` | `mislukt` |
+| niets aangeboden (geen configuratie — de transportlaag gooit vóór de aanroep) | `geweigerd` | `mislukt` |
+| geen antwoord: timeout, netwerkfout, verbinding weg | `onzeker` | `onbekend` |
+| 5xx — een storing bij hen | `onzeker` | `onbekend` |
+| 4xx waarvan het foutlichaam onleesbaar is | `onzeker` | `onbekend` |
+
+Die laatste rij is subtieler dan hij lijkt. De transportlaag doet
+`err?.code ?? res.status`, dus bij een onleesbaar foutlichaam ís `metaCode`
+diezelfde HTTP-status nog een keer. Een code die gelijk is aan de status is
+daarom géén providercode, en dan weten we niets — er staat een toets op die dat
+vastpint, inclusief de regel in `meta-whatsapp.js` waar die terugval staat.
+
+Waarom het verschil ertoe doet: een 4xx met code 131047 bestáát omdat het
+bericht niet is aangenomen. Een 502 van een tussenliggende laag zegt daar niets
+over — het verzoek kan de overkant wél bereikt hebben en pas het antwoord kan
+verdwenen zijn. "Mislukt" zeggen zou daar een zekerheid beweren die we niet
+hebben, en de knop "stuur het gerust opnieuw" naast een bericht zetten dat de
+klant al heeft.
+
+Beide zijn **eindstanden**. Geen cron, geen scherm en geen endpoint raakt zo'n
+rij nog aan; er is niet eens een actie voor. Wil je het bericht alsnog sturen,
+dan zet het scherm de tekst terug in het veld en doe je het als nieuw bericht —
+met je ogen open. De knop die dat doet, verstuurt zelf niets.
+
+Van de twee manieren waarop dit mis kan gaan is er één veel erger dan de andere.
+Niet verstuurd en luid gemeld is binnen een minuut recht te zetten door een
+mens. Twee keer verstuurd naar een klant met een achterstand is niet recht te
+zetten.
+
+#### En het scherm zegt het
+
+Boven de schrijfbalk staat per gesprek wat er in het laatste etmaal misging:
+stand, reden, de tekst zelf, en die ene knop. Dat venster van een etmaal loopt
+van zichzelf leeg — geen wegklik-kolom, geen "gezien"-knop. Wat je na een dag
+nog niet hebt opgepakt, is geen melding meer maar een verwijt.
+
+De balk staat er ook terwijl de teller van een vólgend bericht loopt. Dat is
+bewust: het is precies het moment waarop je wil weten dat de vorige niet aankwam.
+
+> **Wat nog in het scherm wacht: templates.** Die lopen via een ánder endpoint
+> (`inbox-send-template`), dat zijn variabelen pas op het verzendmoment opzoekt.
+> Dat pad is niet mee verhuisd, dus voor een template geldt de oude beperking
+> nog: scherm dicht binnen dertig seconden betekent dat hij niet vertrekt. De
+> balk zegt per geval welke van de twee waar is. Dit is bewust een aparte stap —
+> het meeverhuizen van die resolutie is een tweede verbouwing.
 
 ### G6 — mail bij een gesprek dat nog geen klant heeft
 
