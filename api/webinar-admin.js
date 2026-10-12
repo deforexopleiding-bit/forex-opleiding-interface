@@ -4,6 +4,10 @@
 //
 // GET                     → { reeks, sessies: [{ …, aantal }] }  (4 weken terug + komende 8)
 // GET ?sessie_id=<uuid>   → { sessie, aanmeldingen: [...] }
+// GET ?qr=1               → { url, png, svg } — QR van de boekingslink voor de
+//                           webinar (fase 2, 2026-10-12). Karl deelt 'm tijdens
+//                           het webinar; boekingen via die link krijgen
+//                           booking_source='webinar' + de setter van die bron.
 //   RBAC: events.event.view
 // POST { actie, … }       RBAC: events.event.edit
 //   'reeks_opslaan'  { titel?, zoom_url?, starttijd?, duur_min?, actief? }
@@ -15,7 +19,21 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import QRCode from 'qrcode';
 import { haalReeks, zorgVoorSessies, slaSessieOver, nlNaarUtc, MIN } from './_lib/webinar.js';
+
+/** De boekingslink achter de QR (booking_sources.slug 'webinar'). */
+export const WEBINAR_BOEKINGSLINK = 'https://deforexopleiding.nl/agenda/webinar';
+
+/** QR van de boekingslink: PNG (data-URL, 1024 px) + SVG. Huisstijl-navy op wit. */
+export async function webinarQr(url = WEBINAR_BOEKINGSLINK) {
+  const opties = { errorCorrectionLevel: 'M', margin: 2, color: { dark: '#10284A', light: '#FFFFFF' } };
+  const [png, svg] = await Promise.all([
+    QRCode.toDataURL(url, { ...opties, width: 1024 }),
+    QRCode.toString(url, { ...opties, type: 'svg' }),
+  ]);
+  return { url, png, svg };
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -78,6 +96,7 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       if (!(await requirePermission(req, 'events.event.view'))) return res.status(403).json({ error: 'Geen rechten (events.event.view)' });
+      if (req.query?.qr) return res.status(200).json(await webinarQr());
       const reeks = await haalReeks(supabaseAdmin);
       if (!reeks) return res.status(200).json({ reeks: null, sessies: [], migratie_nodig: true });
 

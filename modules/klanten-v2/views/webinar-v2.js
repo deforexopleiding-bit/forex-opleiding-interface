@@ -10,6 +10,9 @@
 //     actieve week en krijgen een nieuwe bevestiging) / Herstellen, en een
 //     afwijkende Zoom-link voor die week.
 //   - Aanmelders van een week, met per moment of mail/WhatsApp verstuurd is.
+//   - Fase 2 (2026-10-12): QR-code van de boekingslink /agenda/webinar (gratis
+//     strategie-scan met Dave), groot te tonen en te downloaden als PNG. De
+//     link staat in Leadsonderhoud → Bronnen op setter Karl → zijn 3%.
 // Data: GET/POST /api/webinar-admin (events.event.view / events.event.edit).
 (function () {
   'use strict';
@@ -26,6 +29,7 @@
   const st = window.__wbState = window.__wbState || {
     loading: false, fetched: false, error: null, reeks: null, sessies: [], migratieNodig: false,
     open: null, aanm: { loading: false, error: null, rows: [] }, bezig: false, _seq: 0,
+    qr: { loading: false, fout: null, data: null }, qrGroot: false,
   };
 
   function rerender() { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); }
@@ -49,6 +53,20 @@
       console.error('[webinar-v2] laden mislukt:', e && e.status, e && (e.body || e.message));
     }
     st.loading = false; st.fetched = true;
+    rerender();
+  }
+
+  async function laadQr() {
+    if (st.qr.loading || st.qr.data) return;
+    st.qr = { loading: true, fout: null, data: null };
+    try {
+      const j = await window.KV.authedJson('/api/webinar-admin?qr=1');
+      st.qr = { loading: false, fout: null, data: j && j.png ? j : null };
+      if (!st.qr.data) st.qr.fout = 'Geen QR ontvangen';
+    } catch (e) {
+      console.error('[webinar-v2] QR laden mislukt:', e && e.status, e && (e.body || e.message));
+      st.qr = { loading: false, fout: 'Kon de QR-code niet maken', data: null };
+    }
     rerender();
   }
 
@@ -119,6 +137,7 @@
     if (nieuw === null) return;
     await post({ actie: 'sessie_zoom', sessie_id: id, zoom_url: nieuw }, nieuw.trim() ? 'Zoom-link voor deze week opgeslagen' : 'Standaard Zoom-link hersteld');
   };
+  window.__wbQrGroot = function (aan) { st.qrGroot = !!aan; rerender(); };
   window.__wbOpen = function (id) {
     st.open = st.open === id ? null : id;
     if (st.open) laadAanmelders(st.open); else rerender();
@@ -145,6 +164,34 @@
           <span style="font-size:11.5px;color:var(--text-3)">Elke maandag. Aanmeldpagina's: /webinar-v1 en /webinar-v2 op de website.</span>
         </div>
       </div></div>`;
+  }
+
+  function qrHtml() {
+    if (!st.qr.data && !st.qr.loading && !st.qr.fout) queueMicrotask(laadQr);
+    const q = st.qr.data;
+    const beeld = q
+      ? `<img src="${esc(q.png)}" alt="QR-code naar ${esc(q.url)}" width="220" height="220" style="display:block;width:220px;height:220px;border-radius:8px;border:1px solid var(--border);background:#fff">`
+      : `<div style="width:220px;height:220px;display:grid;place-items:center;border:1px dashed var(--border);border-radius:8px;color:var(--text-3);font-size:12px">${st.qr.fout ? esc(st.qr.fout) : 'QR maken…'}</div>`;
+    const groot = q && st.qrGroot ? `
+      <div onclick="if(event.target===this)__wbQrGroot(false)" style="position:fixed;inset:0;z-index:9000;background:rgba(10,20,35,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px">
+        <img src="${esc(q.png)}" alt="QR-code naar ${esc(q.url)}" style="width:min(80vh,90vw);height:auto;background:#fff;border-radius:12px">
+        <div style="color:#fff;font-size:18px;font-weight:600">Plan je gratis strategie-scan · deforexopleiding.nl/agenda/webinar</div>
+        <button class="btn btn-ghost btn-sm" style="background:#fff" onclick="__wbQrGroot(false)">Sluiten</button>
+      </div>` : '';
+    return `<div class="card" style="margin-bottom:14px">
+      <div class="card-head"><div class="card-title">QR-code: gratis strategie-scan</div></div>
+      <div class="card-body" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+        ${beeld}
+        <div style="flex:1;min-width:220px;font-size:12.5px;line-height:1.55">
+          <div>Laat deze QR tijdens het webinar zien. Deelnemers plannen er een gratis strategie-scan mee bij Dave.</div>
+          <div style="margin:6px 0"><a href="${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}" target="_blank" rel="noopener" class="mono">${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}</a></div>
+          <div style="color:var(--text-3);font-size:11.5px">Boekingen via deze link krijgen bron "webinar" en de setter van die link (Leadsonderhoud → Bronnen) — die ontvangt de commissie.</div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" ${q ? '' : 'disabled'} onclick="__wbQrGroot(true)">Groot tonen</button>
+            ${q ? `<a class="btn btn-ghost btn-sm" href="${esc(q.png)}" download="webinar-strategie-scan-qr.png">Download PNG</a>` : ''}
+          </div>
+        </div>
+      </div>${groot}</div>`;
   }
 
   function vinkje(a, key) {
@@ -207,7 +254,7 @@
     if (st.migratieNodig || !st.reeks) {
       return '<div class="pad"><div class="card"><div class="card-body" style="font-size:12.5px">De webinar-tabellen ontbreken nog. Draai eerst de migratie <span class="mono">docs/sql-migrations/2026-10-09-webinar-fase1.sql</span>.</div></div></div>';
     }
-    return `<div class="pad">${instellingenHtml(st.reeks)}${sessiesHtml(st.reeks)}</div>`;
+    return `<div class="pad">${instellingenHtml(st.reeks)}${qrHtml()}${sessiesHtml(st.reeks)}</div>`;
   }
 
   window.DFO.VIEWS = window.DFO.VIEWS || {};
