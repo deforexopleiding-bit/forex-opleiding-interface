@@ -263,5 +263,10 @@ test('de lijst is in Instellingen te beheren en wordt daar nagekeken', () => {
 });
 
 test('het scherm heeft een nieuw nummer', () => {
-  assert.match(INDEX, /\.\.\/iris\/iris\.js\?v=22/);
+  // Een getal vastpinnen maakt van deze toets een hek voor élke latere PR die
+  // iris.js aanraakt: hij eist een bump en valt dan om op precies die bump.
+  // H3 zette hem op 22; vanaf hier is alleen "niet lager dan 22" de eis.
+  const m = INDEX.match(/\.\.\/iris\/iris\.js\?v=(\d+)/);
+  assert.ok(m, 'iris.js wordt zonder ?v= geladen');
+  assert.ok(Number(m[1]) >= 22, `?v=${m[1]} is lager dan de 22 van H3`);
 });
