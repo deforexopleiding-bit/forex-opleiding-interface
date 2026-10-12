@@ -74,6 +74,29 @@
        rastercel kleiner te worden dan zijn inhoud, en dan scrollt de draad
        niet maar groeit hij — met de schrijfbalk ergens onder de vouw. */
     .iris-post > *{min-width:0;min-height:0;overflow:hidden}
+
+    /* DE RUIMTE VOLGT DE AANDACHT (P-3).
+
+       Staat er geen gesprek open, dan deed het raster toch alsof: de lijst
+       werd tot 260-320px samengeknepen en de twee kolommen ernaast stonden
+       leeg te zijn omdat de indeling het zo wilde. Twee derde van het scherm
+       deed niets, terwijl het enige dat er wel stond het krapst zat.
+
+       Niets gekozen -> de lijst is het scherm. Zodra je kiest, schuift hij
+       terug naar de smalle kolom en komt de draad ernaast. Dat is dezelfde
+       beweging die elk mailprogramma maakt, en de reden dat die beweging
+       bestaat is precies deze. */
+    .iris-post:not(.heeft-keuze){grid-template-columns:minmax(0,1fr)}
+    .iris-post:not(.heeft-keuze) .iris-post-draad,
+    .iris-post:not(.heeft-keuze) .iris-post-dossier{display:none}
+    .iris-post:not(.heeft-keuze) .iris-post-lijst{border-right:none}
+    /* In de brede stand is er plaats voor de samenvatting die Iris toch al
+       geschreven heeft. In de smalle stand zou diezelfde regel de rij twee
+       keer zo hoog maken voor tekst die je dan afkapt. */
+    .iris-post:not(.heeft-keuze) .iris-rij-samenvatting{
+      white-space:normal;overflow:visible;text-overflow:clip;max-height:none}
+    .iris-post:not(.heeft-keuze) .iris-rij{max-width:840px;margin:0 auto}
+
     .iris-post-lijst{border-right:1px solid var(--border)}
     .iris-post-draad{border-right:1px solid var(--border)}
     .iris-post-dossier{overflow-y:auto}
@@ -161,6 +184,8 @@
     gesprek: { bezig: false, fout: null, data: null, voorId: null },
     dossier: { bezig: false, fout: null, data: null, voorId: null },
     instellingen: { bezig: false, fout: null, data: null, opgehaald: false },
+    // Wat er nú moet gebeuren. Staat op élke tab, dus buiten de tab-toestanden.
+    aandacht: { regel: null, tellingen: null, bezig: false, opgehaald: false },
     pollTimer: null,
     _seq: 0,
 
@@ -342,6 +367,9 @@
       if (document.hidden) return; // een tabblad op de achtergrond hoeft niets
       S.lijst.opgehaald = false;
       haalLijst();
+      // Drie head-tellingen, geen rijen: de balk meeverversen kost niets en
+      // een balk die een uur achterloopt is een balk die liegt.
+      haalAandacht();
     }, POLL_MS);
   }
   function stopPoll() {
@@ -827,6 +855,44 @@
     } catch (e) {
       toast(e?.message || 'Stoppen mislukt', 'error');
     }
+  };
+
+  /**
+   * Wat er nú moet gebeuren.
+   *
+   * Drie head-tellingen op de server, één regel terug. Geen rij wordt
+   * opgehaald, dus dit mag bij elke poll mee zonder dat het iets kost.
+   *
+   * Faalt het, dan verdwijnt de balk en staat er niets. Dat is met opzet: een
+   * balk die "kon niet tellen" zegt is een balk die je leert overslaan, en dan
+   * sla je hem ook over als er wél iets staat.
+   */
+  async function haalAandacht() {
+    const st = S.aandacht;
+    if (st.bezig) return;
+    st.bezig = true;
+    try {
+      const j = await haal('/api/iris-post?actie=aandacht');
+      st.regel = j.regel || null;
+      st.tellingen = j.tellingen || null;
+    } catch (e) {
+      st.regel = null;
+      console.warn('[iris] aandacht niet opgehaald:', e?.message || e);
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+      hertekenen();
+    }
+  }
+
+  /* Springen naar waar het over gaat. De balk is pas iets waard als je er
+     vanaf komt waar het probleem zit; een mededeling die je zelf moet
+     navigeren, is een mededeling die je negeert. */
+  window.__irisAandacht = () => {
+    const r = S.aandacht.regel;
+    if (!r || !r.naar) return;
+    if (r.naar.tab && r.naar.tab !== S.tab) { window.__irisTab(r.naar.tab); }
+    if (r.naar.filter) { window.__irisFilter(r.naar.filter); }
   };
 
   /* ── Belrij en logboek: ophalen ───────────────────────────────────────
@@ -1324,6 +1390,34 @@
 
   const eur = (n) => '€ ' + (Number(n) || 0).toLocaleString('nl-BE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  /**
+   * ÉÉN regel bovenaan, en alleen als er iets is.
+   *
+   * ── DE REGEL ACHTER DE REGEL ──────────────────────────────────
+   * Een balk die er altijd staat, lees je na twee dagen niet meer -- en dan is
+   * hij erger dan geen balk, want hij neemt de plek in van iets dat wél nieuw
+   * is. Is er niets aan de hand, dan is er ook geen balk.
+   *
+   * De volgorde waarin iets wint, staat op de server (_lib/iris/aandacht.js)
+   * en is de volgorde van onomkeerbaarheid: een venster dat dichtgaat heeft
+   * een klok van buiten, een hangende melding is stil kapot, werk dat wacht
+   * loopt niet weg.
+   */
+  function aandachtBalk() {
+    const r = S.aandacht.regel;
+    if (!r || !r.tekst) return '';
+    const dringend = r.toon === 'dringend';
+    const kleur = dringend ? 'var(--amber)' : 'var(--text-2)';
+    const achter = dringend ? 'var(--amber-soft,var(--surface-2))' : 'var(--surface-2)';
+    return `<div onclick="__irisAandacht()" title="Klik om er meteen heen te gaan"
+      style="margin:0 20px 10px;padding:8px 12px;border-radius:8px;background:${achter};
+             border:1px solid ${dringend ? 'var(--amber-line,var(--border))' : 'var(--border)'};
+             font-size:12px;color:${kleur};cursor:pointer;display:flex;gap:8px;align-items:center">
+      <span style="flex:1;min-width:0">${esc(r.tekst)}</span>
+      <span style="font-size:11px;color:var(--text-3);white-space:nowrap">bekijken →</span>
+    </div>`;
+  }
+
   /* ── Opmaak: de drie kolommen ─────────────────────────────────────────── */
 
   function filterBalk() {
@@ -1365,8 +1459,35 @@
     // het hele scherm en zou een rand aan de rechterkant nergens op slaan.
     return `<div style="display:flex;flex-direction:column;height:100%;min-width:0">
       ${filterBalk()}
+      ${lijstTelling()}
       <div id="irisLijst" style="flex:1;overflow-y:auto">${binnen}</div>
       ${pagina}
+    </div>`;
+  }
+
+  /**
+   * Een getal boven de lijst.
+   *
+   * ── HET DROOGTEST-PATROON ───────────────────────────────────────────────
+   * De droogtest in Instellingen ("69 berichten over 7 dagen") was het enige
+   * plekje in Iris dat een ANTWOORD gaf in plaats van een lijst om doorheen te
+   * gaan. Overal waar een lijst staat waar je doorheen moet, hoort eerst te
+   * staan hoe groot hij is en wat ervan dringt.
+   *
+   * Het dringende getal komt van de aandachtstelling en niet uit de geladen
+   * pagina: die toont er vijftig van de driehonderd, en "3 dringt" over een
+   * halve lijst is erger dan geen getal.
+   */
+  function lijstTelling() {
+    const st = S.lijst;
+    if (!st.opgehaald || st.fout || !st.totaal) return '';
+    const woord = st.totaal === 1 ? '1 gesprek' : `${st.totaal} gesprekken`;
+    // Alleen bij het werkfilter is "dringt" hetzelfde getal als de balk; in het
+    // venster-filter zou het de hele lijst zijn, en dat zegt niets.
+    const dringend = (S.filter === 'wacht_op_ons' && S.aandacht.tellingen)
+      ? Math.max(0, Number(S.aandacht.tellingen.venster_bijna_dicht) || 0) : 0;
+    return `<div style="padding:6px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-3)">
+      ${esc(woord)}${dringend ? ` · <span style="color:var(--amber);font-weight:600">${dringend} dringt</span>` : ''}
     </div>`;
   }
 
@@ -1376,7 +1497,7 @@
     const cat = r.categorie ? `<span style="font-size:10px;color:var(--text-3)">${esc(CATEGORIE_LABELS[r.categorie] || r.categorie)}</span>` : '';
     const onzeker = (r.zekerheid !== null && r.zekerheid < 0.5)
       ? `<span title="Iris weet het niet zeker (${Math.round(r.zekerheid * 100)}%)" style="font-size:10px;color:var(--amber)">?</span>` : '';
-    return `<div onclick="__irisKies('${esc(r.id)}')"
+    return `<div onclick="__irisKies('${esc(r.id)}')" class="iris-rij"
       style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${gekozen ? 'var(--surface-2)' : 'transparent'};border-left:3px solid ${gekozen ? 'var(--brand)' : 'transparent'}">
       <div style="display:flex;gap:7px;align-items:baseline;margin-bottom:3px">
         <span style="font-size:12px">${kanaal}</span>
@@ -1384,7 +1505,7 @@
         ${r.ongelezen ? `<span style="font-size:10px;background:var(--brand);color:#fff;border-radius:9px;padding:1px 6px;font-weight:700">${r.ongelezen}</span>` : ''}
         <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${tijdKort(r.laatste_inbound)}</span>
       </div>
-      <div style="font-size:11.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px">
+      <div class="iris-rij-samenvatting" style="font-size:11.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:4px">
         ${esc(r.samenvatting || r.voorbeeld || '—')}
       </div>
       <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
@@ -2187,6 +2308,9 @@
     if (S.tab === 'post' && !S.lijst.opgehaald && !S.lijst.bezig) {
       queueMicrotask(() => { haalLijst(); startPoll(); });
     }
+    // De balk staat op elke tab, dus hij hangt niet aan de Post maar aan de
+    // module. Eén keer bij montage; daarna ververst de poll hem mee.
+    if (!S.aandacht.opgehaald && !S.aandacht.bezig) queueMicrotask(haalAandacht);
 
     const tabs = TABS.map(([v, label]) =>
       `<button class="chip ${S.tab === v ? 'on' : ''}" style="font-size:12px;padding:5px 13px" onclick="__irisTab('${v}')">${esc(label)}</button>`
@@ -2227,6 +2351,7 @@
         </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">${tabs}</div>
       </div>
+      ${aandachtBalk()}
       ${binnen}
     </div>`;
   }
