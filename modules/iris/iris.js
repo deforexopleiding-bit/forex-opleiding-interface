@@ -1033,6 +1033,32 @@
     hertekenen();
   };
 
+  /**
+   * Het detail opnieuw ophalen na een wijziging.
+   *
+   * ── WAAROM NIET DE POST-ANTWOORDEN HERGEBRUIKEN ─────────────────────────
+   * Antwoorden, afsluiten en heropenen gaven alle drie `j.opdracht` terug, en
+   * het scherm zette daar `{ opdracht: j.opdracht, acties: <de oude> }` van.
+   * Dat werkte zolang het detail niets anders bevatte. Sinds de server er
+   * plan_regels, verloop_regels en na_uitvoeren_zin bij levert, wist diezelfde
+   * regel juist de drie dingen die O-1 zichtbaar maakt -- en precies op het
+   * moment dat je er het meest naar wilt kijken: nadat je Iris' vraag
+   * beantwoord hebt en ze een nieuw plan maakte.
+   *
+   * Eén opvraging erbij is goedkoper dan drie plekken die moeten onthouden
+   * welke velden een detail tegenwoordig heeft.
+   */
+  async function herlaadDetail(id) {
+    if (!id || S.opdrachten.open !== id) return;
+    try {
+      S.opdrachten.detail = await haal('/api/iris-opdracht?actie=een&id=' + encodeURIComponent(id));
+    } catch (e) {
+      // Niet fataal: de wijziging zelf is gelukt, alleen het beeld loopt achter.
+      console.warn('[iris] detail niet herladen:', e?.message || e);
+    }
+    hertekenen();
+  }
+
   window.__irisOpdrachtAntwoordTyp = (v) => { S.opdrachten.antwoord = String(v || ''); };
 
   window.__irisOpdrachtAntwoord = async (id, gekozen) => {
@@ -1040,15 +1066,15 @@
     const tekst = (gekozen || st.antwoord || '').trim();
     if (!tekst) return;
     try {
-      const j = await haalRuw('/api/iris-opdracht', {
+      await haalRuw('/api/iris-opdracht', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actie: 'antwoord', id, antwoord: tekst }),
       });
       st.antwoord = '';
-      st.detail = { opdracht: j.opdracht, acties: st.detail?.acties || [] };
       st.opgehaald = false;
       haalOpdrachten();
+      herlaadDetail(id);
     } catch (e) {
       toast(e?.message || 'Antwoord niet verwerkt', 'error');
     }
@@ -1066,15 +1092,15 @@
   window.__irisOpdrachtAfsluiten = async (id, keuze) => {
     const st = S.opdrachten;
     try {
-      const j = await haalRuw('/api/iris-opdracht', {
+      await haalRuw('/api/iris-opdracht', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actie: 'afsluiten', id, met_onverstuurd: keuze || undefined }),
       });
       st.afsluitVraag = null;
-      st.detail = { opdracht: j.opdracht, acties: st.detail?.acties || [] };
       st.opgehaald = false;
       haalOpdrachten();
+      herlaadDetail(id);
       toast('Afgesloten. Terug openen kan altijd nog.', 'success');
     } catch (e) {
       // De 409 met de keuzes komt hier binnen als een fout met uitleg. We
@@ -1102,14 +1128,14 @@
 
   window.__irisOpdrachtHeropenen = async (id) => {
     try {
-      const j = await haalRuw('/api/iris-opdracht', {
+      await haalRuw('/api/iris-opdracht', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actie: 'heropenen', id }),
       });
-      S.opdrachten.detail = { opdracht: j.opdracht, acties: S.opdrachten.detail?.acties || [] };
       S.opdrachten.opgehaald = false;
       haalOpdrachten();
+      herlaadDetail(id);
     } catch (e) {
       toast(e?.message || 'Terug openen mislukt', 'error');
     }
@@ -1762,7 +1788,6 @@
   function opdrachtDetail(d) {
     const st = S.opdrachten;
     const o = d.opdracht || {};
-    const acties = Array.isArray(d.acties) ? d.acties : [];
 
     // De vraag aan Maxim wint van alles: staat die open, dan is dát wat er
     // moet gebeuren, en niet het plan eronder.
@@ -1784,15 +1809,34 @@
         </div>`
       : '';
 
-    const plan = acties.length
+    // Het plan komt uit `plan_regels`, niet uit `acties`. Dat is de hele fix:
+    // het blok hing aan acties.length, en een opdracht die nog op een antwoord
+    // wacht heeft nul iris_acties -- dus viel alles weg wat Iris bedacht had.
+    const regels = Array.isArray(d.plan_regels) ? d.plan_regels : [];
+    const begrepen = o.plan && o.plan.begrepen ? String(o.plan.begrepen) : '';
+    const groep = o.plan && o.plan.raakt_groep && o.plan.groep_omschrijving
+      ? String(o.plan.groep_omschrijving) : '';
+
+    const plan = (regels.length || begrepen)
       ? `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:9px;background:var(--surface-2)">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Plan</div>
-          ${acties.map((a) => `<div style="font-size:12px;display:flex;gap:8px;align-items:baseline;padding:3px 0">
-            <span style="color:${a.fout ? 'var(--rose)' : (a.status === 'uitgevoerd' ? 'var(--emerald)' : 'var(--text-3)')};font-weight:600">
-              ${a.fout ? '✕' : (a.status === 'uitgevoerd' ? '✓' : '·')}</span>
-            <span style="flex:1;min-width:0">${esc(a.type)}</span>
-            <span style="font-size:10.5px;color:var(--text-3)">${esc(a.status || '')}</span>
-          </div>${a.fout ? `<div style="font-size:11px;color:var(--rose);margin:0 0 4px 16px">${esc(a.fout)}</div>` : ''}`).join('')}
+          ${begrepen ? `<div style="font-size:12px;color:var(--text-1);margin-bottom:8px">${esc(begrepen)}</div>` : ''}
+          ${groep ? `<div style="font-size:11.5px;color:var(--amber);margin-bottom:8px">Dit raakt een groep: ${esc(groep)}</div>` : ''}
+          ${regels.length ? regels.map(planRegel).join('') : `<div style="font-size:11.5px;color:var(--text-3)">Nog geen stappen — Iris wacht op een antwoord.</div>`}
+        </div>`
+      : '';
+
+    // Het verloop. De tabelbeschrijving noemt dit "het spoor dat maakt dat er
+    // nooit iets stil verdwijnt"; tot nu toe verdween het spoor zelf stil.
+    const stappen = Array.isArray(d.verloop_regels) ? d.verloop_regels : [];
+    const verloop = stappen.length
+      ? `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:9px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Verloop</div>
+          ${stappen.map((v) => `<div style="font-size:11.5px;display:flex;gap:8px;align-items:baseline;padding:2px 0">
+            <span style="color:var(--text-3);white-space:nowrap;min-width:78px">${esc(tijdKort(v.op))}</span>
+            <span style="flex:1;min-width:0">${esc(v.wat)}</span>
+            <span title="${v.door_mens ? 'Door een mens' : 'Door Iris'}" style="color:var(--text-3)">${v.door_mens ? 'mens' : 'Iris'}</span>
+          </div>`).join('')}
         </div>`
       : '';
 
@@ -1817,9 +1861,52 @@
            <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px;color:var(--emerald)" onclick="__irisOpdrachtAfsluiten('${esc(o.id)}')">Afsluiten</button>`}
     </div>`;
 
-    return `${vraag}${plan}${afsluit}
-      ${o.na_uitvoeren ? `<div style="font-size:11.5px;color:var(--text-2);margin-bottom:9px;font-style:italic">${esc(o.na_uitvoeren)}</div>` : ''}
+    // na_uitvoeren is 'wacht' of 'geregeld' -- een enum-waarde, geen zin. Die
+    // stond hier cursief afgedrukt alsof het een toelichting was. De server
+    // maakt er nu een zin van; valt die weg, dan staat er niets in plaats van
+    // een los woord.
+    const naZin = d.na_uitvoeren_zin || null;
+
+    return `${vraag}${plan}${verloop}${afsluit}
+      ${naZin ? `<div style="font-size:11.5px;color:var(--text-2);margin-bottom:9px">${esc(naZin)}</div>` : ''}
       ${knoppen}`;
+  }
+
+  /**
+   * Één stap uit het plan, met wat ervan terechtkwam.
+   *
+   * Vier standen, en het verschil tussen de laatste twee is waar het om gaat:
+   * "voorgenomen" betekent dat er nog niets klaarstaat om op te drukken,
+   * "klaargezet" dat iemand op Uitvoeren moet. Die twee als hetzelfde tonen --
+   * wat de grijze punt deed -- laat een opdracht er afgerond uitzien terwijl
+   * er nog een klik ontbreekt.
+   */
+  function planRegel(r) {
+    const stand = {
+      gedaan: ['✓', 'var(--emerald)', 'gedaan'],
+      mislukt: ['✕', 'var(--rose)', 'mislukt'],
+      klaargezet: ['○', 'var(--amber)', 'klaar om uit te voeren'],
+      voorgenomen: ['·', 'var(--text-3)', 'nog niet klaargezet'],
+    }[r.stand] || ['·', 'var(--text-3)', ''];
+
+    const uitkomst = (r.resultaat || []).map((x) => {
+      const link = x.link
+        ? ` <a href="${esc(x.link.href)}" style="color:var(--brand,var(--emerald))">${esc(x.link.label)} →</a>`
+        : '';
+      return `<div style="font-size:11px;color:var(--text-2);margin:0 0 3px 18px">${esc(x.tekst)}${link}</div>`;
+    }).join('');
+
+    return `<div style="font-size:12px;display:flex;gap:8px;align-items:baseline;padding:3px 0">
+        <span style="color:${stand[1]};font-weight:600">${stand[0]}</span>
+        <span style="flex:1;min-width:0">
+          <span>${esc(r.omschrijving || r.label)}</span>
+          ${r.omschrijving ? `<span style="font-size:10.5px;color:var(--text-3)"> · ${esc(r.label)}</span>` : ''}
+          ${r.wie ? `<span style="font-size:10.5px;color:var(--text-3)"> · ${esc(r.wie)}</span>` : ''}
+        </span>
+        <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(stand[2])}</span>
+      </div>
+      ${r.fout ? `<div style="font-size:11px;color:var(--rose);margin:0 0 4px 18px">${esc(r.fout)}</div>` : ''}
+      ${uitkomst}`;
   }
 
   /* ── Belrij ───────────────────────────────────────────────────────────
