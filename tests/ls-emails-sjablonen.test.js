@@ -218,5 +218,5 @@ test('bedrading: één opslagweg — popup, massa en E-mails-pagina delen /api/l
   assert.match(ls, /window\.MailBouwer\.open\(\{ sjabloon: sjabloon \|\| \{\}, onOpgeslagen: \(\) => fetchEmails\(true\) \}\)/);
   assert.match(lees('modules/klanten-v2/views/_stuur-bericht.js'), /api\('\/api\/lead-mail-sjablonen'\)/);
   assert.match(lees('modules/klanten-v2/views/_massa-bericht.js'), /api\('\/api\/lead-mail-sjablonen'\)/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/leadsonderhoud-v2\.js\?v=73"/);
+  assert.ok(Number(lees('modules/klanten-v2/index.html').match(/views\/leadsonderhoud-v2\.js\?v=(\d+)"/)[1]) >= 73, 'leadsonderhoud-v2 minstens v73');
 });

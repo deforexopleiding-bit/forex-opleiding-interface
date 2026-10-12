@@ -165,7 +165,7 @@ test('Inbox (zelfde patroon): zoekveld blijft staan, placeholder volgt de bron',
 });
 
 test('bedrading: cache-busters gebumpt, geen kale zoek-inputs meer', () => {
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/leadsonderhoud-v2\.js\?v=7[2-9]"/);
+  assert.ok(Number(lees('modules/klanten-v2/index.html').match(/views\/leadsonderhoud-v2\.js\?v=(\d+)"/)[1]) >= 72, 'leadsonderhoud-v2 minstens v72');
   assert.match(lees('modules/klanten-v2/index.html'), /views\/inbox-v2\.js\?v=12"/);
   assert.doesNotMatch(lees('modules/klanten-v2/views/inbox-v2.js'), /oninput="[^"]*DFO\.render\(\);this\.focus/);
   const ls = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');

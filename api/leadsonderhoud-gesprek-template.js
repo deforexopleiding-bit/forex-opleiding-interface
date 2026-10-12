@@ -60,12 +60,13 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  // FASE 0 — conversation_id-pad (dormant; nog geen UI roept dit aan).
-  // Autorisatie: de conv staat op de leadsonderhoud-lijn. Het lead_id-pad
-  // hieronder blijft byte-voor-byte ongewijzigd (incl. traject-gate).
+  // conversation_id-pad: alleen voor rijen ZONDER lead (lead-loze gesprekken).
+  // Autorisatie: de conv staat op de leadsonderhoud-lijn. Met een lead_id is
+  // conversation_id een hint (2026-10-12, zoals gesprek-berichten) en blijft het
+  // lead-pad (traject-gate + berichten_log) ongewijzigd.
   const convIdT = String(body.conversation_id || '').trim();
-  if (convIdT) {
-    if (!UUID_RE.test(convIdT)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  if (convIdT && !UUID_RE.test(convIdT)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  if (convIdT && !String(body.lead_id || '').trim()) {
     return sendTemplateByConversation(res, { user, convId: convIdT, body });
   }
   const leadId       = String(body.lead_id || '').trim();
@@ -113,7 +114,7 @@ export default async function handler(req, res) {
     // Zoek de bestaande WA-conv (voor logging + phone_number canoniek) — direct
     // op lijn + nummer, nieuwste eerst (vindLeadConv; zie kop).
     // GEEN 24u-venster-check: templates mogen ook buiten venster.
-    const conv = await vindLeadConv(lijn, lead, null, { sb: supabaseAdmin, tag: '[ls-gesprek-template]' });
+    const conv = await vindLeadConv(lijn, lead, convIdT || null, { sb: supabaseAdmin, tag: '[ls-gesprek-template]' });
     // Nog geen conv: Meta accepteert alsnog een template naar een 'nieuw'
     // nummer; logOutboundWa maakt het gesprek daarna aan (zie onder).
     const toNumber = conv ? conv.phone_number : lead.telefoon_e164;

@@ -926,8 +926,10 @@
   // conversatie → { conversation_id } (de Fase 0-endpointpaden). Compose-state
   // wordt daarentegen ALTIJD op de rowKey gesleuteld (zie _lsInbRowKey), zodat
   // lead-loze rijen niet op een null lead_id botsen.
+  // Met een lead: lead_id + conversation_id als HINT (de server zoekt het gesprek
+  // dan direct, zie vindLeadConv). Zonder lead: alleen conversation_id.
   function _lsInbSendKeys(conv) {
-    if (conv && conv.lead_id) return { lead_id: conv.lead_id };
+    if (conv && conv.lead_id) return conv.conversation_id ? { lead_id: conv.lead_id, conversation_id: conv.conversation_id } : { lead_id: conv.lead_id };
     return { conversation_id: conv ? conv.conversation_id : null };
   }
 

@@ -6,13 +6,22 @@
 // wacht op Meta). Mail-antwoorden lopen niet via dit endpoint — die stuur je vanuit
 // de e-mailmodule vanaf welkom@.
 //
+// Body: { lead_id, body, conversation_id? } — met lead_id is conversation_id
+//       alleen een HINT voor het gesprek (zoals gesprek-berichten); zonder
+//       lead_id stuurt conversation_id naar het lead-loze pad hieronder.
+//
 // Response: 200 { ok:true, wamid }
 //           409 { error } als er geen WhatsApp-lijn/gesprek is
 //           422 { error:'24u-venster verlopen' } buiten venster
+//
+// 2026-10-12: het gesprek werd gezocht in een ONGESORTEERDE .limit(500) van de
+// lijn (~1100 gesprekken) → bij een deel van de leads 409 "Nog geen
+// WhatsApp-gesprek" terwijl de draad hun berichten toonde. Nu vindLeadConv
+// (hint, anders direct op lijn + nummer, nieuwste eerst) — zoals #1760/#1762.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { haalLijn, trajectSlugs, normNummer, binnenVenster } from './_lib/leadsonderhoud-gesprekken.js';
+import { haalLijn, trajectSlugs, binnenVenster, vindLeadConv } from './_lib/leadsonderhoud-gesprekken.js';
 import { sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,12 +40,12 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
-  // FASE 0 — conversation_id-pad (dormant; nog geen UI roept dit aan).
-  // Autorisatie: de conversatie moet op de leadsonderhoud-lijn staan. Het
-  // lead_id-pad hieronder blijft byte-voor-byte ongewijzigd (incl. traject-gate).
+  // conversation_id-pad: alleen voor rijen ZONDER lead (lead-loze gesprekken).
+  // Autorisatie: de conversatie moet op de leadsonderhoud-lijn staan. Met een
+  // lead_id is conversation_id een hint en blijft het lead-pad (incl. traject-gate).
   const convId = String(body.conversation_id || '').trim();
-  if (convId) {
-    if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  if (convId && !UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+  if (convId && !String(body.lead_id || '').trim()) {
     return sendTextByConversation(res, { user, convId, tekst: String(body.body || '').trim() });
   }
   const leadId = String(body.lead_id || '');
@@ -60,14 +69,9 @@ export default async function handler(req, res) {
     if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld' });
     if (!lead.telefoon_e164) return res.status(409).json({ error: 'Deze lead heeft geen telefoonnummer' });
 
-    // Het gesprek van deze lead op de lijn.
-    const { data: convs } = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .select('id, phone_number, phone_number_id, last_inbound_at')
-      .eq('phone_number_id', lijn.phoneNumberId)
-      .limit(500);
-    const doel = normNummer(lead.telefoon_e164);
-    const conv = (convs || []).find((c) => normNummer(c.phone_number) === doel) || null;
+    // Het gesprek van deze lead op de lijn — direct (hint, anders lijn + nummer,
+    // nieuwste eerst). Een hint die niet bij lead/lijn past wordt genegeerd.
+    const conv = await vindLeadConv(lijn, lead, convId || null, { sb: supabaseAdmin, tag: '[leadsonderhoud-gesprek-antwoord]' });
     if (!conv) return res.status(409).json({ error: 'Nog geen WhatsApp-gesprek met deze lead' });
 
     if (!binnenVenster(conv.last_inbound_at)) {
@@ -122,10 +126,9 @@ export default async function handler(req, res) {
   }
 }
 
-// FASE 0 — vrij-tekst WhatsApp-antwoord op basis van conversation_id (geen lead).
+// Vrij-tekst WhatsApp-antwoord op basis van conversation_id (lead-loze rij).
 // Identiek aan het lead-pad hierboven, behalve dat de conv direct op id wordt
 // geladen en de autorisatie de leadsonderhoud-lijn is i.p.v. de traject-gate.
-// Dormant tot de inbox-verbreding (fase 2) dit gaat aanroepen.
 async function sendTextByConversation(res, { user, convId, tekst }) {
   if (!tekst) return res.status(400).json({ error: 'Bericht is leeg' });
   if (tekst.length > MAX_BODY) return res.status(400).json({ error: 'Bericht te lang' });
