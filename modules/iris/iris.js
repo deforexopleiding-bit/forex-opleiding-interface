@@ -245,7 +245,13 @@
     // Staat de dossierkaart open? Alleen van belang als hij niet als eigen
     // kolom past — boven 1200px staat hij er altijd en doet deze vlag niets.
     dossierOpen: false,
-    logboek: { bezig: false, fout: null, items: [], opgehaald: false, alleenFouten: false },
+    logboek: {
+      bezig: false, fout: null, items: [], opgehaald: false, alleenFouten: false,
+      // 'ochtend' is de standaard: waar je mee zit is "moet ik iets weten",
+      // niet "wat gebeurde er allemaal". Het hele logboek staat een klik verder.
+      vorm: 'ochtend',
+      antwoord: null,
+    },
   };
 
   function hertekenen() { if (window.DFO?.render) window.DFO.render(); }
@@ -996,8 +1002,12 @@
     if (st.bezig) return;
     st.bezig = true;
     try {
-      const j = await haal('/api/iris-log?limiet=100' + (st.alleenFouten ? '&alleen_fouten=1' : ''));
+      const url = st.vorm === 'ochtend'
+        ? '/api/iris-log?vorm=ochtend'
+        : '/api/iris-log?limiet=100' + (st.alleenFouten ? '&alleen_fouten=1' : '');
+      const j = await haal(url);
       st.items = Array.isArray(j.items) ? j.items : [];
+      st.antwoord = j.ochtend || null;
       st.fout = null;
     } catch (e) {
       st.fout = e?.message || 'Logboek niet opgehaald';
@@ -1043,6 +1053,23 @@
     S.belrij.eigenaar = String(v || 'alle');
     S.belrij.opgehaald = false;
     haalBelrij();
+    hertekenen();
+  };
+
+  /* Wisselen tussen het antwoord en het logboek.
+
+     Het antwoord staat voorop omdat dat de vraag is die je 's ochtends hebt.
+     Het logboek blijft er onveranderd naast: dat is het juiste ding als je
+     iets uitzoekt, en het verkeerde als je alleen wilt weten of er iets aan
+     de hand is. */
+  window.__irisLogVorm = (v) => {
+    const st = S.logboek;
+    if (st.vorm === v) return;
+    st.vorm = v;
+    st.opgehaald = false;
+    st.items = [];
+    st.antwoord = null;
+    haalLogboek();
     hertekenen();
   };
 
@@ -2427,15 +2454,25 @@
   function logboekTab() {
     const st = S.logboek;
     if (!st.opgehaald && !st.bezig) queueMicrotask(haalLogboek);
-    if (st.bezig && !st.items.length) return `<div style="padding:20px">${skelet(6)}</div>`;
+    if (st.bezig && !st.items.length && !st.antwoord) return `<div style="padding:20px">${skelet(6)}</div>`;
     if (st.fout) return foutBlok(st.fout);
 
+    const vormKnop = (v, l, titel) => `<button class="chip ${st.vorm === v ? 'on' : ''}"
+      style="font-size:11.5px;padding:4px 11px" title="${esc(titel)}"
+      onclick="__irisLogVorm('${v}')">${esc(l)}</button>`;
+
     const kop = `<div style="display:flex;gap:6px;align-items:center;padding:14px 0 12px;flex-wrap:wrap">
-      <button class="chip ${st.alleenFouten ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px"
-        onclick="__irisLogFouten()">Alleen fouten</button>
+      ${vormKnop('ochtend', 'Vanmorgen', 'Wat er sinds gisteravond gebeurd is, samengevat.')}
+      ${vormKnop('alles', 'Logboek', 'Regel voor regel, nieuwste bovenaan.')}
+      ${st.vorm === 'alles' ? `<button class="chip ${st.alleenFouten ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px"
+        onclick="__irisLogFouten()">Alleen fouten</button>` : ''}
       <span style="font-size:11px;color:var(--text-3);margin-left:6px">
-        Laatste ${esc(String(st.items.length))} regels. Geen nummers, geen berichtteksten.</span>
+        Geen nummers, geen berichtteksten.</span>
     </div>`;
+
+    if (st.vorm === 'ochtend') {
+      return `<div style="max-width:760px;margin:0 auto;padding:0 20px 24px">${kop}${ochtendBlok(st.antwoord)}</div>`;
+    }
 
     if (!st.items.length) {
       return `<div style="max-width:760px;margin:0 auto;padding:0 20px">${kop}${NIETS(st.alleenFouten ? 'Geen fouten. Dat mag gezegd worden.' : 'Nog niets gebeurd.')}</div>`;
@@ -2455,6 +2492,58 @@
     }).join('');
 
     return `<div style="max-width:760px;margin:0 auto;padding:0 20px 24px">${kop}${rijen}</div>`;
+  }
+
+  /**
+   * Het antwoord op de ochtendvraag.
+   *
+   * ── WAAROM DIT NAAST HET LOGBOEK STAAT EN HET NIET VERVANGT ─────────────
+   * Een logboek is het juiste ding als je iets uitzoekt: regel voor regel,
+   * precies wat er gebeurde. Het is het verkeerde ding om 's ochtends naar te
+   * kijken, want dan heb je één vraag en dwingt een lijst je het antwoord er
+   * zelf uit te halen. Twee vormen van dezelfde gegevens, en de vraag bepaalt
+   * welke voorop staat.
+   *
+   * Wat misging staat bovenaan, ook als het één regel van de veertig is. Dat
+   * is de hele reden dat je kijkt.
+   */
+  function ochtendBlok(a) {
+    if (!a) return NIETS('Nog niets opgehaald.');
+
+    const kop = `<div style="font-size:14px;font-weight:600;margin-bottom:4px">${esc(a.kop || '')}</div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:14px">
+        Sinds ${esc(tijdKort(a.vanaf))}${a.door_iris || a.door_mensen
+          ? ` · ${a.door_iris} door Iris, ${a.door_mensen} door een medewerker` : ''}</div>`;
+
+    if (!a.totaal) return kop + NIETS('Rustige nacht.');
+
+    const fouten = (a.fouten || []).length
+      ? `<div style="border:1px solid var(--rose-line,var(--border));background:var(--rose-soft,var(--surface-2));border-radius:8px;padding:10px 12px;margin-bottom:12px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--rose);font-weight:700;margin-bottom:6px">Dit ging mis</div>
+          ${a.fouten.map((f) => `<div style="font-size:12px;margin-bottom:5px">
+            <span style="color:var(--text-3);font-size:10.5px">${esc(tijdKort(f.wanneer))}</span>
+            · ${esc(f.wat || '—')}
+            ${f.fout ? `<div style="font-size:11px;color:var(--rose);margin-left:10px">${esc(f.fout)}</div>` : ''}
+          </div>`).join('')}
+          ${a.mislukt > a.fouten.length
+            ? `<div style="font-size:11px;color:var(--text-3)">… en nog ${a.mislukt - a.fouten.length}. Kijk in het logboek.</div>`
+            : ''}
+        </div>`
+      : '';
+
+    const groepen = (a.groepen || []).length
+      ? `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Wat er gebeurde</div>
+          ${a.groepen.map((g) => `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 0;font-size:12px">
+            <span style="flex:1;min-width:0">${esc(g.wat)}</span>
+            ${g.mislukt ? `<span style="font-size:10.5px;color:var(--rose)">${g.mislukt} mis</span>` : ''}
+            <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${g.aantal}×</span>
+            <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(tijdKort(g.laatste))}</span>
+          </div>`).join('')}
+        </div>`
+      : '';
+
+    return kop + fouten + groepen;
   }
 
   function dossiersTab() {
