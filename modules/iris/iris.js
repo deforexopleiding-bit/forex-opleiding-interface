@@ -266,6 +266,10 @@
     },
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
+    // Het signaal waarvan de "Afgehandeld"-knop nu loopt. Eén tegelijk: twee
+    // klikken op dezelfde kaart terwijl de eerste nog onderweg is, geeft twee
+    // POST's en een scherm dat terugspringt naar de stand van de eerste.
+    signaalBezig: null,
     droogtest: { bezig: false, fout: null, data: null, opgehaald: false },
     herkoppel: { bezig: false, fout: null, uitkomst: null },
     // Staat de dossierkaart open? Alleen van belang als hij niet als eigen
@@ -378,6 +382,42 @@
       if (S.gekozen === gesprekId) { S.dossier.bezig = false; hertekenen(); }
     }
   }
+
+  /**
+   * Een mentorsignaal afvinken (of weer open zetten).
+   *
+   * De rij in S.dossier wordt meteen bijgewerkt met wat de server teruggaf —
+   * niet met wat ik denk dat er nu staat. Zelf een waarde verzinnen en die
+   * later laten afwijken van de databank is precies het soort stille fout
+   * waar niemand achter komt tot iemand verbaasd naar het scherm kijkt.
+   *
+   * Er gaat NIETS naar het LMS. Dit is onze kant.
+   */
+  window.__irisSignaalAf = async (signaalId, afgehandeld) => {
+    if (!signaalId || S.signaalBezig) return;
+    S.signaalBezig = signaalId;
+    hertekenen();
+    try {
+      const j = await haalRuw('/api/iris-signaal-afhandelen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signaal_id: signaalId, afgehandeld: !!afgehandeld }),
+      });
+      const lijst = S.dossier?.data?.signalen?.items;
+      if (Array.isArray(lijst) && j?.signaal) {
+        const i = lijst.findIndex((x) => x && x.id === signaalId);
+        if (i >= 0) lijst[i] = { ...lijst[i], ...j.signaal };
+      }
+      // De belrij kan hierdoor veranderen: een afgehandeld signaal levert geen
+      // reden meer aan, dus de volgende ronde vinkt die reden af.
+      S.belrij.opgehaald = false;
+    } catch (e) {
+      toast(e?.message || 'Signaal niet bijgewerkt', 'error');
+    } finally {
+      S.signaalBezig = null;
+      hertekenen();
+    }
+  };
 
   async function haalInstellingen() {
     if (S.instellingen.bezig) return;
@@ -2093,12 +2133,38 @@
         </div>`
       : bron(d.beloftes, 'Geen belofte.', () => `<div style="font-size:11.5px;color:var(--text-3)">Geen lopende belofte.</div>`);
 
-    const signalen = bron(d.signalen, 'Geen mentorsignalen.', (b) =>
-      b.items.slice(0, 3).map((s) => `<div style="font-size:11.5px;padding:3px 0">
-        <b>${esc(s.type)}</b>${s.mentor_naam ? ` <span style="color:var(--text-3)">— ${esc(s.mentor_naam)}</span>` : ''}
-        ${s.toelichting ? `<div style="color:var(--text-2);font-size:11px">${esc(s.toelichting)}</div>` : ''}
-      </div>`).join('')
-    );
+    // ── Mentorsignalen met een "Afgehandeld"-knop ──────────────────────────
+    //
+    // De knop zet `iris_signalen.verwerkt_op` in ONS systeem. Er gaat niets
+    // terug naar het LMS -- de mentor sluit zijn signaal daar zelf af. Dit is
+    // onze stand: "wij hebben ernaar gekeken".
+    //
+    // Open signalen eerst, afgehandelde eronder en gedimd. Ze helemaal
+    // verbergen zou betekenen dat je niet kunt zien dat iemand er net op
+    // geklikt heeft, en dan klikt de volgende nog een keer.
+    const signalen = bron(d.signalen, 'Geen mentorsignalen.', (b) => {
+      const items = [...(b.items || [])].sort((x, y) => {
+        const ax = x.verwerkt_op ? 1 : 0, ay = y.verwerkt_op ? 1 : 0;
+        if (ax !== ay) return ax - ay;
+        return String(y.signaal_op || '').localeCompare(String(x.signaal_op || ''));
+      }).slice(0, 5);
+
+      return items.map((s) => {
+        const klaar = !!s.verwerkt_op;
+        const bezig = S.signaalBezig === s.id;
+        return `<div style="font-size:11.5px;padding:4px 0;display:flex;gap:8px;align-items:flex-start;opacity:${klaar ? '.55' : '1'}">
+          <div style="flex:1;min-width:0">
+            <b style="${klaar ? 'text-decoration:line-through' : ''}">${esc(s.type)}</b>${s.mentor_naam ? ` <span style="color:var(--text-3)">— ${esc(s.mentor_naam)}</span>` : ''}
+            ${s.toelichting ? `<div style="color:var(--text-2);font-size:11px">${esc(s.toelichting)}</div>` : ''}
+            ${klaar ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px">afgehandeld ${esc(tijdKort(s.verwerkt_op))} — alleen hier, niet in het LMS</div>` : ''}
+          </div>
+          <button class="btn btn-ghost btn-sm" ${bezig ? 'disabled' : ''}
+            title="${klaar ? 'Weer op open zetten' : 'Afgehandeld in ons systeem. Het LMS wordt niet aangepast.'}"
+            style="font-size:10.5px;padding:3px 8px;white-space:nowrap"
+            onclick="__irisSignaalAf('${esc(s.id)}', ${klaar ? 'false' : 'true'})">${bezig ? '…' : (klaar ? 'Heropen' : 'Afgehandeld')}</button>
+        </div>`;
+      }).join('');
+    });
 
     const pogingen = bron(d.belpogingen, 'Nog niet gebeld.', (b) =>
       `<div style="font-size:11.5px">${b.aantal_echt} poging(en)${b.laatste_contact ? ` · laatst gesproken ${tijdKort(b.laatste_contact)}` : ''}</div>`
