@@ -21,6 +21,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
+import { voegHandmatigToe } from './_lib/iris/belrij-vullen.js';
 import {
   uitCallLog, telPogingen, moetEscaleren, sorteerBelrij, redenTekst, MAX_PER_DAG,
   voortgang, nummerAfgeschermd,
@@ -332,23 +333,35 @@ async function afronden(req, res, user) {
   return res.status(200).json({ ok: true, status: data.status });
 }
 
+/**
+ * Met de hand op de lijst zetten.
+ *
+ * Dit deed een gewone INSERT en maakte dus een TWEEDE rij als die persoon er al
+ * op stond — dan wordt hij twee keer gebeld. Nu langs voegHandmatigToe(), die
+ * hetzelfde pad volgt als de vuller: bestaat er een open rij, dan komt de reden
+ * daar als regel onder in plaats van dat er een rij bij komt.
+ */
 async function toevoegen(req, res, user) {
   const contactId = String(req.body?.contact_id || '').trim();
   if (!UUID_RE.test(contactId)) return res.status(400).json({ error: 'contact_id moet een geldige uuid zijn' });
 
-  const { data, error } = await supabaseAdmin
+  const uit = await voegHandmatigToe(supabaseAdmin, {
+    contactId,
+    reden: req.body?.reden || 'handmatig toegevoegd',
+    detail: req.body?.detail || null,
+    eigenaar: req.body?.eigenaar && UUID_RE.test(String(req.body.eigenaar)) ? req.body.eigenaar : null,
+    prioriteit: req.body?.prioriteit,
+    bron: ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'].includes(req.body?.bron)
+      ? req.body.bron : 'hand',
+  });
+
+  const { data } = await supabaseAdmin
     .from('iris_belrij')
-    .insert({
-      contact_id: contactId,
-      reden: String(req.body?.reden || 'handmatig toegevoegd').slice(0, 200),
-      reden_detail: req.body?.detail ? String(req.body.detail).slice(0, 500) : null,
-      eigenaar: req.body?.eigenaar && UUID_RE.test(String(req.body.eigenaar)) ? req.body.eigenaar : null,
-      prioriteit: Number.isFinite(Number(req.body?.prioriteit)) ? Number(req.body.prioriteit) : 50,
-      bron: ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'].includes(req.body?.bron)
-        ? req.body.bron : 'hand',
-    })
     .select('*')
-    .single();
-  if (error) throw new Error('toevoegen: ' + error.message);
-  return res.status(200).json({ regel: data });
+    .eq('id', uit.belrij_id)
+    .maybeSingle();
+  // `nieuw: false` betekent dat de persoon er al op stond en de reden erbij is
+  // gekomen. Het scherm mag dat zeggen; stil doen alsof er een rij bij kwam zou
+  // de indruk geven dat er twee staan.
+  return res.status(200).json({ regel: data, nieuw: uit.nieuw });
 }

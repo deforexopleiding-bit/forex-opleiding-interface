@@ -23,6 +23,8 @@
 // Op iris_belrij_redenen kan het wél, want daar is de index volledig
 // (belrij_id, bron_sleutel).
 
+import { randomUUID } from 'node:crypto';
+
 import { voorstelVoor } from './signalen.js';
 import { haalInstellingen, eigenaarVoorBron } from './instellingen.js';
 import {
@@ -325,4 +327,106 @@ export async function vulBelrij(db, { nu = new Date(), max = PER_BRON_MAX, opTij
   }
 
   return rapport;
+}
+
+/* ── 6. Met de hand op de lijst zetten ────────────────────────────────────── */
+
+/**
+ * Eén persoon met de hand op de belrij, langs hetzelfde pad als de vuller.
+ *
+ * ── WAAROM DIT NIET MEER EEN GEWONE INSERT IS ────────────────────────────────
+ * Er waren twee plekken die rechtstreeks in `iris_belrij` schreven:
+ * `api/iris-actie.js` (de actie `belrij_toevoegen` uit een plan) en
+ * `api/iris-belrij.js` (de knop op het scherm). Beide maakten een NIEUWE rij,
+ * ook als die persoon er al op stond. Dan staat iemand twee keer op de lijst en
+ * wordt hij twee keer gebeld — precies wat taak 6 moest oplossen.
+ *
+ * Nu: dezelfde SELECT-dan-UPDATE-of-INSERT als de vuller, en de reden komt als
+ * regel in `iris_belrij_redenen` te staan met een `hand:`-sleutel. Daardoor
+ * staat hij naast de redenen die uit de drie bronnen komen, in plaats van ze te
+ * overschrijven.
+ *
+ * De `hand:`-prefix is ook wat hem beschermt: `vervallenRedenen()` vinkt alleen
+ * sleutels af die de vuller beheert, dus een handmatige reden blijft staan tot
+ * een mens hem weghaalt.
+ *
+ * @returns {{belrij_id: string, nieuw: boolean, reden_id: string|null}}
+ */
+export async function voegHandmatigToe(db, {
+  contactId,
+  reden = 'handmatig toegevoegd',
+  detail = null,
+  eigenaar = null,
+  prioriteit = 50,
+  bron = 'hand',
+  nu = new Date(),
+} = {}) {
+  if (!contactId) throw new Error('belrij zonder contact');
+
+  const { data: bestaand, error: leesFout } = await db
+    .from('iris_belrij')
+    .select('id, prioriteit, eigenaar')
+    .eq('contact_id', contactId)
+    .in('status', OPEN_STATUS)
+    .order('aangemaakt_op', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (leesFout) throw new Error('belrij lezen: ' + leesFout.message);
+
+  const gevraagd = Number.isFinite(Number(prioriteit)) ? Number(prioriteit) : 50;
+  let belrijId = bestaand?.id || null;
+  let nieuw = false;
+
+  if (belrijId) {
+    // Een mens die een rij hoger zet, mag dat. Omlaag niet: dan verdwijnt
+    // iemand naar onderen doordat er nóg een reden bij kwam.
+    const velden = { bijgewerkt_op: nu.toISOString() };
+    const hoogste = Math.max(Number(bestaand.prioriteit) || 0, gevraagd);
+    if (hoogste !== Number(bestaand.prioriteit)) velden.prioriteit = hoogste;
+    // Wie expliciet een eigenaar meegeeft, wijst toe — ook als er al iemand
+    // staat. Dit is een mens die het zegt, geen regel die het afleidt.
+    if (eigenaar) velden.eigenaar = eigenaar;
+    const { error } = await db.from('iris_belrij').update(velden).eq('id', belrijId);
+    if (error) throw new Error('belrij bijwerken: ' + error.message);
+  } else {
+    const { data, error } = await db
+      .from('iris_belrij')
+      .insert({
+        contact_id: contactId,
+        reden: String(reden || 'handmatig toegevoegd').slice(0, 200),
+        reden_detail: detail ? String(detail).slice(0, 500) : null,
+        eigenaar: eigenaar || null,
+        prioriteit: gevraagd,
+        bron,
+        status: 'open',
+      })
+      .select('id')
+      .single();
+    if (error) throw new Error('belrij aanmaken: ' + error.message);
+    belrijId = data.id;
+    nieuw = true;
+  }
+
+  // De reden erbij. Een eigen sleutel per toevoeging: twee keer met de hand
+  // dezelfde persoon toevoegen met een andere reden hoort twee regels te geven,
+  // anders overschrijft de tweede de eerste.
+  let redenId = null;
+  const { data: gezet, error: redenFout } = await db
+    .from('iris_belrij_redenen')
+    .insert({
+      belrij_id: belrijId,
+      bron,
+      bron_sleutel: `hand:${randomUUID()}`,
+      reden: String(reden || 'hand').slice(0, 200),
+      reden_detail: detail ? String(detail).slice(0, 500) : null,
+      bron_link: null,
+    })
+    .select('id')
+    .single();
+  // Fail-soft: staat de migratie nog niet, dan is de rij er wel en de regel
+  // niet. De kaart valt dan terug op iris_belrij.reden, zoals vóór taak 6.
+  if (redenFout) console.warn('[iris/belrij-vullen] handmatige reden niet opgeslagen:', redenFout.message);
+  else redenId = gezet?.id || null;
+
+  return { belrij_id: belrijId, nieuw, reden_id: redenId };
 }

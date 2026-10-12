@@ -28,6 +28,7 @@ import {
 import { keurWaardeGoed, TOEGESTANE_SLEUTELS } from '../api/iris-instellingen.js';
 import { schrijfPersoon } from '../api/_lib/iris/belrij-vullen.js';
 import { uitBeltaak, uitSignaal, voegSamen } from '../api/_lib/iris/belrij-bronnen.js';
+import { nepDb } from './vast/nep-db.js';
 
 const IRIS     = readFileSync(new URL('../modules/iris/iris.js', import.meta.url), 'utf8');
 const INDEX    = readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8');
@@ -127,52 +128,6 @@ test('elke bron van de belrij is instelbaar', () => {
 });
 
 /* ── de regel in de vuller ────────────────────────────────────────────────── */
-
-function nepDb(tabellen = {}) {
-  const data = {};
-  for (const [t, r] of Object.entries(tabellen)) data[t] = r.map((x) => ({ ...x }));
-  let n = 0;
-  const from = (tabel) => {
-    data[tabel] = data[tabel] || [];
-    const f = [];
-    const pas = () => data[tabel].filter((r) => f.every((x) =>
-      x.op === 'eq' ? r[x.k] === x.v
-      : x.op === 'in' ? x.v.includes(r[x.k])
-      : x.op === 'is' ? (r[x.k] ?? null) === x.v
-      : true));
-    const klaar = (rijen) => ({
-      select: () => klaar(rijen),
-      single: async () => ({ data: rijen[0] || null, error: null }),
-      maybeSingle: async () => ({ data: rijen[0] || null, error: null }),
-      eq: (k, v) => { f.push({ op: 'eq', k, v }); return klaar(rijen); },
-      in: (k, v) => { f.push({ op: 'in', k, v }); return klaar(rijen); },
-      then: (res) => Promise.resolve({ data: rijen, error: null }).then(res),
-    });
-    const k = {
-      select: () => k,
-      eq: (kol, v) => { f.push({ op: 'eq', k: kol, v }); return k; },
-      in: (kol, v) => { f.push({ op: 'in', k: kol, v }); return k; },
-      is: (kol, v) => { f.push({ op: 'is', k: kol, v }); return k; },
-      not: () => k, filter: () => k, order: () => k, limit: () => k,
-      maybeSingle: async () => ({ data: pas()[0] || null, error: null }),
-      single: async () => ({ data: pas()[0] || null, error: null }),
-      insert: (r) => { const nw = { id: `${tabel}-${++n}`, ...r }; data[tabel].push(nw); return klaar([nw]); },
-      update: (v) => { const raak = pas(); for (const r of raak) Object.assign(r, v); return klaar(raak); },
-      upsert: (rijen, { onConflict } = {}) => {
-        const sl = String(onConflict || '').split(',').map((x) => x.trim()).filter(Boolean);
-        const uit = [];
-        for (const r of (Array.isArray(rijen) ? rijen : [rijen])) {
-          const b = sl.length ? data[tabel].find((x) => sl.every((q) => x[q] === r[q])) : null;
-          if (b) { Object.assign(b, r); uit.push(b); } else { const nw = { id: `${tabel}-${++n}`, ...r }; data[tabel].push(nw); uit.push(nw); }
-        }
-        return klaar(uit);
-      },
-      then: (res) => Promise.resolve({ data: pas(), error: null }).then(res),
-    };
-    return k;
-  };
-  return { from, _data: data };
-}
 
 const beltaak = (id, klant) => ({ id, customer_id: klant, payload: { kind: 'call', title: 'Bel klant' } });
 
