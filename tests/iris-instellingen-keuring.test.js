@@ -166,10 +166,15 @@ test('een onbekende sleutel wordt geweigerd', () => {
   assert.match(fout, /onbekende sleutel/);
 });
 
-test('de toegestane sleutels zijn precies de zeven uit de migratie', () => {
+test('de toegestane sleutels zijn precies de acht die de keuring kent', () => {
   assert.deepEqual([...TOEGESTANE_SLEUTELS].sort(), [
     'autonomie', 'dosering', 'escalatie', 'mailboxen',
     'model', 'ongedaan_seconden', 'stille_uren',
+    // Sinds H3: afzenders die geen klantvraag zijn. Geen rij in de migratie
+    // nodig — haalInstellingen valt terug op een lege lijst, en een lege lijst
+    // filtert niets weg. Zo begint de instelling uit zonder dat er SQL hoeft
+    // te draaien voordat het scherm werkt.
+    'systeemafzenders',
   ]);
 });
 

@@ -118,7 +118,11 @@ test('de cursor loopt over de HOOFDopvraging, niet over wat er op het scherm sta
   // stil uit de lijst.
   assert.match(POST, /const hoofdAantal = \(gesprekken \|\| \[\]\)\.length;/);
   assert.match(POST, /volgende_vanaf: vanaf \+ hoofdAantal/);
-  assert.match(POST, /meer: \(count \?\? 0\) > vanaf \+ hoofdAantal/);
+  // Sinds H3 komt het totaal uit één plek, want de werkbak telt zelf: hij
+  // filtert vóór het pagineren, dus het `count` van zijn id-opvraging is
+  // alleen de grootte van déze bladzijde en niet van de lijst.
+  assert.match(POST, /const totaal = werkbakTotaal !== null \? werkbakTotaal : \(count \?\? hoofdAantal\);/);
+  assert.match(POST, /meer: totaal > vanaf \+ hoofdAantal/);
 });
 
 test('de klok-groep wordt alleen op de eerste pagina opgehaald', () => {

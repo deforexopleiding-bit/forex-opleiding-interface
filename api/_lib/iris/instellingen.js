@@ -138,6 +138,15 @@ export const STANDAARD = Object.freeze({
     temperatuur: 0.3,
   }),
   ongedaan_seconden: 30,
+  // Afzenders die geen klantvraag zijn. LEEG, en dat is met opzet: wie hier
+  // staat verdwijnt uit de werkbak, en zo'n lijst mag niet door mij bedacht
+  // worden. Maxim vult hem in Instellingen.
+  //
+  // Waar hij voor is: onze eigen systeemmeldingen ("Nieuwe afspraak ingeboekt.
+  // Naam: …") komen als INKOMENDE mail binnen, dus de regel "er kwam iets
+  // binnen ná ons laatste bericht" haalt ze er niet uit. Leveranciersmail
+  // (360dialog Support) is hetzelfde geval.
+  systeemafzenders: Object.freeze([]),
 });
 
 /** Staat de hoofdschakelaar aan? Alles behalve een uitdrukkelijke 'true' is nee. */
@@ -236,6 +245,7 @@ export async function haalInstellingen(supabase, env = process.env) {
     mailboxen: { ...STANDAARD.mailboxen },
     model: { ...STANDAARD.model },
     ongedaan_seconden: STANDAARD.ongedaan_seconden,
+    systeemafzenders: [],
     fout: null,
   };
 
@@ -271,8 +281,54 @@ export async function haalInstellingen(supabase, env = process.env) {
     mailboxen: { ...STANDAARD.mailboxen, ...(objOf(bron.mailboxen)) },
     model: { ...STANDAARD.model, ...(objOf(bron.model)) },
     ongedaan_seconden: leesOngedaanSeconden(bron.ongedaan_seconden),
+    systeemafzenders: leesSysteemafzenders(bron.systeemafzenders),
     fout: null,
   };
+}
+
+/**
+ * De lijst met afzenders die geen klantvraag zijn.
+ *
+ * Rommel erin mag nooit een lijst opleveren die te véél wegfiltert: dat is de
+ * stille kant van deze instelling, want een gesprek dat eruit valt mist
+ * niemand tot de klant belt. Dus: alleen tekst, kleingemaakt, getrimd,
+ * ontdubbeld, en lege waarden weg.
+ *
+ * Een item mag een volledig adres zijn (`noreply@…`) of een domein (`@…`). Wat
+ * ertussen zit — een los woord — wordt bewust NIET als patroon opgevat; dat
+ * zou "info" op elk adres met "info" erin laten matchen.
+ */
+export function leesSysteemafzenders(ruw) {
+  if (!Array.isArray(ruw)) return [];
+  const uit = [];
+  for (const item of ruw) {
+    if (typeof item !== 'string') continue;
+    const v = item.trim().toLowerCase();
+    if (!v) continue;
+    if (!v.includes('@')) continue;
+    if (!uit.includes(v)) uit.push(v);
+  }
+  return uit;
+}
+
+/**
+ * Is dit een afzender die geen klantvraag is?
+ *
+ * Een volledig adres moet exact kloppen; een domein (`@dfo.nl`) geldt voor
+ * alles erachter. Geen losse woorden, geen deelstrings: `info` zou anders ook
+ * `klant-info@gmail.com` raken.
+ */
+export function isSysteemafzender(adres, lijst) {
+  const a = String(adres || '').trim().toLowerCase();
+  if (!a || !Array.isArray(lijst) || !lijst.length) return false;
+  for (const item of lijst) {
+    if (item.startsWith('@')) {
+      if (a.endsWith(item)) return true;
+    } else if (a === item) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Een jsonb-waarde die een object hoort te zijn, of een leeg object. */

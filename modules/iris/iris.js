@@ -142,6 +142,10 @@
 
   const FILTER_LABELS = {
     wacht_op_ons: 'Wacht op ons',
+    // Nieuw sinds H3: status 'nieuw' is hier naartoe verhuisd. Nog niet
+    // ingedeeld is niet hetzelfde als op ons wachtend — dat is waarom
+    // leveranciersmail tussen het werk stond.
+    nog_in_te_delen: 'Nog in te delen',
     wacht_op_klant: 'Wacht op klant',
     venster_bijna_dicht: 'Venster bijna dicht',
     niet_gekoppeld: 'Niet gekoppeld',
@@ -2203,6 +2207,7 @@
         ${(d.categorieen || []).map(rij).join('')}
       </div>
       ${herkoppelBlok()}
+      ${systeemafzendersBlok(inst)}
       <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
         <div><b>uit</b> — Iris doet niets in deze categorie.</div>
         <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
@@ -2216,6 +2221,103 @@
       </div>
     </div>`;
   }
+
+  /**
+   * Afzenders die geen klantvraag zijn.
+   *
+   * ── WAAROM DIT HIER STAAT EN NIET IN DE CODE ──────────────────────────────
+   * Onze eigen systeemmeldingen ("Nieuwe afspraak ingeboekt. Naam: …") komen
+   * als INKOMENDE mail binnen, dus de regel "er kwam iets binnen ná ons
+   * laatste bericht" haalt ze er niet uit. Hetzelfde geldt voor
+   * leveranciersmail.
+   *
+   * Maar WELKE afzenders dat zijn, is een bedrijfskeuze en geen code-keuze. Wie
+   * hier staat verdwijnt uit de werkbak, en dat is de stille kant: een gesprek
+   * dat eruit valt mist niemand tot de klant belt. Dus staat de lijst hier, en
+   * begint hij leeg.
+   */
+  function systeemafzendersBlok(inst) {
+    const lijst = Array.isArray(inst?.systeemafzenders) ? inst.systeemafzenders : [];
+    const st = S.instellingen || {};
+    return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Afzenders die geen klantvraag zijn</div>
+      <div style="font-size:11.5px;color:var(--text-2);margin-bottom:8px">
+        Wie hier staat, komt niet in "Wacht op ons". Bedoeld voor onze eigen
+        systeemmeldingen en leveranciers — die komen als inkomende mail binnen en
+        lijken daardoor op een vraag. Een volledig adres, of <b>@domein</b> voor
+        alles van dat domein. Een los woord mag niet: "info" zou ook
+        klant-info@gmail.com raken.
+      </div>
+      ${lijst.length
+        ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">${lijst.map((a, i) =>
+            `<span class="chip" style="font-size:11.5px;padding:3px 9px">${esc(a)}
+               <button style="background:none;border:none;color:var(--text-3);cursor:pointer;padding:0 0 0 5px;font-size:12px"
+                 title="Verwijderen" onclick="__irisAfzenderWeg(${i})">×</button></span>`).join('')}</div>`
+        : `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">De lijst is leeg — er wordt niets weggefilterd.</div>`}
+      <div style="display:flex;gap:6px">
+        <input type="text" value="${esc(st.afzenderNieuw || '')}" oninput="__irisAfzenderTyp(this.value)"
+          placeholder="noreply@deforexopleiding.nl of @support.360dialog.com"
+          style="flex:1;min-width:0;font-size:12px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:6px 12px"
+          onclick="__irisAfzenderBij()" ${st.afzenderBezig ? 'disabled' : ''}>${st.afzenderBezig ? 'Bezig…' : 'Toevoegen'}</button>
+      </div>
+      ${st.afzenderFout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:5px">⚠ ${esc(st.afzenderFout)}</div>` : ''}
+    </div>`;
+  }
+
+  window.__irisAfzenderTyp = (v) => {
+    S.instellingen = S.instellingen || {};
+    S.instellingen.afzenderNieuw = String(v || '');
+  };
+
+  /* De hele lijst gaat als één waarde terug. Dat is met opzet: het endpoint
+     keurt de lijst in zijn geheel en geeft hem genormaliseerd terug, zodat er
+     geen tweede plek is die bepaalt wat een geldig adres is. */
+  async function zetAfzenders(nieuweLijst) {
+    const st = S.instellingen = S.instellingen || {};
+    st.afzenderBezig = true;
+    st.afzenderFout = null;
+    hertekenen();
+    try {
+      await haalRuw('/api/iris-instellingen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sleutel: 'systeemafzenders', waarde: nieuweLijst }),
+      });
+      st.afzenderNieuw = '';
+      // Opnieuw ophalen, niet zelf bijhouden: het endpoint normaliseert de
+      // lijst (kleine letters, ontdubbeld), en een eigen kopie zou daar na één
+      // bewerking van afwijken.
+      st.bezig = false;
+      await haalInstellingen();
+    } catch (e) {
+      st.afzenderFout = e?.message || 'Opslaan mislukt';
+    } finally {
+      st.afzenderBezig = false;
+      hertekenen();
+    }
+  }
+
+  /** De lijst zoals de server hem laatst gaf. Eén bron, geen eigen kopie. */
+  function huidigeAfzenders() {
+    const lijst = S.instellingen?.data?.instellingen?.systeemafzenders;
+    return Array.isArray(lijst) ? lijst : [];
+  }
+
+  window.__irisAfzenderBij = async () => {
+    const st = S.instellingen = S.instellingen || {};
+    const nieuw = String(st.afzenderNieuw || '').trim().toLowerCase();
+    if (!nieuw) return;
+    const huidig = huidigeAfzenders();
+    if (huidig.includes(nieuw)) { st.afzenderNieuw = ''; hertekenen(); return; }
+    await zetAfzenders([...huidig, nieuw]);
+  };
+
+  window.__irisAfzenderWeg = async (i) => {
+    const huidig = huidigeAfzenders();
+    if (i < 0 || i >= huidig.length) return;
+    await zetAfzenders(huidig.filter((_, j) => j !== i));
+  };
 
   /* ── Dossiers ─────────────────────────────────────────────────────────── */
 

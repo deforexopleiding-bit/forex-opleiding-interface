@@ -88,7 +88,10 @@ test('bouwLijstRij: zonder bericht is de zekerheid null en niet nul', () => {
 
 test('de filters zijn de vragen die iemand s ochtends stelt', () => {
   assert.deepEqual([...FILTERS], [
-    'wacht_op_ons', 'wacht_op_klant', 'venster_bijna_dicht',
+    // 'nog_in_te_delen' is er sinds H3 bij: status 'nieuw' is daar naartoe
+    // verhuisd. Nog niet ingedeeld is niet hetzelfde als op ons wachtend, en
+    // dat is waarom leveranciersmail tussen het werk stond.
+    'wacht_op_ons', 'nog_in_te_delen', 'wacht_op_klant', 'venster_bijna_dicht',
     'niet_gekoppeld', 'belofte_vandaag', 'spam', 'alles',
   ]);
   assert.ok(!FILTERS.includes('open'), '"alle open gesprekken" is geen vraag die iemand stelt');
