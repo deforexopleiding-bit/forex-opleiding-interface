@@ -165,7 +165,9 @@ test('het scherm heeft een Uitvoeren-knop die daarheen wijst', () => {
   assert.match(SCHERM_SRC, /const magUitvoeren = !klaar && !o\.vraag_aan_maxim && planStappen\.length > 0;/);
   // Het scherm hoort een nieuw nummer te hebben, anders laadt de browser de
   // oude kopie en is de knop er voor niemand.
-  assert.match(INDEX_SRC, /\.\.\/iris\/iris\.js\?v=20/);
+  // Het nummer schuift mee met elke PR die iris.js aanraakt; H2 zette hem op
+  // 21. Wat deze toets moet vastpinnen is dat er een bump IS, niet welk getal.
+  assert.match(INDEX_SRC, /\.\.\/iris\/iris\.js\?v=(2[1-9]|[3-9]\d)/);
 });
 
 test('er wordt NOOIT een naam naar een contact gezocht', () => {

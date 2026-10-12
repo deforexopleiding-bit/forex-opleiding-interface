@@ -67,17 +67,59 @@ function toast(msg, opts = {}) {
   _toastTimer = setTimeout(() => el.classList.remove('show'), opts.duration || 2400);
 }
 
+/** Hoelang we op een token wachten voor we het opgeven. */
+const TOKEN_WACHT_MS = 8000;
+
+/**
+ * Een belofte met een plafond erop.
+ *
+ * Een belofte die nooit afloopt is het ergste soort storing: geen fout, geen
+ * melding, geen log — alleen een knop die op "Bezig…" blijft staan. Een
+ * plafond maakt daar een zichtbare fout van die je kúnt oplossen.
+ */
+async function metPlafond(belofte, ms, bijTeLang) {
+  let klok;
+  try {
+    return await Promise.race([
+      Promise.resolve(belofte),
+      new Promise((_, af) => { klok = setTimeout(() => af(new Error(bijTeLang)), ms); }),
+    ]);
+  } finally {
+    clearTimeout(klok);
+  }
+}
+
 /**
  * Fetch met Bearer-token uit AuthShared. Herbruikt de bestaande auth-cookie
  * flow; als er geen sessie is, wordt AuthShared.requireAuth de gebruiker
  * al naar /login geredirect hebben tegen de tijd dat we hier komen.
+ *
+ * ── DE HUISREGEL DIE HIER ONTBRAK ───────────────────────────────────────────
+ * `window._authSharedReady` is de belofte van de async-IIFE in
+ * supabase-client.js, en CLAUDE.md zegt er ALTIJD over: die hoort geawait te
+ * worden vóór je AuthShared aanspreekt. Dat gebeurde hier niet. Vlak na het
+ * laden bestaat `window.supabase` soms nog niet, en houdt supabase-js een slot
+ * vast terwijl het de sessie vernieuwt — dan geeft getAccessToken() nooit
+ * antwoord en hangt elke aanroep die erachter staat, zonder enig spoor.
+ *
+ * Nu: eerst wachten tot de aanmelding klaar is, dán het token vragen, met om
+ * allebei een plafond van acht seconden. Dat is ruim voor een token en kort
+ * genoeg om een vastloper te laten zien in plaats van te laten hangen.
  */
+async function haalToken() {
+  await metPlafond(window._authSharedReady, TOKEN_WACHT_MS,
+    'De aanmelding reageert niet. Herlaad de pagina.');
+  if (!window.AuthShared || typeof window.AuthShared.getAccessToken !== 'function') return null;
+  return await metPlafond(window.AuthShared.getAccessToken(), TOKEN_WACHT_MS,
+    'Je sessie reageert niet. Herlaad de pagina.') || null;
+}
+
 async function authedFetch(url, init = {}) {
   // Guard tegen expliciete `null` — default {} kicks alleen bij undefined,
   // dus `authedFetch(url, null)` crashte op `init.headers`. Fix voor
   // email-v2 Sanne-suggest ("Cannot read properties of null (reading 'headers')").
   init = init || {};
-  const token = (window.AuthShared && (await window.AuthShared.getAccessToken())) || null;
+  const token = await haalToken();
   const headers = new Headers(init.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
   if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
@@ -213,8 +255,10 @@ function roleLabelNL(r) {
 async function doRoleSwitch(targetRole, btn) {
   try {
     if (btn) { btn.disabled = true; btn.textContent = 'Wisselen…'; }
-    const token = window.AuthShared && typeof window.AuthShared.getAccessToken === 'function'
-      ? await window.AuthShared.getAccessToken() : null;
+    // Zelfde gat als in authedFetch, en één plek overslaan is genoeg om het
+    // terug te krijgen. Deze knop klik je niet vlak na het laden, dus hij viel
+    // minder op — maar de klasse is dezelfde.
+    const token = await haalToken();
     if (!token) throw new Error('geen sessie');
     const r = await fetch('/api/role-switch', {
       method: 'POST',
