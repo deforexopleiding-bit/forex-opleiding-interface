@@ -139,6 +139,28 @@ test('beoordeelToegangGate: leest context + latere berichten; fail-closed', asyn
   assert.deepEqual([kapot.ok, kapot.reden], [false, 'besluit_fout'], 'bij twijfel geen automatische toegang');
 });
 
+// DE OORZAAK VAN EEN TOETS DIE OP 13 OKT 14:25 UTC OMVIEL. Deze bak toetst de
+// venstergrens via de webhook, en die geeft `nu` niet mee. Stond de standaard
+// op `new Date()`, dan las de gate de ECHTE klok terwijl de toets `Date.now`
+// stilzet — de Date-constructor trekt zich van een `Date.now`-stub niets aan.
+// De fixture is van 10 okt, het venster is 72 uur, dus de toets was groen tot
+// 13 okt 14:25 en daarna rood zonder dat er iets aan de code veranderde.
+// Hieronder staat de eis: de standaard volgt `Date.now`.
+test('beoordeelToegangGate zonder nu: de standaardklok volgt Date.now (geen tijdbom)', async () => {
+  const db = () => nepDb({ whatsapp_messages: berichten().filter((m) => m.id !== 'm3') });
+  const p = { aanvraag: AANVRAAG, contextWamid: null, convId: CONV };
+  const binnen = nu('2026-10-10T15:00:00Z');
+  try {
+    assert.deepEqual([(await G.beoordeelToegangGate(db(), p)).ok, (await G.beoordeelToegangGate(db(), p)).reden],
+      [true, 'binnen_venster'], 'stilgezette klok binnen het venster → ja');
+  } finally { binnen(); }
+  const buiten = nu('2026-10-20T15:00:00Z');
+  try {
+    assert.equal((await G.beoordeelToegangGate(db(), p)).reden, 'buiten_venster',
+      'stilgezette klok ver buiten het venster → nee; leest de gate hier "binnen_venster", dan negeert de standaard Date.now');
+  } finally { buiten(); }
+});
+
 // ── 3. De echte webhook-verwerking ─────────────────────────────────────────
 
 function webhookBody({ wamid, context = null, knop = null, tekst = null, ts }) {
