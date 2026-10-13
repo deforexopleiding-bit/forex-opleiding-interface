@@ -45,17 +45,26 @@ import { ImapFlow } from 'imapflow';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { invalidateEmailUnreadForCustomer } from './_lib/email-unread-per-customer.js';
+import { MODULE_MAILBOX, MAILBOX_MODULES } from './_lib/module-mailbox.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Zelfde map als in email-unread-per-customer.js — bewust NIET geëxporteerd
-// via die module om de import-boundary klein te houden. Bij uitbreiding
-// (nieuwe module) update BEIDE files.
-const MODULE_ACCOUNTS = {
-  finance:    { user: 'administratie@deforexopleiding.nl', mailboxLabel: 'administratie', passEnv: 'IMAP_PASS_ADMINISTRATIE', permKey: 'finance.inbox.view' },
-  onboarding: { user: 'onboarding@deforexopleiding.nl',    mailboxLabel: 'onboarding',    passEnv: 'IMAP_PASS_ONBOARDING',    permKey: 'onboarding.inbox.view' },
-  events:     { user: 'events@deforexopleiding.nl',        mailboxLabel: 'events',        passEnv: 'IMAP_PASS_EVENTS',        permKey: 'events.inbox.view' },
-};
+// De mailbox komt uit _lib/module-mailbox.js — ÉÉN map, sinds de derde
+// gebruiker erbij kwam. Hier staat alleen nog wat endpoint-specifiek is: welk
+// recht deze route vraagt.
+const MODULE_PERM = Object.freeze({
+  finance:    'finance.inbox.view',
+  onboarding: 'onboarding.inbox.view',
+  events:     'events.inbox.view',
+});
+const MODULE_ACCOUNTS = Object.freeze(Object.fromEntries(
+  MAILBOX_MODULES.map((m) => [m, Object.freeze({
+    user: MODULE_MAILBOX[m].user,
+    mailboxLabel: MODULE_MAILBOX[m].label,
+    passEnv: MODULE_MAILBOX[m].passEnv,
+    permKey: MODULE_PERM[m],
+  })])
+));
 
 function normalizeEmail(s) {
   return String(s || '').trim().toLowerCase();
@@ -268,10 +277,37 @@ export default async function handler(req, res) {
   const uidsMissing = perUidReport.filter((u) => !u.existed).length;
   const uidsAlreadySeen = perUidReport.filter((u) => u.was_seen === true).length;
 
-  // Cache-invalidate: wis de entry van deze klant uit de module-cache zodat
-  // de volgende conv-list-refresh de nieuwe 0-teller ziet. Werkt óók als de
-  // IMAP-call niet is gedaan (bv. missende env) — dan wist 'ie niets, geen
-  // kwaad.
+  // ── OOK IN DE DATABANK ──────────────────────────────────────────────────
+  //
+  // De gesprekkenlijst telt de ongelezen mail sinds 13 okt uit
+  // `email_messages.is_read` in plaats van uit een live IMAP-scan (die kostte
+  // twintig seconden per verzoek). `sync-emails` haalt de \Seen-flag elke vijf
+  // minuten op — maar vijf minuten wachten tot je eigen klik zichtbaar wordt,
+  // is een knop waarvan je denkt dat hij niet werkt. Dus zetten we het hier
+  // meteen zelf.
+  //
+  // IMAP blijft de bron van waarheid: de STORE hierboven is wat telt, dit is
+  // de spiegel ervan. Mislukt deze update, dan gaat de badge uit bij de
+  // volgende sync — vandaar een waarschuwing en geen fout.
+  let dbGemarkeerd = 0;
+  try {
+    const { data: bijgewerkt, error: upErr } = await supabaseAdmin
+      .from('email_messages')
+      .update({ is_read: true })
+      .eq('customer_id', customerId)
+      .eq('mailbox', acct.mailboxLabel)
+      .eq('is_read', false)
+      .select('id');
+    if (upErr) throw new Error(upErr.message);
+    dbGemarkeerd = (bijgewerkt || []).length;
+  } catch (e) {
+    console.warn('[inbox-email-mark-read] is_read in databank niet gezet:', e?.message || e);
+  }
+
+  // Cache-invalidate: wis de entry van deze klant uit de module-cache. De
+  // lijst leest hem niet meer, maar de helper bestaat nog voor wie hem wél
+  // gebruikt — en een cache die niet gewist wordt is erger dan een wis die
+  // niemand nodig heeft.
   try {
     invalidateEmailUnreadForCustomer(moduleRaw, custEmail);
   } catch (e) {
@@ -289,6 +325,7 @@ export default async function handler(req, res) {
     // volgende 0-count-bug.
     debug: {
       source: 'email_messages (customer_id-scoped)',
+      db_is_read_gezet: dbGemarkeerd,
       db_rows_found: dbRowsFound,
       db_mailbox_filter: acct.mailboxLabel,   // short-label ('administratie' etc)
       imap_user: acct.user,                   // full e-mail voor login

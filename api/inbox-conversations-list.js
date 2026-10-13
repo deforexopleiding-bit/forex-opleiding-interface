@@ -32,7 +32,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.js';
+import { mailboxLabel } from './_lib/module-mailbox.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel, inBlokken, isVandaag, metWerkstand } from './_lib/gesprekken-werkstand.js';
 import { filterGesprekkenOpKlantModule } from './_lib/klant-module.js';
@@ -315,33 +315,68 @@ export default async function handler(req, res) {
       console.error('[inbox-conversations-list] wanbetaler-agg fail:', e?.message || e);
     }
 
-    // ── E-mail ongelezen-verrijking (gebatcht IMAP-fetch, 60s cached) ──
-    // Voor elke conv met een gekoppelde klant + email-adres: haal via IMAP-
-    // helper op hoeveel ongelezen mails er van dat adres in de module-inbox
-    // staan (\Seen-flag). Fail-safe: bij warning/error blijft email_unread
-    // gewoon 0 en de lijst rendert normaal. IMAP is bron van waarheid; wij
-    // zetten geen \Seen-flags — mailclient/webmail houdt gelezen-status bij.
-    const emailUnreadByEmail = new Map();
+    // ── E-mail ongelezen-verrijking (uit de databank, niet uit IMAP) ──────
+    //
+    // DIT WAS DE TWINTIG SECONDEN. Hier stond een LIVE IMAP-verbinding naar
+    // Strato: connect, INBOX locken, en dan envelope+flags ophalen van ELK
+    // bericht sinds 1 januari. Met een socketTimeout van 9 s en een cache van
+    // 60 s die per Vercel-instantie leeft — dus bij een koude instantie, en de
+    // poll draait elke zes seconden, betaalde de gebruiker die scan opnieuw.
+    //
+    // Het kan uit de databank. `sync-emails` draait elke vijf minuten, leest
+    // alleen INBOX, en schrijft per bericht `is_read` (de \Seen-flag) plus
+    // `customer_id` en `mailbox`. Dat is exact dezelfde vraag — hoeveel
+    // ongelezen berichten van deze klant staan er in de mailbox van deze
+    // module — maar dan als indexeerbare query in plaats van een mailscan.
+    //
+    // WAT ER VERANDERT AAN DE VERSHEID. Markeer je een mail als gelezen in
+    // webmail, dan ging de badge voorheen binnen een minuut uit en nu binnen
+    // vijf (de sync-interval). Markeren vanuit de module zelf is wél meteen
+    // goed: inbox-email-mark-read zet `is_read` nu ook in de databank. Vijf
+    // minuten op een badge is de prijs voor een lijst die laadt.
+    //
+    // Op customer_id, niet op e-mailadres: dat is de sleutel die de rij toch
+    // al heeft, en een klant met twee adressen telt zo in één keer goed.
+    const emailUnreadByCustomer = new Map();
     let emailUnreadWarning = null;
-    try {
-      const uniqueEmails = Array.from(new Set(
-        (data || [])
-          .map((r) => (r.customer?.email || '').trim().toLowerCase())
-          .filter(Boolean)
-      ));
-      if (uniqueEmails.length > 0) {
-        const emUn = await getEmailUnreadByCustomerEmail({
-          module:       moduleRaw,
-          filterEmails: uniqueEmails,
-        });
-        for (const [email, cnt] of emUn.unreadByEmail.entries()) {
-          emailUnreadByEmail.set(email, cnt);
+    const mbLabel = mailboxLabel(moduleRaw);
+    if (!mbLabel) {
+      emailUnreadWarning = `module '${moduleRaw}' heeft geen mailbox`;
+    } else {
+      try {
+        const custIdsForUnread = Array.from(new Set(
+          (data || []).map((r) => r.customer_id).filter(Boolean)
+        ));
+        if (custIdsForUnread.length > 0) {
+          // Alleen de ONGELEZEN rijen. Dat is een kleine verzameling (een
+          // volle inbox heeft tientallen ongelezen, niet duizenden), dus
+          // tellen in JS kan en een limiet is hier geen afkapping maar een
+          // vangnet.
+          const unreadBlokken = await Promise.all(
+            inBlokken(custIdsForUnread).map((blok) => supabaseAdmin
+              .from('email_messages')
+              .select('customer_id')
+              .in('customer_id', blok)
+              .eq('mailbox', mbLabel)
+              .eq('is_read', false)
+              .limit(5000))
+          );
+          for (const r of unreadBlokken) {
+            if (r.error) {
+              console.error('[inbox-conversations-list] email-unread blok:', r.error.message);
+              emailUnreadWarning = 'email-unread blok mislukt: ' + r.error.message;
+              continue;
+            }
+            for (const rij of (r.data || [])) {
+              if (!rij?.customer_id) continue;
+              emailUnreadByCustomer.set(rij.customer_id, (emailUnreadByCustomer.get(rij.customer_id) || 0) + 1);
+            }
+          }
         }
-        emailUnreadWarning = emUn.warning || null;
+      } catch (e) {
+        console.error('[inbox-conversations-list] email-unread fail:', e?.message || e);
+        emailUnreadWarning = 'email-unread fetch fail';
       }
-    } catch (e) {
-      console.error('[inbox-conversations-list] email-unread fail:', e?.message || e);
-      emailUnreadWarning = 'email-unread fetch fail';
     }
 
     // ── Brief-status-verrijking (gebatcht, geen N+1) ──────────────────────
@@ -419,9 +454,7 @@ export default async function handler(req, res) {
         if (Number.isFinite(t) && (now - t) <= TWENTY_FOUR_HOURS_MS) canSendText = true;
       }
       const agg = row.customer_id ? openInvoicesByCustomer.get(row.customer_id) : null;
-      // E-mail unread lookup — case-insensitive match op customer.email.
-      const custEmail = (cust?.email || '').trim().toLowerCase();
-      const emailUnread = custEmail ? (emailUnreadByEmail.get(custEmail) || 0) : 0;
+      const emailUnread = row.customer_id ? (emailUnreadByCustomer.get(row.customer_id) || 0) : 0;
       const waUnread = row.unread_count || 0;
       // Effective sort-timestamp: MAX(WA-last, laatste e-mail). Als geen
       // van beide → fallback op last_message_at (kan NULL zijn — dan achter
