@@ -493,10 +493,20 @@ test('scherm: haalt /api/funnel-stats op en tekent 12 kaarten in 3 groepen', asy
   const D = window.DFOFunnelDashboard;
   let html = D.render([]);
   assert.match(html, /Funnel-conversie/);
-  assert.equal(taken.length, 1);
-  await taken[0]();
-  assert.equal(calls.length, 1);
-  assert.match(calls[0], /^\/api\/funnel-stats\?van=\d{4}-\d{2}-\d{2}&tot=\d{4}-\d{2}-\d{2}$/);
+  // TWEE taken, niet één: sinds de boek-flow-schakelaar (#1790) haalt het
+  // scherm bij de eerste render ook /api/opstartsessie-flow-get op. Die PR
+  // liet deze toets op `taken.length === 1` staan, dus stond 'ie rood vanaf
+  // de merge. We eisen hier de VERZAMELING verzoeken en niet de volgorde —
+  // welke van de twee eerst in de wachtrij staat, is geen gedrag om vast te
+  // leggen.
+  assert.equal(taken.length, 2);
+  for (const t of taken) await t();
+  assert.equal(calls.length, 2);
+  const stats = calls.filter((u) => u.startsWith('/api/funnel-stats'));
+  assert.equal(stats.length, 1, 'precies één keer de cijfers ophalen');
+  assert.match(stats[0], /^\/api\/funnel-stats\?van=\d{4}-\d{2}-\d{2}&tot=\d{4}-\d{2}-\d{2}$/);
+  assert.deepEqual(calls.filter((u) => u === '/api/opstartsessie-flow-get').length, 1,
+    'en precies één keer de boek-flow');
   html = D.render([{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }]);
   assert.equal((html.match(/class="fd-kaart"/g) || []).length, 12);
   assert.match(html, /data-groep="kmc"/);

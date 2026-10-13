@@ -146,12 +146,25 @@ test('lines: address_country lowercase "be" → nog steeds "België"', () => {
   assert.equal(buildAddressBlockLines(cust, 'Naam')[3], 'België');
 });
 
-test('lines: onbekende country → default naar Nederland', () => {
+// Deze toets eiste 'Nederland' bij country 'DE' MET postcode '1000', en stond
+// daarmee rood vanaf z'n geboorte (#1592): in diezelfde PR kwam `bepaalLand`,
+// en die leidt een onbekend land af uit het postcodeformaat — vier cijfers
+// zonder letters is Belgisch. De bedoeling van de toets (een onbekend land
+// valt terug op Nederland) blijft staan; de fixture moest alleen een postcode
+// krijgen die géén kant op wijst, anders toetst 'ie de terugval niet maar de
+// afleiding.
+test('lines: onbekende country zonder NL/BE-postcodevorm → terugval naar Nederland', () => {
   const cust = {
-    address_street: 'X', address_number: '1', address_postal: '1000', address_city: 'Y',
+    address_street: 'X', address_number: '1', address_postal: '12345', address_city: 'Y',
     address_country: 'DE',
   };
   assert.equal(buildAddressBlockLines(cust, 'Naam')[3], 'Nederland');
+});
+
+test('lines: onbekende country, postcode beslist (vier cijfers → BE, vier+twee → NL)', () => {
+  const basis = { address_street: 'X', address_number: '1', address_city: 'Y', address_country: 'DE' };
+  assert.equal(buildAddressBlockLines({ ...basis, address_postal: '1000' }, 'Naam')[3], 'België');
+  assert.equal(buildAddressBlockLines({ ...basis, address_postal: '7812 HZ' }, 'Naam')[3], 'Nederland');
 });
 
 test('lines: lege naam → naam-regel wordt skipped', () => {

@@ -66,7 +66,13 @@ export function gateBesluit({ aanvraag, heeftContext = false, contextTemplate = 
  * @param {object} sb  service-role client
  * @param {object} p   { aanvraag, contextWamid, convId, nu }
  */
-export async function beoordeelToegangGate(sb, { aanvraag, contextWamid = null, convId = null, nu = new Date() }) {
+// `nu` staat standaard op `new Date(Date.now())` en niet op `new Date()`. Dat
+// is hetzelfde moment, maar wél testbaar: een toets die de klok stilzet doet
+// dat via `Date.now`, en de Date-CONSTRUCTOR trekt zich daar niets van aan.
+// Met `new Date()` liep de venstertoets dus altijd op de echte klok — en dan
+// is "binnen 72 uur na de reminder" een toets die op een vast tijdstip
+// omvalt, niet een toets op gedrag. (Gebeurd: 13 okt 14:25 UTC.)
+export async function beoordeelToegangGate(sb, { aanvraag, contextWamid = null, convId = null, nu = new Date(Date.now()) }) {
   try {
     let contextTemplate = null;
     let contextGevonden = false;

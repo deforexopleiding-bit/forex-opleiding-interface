@@ -44,10 +44,33 @@ test('requireCrmStaff weigert een leeg Bearer-token', async () => {
 
 // ── 2) Rollen-whitelist ─────────────────────────────────────────────────────
 
-test('whitelist bevat exact de 7 medewerkersrollen', () => {
-  assert.deepEqual([...CRM_STAFF_ROLES].sort(), [
-    'administratie', 'admin', 'manager', 'marketing', 'mentor', 'sales', 'super_admin',
-  ].sort());
+// ACHT, niet zeven. Deze toets eiste er zeven en stond rood vanaf z'n geboorte
+// (#1592): 'appointmentsetter' zat op dat moment al bijna een maand in de lijst
+// (BP1, 31 aug, voor Romy) en hoort daar — de rol staat ook in
+// `public.is_crm_staff()` (2026-08-31-bp1-appointmentsetter-foundation.sql) en
+// in `modules/shared/crm-guard.js`. Het getal in de naam was dus mis, niet de
+// code.
+//
+// En met dat getal vervalt de naam van de toets als reden om 'm bij te werken.
+// Waar het echt om gaat, staat bovenaan crm-roles.js: deze lijst moet 1-op-1
+// gelijk blijven aan die in crm-guard.js. Dat eisen we hieronder, zodat een
+// rol die maar aan één kant wordt bijgezet een rode toets geeft in plaats van
+// een scherm dat een medewerker naar het LMS wegstuurt.
+const CRM_STAFF_ROLES_VERWACHT = [
+  'super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing',
+  'appointmentsetter',
+];
+
+test('whitelist bevat exact de 8 medewerkersrollen', () => {
+  assert.deepEqual([...CRM_STAFF_ROLES].sort(), [...CRM_STAFF_ROLES_VERWACHT].sort());
+});
+
+test('crm-guard.js (browser) heeft exact dezelfde achttal', () => {
+  const src = readFileSync(new URL('../modules/shared/crm-guard.js', import.meta.url), 'utf8');
+  const blok = src.slice(src.indexOf('var CRM_STAFF_ROLES = ['));
+  const rollen = [...blok.slice(0, blok.indexOf('];')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(rollen.sort(), [...CRM_STAFF_ROLES_VERWACHT].sort(),
+    'de browserlijst loopt uit de pas met api/_lib/crm-roles.js');
 });
 
 test('staff-rollen geven true', () => {
