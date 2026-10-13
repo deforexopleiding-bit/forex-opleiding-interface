@@ -135,7 +135,11 @@ test('script: webinar in de vaste lijst, code-terugval zonder DB-rij, categorie 
 // ── 4. Validatie ─────────────────────────────────────────────────────────────
 test('public endpoint: validatie', () => {
   const goed = { voornaam: ' Thomas ', email: 'T@Gmail.com', telefoon: '+32470000090', bron: 'webinar-v1', lead_id: '6b5eecd3-0000-4000-8000-000000000000', toestemming: true };
-  assert.deepEqual(valideer(goed).waarden, { voornaam: 'Thomas', email: 't@gmail.com', telefoon: '+32470000090', bron: 'webinar-v1', leadId: '6b5eecd3-0000-4000-8000-000000000000', toestemming: true });
+  assert.deepEqual(valideer(goed).waarden, { voornaam: 'Thomas', email: 't@gmail.com', telefoon: '+32470000090', bron: 'webinar-v1', leadId: '6b5eecd3-0000-4000-8000-000000000000', toestemming: true, sessieId: null });
+  // Datumkeuze (2026-10-13): sessie_id optioneel, maar als 'ie er is een uuid.
+  assert.equal(valideer({ ...goed, sessie_id: '7C9E6679-7425-40DE-944B-E07FC1F90AE7' }).waarden.sessieId, '7c9e6679-7425-40de-944b-e07fc1f90ae7');
+  assert.equal(valideer({ ...goed, sessie_id: 'maandag' }).ok, false);
+  assert.equal(valideer({ ...goed, sessie_id: '' }).waarden.sessieId, null);
   assert.equal(valideer({ ...goed, bron: '7-daagse-v3' }).ok, false);
   assert.equal(valideer({ ...goed, email: 'geen' }).ok, false);
   assert.equal(valideer({ ...goed, voornaam: '' }).ok, false);
@@ -399,4 +403,128 @@ test('templates: geen body begint of eindigt op een variabele (Meta: "Invalid pa
     assert.doesNotMatch(body, /^\{\{\d+\}\}/, t.name + ' begint met een variabele');
     assert.doesNotMatch(body, /\{\{\d+\}\}[.!?]?$/, t.name + ' eindigt op een variabele');
   }
+});
+
+// ── Datumkeuze (2026-10-13): de deelnemer kiest uit de eerstvolgende 3 ──────
+const datums = (rijen) => rijen.map((s) => s.datum);
+const sessieOp = (db, datum) => db.tab.webinar_sessies.find((s) => s.datum === datum);
+
+test('datumkeuze: aangeboden = eerstvolgende 3 doorgaande sessies; overgeslagen weken eruit; eerstvolgende eerst', async () => {
+  const db = nieuweDb();
+  await W.zorgVoorSessies(db, db.tab.webinar_reeksen[0], { nu: DONDERDAG });
+  sessieOp(db, '2026-10-19').status = 'overgeslagen';
+  const a = await W.aangebodenSessies(db, db.tab.webinar_reeksen[0], { nu: DONDERDAG });
+  assert.deepEqual(datums(a), ['2026-10-12', '2026-10-26', '2026-11-02']);
+  assert.equal(W.KEUZE_AANTAL, 3);
+});
+
+test('datumkeuze: horizon plant verder vooruit als overgeslagen weken de voorraad < 4 maken', async () => {
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  await W.zorgVoorSessies(db, reeks, { nu: DONDERDAG });
+  assert.equal(db.tab.webinar_sessies.length, 6, 'normaal: 6 weken');
+  for (const d of ['2026-10-12', '2026-10-19', '2026-10-26']) sessieOp(db, d).status = 'overgeslagen';
+  await W.zorgVoorSessies(db, reeks, { nu: DONDERDAG });
+  const komend = await W.komendeSessies(db, reeks, { nu: DONDERDAG });
+  assert.ok(komend.length >= W.MIN_KOMENDE_SESSIES, 'komend=' + komend.length);
+  assert.deepEqual(datums(await W.aangebodenSessies(db, reeks, { nu: DONDERDAG })), ['2026-11-02', '2026-11-09', '2026-11-16']);
+  assert.ok(!komend.some((s) => s.status !== 'gepland'), 'nooit een overgeslagen week');
+});
+
+test('datumkeuze: minder dan 3 beschikbaar → zoveel als er zijn, zonder fout', async () => {
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  await W.zorgVoorSessies(db, reeks, { aantal: 16, nu: DONDERDAG });
+  const laatste2 = db.tab.webinar_sessies.slice(-2).map((s) => s.datum);
+  for (const s of db.tab.webinar_sessies) if (!laatste2.includes(s.datum)) s.status = 'overgeslagen';
+  const a = await W.aangebodenSessies(db, reeks, { nu: DONDERDAG });
+  assert.deepEqual(datums(a), laatste2);
+});
+
+test('datumkeuze: aanmelding + bevestiging (mail én WhatsApp, datum én Zoom-link) gaan naar de GEKOZEN sessie', async () => {
+  reset();
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  const opties = await W.aangebodenSessies(db, reeks, { nu: DONDERDAG });
+  const gekozen = opties[1];
+  sessieOp(db, '2026-10-19').zoom_url = 'https://zoom.us/j/week-19';
+  const r = await W.meldAan(db, { voornaam: 'Kees', email: 'kees@example.com', telefoon: '+31611112222', bron: 'webinar-v2', sessieId: gekozen.id, nu: DONDERDAG });
+  assert.equal(r.sessie.datum, '2026-10-19');
+  assert.equal(r.alAangemeld, false); assert.equal(r.verplaatst, false);
+  assert.equal(db.tab.webinar_aanmeldingen[0].sessie_id, gekozen.id);
+  assert.match(verzonden.mails[0].subject, /Je bent aangemeld: webinar op maandag 19 oktober/);
+  assert.match(verzonden.mails[0].html, /https:\/\/zoom\.us\/j\/week-19/);
+  assert.deepEqual(verzonden.wa[0].variables, ['Kees', 'maandag 19 oktober', '19:00', 'https://zoom.us/j/week-19']);
+  // Zonder sessieId: de eerstvolgende (oude gedrag).
+  reset();
+  const r2 = await W.meldAan(db, { voornaam: 'Lot', email: 'lot@example.com', telefoon: null, bron: 'webinar-v1', nu: DONDERDAG });
+  assert.equal(r2.sessie.datum, '2026-10-12');
+});
+
+test('datumkeuze: server wijst verleden / overgeslagen / onbekende / niet-aangeboden sessies af — niets opgeslagen, niets verstuurd', async () => {
+  reset();
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  await W.zorgVoorSessies(db, reeks, { nu: DONDERDAG });
+  db.tab.webinar_sessies.push({ id: 'sessie-verleden', reeks_id: reeks.id, datum: '2026-10-05', starts_at: '2026-10-05T17:00:00.000Z', ends_at: '2026-10-05T18:00:00.000Z', status: 'gepland', zoom_url: null });
+  sessieOp(db, '2026-10-26').status = 'overgeslagen';
+  const vierde = sessieOp(db, '2026-11-09');
+  for (const id of ['sessie-verleden', sessieOp(db, '2026-10-26').id, '00000000-0000-4000-8000-000000000000', vierde.id]) {
+    const r = await W.meldAan(db, { voornaam: 'X', email: 'x@example.com', telefoon: null, bron: 'webinar-v1', sessieId: id, nu: DONDERDAG });
+    assert.equal(r.ongeldigeSessie, true, id);
+  }
+  assert.equal(db.tab.webinar_aanmeldingen.length, 0);
+  assert.equal(verzonden.mails.length + verzonden.wa.length, 0);
+});
+
+test('datumkeuze: al aangemeld — zelfde datum = "al gereserveerd"; andere datum (op e-mail of nummer) = verplaatsen + verse bevestiging', async () => {
+  reset();
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  const [d12, d19, d26] = await W.aangebodenSessies(db, reeks, { nu: DONDERDAG });
+  await W.meldAan(db, { voornaam: 'Anna', email: 'anna@example.com', telefoon: '+31633334444', bron: 'webinar-v1', sessieId: d12.id, nu: DONDERDAG });
+  const rij = db.tab.webinar_aanmeldingen[0];
+  rij.reminder_dag_op = '2026-10-11T17:00:00Z';
+  reset();
+  const zelfde = await W.meldAan(db, { voornaam: 'Anna', email: 'ANNA@example.com', telefoon: '+31633334444', bron: 'webinar-v2', sessieId: d12.id, nu: DONDERDAG });
+  assert.equal(zelfde.alAangemeld, true); assert.equal(zelfde.verplaatst, false);
+  assert.equal(verzonden.mails.length, 0);
+  reset();
+  const ander = await W.meldAan(db, { voornaam: 'Anna', email: 'anna@example.com', telefoon: '+31633334444', bron: 'webinar-v1', sessieId: d19.id, nu: DONDERDAG });
+  assert.equal(ander.verplaatst, true); assert.equal(ander.alAangemeld, false);
+  assert.equal(db.tab.webinar_aanmeldingen.length, 1);
+  assert.equal(rij.sessie_id, d19.id);
+  assert.equal(rij.verplaatst_van_sessie_id, null);
+  assert.equal(rij.reminder_dag_op, null);
+  assert.ok(rij.bevestiging_op, 'verse bevestiging geclaimd');
+  assert.equal(rij.berichten.verplaatst_door_keuze.van_sessie_id, d12.id);
+  assert.equal(verzonden.mails.length, 1);
+  assert.match(verzonden.mails[0].subject, /Je bent aangemeld: webinar op maandag 19 oktober/);
+  reset();
+  const opNummer = await W.meldAan(db, { voornaam: 'Anna', email: 'anna.werk@example.com', telefoon: '+31633334444', bron: 'webinar-v2', sessieId: d26.id, nu: DONDERDAG });
+  assert.equal(opNummer.verplaatst, true);
+  assert.equal(db.tab.webinar_aanmeldingen.length, 1);
+  assert.equal(rij.sessie_id, d26.id);
+  assert.match(verzonden.mails[0].subject, /maandag 26 oktober/);
+});
+
+test('datumkeuze: wordt de gekozen week later overgeslagen, dan schuift de bestaande logica de aanmelder door (verplaats-mail)', async () => {
+  reset();
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  const [, d19] = await W.aangebodenSessies(db, reeks, { nu: DONDERDAG });
+  await W.meldAan(db, { voornaam: 'Bob', email: 'bob@example.com', telefoon: '+31655556666', bron: 'webinar-v1', sessieId: d19.id, nu: DONDERDAG });
+  const r = await W.slaSessieOver(db, { sessieId: d19.id, nu: DONDERDAG });
+  assert.equal(r.verplaatst, 1);
+  assert.equal(r.doel.datum, '2026-10-26');
+  reset();
+  const uit = await W.cronRonde(db, { nu: new Date('2026-10-08T10:01:00Z'), wachtMs: 0 });
+  assert.equal(uit.bevestiging, 1);
+  assert.match(verzonden.mails[0].subject, /verplaatst naar maandag 26 oktober/);
+});
+
+test('endpoint: 409 SESSIE_ONGELDIG bij een niet-aangeboden sessie; antwoord bevat verplaatst', () => {
+  const src = lees('api/public-webinar-aanmelding.js');
+  assert.ok(src.includes("if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });"));
+  assert.ok(src.includes('verplaatst: r.verplaatst === true,'));
 });

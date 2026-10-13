@@ -6,10 +6,16 @@
 // public-event-vervolg-invite).
 //
 // Body: { voornaam, email, telefoon (E.164), bron: 'webinar-v1'|'webinar-v2',
-//         lead_id (uuid|null), toestemming (bool) }
-// 200 { ok, aanmelding_id, al_aangemeld, sessie: { id, titel, starts_at, ends_at } }
-// 409 { error, code: 'GEEN_SESSIE' }   — geen actieve komende webinar (alles overgeslagen / reeks uit)
-// 400 { error }                        — ongeldige invoer
+//         lead_id (uuid|null), toestemming (bool), sessie_id (uuid|null) }
+//   sessie_id (2026-10-13, datumkeuze): de gekozen sessie. Moet één van de op dit
+//   moment aangeboden sessies zijn (eerstvolgende 3 doorgaande); anders 409
+//   SESSIE_ONGELDIG. Zonder sessie_id: de eerstvolgende (oude gedrag).
+// 200 { ok, aanmelding_id, al_aangemeld, verplaatst, sessie: { id, titel, starts_at, ends_at } }
+//   verplaatst = al aangemeld voor een andere datum → naar de gekozen verplaatst
+//   (verse bevestiging); al_aangemeld = al aangemeld voor DEZE datum.
+// 409 { error, code: 'GEEN_SESSIE' }      — geen actieve komende webinar (alles overgeslagen / reeks uit)
+// 409 { error, code: 'SESSIE_ONGELDIG' }  — gekozen sessie niet (meer) aangeboden
+// 400 { error }                           — ongeldige invoer
 //
 // De bevestiging (mail + WhatsApp, met datum + Zoom-link) gaat hier meteen uit
 // (api/_lib/webinar.js → meldAan). Geen limiet op het aantal aanmeldingen.
@@ -32,7 +38,12 @@ export function valideer(body) {
   if (telefoon && !/^\+\d{8,15}$/.test(telefoon)) return { ok: false, fout: 'Telefoon moet E.164 zijn (+31…)' };
   if (!BRONNEN.includes(b.bron)) return { ok: false, fout: 'Onbekende bron' };
   const leadId = b.lead_id && UUID_RE.test(String(b.lead_id)) ? String(b.lead_id) : null;
-  return { ok: true, waarden: { voornaam, email, telefoon: telefoon || null, bron: b.bron, leadId, toestemming: b.toestemming === true } };
+  let sessieId = null;
+  if (b.sessie_id !== undefined && b.sessie_id !== null && b.sessie_id !== '') {
+    if (!UUID_RE.test(String(b.sessie_id))) return { ok: false, fout: 'Ongeldige sessie' };
+    sessieId = String(b.sessie_id).toLowerCase();
+  }
+  return { ok: true, waarden: { voornaam, email, telefoon: telefoon || null, bron: b.bron, leadId, toestemming: b.toestemming === true, sessieId } };
 }
 
 export default async function handler(req, res) {
@@ -52,10 +63,12 @@ export default async function handler(req, res) {
   try {
     const r = await meldAan(supabaseAdmin, v.waarden);
     if (r.geenSessie) return res.status(409).json({ error: 'Er staat geen webinar gepland', code: 'GEEN_SESSIE' });
+    if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });
     return res.status(200).json({
       ok: true,
       aanmelding_id: r.aanmelding.id,
       al_aangemeld: r.alAangemeld,
+      verplaatst: r.verplaatst === true,
       sessie: { id: r.sessie.id, titel: r.reeks.titel, starts_at: r.sessie.starts_at, ends_at: r.sessie.ends_at },
     });
   } catch (e) {
