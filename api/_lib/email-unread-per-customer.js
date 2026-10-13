@@ -22,18 +22,15 @@
 //   Nooit throw — caller kan zonder guards de Map.get()-lookup doen.
 
 import { ImapFlow } from 'imapflow';
+import { MODULE_MAILBOX } from './module-mailbox.js';
 
 const CACHE_TTL_MS = 60 * 1000;
 const SINCE_DATE = new Date('2026-01-01T00:00:00Z');
 
-// Module → { mailbox-user, env-var-naam voor wachtwoord }.
-// finance-inbox = administratie@ (dunning-mails komen daar binnen).
-// Uitbreidbaar: nieuwe modules bijzetten met eigen mailbox.
-const MODULE_ACCOUNTS = {
-  finance:    { user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' },
-  onboarding: { user: 'onboarding@deforexopleiding.nl',    passEnv: 'IMAP_PASS_ONBOARDING' },
-  events:     { user: 'events@deforexopleiding.nl',        passEnv: 'IMAP_PASS_EVENTS' },
-};
+// Module → mailbox. Komt uit _lib/module-mailbox.js: één map voor alle
+// gebruikers, sinds de gesprekkenlijst het short label ook nodig had en
+// "update BEIDE files" een opdracht werd die iemand half uitvoert.
+const MODULE_ACCOUNTS = MODULE_MAILBOX;
 
 // In-memory cache per module: { fetchedAt, unreadByEmail }.
 const _cache = new Map();

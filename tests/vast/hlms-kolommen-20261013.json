@@ -1,0 +1,13 @@
+{
+  "hlms_student": "id,auth_id,mentor_id,voornaam,achternaam,email,telefoon,membership_type,start_datum,eind_datum,calls_gedaan,calls_totaal,no_show_count,onboarding_status,bubble_user_id,aangemaakt_op,gewijzigd_op,product_soort,traject_maanden,overrides,herkomst,imported_at,access_start,calls_startsaldo,uitnodiging_verstuurd_op,uitnodiging_aantal,aangemaakt_door,crm_onboarding_id",
+  "hlms_personeel": "id,email,naam,rol,actief,aangemaakt_op",
+  "hlms_sessie": "id,student_id,mentor_id,titel,start_tijd,duur_minuten,status,aanwezigheid,agenda,besproken_punten,sessiesamenvatting,mentor_notities,interne_notities,aangemaakt_op,bijgewerkt_op,factuur_bespreken_bevestigd_op,eenheden,locatie",
+  "hlms_teamtraining": "id,titel,start_tijd,zoom_url,aangemaakt_door,aangemaakt_op,opname_les_id,status,zoom_meeting_id,samenvatting,trefwoorden,transcript_status,opname_status,samenvatting_bron,opname_reden,transcript_reden,vimeo_id,samenvatting_voorstel,trefwoorden_voorstel,is_test,transcript_bron",
+  "hlms_teamtraining_trainer": "training_id,personeel_id,toegevoegd_door,toegevoegd_op",
+  "hlms_crm_stilte": "student_id,stil_tot,reden,reden_tekst,door,door_naam,bron,bijgewerkt_op",
+  "hlms_crm_factuurstand": "student_id,vervallen_aantal,open_aantal,oudste_vervaldatum,openstaand_bedrag,bijgewerkt_op,bron_status,bron_fout,verstuurd_aantal,toestand",
+  "hlms_signaal_gebeurtenis": "id,signaal_id,soort,tekst,door,op",
+  "hlms_signaal": "id,onderwerp,student_id,mentor_id,soort,zwaarte,status,bron,bewijs,eerste_op,laatst_gezien_op,mentor_deadline,gesloten_op,gesloten_reden,oorzaak_weg_op,afgehandeld_door,uitkomst,aangemaakt_op,wacht_tot,wacht_reden,bak,in_behandeling_door,in_behandeling_sinds,controle_op,voorstel_datum,crm_onboarding_id",
+  "hlms_intake": "crm_onboarding_id,student_id,naam,telefoon,traject_label,start_datum,aangemeld_op,crm_stand,crm_bijgewerkt_op,handmatig,toegevoegd_door,geclaimd_door,geclaimd_op,gesprek_op,afgerond_door,afgerond_op,uitkomst,actieplan,aangemaakt_op,mentor_id,bedenktijd_status,bedenktijd_vervalt_op,bedenktijd_reden,goedgekeurd_door,goedgekeurd_op,overgeslagen_op,overgeslagen_door,overgeslagen_reden,overgeslagen_sessie_id,intake_keuze,intake_keuze_door,intake_keuze_op,pot_vanaf",
+  "hlms_sessie_taak": "id,sessie_id,titel,omschrijving,afgevinkt,volgorde,aangemaakt_op,les_id,afgevinkt_op"
+}
