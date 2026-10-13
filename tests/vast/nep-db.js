@@ -26,9 +26,12 @@ let teller = 0;
 /**
  * @param {Record<string, object[]>} tabellen  begintoestand per tabel
  * @param {object} [opties]
- * @param {(tabel: string, soort: 'select'|'insert'|'update'|'upsert') => boolean} [opties.faalOp]
+ * @param {(tabel: string, soort: 'select'|'insert'|'update'|'upsert') => boolean|object} [opties.faalOp]
  *        geef true om die bewerking op die tabel te laten falen, zodat
- *        fail-soft-paden echt getoetst worden en niet alleen gegrepen
+ *        fail-soft-paden echt getoetst worden en niet alleen gegrepen. Geef een
+ *        OBJECT om de fout zelf te bepalen — nodig zodra de code op `code`
+ *        kijkt en niet alleen op het bestaan van een fout, zoals bij een
+ *        unieke-index-overtreding: `{ code: '23505', message: '...' }`.
  */
 export function nepDb(tabellen = {}, { faalOp = null } = {}) {
   const data = {};
@@ -51,7 +54,11 @@ export function nepDb(tabellen = {}, { faalOp = null } = {}) {
       return max == null ? uit : uit.slice(0, max);
     };
 
-    const fout = (soort) => (faalOp && faalOp(tabel, soort) ? { message: `nep-fout op ${tabel}.${soort}` } : null);
+    const fout = (soort) => {
+      const f = faalOp && faalOp(tabel, soort);
+      if (!f) return null;
+      return typeof f === 'object' ? f : { message: `nep-fout op ${tabel}.${soort}` };
+    };
 
     /** Een keten die een MUTATIE uitvoert zodra ze wordt uitgevoerd — niet eerder. */
     const mutatie = (soort, doe) => {

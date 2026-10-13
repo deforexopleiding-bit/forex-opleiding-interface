@@ -12,12 +12,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { schrijfPersoon, vulBelrij } from '../api/_lib/iris/belrij-vullen.js';
+import { schrijfPersoon, vulBelrij, voegHandmatigToe } from '../api/_lib/iris/belrij-vullen.js';
 import { uitBeltaak, uitSignaal, uitOpvolging, voegSamen, BRON_PRIORITEIT } from '../api/_lib/iris/belrij-bronnen.js';
 import { nepDb } from './vast/nep-db.js';
 
 const CONTACT = '11111111-1111-1111-1111-111111111111';
 const CONTACT_B = '22222222-2222-2222-2222-222222222222';
+const MAXIM     = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 
 const beltaak = (id, klant) => ({ id, customer_id: klant, action_type: 'MANUAL_FOLLOWUP', status: 'PENDING', payload: { kind: 'call', title: 'Bel klant' } });
 
@@ -54,6 +55,78 @@ test('twee ronden met dezelfde bronnen geven GEEN tweede rij en GEEN tweede rede
   assert.equal(tweede.bijgewerkt, 1);
   assert.equal(db._data.iris_belrij.length, 1, 'er staat een tweede open rij voor dezelfde persoon');
   assert.equal(db._data.iris_belrij_redenen.length, 1);
+});
+
+/* ── de verloren race met de unieke index ─────────────────────────────────── */
+//
+// Sinds 13 okt staat idx_iris_belrij_een_open_per_contact in productie: één
+// open rij per persoon, als PARTIËLE unieke index. Zo'n index kan geen
+// ON CONFLICT-arbiter zijn, dus beide schrijvers doen SELECT-dan-INSERT — en
+// tussen die twee zit ruimte waar de cron-ronde en een mens die op "op de
+// lijst zetten" klikt elkaar tegenkomen. Wie verliest, kreeg een 23505 als
+// harde fout: in de ronde een foutregel plus die persoon een ronde
+// overgeslagen, op de knop een 500 terwijl de rij er gewoon staat. Een 23505
+// op DEZE index betekent niet "er ging iets mis" maar "iemand was net
+// sneller".
+//
+// We spelen de race echt: de nep-databank roept faalOp aan op het moment dat
+// de INSERT wordt uitgevoerd, dus zetten we daar de rij van "de ander" neer en
+// geven we de 23505 terug. Dat is precies de volgorde van de race.
+function dbMetVerlorenRace(rijen, rijVanDeAnder) {
+  let gedaan = false;
+  const db = nepDb(rijen, {
+    faalOp: (tabel, soort) => {
+      if (tabel !== 'iris_belrij' || soort !== 'insert' || gedaan) return false;
+      gedaan = true;
+      if (rijVanDeAnder) db._data.iris_belrij.push({ ...rijVanDeAnder });
+      return { code: '23505', message: 'duplicate key value violates unique constraint "idx_iris_belrij_een_open_per_contact"' };
+    },
+  });
+  return db;
+}
+
+const RIJ_VAN_DE_ANDER = { id: 'b-ander', contact_id: CONTACT, status: 'open', prioriteit: 40, bron: 'mentorsignaal', eigenaar: null, reden: 'mentorsignaal' };
+
+test('ronde verliest de race: de redenen komen op de BESTAANDE rij, geen tweede rij, geen fout', async () => {
+  const db = dbMetVerlorenRace({ iris_belrij: [], iris_belrij_redenen: [] }, RIJ_VAN_DE_ANDER);
+  const rij = voegSamen([uitBeltaak(beltaak('t1', 'k1'), { contactId: CONTACT })])[0];
+
+  const uit = await schrijfPersoon(db, rij);
+
+  assert.equal(uit.nieuw, 0, 'wij maakten de rij niet');
+  assert.equal(uit.bijgewerkt, 1, 'we werkten de rij van de ander bij');
+  assert.equal(db._data.iris_belrij.length, 1, 'er staat een tweede open rij voor dezelfde persoon');
+  assert.equal(db._data.iris_belrij_redenen.length, 1);
+  assert.equal(db._data.iris_belrij_redenen[0].belrij_id, 'b-ander', 'de reden hangt aan de rij die er al stond');
+  // De wanbetalerbron weegt zwaarder dan de 40 van de ander; omlaag gaat 'ie nooit.
+  assert.equal(db._data.iris_belrij[0].prioriteit, BRON_PRIORITEIT.wanbetaler);
+});
+
+test('ronde verliest de race en er valt niets te hervinden: gooien, geen id verzinnen', async () => {
+  // De ander rondde z'n rij meteen af, dus de hervonden lees vindt niets open.
+  const db = dbMetVerlorenRace({ iris_belrij: [], iris_belrij_redenen: [] }, null);
+  const rij = voegSamen([uitSignaal({ id: 's1', contact_id: CONTACT, type: 'reageert_niet' })])[0];
+
+  await assert.rejects(() => schrijfPersoon(db, rij), /belrij aanmaken/,
+    'stil doen alsof het goed ging zou een rij verzinnen die niet bestaat');
+  assert.equal(db._data.iris_belrij.length, 0);
+  assert.equal(db._data.iris_belrij_redenen.length, 0);
+});
+
+test('hand verliest de race: de klik hangt aan de bestaande rij, met prioriteit en eigenaar', async () => {
+  const db = dbMetVerlorenRace({ iris_belrij: [], iris_belrij_redenen: [] }, RIJ_VAN_DE_ANDER);
+
+  const uit = await voegHandmatigToe(db, {
+    contactId: CONTACT, reden: 'met de hand', prioriteit: 90, eigenaar: MAXIM, bron: 'hand',
+  });
+
+  assert.equal(uit.belrij_id, 'b-ander', 'de klik hangt aan de rij die er al stond');
+  assert.equal(uit.nieuw, false, 'het scherm hoort te zeggen dat de persoon er al op stond');
+  assert.equal(db._data.iris_belrij.length, 1, 'geen tweede rij');
+  assert.equal(db._data.iris_belrij[0].prioriteit, 90, 'de prioriteit van het mens komt er alsnog op');
+  assert.equal(db._data.iris_belrij[0].eigenaar, MAXIM, 'en de eigenaar die het mens aanwijst ook');
+  assert.equal(db._data.iris_belrij_redenen.length, 1, 'de reden komt onder de bestaande rij');
+  assert.equal(db._data.iris_belrij_redenen[0].belrij_id, 'b-ander');
 });
 
 test('een prioriteit die een mens hoger zette blijft staan', async () => {
