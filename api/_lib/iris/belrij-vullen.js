@@ -37,6 +37,60 @@ export const PER_BRON_MAX = 500;
 /** Statussen waarin een belrij-rij "nog werk" is. Gelijk aan idx_iris_belrij_open. */
 export const OPEN_STATUS = Object.freeze(['open', 'bezig']);
 
+/** Postgres: een unieke index die overtreden wordt. */
+const DUBBELE_RIJ = '23505';
+
+/**
+ * De open rij aanmaken, en een 23505 lezen als "staat er al".
+ *
+ * ── WAAROM DIT NODIG IS ──────────────────────────────────────────────────────
+ * Sinds 13 okt staat `idx_iris_belrij_een_open_per_contact` in productie: een
+ * partiële unieke index op contact_id waar de status open of bezig is. Die
+ * index kan geen ON CONFLICT-arbiter zijn (zie de kop van dit bestand), dus
+ * zowel de vuller als de knop op het scherm doen SELECT-dan-UPDATE-of-INSERT.
+ * Tussen die SELECT en die INSERT zit ruimte, en daar lopen twee schrijvers
+ * elkaar tegen het lijf: de cron-ronde en een mens die op "op de lijst zetten"
+ * klikt.
+ *
+ * Wie die race verliest, kreeg een 23505 als harde fout. In de ronde is dat
+ * fail-soft (één foutregel, die persoon een ronde overgeslagen), maar op de
+ * knop is het een 500 terwijl de rij er gewoon staat — precies de verwarring
+ * die de index moest wegnemen. Een 23505 op déze index betekent niet "er ging
+ * iets mis", het betekent "iemand anders was net sneller". Zelfde lijn als de
+ * ontdubbeling van de supportmail: een 23505 op de index is "al verwerkt".
+ *
+ * Alleen 23505 vangen we; elke andere fout gooit door. En vinden we daarna
+ * alsnog geen open rij (de ander heeft 'm meteen weer afgerond), dan gooien we
+ * de oorspronkelijke fout — stil doen alsof het goed ging, zou een rij
+ * verzinnen die niet bestaat.
+ *
+ * @returns {Promise<{ rij: object, nieuw: boolean }>} nieuw=false → de race verloren
+ */
+async function maakOpenRij(db, velden) {
+  const { data, error } = await db
+    .from('iris_belrij')
+    .insert(velden)
+    .select('id')
+    .single();
+  if (!error) {
+    return { rij: { id: data.id, prioriteit: velden.prioriteit, eigenaar: velden.eigenaar, status: velden.status, bron: velden.bron }, nieuw: true };
+  }
+  if (String(error.code || '') !== DUBBELE_RIJ) throw new Error(`belrij aanmaken: ${error.message}`);
+
+  const { data: alsnog, error: leesFout } = await db
+    .from('iris_belrij')
+    .select('id, prioriteit, status, bron, eigenaar')
+    .eq('contact_id', velden.contact_id)
+    .in('status', OPEN_STATUS)
+    .order('aangemaakt_op', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (leesFout) throw new Error(`belrij na dubbele rij lezen: ${leesFout.message}`);
+  if (!alsnog?.id) throw new Error(`belrij aanmaken: ${error.message}`);
+  console.warn('[iris/belrij-vullen] open rij bestond al (race); reden komt op de bestaande rij:', alsnog.id);
+  return { rij: alsnog, nieuw: false };
+}
+
 /* ── 1. Bel-taken van de wanbetalers ──────────────────────────────────────── */
 
 /**
@@ -176,47 +230,52 @@ export async function schrijfPersoon(db, rij, { nu = new Date(), eigenaren = {} 
     .maybeSingle();
   if (leesFout) throw new Error(`belrij lezen: ${leesFout.message}`);
 
-  let belrijId = bestaand?.id || null;
+  // Staat er nog niets, dan maken we de rij. Verliezen we daarbij de race met
+  // een andere schrijver, dan geeft maakOpenRij de rij van die ander terug en
+  // lopen we gewoon door naar de bijwerk-tak eronder — de redenen komen dan op
+  // die rij, niet op een tweede.
+  let huidig = bestaand || null;
+  let isNieuw = false;
+  if (!huidig) {
+    const kop = rij.redenen[0];
+    const gemaakt = await maakOpenRij(db, {
+      contact_id: rij.contact_id,
+      reden: String(kop.reden || 'bellen').slice(0, 200),
+      reden_detail: kop.reden_detail || null,
+      prioriteit: Number(rij.prioriteit) || 50,
+      bron: rij.bron || 'hand',
+      // Wie belt er. Null als de regel voor deze bron niet is ingesteld; dan
+      // staat de rij onder "alle" en wacht hij daar op iemand. Dat is beter
+      // dan hem aan de verkeerde persoon hangen.
+      eigenaar: eigenaarVoorBron(eigenaren, rij.bron),
+      // Expliciet, al staat er een DEFAULT op de kolom: de SELECT hierboven
+      // zoekt op status, dus een rij die om wat voor reden ook zonder status
+      // wordt aangemaakt, wordt de volgende ronde niet teruggevonden en
+      // levert een tweede rij voor dezelfde persoon op.
+      status: 'open',
+    });
+    huidig = gemaakt.rij;
+    isNieuw = gemaakt.nieuw;
+  }
 
-  if (belrijId) {
-    const hoogste = Math.max(Number(bestaand.prioriteit) || 0, Number(rij.prioriteit) || 0);
+  const belrijId = huidig.id;
+
+  if (isNieuw) {
+    uit.nieuw = 1;
+  } else {
+    const hoogste = Math.max(Number(huidig.prioriteit) || 0, Number(rij.prioriteit) || 0);
     const velden = { bijgewerkt_op: nu.toISOString() };
-    if (hoogste !== Number(bestaand.prioriteit)) velden.prioriteit = hoogste;
+    if (hoogste !== Number(huidig.prioriteit)) velden.prioriteit = hoogste;
     // Een eigenaar die er al staat blijft staan -- ook als de regel nu iemand
     // anders aanwijst. Wie een rij heeft opgepakt, raakt hem niet kwijt doordat
     // er een tweede reden bij komt uit een bron met een andere eigenaar.
-    if (!bestaand.eigenaar) {
+    if (!huidig.eigenaar) {
       const volgensRegel = eigenaarVoorBron(eigenaren, rij.bron);
       if (volgensRegel) velden.eigenaar = volgensRegel;
     }
     const { error } = await db.from('iris_belrij').update(velden).eq('id', belrijId);
     if (error) throw new Error(`belrij bijwerken: ${error.message}`);
     uit.bijgewerkt = 1;
-  } else {
-    const kop = rij.redenen[0];
-    const { data, error } = await db
-      .from('iris_belrij')
-      .insert({
-        contact_id: rij.contact_id,
-        reden: String(kop.reden || 'bellen').slice(0, 200),
-        reden_detail: kop.reden_detail || null,
-        prioriteit: Number(rij.prioriteit) || 50,
-        bron: rij.bron || 'hand',
-        // Wie belt er. Null als de regel voor deze bron niet is ingesteld; dan
-        // staat de rij onder "alle" en wacht hij daar op iemand. Dat is beter
-        // dan hem aan de verkeerde persoon hangen.
-        eigenaar: eigenaarVoorBron(eigenaren, rij.bron),
-        // Expliciet, al staat er een DEFAULT op de kolom: de SELECT hierboven
-        // zoekt op status, dus een rij die om wat voor reden ook zonder status
-        // wordt aangemaakt, wordt de volgende ronde niet teruggevonden en
-        // levert een tweede rij voor dezelfde persoon op.
-        status: 'open',
-      })
-      .select('id')
-      .single();
-    if (error) throw new Error(`belrij aanmaken: ${error.message}`);
-    belrijId = data.id;
-    uit.nieuw = 1;
   }
 
   // ── De redenen, fail-soft ───────────────────────────────────────────────────
@@ -410,37 +469,39 @@ export async function voegHandmatigToe(db, {
   if (leesFout) throw new Error('belrij lezen: ' + leesFout.message);
 
   const gevraagd = Number.isFinite(Number(prioriteit)) ? Number(prioriteit) : 50;
-  let belrijId = bestaand?.id || null;
+  let huidig = bestaand || null;
   let nieuw = false;
 
-  if (belrijId) {
+  if (!huidig) {
+    const gemaakt = await maakOpenRij(db, {
+      contact_id: contactId,
+      reden: String(reden || 'handmatig toegevoegd').slice(0, 200),
+      reden_detail: detail ? String(detail).slice(0, 500) : null,
+      eigenaar: eigenaar || null,
+      prioriteit: gevraagd,
+      bron,
+      status: 'open',
+    });
+    huidig = gemaakt.rij;
+    nieuw = gemaakt.nieuw;
+  }
+
+  const belrijId = huidig.id;
+
+  // Ook ná een verloren race: de prioriteit en de eigenaar die dit mens
+  // meegeeft, horen alsnog op de rij te komen. Anders kost een cron-ronde die
+  // er net tussendoor fietste de klik z'n betekenis, en dat is niet te zien.
+  if (!nieuw) {
     // Een mens die een rij hoger zet, mag dat. Omlaag niet: dan verdwijnt
     // iemand naar onderen doordat er nóg een reden bij kwam.
     const velden = { bijgewerkt_op: nu.toISOString() };
-    const hoogste = Math.max(Number(bestaand.prioriteit) || 0, gevraagd);
-    if (hoogste !== Number(bestaand.prioriteit)) velden.prioriteit = hoogste;
+    const hoogste = Math.max(Number(huidig.prioriteit) || 0, gevraagd);
+    if (hoogste !== Number(huidig.prioriteit)) velden.prioriteit = hoogste;
     // Wie expliciet een eigenaar meegeeft, wijst toe — ook als er al iemand
     // staat. Dit is een mens die het zegt, geen regel die het afleidt.
     if (eigenaar) velden.eigenaar = eigenaar;
     const { error } = await db.from('iris_belrij').update(velden).eq('id', belrijId);
     if (error) throw new Error('belrij bijwerken: ' + error.message);
-  } else {
-    const { data, error } = await db
-      .from('iris_belrij')
-      .insert({
-        contact_id: contactId,
-        reden: String(reden || 'handmatig toegevoegd').slice(0, 200),
-        reden_detail: detail ? String(detail).slice(0, 500) : null,
-        eigenaar: eigenaar || null,
-        prioriteit: gevraagd,
-        bron,
-        status: 'open',
-      })
-      .select('id')
-      .single();
-    if (error) throw new Error('belrij aanmaken: ' + error.message);
-    belrijId = data.id;
-    nieuw = true;
   }
 
   // De reden erbij. Een eigen sleutel per toevoeging: twee keer met de hand

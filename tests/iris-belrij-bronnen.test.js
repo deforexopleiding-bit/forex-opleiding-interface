@@ -192,8 +192,15 @@ test('er wordt geen tweede open rij per persoon gemaakt: eerst zoeken, dan schri
   assert.equal(metArbiter, null, 'iris_belrij wordt geupsert — dat kan niet met een partiële index');
 });
 
+// Deze toets stond op `Number(bestaand.prioriteit)` en viel om zodra die
+// plaatselijke variabele een andere naam kreeg — les 13 in eigen huis. De eis
+// is dat de prioriteit nooit omlaag gaat, niet hoe de variabele heet, dus
+// staat de naam er niet meer in. Het gedrág staat in
+// tests/iris-belrij-schrijven.test.js ('een prioriteit die een mens hoger
+// zette blijft staan') en hieronder voor de handmatige kant.
 test('een prioriteit die een mens hoger zette, schuift niet omlaag', () => {
-  assert.match(C_VULLER, /Math\.max\(Number\(bestaand\.prioriteit\)/);
+  assert.equal((C_VULLER.match(/Math\.max\(Number\(\w+\.prioriteit\)/g) || []).length, 2,
+    'beide schrijfpaden (de ronde en de hand) nemen het hoogste van de twee');
 });
 
 test('de redenen gaan er wél met een arbiter in — die index is volledig', () => {
