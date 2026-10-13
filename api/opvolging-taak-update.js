@@ -13,6 +13,16 @@
 //   actie 'archiveer'       { archief_reden }  → status gearchiveerd (reden verplicht)
 //   actie 'notitie'         { notitie }
 //
+// Alleen voor leadkaarten (Leads bellen):
+//   actie 'uitkomst'        { uitkomst: geen_gehoor|voicemail|gesproken|foutief_nummer }
+//                             → wat er gebeurde aan de lijn. Geen gehoor/voicemail
+//                               zet de laatste call recht ('gesproken' is bij een
+//                               voicemail een opgenomen lijn, geen gesprek) en laat
+//                               de belcadans de volgende ronde kiezen. Foutief
+//                               nummer rondt de kaart meteen af.
+//   actie 'opnieuw_om'      { wanneer: ISO | 'vanavond' | 'morgen' } → volgende
+//                             poging op een zelfgekozen moment
+//
 // Nieuw endpoint. Schrijft uitsluitend in opvolging_taken.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -21,7 +31,9 @@ import { terugInLijstPatch } from './_lib/opvolging-terug-in-lijst.js';
 import { isLeadkaart } from './_lib/opvolging-lijst.js';
 import {
   REDEN_CODE_TERUGBELLEN, valideerAfronden, AFROND_CATEGORIEEN,
+  UITKOMSTEN, logErbij, momentInZone, dagPlusN, START_UUR, belPlan,
 } from './_lib/opvolging-leads-pot.js';
+import { corrigeerLaatsteCall } from './_lib/opvolging-leads-uitkomst.js';
 
 /** Een dag na `dag` (YYYY-MM-DD). */
 const dagNa = (dag) => {
@@ -83,8 +95,17 @@ export default async function handler(req, res) {
     if (leesErr) throw leesErr;
     if (!taak) return res.status(404).json({ error: 'Deze taak bestaat niet (meer).' });
 
+    const lead = isLeadkaart(taak);
+
     if (b.actie === 'later_vandaag') {
       patch.later = true;
+      // LEADKAART: 'later vandaag' = over 3 uur opnieuw aan de beurt in de
+      // Belrij. Tot dan staat hij in afkoeling, niet bovenaan.
+      if (lead) {
+        patch.later = false;
+        patch.volgende_poging_at = new Date(Date.now() + 3 * 3600000).toISOString();
+        patch.uitkomst_log = logErbij(taak, { soort: 'opnieuw', tekst: 'Later vandaag nog eens', wanneer: patch.volgende_poging_at });
+      }
 
     } else if (b.actie === 'verplaats') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(b.due || '')) return res.status(400).json({ error: 'due ontbreekt' });
@@ -98,6 +119,11 @@ export default async function handler(req, res) {
         if (b.due < dagNa(dagInZone(Date.now()))) return res.status(400).json({ error: 'Kies een dag vanaf morgen.' });
         patch.terugbel_notitie = wat.slice(0, 1000);
         patch.reden_code = REDEN_CODE_TERUGBELLEN;
+        patch.volgende_poging_at = null;
+        // De afgesproken dag in het logboek: daarvandaan tellen de rondes van
+        // deze afspraak (de nachtelijke doorrol verschuift `due` later naar
+        // vandaag, dus die is geen betrouwbare startdag).
+        patch.uitkomst_log = logErbij(taak, { soort: 'terugbel', due: b.due, tekst: 'Terugbellen op ' + b.due + ': ' + wat.slice(0, 200) });
       }
       // Geteld worden alleen echte pogingen van vandaag; het doorschuiven zelf telt niet mee.
       const { count } = await supabaseAdmin
@@ -142,6 +168,7 @@ export default async function handler(req, res) {
         const fout = valideerAfronden({ categorie: b.archief_categorie, notitie: b.archief_reden });
         if (fout) return res.status(400).json({ error: fout, categorieen: Object.keys(AFROND_CATEGORIEEN) });
         patch.archief_categorie = String(b.archief_categorie);
+        patch.uitkomst_log = logErbij(taak, { soort: 'afgerond', tekst: 'Afgerond: ' + (AFROND_CATEGORIEEN[b.archief_categorie] || b.archief_categorie) });
       }
       const reden = (b.archief_reden || '').trim();
       if (!reden) return res.status(400).json({ error: 'archief_reden is verplicht' });
@@ -151,6 +178,46 @@ export default async function handler(req, res) {
 
     } else if (b.actie === 'notitie') {
       patch.notitie = b.notitie || null;
+
+    } else if (b.actie === 'uitkomst') {
+      if (!lead) return res.status(400).json({ error: 'uitkomst bestaat alleen voor Leads bellen' });
+      const u = String(b.uitkomst || '');
+      if (!Object.prototype.hasOwnProperty.call(UITKOMSTEN, u)) {
+        return res.status(400).json({ error: 'onbekende uitkomst', uitkomsten: Object.keys(UITKOMSTEN) });
+      }
+      if (u === 'foutief_nummer' && !(await requirePermission(req, 'opvolging.taak.archiveren'))) {
+        return res.status(403).json({ error: 'Geen rechten (opvolging.taak.archiveren)' });
+      }
+      const correctie = await corrigeerLaatsteCall(supabaseAdmin, { taakId: taak.id, uitkomst: u, nuMs: Date.now() });
+      const noot = String(b.notitie || '').trim().slice(0, 500);
+      patch.uitkomst_log = logErbij(taak, {
+        soort: u, tekst: UITKOMSTEN[u] + (noot ? ' — ' + noot : ''), call: correctie.actie,
+      });
+      if (u === 'geen_gehoor' || u === 'voicemail') {
+        // De cadans beslist: volgende ronde volgt uit de belpogingen zelf.
+        patch.volgende_poging_at = null;
+        patch.later = false;
+      }
+      if (u === 'foutief_nummer') {
+        patch.status = 'gearchiveerd';
+        patch.archief_categorie = 'foutief_nummer';
+        patch.archief_reden = 'Foutief nummer — vastgesteld bij het bellen op ' + dagInZone(Date.now()) + '.' + (noot ? ' ' + noot : '');
+        patch.gearchiveerd_at = new Date().toISOString();
+      }
+
+    } else if (b.actie === 'opnieuw_om') {
+      if (!lead) return res.status(400).json({ error: 'opnieuw_om bestaat alleen voor Leads bellen' });
+      const vandaagAms = dagInZone(Date.now());
+      let ms;
+      if (b.wanneer === 'vanavond') ms = momentInZone(vandaagAms, 18);
+      else if (b.wanneer === 'morgen') ms = momentInZone(dagPlusN(vandaagAms, 1), START_UUR);
+      else ms = Date.parse(String(b.wanneer || ''));
+      if (!Number.isFinite(ms) || ms <= Date.now() || ms > Date.now() + 30 * 86400000) {
+        return res.status(400).json({ error: 'Kies een moment in de komende 30 dagen.' });
+      }
+      patch.volgende_poging_at = new Date(ms).toISOString();
+      patch.later = false;
+      patch.uitkomst_log = logErbij(taak, { soort: 'opnieuw', tekst: 'Opnieuw proberen', wanneer: patch.volgende_poging_at });
 
     } else {
       return res.status(400).json({ error: 'onbekende actie' });
@@ -163,7 +230,16 @@ export default async function handler(req, res) {
       .from('opvolging_taken').update(patch).eq('id', b.taak_id).select().maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Deze taak bestaat niet (meer).' });
-    return res.status(200).json({ success: true, taak: data });
+    // Na een uitkomst wil het scherm meteen weten wanneer de volgende ronde is.
+    let plan = null;
+    if (lead && (b.actie === 'uitkomst' || b.actie === 'opnieuw_om' || b.actie === 'later_vandaag')) {
+      try {
+        const { data: pog } = await supabaseAdmin.from('opvolging_pogingen').select('*')
+          .eq('taak_id', data.id).order('tijdstip', { ascending: true }).limit(500);
+        plan = belPlan({ kaart: data, pogingen: pog || [], nuMs: Date.now() });
+      } catch (e) { console.warn('[opvolging-taak-update] plan (soft):', e?.message || e); }
+    }
+    return res.status(200).json({ success: true, taak: data, plan });
   } catch (e) {
     // De echte tekst in het log, een generieke zin naar buiten. e.message
     // rechtstreeks doorsturen zette databasetaal op Daves scherm.
