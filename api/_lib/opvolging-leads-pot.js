@@ -687,9 +687,21 @@ export function belPlan({ kaart, pogingen, nuMs }) {
   const laatsteUit = lijst.filter(isUitgaand).map((p) => Date.parse(p.tijdstip)).filter(Number.isFinite);
   const laatsteIn = lijst.filter((p) => p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht') && p.richting === 'in')
     .map((p) => Date.parse(p.tijdstip)).filter(Number.isFinite);
-  const uitMax = laatsteUit.length ? Math.max(...laatsteUit) : 0;
+  // Een aangeklikte uitkomst of beslissing na het antwoord telt ook als
+  // 'gezien en afgehandeld' — anders blijft een gelezen 'nee' bovenaan staan.
+  const logMs = logVan(kaart).map((e) => Date.parse(e.op)).filter(Number.isFinite);
+  const uitMax = Math.max(0, ...laatsteUit, ...logMs);
   const inMax = laatsteIn.length ? Math.max(...laatsteIn) : 0;
-  const reageerde = inMax > 0 && inMax > uitMax;
+  // Een terugbelafspraak voor later is zelf al het antwoord op wat hij zei:
+  // zonder logregel weten we niet of die vóór of na zijn bericht gemaakt is,
+  // dus dan geen 'reageerde' tot de afgesproken dag.
+  const vandaagDag = dagInZone(nuMs);
+  const latereAfspraak = kaart && kaart.reden_code === REDEN_CODE_TERUGBELLEN &&
+    String(kaart.due || '') > vandaagDag && !logMs.some((t) => t > inMax);
+  const reageerde = inMax > 0 && inMax > uitMax && !latereAfspraak;
+  const antwoord = reageerde
+    ? lijst.filter((p) => p && p.richting === 'in' && Date.parse(p.tijdstip) === inMax).map((p) => String(p.resultaat || '')).pop() || null
+    : null;
 
   // Een belpoging van vandaag zonder aangeklikte uitkomst erna.
   // Een vervolgstap (bericht, agenda, inplanning) na de call telt ook als
@@ -716,6 +728,8 @@ export function belPlan({ kaart, pogingen, nuMs }) {
     handmatig,
     uitgebeld,
     reageerde,
+    // De tekst van zijn laatste bericht, zonder het technische voorvoegsel.
+    antwoord: antwoord ? antwoord.replace(/^antwoord ontvangen(\s*\([^)]*\))?:\s*/i, '').slice(0, 160) || null : null,
     uitkomst_open: uitkomstOpen,
     binnen_venster: binnenVenster,
   };
