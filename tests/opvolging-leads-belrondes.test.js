@@ -324,3 +324,14 @@ test('opnieuw_om: alleen een moment in de toekomst', async (t) => {
   assert.equal(r2.u.code, 200);
   assert.ok(Date.parse(r2.u.body.taak.volgende_poging_at) > Date.now());
 });
+
+test('reageerde: tekst van het antwoord erbij; een latere terugbelafspraak of een uitkomst erna dooft het', () => {
+  const pog = [call(min(300)), { soort: 'whatsapp', richting: 'in', resultaat: 'antwoord ontvangen (Meta): Nee ik ga niet verder', tijdstip: min(60) }];
+  const p = belPlan({ kaart: { status: 'open', due: VANDAAG }, pogingen: pog, nuMs: NU });
+  assert.equal(p.reageerde, true);
+  assert.equal(p.antwoord, 'Nee ik ga niet verder');
+  const later = belPlan({ kaart: { status: 'open', due: dagPlusN(VANDAAG, 5), reden_code: 'terugbellen' }, pogingen: pog, nuMs: NU });
+  assert.equal(later.reageerde, false);
+  const gezien = belPlan({ kaart: { status: 'open', due: VANDAAG, uitkomst_log: [{ op: min(30), soort: 'opnieuw' }] }, pogingen: pog, nuMs: NU });
+  assert.equal(gezien.reageerde, false);
+});
