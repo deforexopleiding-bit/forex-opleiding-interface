@@ -1,3 +1,20 @@
+-- ⛔ NIET DRAAIEN — vervangen door 2026-10-13-iris-laatste-outbound-backfill.sql
+--
+-- Dit bestand filtert op `iris_berichten.richting = 'out'`. Die waarde bestaat
+-- niet: de CHECK op die kolom is `IN ('in','uit')`, en gemeten in productie op
+-- 13 oktober staan er 906 rijen 'in' en 1610 rijen 'uit'. Deze backfill zou dus
+-- 0 rijen hebben gevuld, en de "wacht op ons"-regel van H3 was blijven staan
+-- waar hij stond.
+--
+-- Dezelfde fout zat ook in de CODE: cron-iris-werk vergeleek `vorm.richting`
+-- met 'out', terwijl waRichting() 'uit' teruggeeft. Daardoor werd
+-- `laatste_outbound` nooit gestempeld. Zie de PR bij
+-- 2026-10-13-iris-laatste-outbound-backfill.sql.
+--
+-- Het staat hier als geschiedenis. Draai het niet: het doet niets, maar het
+-- maakt wél de spoortabel iris_outbound_backfill_20261012 aan, en die is dan
+-- een leeg spoor dat suggereert dat er een backfill gelopen heeft.
+
 -- ============================================================================
 -- iris_gesprekken.laatste_outbound bijvullen — eenmalig, in batches
 -- Datum: 12 oktober 2026

@@ -44,6 +44,8 @@ import {
   vormWa,
   vormMail,
   terugblikVanaf,
+  isUitgaand,
+  isInkomend,
 } from './_lib/iris/opname.js';
 
 const STOP_NA_MS = 25_000;
@@ -360,7 +362,7 @@ async function neemWaOp(rij, rapport) {
     if (String(error.code) === '23505') return false;
     throw new Error('bericht opslaan: ' + error.message);
   }
-  if (vorm.richting === 'out') await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
+  if (isUitgaand(vorm)) await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
   return true;
 }
 
@@ -374,7 +376,7 @@ async function neemMailOp(rij, rapport) {
   const vorm = vormMail(rij);
 
   let contact = null;
-  if (vorm.richting === 'in') {
+  if (isInkomend(vorm)) {
     contact = await zorgVoorContact(supabaseAdmin, {
       email: rij.from_address,
       naam: rij.from_name,
@@ -397,7 +399,7 @@ async function neemMailOp(rij, rapport) {
   // een uitgaande mail is dat adres niet uit from_address te halen, dus dan
   // hangen we hem aan het gesprek van het contact als dat er is.
   let gesprek = null;
-  if (vorm.richting === 'in' && rij.from_address) {
+  if (isInkomend(vorm) && rij.from_address) {
     gesprek = await zorgVoorGesprek({
       contactId: contact?.id || null,
       kanaal: 'email',
@@ -424,7 +426,7 @@ async function neemMailOp(rij, rapport) {
     if (String(error.code) === '23505') return false;
     throw new Error('mail opslaan: ' + error.message);
   }
-  if (vorm.richting === 'out') await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
+  if (isUitgaand(vorm)) await stempelOutbound(gesprek?.id, vorm.ontvangen_op);
   return true;
 }
 

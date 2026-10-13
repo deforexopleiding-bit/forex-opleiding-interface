@@ -100,19 +100,44 @@ const ECHTE_KOLOMMEN = Object.freeze([
 ]);
 
 /**
- * Kolommen die in de MIGRATIEBESTANDEN van de LMS-repo staan maar niet in de
- * databank. Die migraties zijn niet gedraaid.
+ * Namen die op hlms_signaal NIET BESTAAN — gemeten in dfo-lms, 13 oktober 2026.
  *
- * Deze lijst bestaat omdat de eerste reparatie van deze bug er precies op
- * uitgleed: `aangemaakt_op` komt uit een migratiebestand, las als een echte
- * kolom, en gaf dezelfde 400 als `created_at`.
+ * ── DEZE LIJST IS GEKROMPEN, EN DAT IS EEN LES APART ────────────────────────
+ * Hij stond vol met `aangemaakt_op`, `bak`, `wacht_tot`, `wacht_reden`,
+ * `controle_op`, `voorstel_datum`, `in_behandeling_door` en
+ * `in_behandeling_sinds`. Die kolommen BESTAAN nu wel: ze zijn er sinds 1
+ * oktober bij gekomen. Een toets die blijft volhouden dat ze niet bestaan,
+ * is een toets die een onwaarheid vastpint — en de volgende lezer vertrouwt
+ * hem.
+ *
+ * Wat overblijft zijn namen die er nooit waren: `created_at` (verzonnen), en
+ * de namen die de CRM-kant gebruikt maar die in het LMS anders heten — `type`
+ * is daar `soort`, `toelichting` zit in `bewijs`, en `mentor_naam` /
+ * `gevraagde_actie` bestaan alleen in onze eigen iris_signalen.
  */
-const NIET_IN_DE_DATABANK = Object.freeze([
-  'created_at', 'aangemaakt_op', 'bak', 'wacht_tot', 'wacht_reden',
-  'controle_op', 'voorstel_datum', 'in_behandeling_door', 'in_behandeling_sinds',
-  'type', 'signaal_type', 'toelichting', 'omschrijving', 'notitie', 'mentor_naam',
-  'gevraagde_actie',
+const BESTAAT_NIET = Object.freeze([
+  'created_at', 'signaal_type', 'toelichting', 'omschrijving', 'notitie',
+  'mentor_naam', 'gevraagde_actie',
 ]);
+
+/**
+ * Kolommen die hlms_signaal WEL heeft sinds 1 oktober 2026, en die wij met
+ * opzet niet opvragen.
+ *
+ * Een kolom in SIGNAAL_KOLOMMEN is een HARDE eis: een LMS waar die migratie
+ * niet gedraaid is (een nieuwe omgeving, een herstel uit een oudere dump)
+ * geeft dan een 400 op de hele opvraging, en dan staan er geen signalen meer
+ * in de Post. Deze lijst bewaakt dus niet "bestaat niet" maar "hangt er niet
+ * aan".
+ */
+const SINDS_1_OKT = Object.freeze([
+  'aangemaakt_op', 'wacht_tot', 'wacht_reden', 'bak',
+  'in_behandeling_door', 'in_behandeling_sinds', 'controle_op',
+  'voorstel_datum', 'crm_onboarding_id',
+]);
+
+/** Alles wat niet in de opvraging mag staan, om wat voor reden ook. */
+const NIET_IN_DE_OPVRAGING = Object.freeze([...BESTAAT_NIET, ...SINDS_1_OKT, 'type']);
 
 // Een rij zoals hlms_signaal hem echt teruggeeft. Gemeten 1 oktober 2026.
 const ECHTE_RIJ = Object.freeze({
@@ -294,14 +319,26 @@ async function vraagOp(rijen = []) {
   return { lms, crm, vraag: lms.gelogd.find((v) => v.tabel === 'hlms_signaal') };
 }
 
-test('DE OPVRAGING NOEMT GEEN ENKELE KOLOM DIE NIET BESTAAT', async () => {
+test('DE OPVRAGING NOEMT GEEN KOLOM DIE NIET BESTAAT', async () => {
   // Dit is de bug, twee keer. Eerst `created_at` (verzonnen), daarna
-  // `aangemaakt_op` (uit een migratiebestand dat niet gedraaid is). Allebei
-  // leverden ze elke vijf minuten een 400 in de LMS-logs.
+  // `aangemaakt_op` (uit een migratiebestand dat toen niet gedraaid was).
+  // Allebei leverden ze elke vijf minuten een 400 in de LMS-logs.
   const { vraag } = await vraagOp();
   const alles = JSON.stringify(vraag);
-  for (const k of NIET_IN_DE_DATABANK) {
+  for (const k of BESTAAT_NIET) {
     assert.ok(!alles.includes(k), `${k} bestaat niet op hlms_signaal en hoort niet in de opvraging`);
+  }
+});
+
+test('DE OPVRAGING HANGT NIET AAN EEN KOLOM VAN NA 1 OKTOBER', async () => {
+  // Die kolommen bestaan nu wél. Eén ervan opvragen maakt de hele opvraging
+  // afhankelijk van een migratie die in een andere LMS-omgeving misschien niet
+  // gedraaid is -- en dan is er geen 400 op één kolom maar geen signaal meer in
+  // de hele Post.
+  const { vraag } = await vraagOp();
+  const alles = JSON.stringify(vraag);
+  for (const k of SINDS_1_OKT) {
+    assert.ok(!alles.includes(k), `${k} bestaat wel, maar de opvraging hoort er niet aan te hangen`);
   }
 });
 
@@ -324,11 +361,14 @@ test('de kolomlijst is EXACT de zeventien kolommen die bestaan', async () => {
     'de kolomlijst hoort gelijk te zijn aan wat pg_attribute teruggaf');
 });
 
-test('de niet-bestaande en de echte kolommen overlappen niet', () => {
-  // Zou een naam in allebei de lijsten staan, dan zegt dit bestand twee dingen
+test('de drie lijsten overlappen niet', () => {
+  // Zou een naam in twee lijsten staan, dan zegt dit bestand twee dingen
   // tegelijk en is geen enkele test erop nog betrouwbaar.
-  for (const k of NIET_IN_DE_DATABANK) {
-    assert.ok(!ECHTE_KOLOMMEN.includes(k), `${k} staat in beide lijsten`);
+  for (const k of NIET_IN_DE_OPVRAGING) {
+    assert.ok(!ECHTE_KOLOMMEN.includes(k), `${k} staat zowel in de opvraging als op de verbodslijst`);
+  }
+  for (const k of BESTAAT_NIET) {
+    assert.ok(!SINDS_1_OKT.includes(k), `${k} bestaat volgens dit bestand zowel wel als niet`);
   }
 });
 
