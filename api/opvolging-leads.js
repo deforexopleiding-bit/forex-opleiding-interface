@@ -47,6 +47,9 @@ export default async function handler(req, res) {
       badge: o.badge,
       nieuw_heet: o.nieuw_heet,
       nieuw_warm_of_heet: o.nieuw_warm_of_heet,
+      // Nu bellen: aantal per sectie, wat dringend is, en wie op zijn
+      // volgende belronde wacht (met het eerstvolgende moment).
+      belrij: o.belrij,
       niet_getoond: o.niet_getoond,
       kandidaten: o.kandidaten,
       dag: o.dag,
