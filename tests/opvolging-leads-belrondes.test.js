@@ -335,3 +335,8 @@ test('reageerde: tekst van het antwoord erbij; een latere terugbelafspraak of ee
   const gezien = belPlan({ kaart: { status: 'open', due: VANDAAG, uitkomst_log: [{ op: min(30), soort: 'opnieuw' }] }, pogingen: pog, nuMs: NU });
   assert.equal(gezien.reageerde, false);
 });
+
+test('GET /api/opvolging-leads geeft de belrij-samenvatting mee', () => {
+  const src = readFileSync(join(ROOT, 'api/opvolging-leads.js'), 'utf8');
+  assert.match(src, /belrij: o\.belrij/);
+});
