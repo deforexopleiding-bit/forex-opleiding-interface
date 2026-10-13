@@ -33,6 +33,18 @@
     preset: '7d', customVan: '', customTot: '',
     loading: false, fetched: false, error: null, data: null, _seq: 0, lastKey: null,
     open: {},
+    // Boek-flow A/B-schakelaar (app_settings.opstartsessie_flow).
+    flowCfg: null, flowFetched: false, flowErr: null, flowSaving: false,
+  };
+
+  // Welke funnels gebruiken de boek-flow (en krijgen dus een A/B-schakelaar):
+  // de 7-daagse- en mini-cursus-varianten. Webinar/website boeken niet via deze
+  // flow, dus daar geen schakelaar.
+  const FLOW_PRODUCTS = new Set(['7-daagse', 'minicursus']);
+  const flowOf = (bron) => {
+    const c = st.flowCfg || {};
+    const per = c.per_funnel || {};
+    return per[bron] === 'A' || per[bron] === 'B' ? per[bron] : (c.default === 'B' ? 'B' : 'A');
   };
 
   // ── Amsterdam-datums ──────────────────────────────────────────────────────
@@ -109,6 +121,45 @@
   window.__fdToggle = function (variant) {
     st.open[variant] = !st.open[variant];
     rerender();
+  };
+
+  // ── Boek-flow A/B-schakelaar ──────────────────────────────────────────────
+  async function fetchFlow(force) {
+    if (!force && st.flowFetched && !st.flowErr) return;
+    try {
+      const j = await window.KV.authedJson('/api/opstartsessie-flow-get');
+      st.flowCfg = { default: j.default === 'B' ? 'B' : 'A', per_funnel: (j.per_funnel && typeof j.per_funnel === 'object') ? j.per_funnel : {} };
+      st.flowErr = null;
+    } catch (e) {
+      st.flowErr = (e && e.status === 403) ? 'Geen rechten om de boek-flow te zien.' : 'Kon boek-flow niet laden.';
+      if (!st.flowCfg) st.flowCfg = { default: 'A', per_funnel: {} };
+    }
+    st.flowFetched = true;
+  }
+  async function saveFlow(cfg) {
+    st.flowSaving = true; rerender();
+    try {
+      const j = await window.KV.authedJson('/api/opstartsessie-flow-set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+      });
+      st.flowCfg = { default: j.default === 'B' ? 'B' : 'A', per_funnel: j.per_funnel || {} };
+      st.flowErr = null;
+    } catch (e) {
+      st.flowErr = (e && e.status === 403) ? 'Geen rechten om de boek-flow te wijzigen (leads.update).' : 'Opslaan van de boek-flow mislukte.';
+    }
+    st.flowSaving = false; rerender();
+  }
+  window.__flowSet = function (variant, flow) {
+    if (st.flowSaving) return;
+    const c = st.flowCfg || { default: 'A', per_funnel: {} };
+    const per = Object.assign({}, c.per_funnel);
+    per[variant] = flow === 'B' ? 'B' : 'A';
+    saveFlow({ default: c.default === 'B' ? 'B' : 'A', per_funnel: per });
+  };
+  window.__flowAll = function (flow) {
+    if (st.flowSaving) return;
+    // Globaal: zet default en wis alle per-funnel-afwijkingen (echt alles op A of B).
+    saveFlow({ default: flow === 'B' ? 'B' : 'A', per_funnel: {} });
   };
 
   // ── Render-helpers ────────────────────────────────────────────────────────
@@ -274,10 +325,45 @@
     </details>`;
   }
 
+  function flowPanelHtml(registry) {
+    const funnels = (registry || []).filter((r) => r && FLOW_PRODUCTS.has(r.product));
+    if (!funnels.length) return '';
+    const saving = st.flowSaving;
+    const def = st.flowCfg ? (st.flowCfg.default === 'B' ? 'B' : 'A') : 'A';
+    const pill = (bron, flow, active) => `<button class="btn btn-sm" style="font-size:11px;padding:3px 11px;${active ? (flow === 'B' ? 'background:#0A7490;color:#fff;font-weight:700;' : 'background:var(--surface-2);font-weight:700;') : 'opacity:.55;background:transparent'}" ${saving ? 'disabled' : ''} onclick="window.__flowSet('${esc(bron)}','${flow}')">${flow}</button>`;
+    const rows = funnels.map((r) => {
+      const f = flowOf(r.bron);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.naam)} <span style="color:var(--text-3);font-family:var(--mono,monospace);font-size:10px">${esc(r.bron)}</span></span>
+        <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}</span>
+      </div>`;
+    }).join('');
+    return `<details class="fd-flow" style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+        Boek-flow (A/B) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = nieuwe snelle flow · default ${def}</span>
+        ${saving ? '<span style="margin-left:auto;color:var(--text-3);font-size:11px">Opslaan…</span>' : ''}
+      </summary>
+      <div style="margin-top:8px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--text-3)">Globaal:</span>
+          <button class="btn btn-sm btn-ghost" style="font-size:11px;padding:3px 10px" ${saving ? 'disabled' : ''} onclick="window.__flowAll('A')">Alles op A</button>
+          <button class="btn btn-sm btn-primary" style="font-size:11px;padding:3px 10px;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('B')">Alles op B</button>
+          ${st.flowErr ? `<span style="color:var(--amber);font-size:11px;margin-left:auto">${esc(st.flowErr)}</span>` : ''}
+        </div>
+        ${rows}
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:8px">Wijziging is binnen ~1 minuut live op de funnels. A blijft altijd de veilige fallback.</div>
+      </div>
+    </details>`;
+  }
+
   function render(registry) {
     if (!st.fetched && !st.loading && !st.error) {
       const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
       q(() => fetchStats(false));
+    }
+    if (!st.flowFetched) {
+      const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
+      q(() => fetchFlow(false).then(() => rerender()));
     }
     const regBy = {};
     for (const r of registry || []) regBy[r.bron] = r;
@@ -319,6 +405,7 @@
         ${custom}
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : esc(periodeTxt)}</span>
       </div>
+      ${flowPanelHtml(registry)}
       ${st.error ? `<div class="fd-fout" style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
       ${bannerHtml(meta)}
       ${groepen}
