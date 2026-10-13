@@ -125,7 +125,7 @@ async function leesTrials(db, leads, meldingen) {
 }
 
 /** Pogingen + losse WA-regels per kaart, geteld zoals overal in de module. */
-async function leesTellingen(db, kaarten, nuMs, meldingen) {
+export async function leesTellingen(db, kaarten, nuMs, meldingen) {
   const ids = kaarten.map((k) => k.id);
   const pog = await inBlokken(ids, (blok) => db.from('opvolging_pogingen').select('*')
     .in('taak_id', blok).order('tijdstip', { ascending: true }));

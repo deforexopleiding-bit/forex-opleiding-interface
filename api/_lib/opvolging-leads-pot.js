@@ -38,7 +38,7 @@ export const TRAJECTEN = ['minicursus', '7-daagse'];
 export const BRON_RE = /^(kennismakingscursus|7-daagse)/i;
 
 /** De volgorde van de potten op het scherm — ook de volgorde voor 'eerste pot met inhoud'. */
-export const POTTEN = ['terugbellen', 'verlopen', 'bezig', 'nieuw', 'wacht', 'later', 'ingepland', 'afgerond'];
+export const POTTEN = ['belrij', 'terugbellen', 'verlopen', 'bezig', 'nieuw', 'wacht', 'later', 'ingepland', 'afgerond'];
 
 export const REDEN_CODE_TERUGBELLEN = 'terugbellen';
 export const REDEN_CODE_VERLOPEN = 'inplantermijn_verlopen';
@@ -398,8 +398,12 @@ export function potVoorKaart(kaart, vandaag, nuMs = Date.now()) {
   const st = String(kaart.status || '');
   const due = String(kaart.due || '');
   if (st === 'open') {
-    if (due > vandaag) return 'later';
+    // Een terugbelafspraak staat ALTIJD in Terugbellen — ook vóór de dag zelf.
+    // Zo is er één plek waar alle beloftes aan leads staan, met de datum erbij;
+    // op de dag zelf komt hij bovenaan de Belrij. (Vroeger verdween hij tot die
+    // dag in 'Later', tussen de opgeladen lijsten.)
     if (kaart.reden_code === REDEN_CODE_TERUGBELLEN) return 'terugbellen';
+    if (due > vandaag) return 'later';
     if (kaart.reden_code === REDEN_CODE_VERLOPEN) return 'verlopen';
     return 'bezig';
   }
@@ -481,6 +485,322 @@ export function valideerAfronden({ categorie, notitie }) {
 export function inspanningTekst({ bel_totaal = 0, bel_dagen = 0, wa_totaal = 0, gesproken = false } = {}) {
   return bel_totaal + '× gebeld op ' + bel_dagen + ' dag' + (bel_dagen === 1 ? '' : 'en') + ', ' +
     wa_totaal + ' WhatsApp' + (wa_totaal === 1 ? '' : 's') + ', ' + (gesproken ? 'wel gesproken' : 'nooit gesproken');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BELRONDES — WIE IS ER NU AAN DE BEURT, EN WIE WACHT OP ZIJN VOLGENDE RONDE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Het probleem dat dit oplost (gemeten 13 okt): 54 kaarten stonden in Bezig,
+// allemaal met due = vandaag, gesorteerd op 'oudste poging eerst'. Wie niet
+// opnam, stond na het ophangen gewoon weer in dezelfde lijst. Dave bleef zo in
+// Bezig hangen — dezelfde mensen die niet opnemen — terwijl de verse leads in
+// Nieuw geen enkel belletje kregen.
+//
+// DE REGEL: een lead die je net probeerde, is even NIET aan de beurt. Hij
+// schuift door naar zijn volgende belronde, op een ander moment van de dag of
+// een andere dag (dat verhoogt de kans dat hij opneemt). Pas als die ronde er
+// is, staat hij weer in de Belrij. Alles wordt AFGELEID uit de belpogingen die
+// de softphone zelf logt — Dave hoeft niets aan te klikken om de cadans te
+// laten werken. Klikt hij wel een uitkomst aan, dan wordt het preciezer.
+//
+// Een RONDE is één poging-moment: twee keer kort na elkaar bellen (meteen
+// herbellen) is één ronde, niet twee.
+
+/** Calls binnen zoveel minuten van elkaar horen bij dezelfde ronde. */
+export const RONDE_GAP_MIN = 60;
+/** Na zoveel rondes zonder resultaat: uitgebeld — afronden of nog één laatste poging. */
+export const MAX_RONDES = 5;
+/**
+ * De pauze NA ronde n (index n−1). Ronde 1 → 3 uur later nog eens (ander
+ * moment van dezelfde dag), daarna oplopend over dagen.
+ */
+export const RONDE_PAUZE = Object.freeze([
+  { uren: 3 },   // na ronde 1: dezelfde dag, 3 uur later
+  { dagen: 1 },  // na ronde 2: morgen
+  { dagen: 2 },  // na ronde 3: overmorgen
+  { dagen: 3 },  // na ronde 4: drie dagen later
+]);
+/** Belvenster: vóór START_UUR en na EIND_UUR wordt niemand 'aan de beurt'. */
+export const START_UUR = 9;
+export const EIND_UUR = 20;
+
+/** De secties van de Belrij, in volgorde van prioriteit. */
+export const BELRIJ_SECTIES = Object.freeze([
+  { code: 'reageerde', label: 'Reageerde op je bericht', uitleg: 'Stuurde iets terug na je laatste poging. Bel nu: hij is wakker.' },
+  { code: 'terugbellen', label: 'Afgesproken terugbellen', uitleg: 'Vroeg zelf om vandaag gebeld te worden. Een belofte — eerst deze.' },
+  { code: 'verlopen', label: 'Agenda gekregen, niets ingepland', uitleg: 'Toonde interesse maar koos binnen 48 uur geen moment.' },
+  { code: 'vers', label: 'Nieuw: vers of heet', uitleg: 'Aangemeld in de laatste 2 dagen, of heet door zijn LMS-gebruik. Hoe sneller je belt, hoe hoger de kans.' },
+  { code: 'opnieuw', label: 'Volgende belronde', uitleg: 'Nam eerder niet op; zijn volgende ronde is er. Eerste rondes eerst.' },
+  { code: 'nieuw', label: 'Overige nieuwe leads', uitleg: 'Nog niet gebeld, warmste eerst.' },
+  { code: 'uitgebeld', label: 'Uitgebeld — rond af', uitleg: MAX_RONDES + ' rondes zonder resultaat. Stuur een laatste WhatsApp of rond af.' },
+]);
+/** Deze secties tellen mee in de badge op de knop in Vandaag. */
+export const BELRIJ_DRINGEND = new Set(['reageerde', 'terugbellen', 'verlopen', 'vers', 'opnieuw']);
+
+/** Is deze poging een belpoging van ons? (afgebroken vóór opnemen telt niet) */
+export function isBelpoging(p) {
+  if (!p || p.soort !== 'call' || p.richting === 'in') return false;
+  return !/^afgebroken/i.test(String(p.resultaat || '').trim());
+}
+
+/** Een uitgaande poging van eender welke soort (bellen, appen, agenda sturen). */
+function isUitgaand(p) {
+  if (!p) return false;
+  if (p.soort === 'call') return isBelpoging(p);
+  if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') {
+    if (p.richting === 'in') return false;
+    // Status-regels (afgeleverd/gelezen) zijn geen nieuwe poging.
+    return !/^WhatsApp (afgeleverd|gelezen)/i.test(String(p.resultaat || ''));
+  }
+  return p.soort === 'agenda_doorgestuurd' || p.soort === 'agenda_herinnering';
+}
+
+/**
+ * De belrondes uit de pogingen. Alleen calls vanaf `vanafMs`.
+ * @returns {{start:number, eind:number, calls:number}[]} oudste eerst
+ */
+export function belRondes(pogingen, vanafMs = 0) {
+  const calls = (Array.isArray(pogingen) ? pogingen : [])
+    .filter(isBelpoging)
+    .map((p) => Date.parse(p.tijdstip))
+    .filter((t) => Number.isFinite(t) && t >= vanafMs)
+    .sort((a, b) => a - b);
+  const rondes = [];
+  for (const t of calls) {
+    const laatste = rondes[rondes.length - 1];
+    if (laatste && t - laatste.eind <= RONDE_GAP_MIN * 60000) { laatste.eind = t; laatste.calls += 1; }
+    else rondes.push({ start: t, eind: t, calls: 1 });
+  }
+  return rondes;
+}
+
+/** YYYY-MM-DD + n kalenderdagen. */
+export function dagPlusN(dag, n) {
+  const d = new Date(String(dag).slice(0, 10) + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Het uur (0–23) in Amsterdam van een moment. */
+function uurInZone(ms) {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone: ZONE, hour: '2-digit', hourCycle: 'h23' }).format(new Date(ms)));
+}
+
+/** Het moment `dag` om `uur`:`min` Amsterdamse tijd, in ms. Zomer- en wintertijd-vast. */
+export function momentInZone(dag, uur, min = 0) {
+  const gok = Date.parse(String(dag).slice(0, 10) + 'T' + String(uur).padStart(2, '0') + ':' + String(min).padStart(2, '0') + ':00Z');
+  // Verschil tussen wat de gok in Amsterdam aanwijst en wat we willen.
+  for (const corr of [0, 1, 2, -1]) {
+    const t = gok - corr * 3600000;
+    if (dagInZone(t) === String(dag).slice(0, 10) && uurInZone(t) === uur) return t;
+  }
+  return gok - 2 * 3600000;
+}
+
+/**
+ * Wanneer mag ronde n+1 beginnen, als ronde n eindigde op `eindMs`?
+ * Valt het buiten het belvenster, dan de eerstvolgende ochtend om START_UUR.
+ */
+export function volgendeRondeMs(eindMs, rondeNr) {
+  const pauze = RONDE_PAUZE[Math.min(Math.max(rondeNr, 1), RONDE_PAUZE.length) - 1];
+  const dag = dagInZone(eindMs);
+  if (pauze.uren) {
+    const t = eindMs + pauze.uren * 3600000;
+    if (dagInZone(t) === dag && uurInZone(t) < EIND_UUR) return t;
+    return momentInZone(dagPlusN(dag, 1), START_UUR);
+  }
+  return momentInZone(dagPlusN(dag, pauze.dagen), START_UUR);
+}
+
+/** Zoveel regels houdt het uitkomstlogboek van één kaart bij. */
+export const LOG_MAX = 60;
+
+/** Het logboek met één regel erbij (nieuwste achteraan, begrensd). */
+export function logErbij(kaart, regel) {
+  const oud = Array.isArray(kaart && kaart.uitkomst_log) ? kaart.uitkomst_log : [];
+  return [...oud, { op: new Date().toISOString(), ...regel }].slice(-LOG_MAX);
+}
+
+/** De uitkomsten die Dave na een call kan aanklikken. */
+export const UITKOMSTEN = Object.freeze({
+  geen_gehoor   : 'Geen gehoor',
+  voicemail     : 'Voicemail',
+  gesproken     : 'Gesproken',
+  foutief_nummer: 'Foutief nummer',
+});
+
+/** Het uitkomstlogboek van een kaart, altijd als array, oudste eerst. */
+export function logVan(kaart) {
+  const l = kaart && Array.isArray(kaart.uitkomst_log) ? kaart.uitkomst_log : [];
+  return l.filter((e) => e && e.op).sort((a, b) => String(a.op).localeCompare(String(b.op)));
+}
+
+/**
+ * Het moment vanaf wanneer de rondes van deze kaart tellen.
+ *
+ * Een terugbelafspraak is een nieuwe start: de lead vroeg zelf om die dag
+ * gebeld te worden, dus wat er daarvóór gebeurde telt niet als ronde van deze
+ * afspraak. De dag komt uit het logboek (de doorrol schuift `due` elke nacht
+ * naar vandaag, die is dus geen betrouwbare startdag). Zelfde voor een
+ * verlopen inplantermijn: vanaf de dag dat hij terugkwam.
+ */
+export function activatieMs(kaart) {
+  if (!kaart) return 0;
+  if (kaart.reden_code === REDEN_CODE_TERUGBELLEN) {
+    const afspraak = logVan(kaart).filter((e) => e.soort === 'terugbel' && e.due).pop();
+    const dag = afspraak ? afspraak.due : kaart.due;
+    return dag ? momentInZone(dag, 0) : 0;
+  }
+  if (kaart.reden_code === REDEN_CODE_VERLOPEN) {
+    const terug = Date.parse(kaart.verlopen_op || '');
+    if (Number.isFinite(terug)) return terug;
+    return kaart.due ? momentInZone(kaart.due, 0) : 0;
+  }
+  return 0;
+}
+
+/**
+ * Het belplan van één kaart: hoeveel rondes, wanneer de volgende, en of hij nu
+ * aan de beurt is.
+ *
+ * @param {object} p
+ * @param {object} p.kaart     opvolging_taken-rij (met volgende_poging_at, uitkomst_log)
+ * @param {object[]} p.pogingen volledige historie (pogingen + WA-regels), oudste eerst
+ * @param {number} p.nuMs
+ */
+export function belPlan({ kaart, pogingen, nuMs }) {
+  const alle = belRondes(pogingen, 0);
+  const vanaf = activatieMs(kaart);
+  const rondes = vanaf ? belRondes(pogingen, vanaf) : alle;
+  const laatste = rondes[rondes.length - 1] || null;
+
+  let volgende = laatste ? volgendeRondeMs(laatste.eind, rondes.length) : null;
+  // Handmatig gekozen moment ('probeer vanavond opnieuw'): telt als het ná de
+  // laatste ronde ligt. Belt hij intussen toch, dan wint het latere van de twee.
+  const hand = Date.parse(kaart && kaart.volgende_poging_at || '');
+  const handmatig = Number.isFinite(hand) && (!laatste || hand > laatste.eind);
+  if (handmatig) volgende = volgende == null ? hand : Math.max(hand, volgende);
+
+  // Reageerde de lead na onze laatste uitgaande poging? Dan is hij nu warm.
+  const lijst = Array.isArray(pogingen) ? pogingen : [];
+  const laatsteUit = lijst.filter(isUitgaand).map((p) => Date.parse(p.tijdstip)).filter(Number.isFinite);
+  const laatsteIn = lijst.filter((p) => p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht') && p.richting === 'in')
+    .map((p) => Date.parse(p.tijdstip)).filter(Number.isFinite);
+  const uitMax = laatsteUit.length ? Math.max(...laatsteUit) : 0;
+  const inMax = laatsteIn.length ? Math.max(...laatsteIn) : 0;
+  const reageerde = inMax > 0 && inMax > uitMax;
+
+  // Een belpoging van vandaag zonder aangeklikte uitkomst erna.
+  // Een vervolgstap (bericht, agenda, inplanning) na de call telt ook als
+  // afgehandeld: dan is er duidelijk iets met die call gedaan.
+  const log = logVan(kaart);
+  const vervolg = lijst.filter((p) => p && p.richting !== 'in' &&
+    (p.soort === 'agenda_doorgestuurd' || p.soort === 'agenda_herinnering' || p.soort === 'ingepland' ||
+     ((p.soort === 'whatsapp' || p.soort === 'spraakbericht') && isUitgaand(p))))
+    .map((p) => Date.parse(p.tijdstip)).filter(Number.isFinite);
+  const laatsteLog = Math.max(log.length ? Date.parse(log[log.length - 1].op) || 0 : 0, ...vervolg, 0);
+  const laatsteCall = alle.length ? alle[alle.length - 1].eind : 0;
+  const uitkomstOpen = laatsteCall > 0 && laatsteCall > laatsteLog && dagInZone(laatsteCall) === dagInZone(nuMs);
+
+  const uitgebeld = rondes.length >= MAX_RONDES && !handmatig;
+  const binnenVenster = uurInZone(nuMs) >= START_UUR && uurInZone(nuMs) < EIND_UUR;
+  return {
+    rondes: rondes.length,
+    rondes_totaal: alle.length,
+    laatste_ronde_at: laatste ? new Date(laatste.eind).toISOString() : null,
+    volgende_at: volgende != null ? new Date(volgende).toISOString() : null,
+    // Zonder ronde is hij meteen aan de beurt. Buiten het belvenster telt
+    // 'klaar' nog steeds — Dave beslist zelf of hij om 20u30 nog belt.
+    klaar: reageerde || volgende == null || volgende <= nuMs,
+    handmatig,
+    uitgebeld,
+    reageerde,
+    uitkomst_open: uitkomstOpen,
+    binnen_venster: binnenVenster,
+  };
+}
+
+/** 'nu', 'vandaag 15:30', 'morgen 09:00', 'do 16 okt 09:00'. */
+export function momentTekst(iso, nuMs) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  if (t <= nuMs) return 'nu';
+  const uur = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date(t));
+  const d = dagenTussen(dagInZone(nuMs), dagInZone(t));
+  if (d === 0) return 'vandaag ' + uur;
+  if (d === 1) return 'morgen ' + uur;
+  const dag = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, weekday: 'short', day: 'numeric', month: 'short' })
+    .format(new Date(t)).replace(/\./g, '');
+  return dag + ' ' + uur;
+}
+
+/**
+ * In welke sectie van de Belrij hoort een rij? null = nu niet aan de beurt.
+ * @param {object} r  rij met .kaart (of null voor een nieuwe lead) en .label
+ * @param {string} pot de pot van de kaart
+ */
+export function belrijSectie(r, pot, vandaag) {
+  const k = r && r.kaart;
+  if (!k) {
+    // Nieuwe lead zonder kaart.
+    if ((r.aangemeld_dagen != null && r.aangemeld_dagen <= 2) || (r.label && r.label.code === 'heet')) return 'vers';
+    return 'nieuw';
+  }
+  const plan = k.plan || {};
+  if (!['bezig', 'terugbellen', 'verlopen', 'wacht'].includes(pot)) return null;
+  if (plan.reageerde) return 'reageerde';
+  if (pot === 'wacht') return null;
+  if (pot === 'terugbellen') {
+    if (String(k.due || '') > String(vandaag || '')) return null;   // nog niet de dag
+    if (!plan.klaar) return null;
+    return plan.rondes >= 3 ? 'opnieuw' : 'terugbellen';
+  }
+  if (!plan.klaar) return null;
+  if (pot === 'verlopen') return plan.uitgebeld ? 'uitgebeld' : 'verlopen';
+  return plan.uitgebeld ? 'uitgebeld' : 'opnieuw';
+}
+
+const SECTIE_VOLGORDE = Object.fromEntries(BELRIJ_SECTIES.map((s, i) => [s.code, i]));
+
+/** Sortering binnen en tussen de secties van de Belrij. */
+export function sorteerBelrij(a, b) {
+  const s = SECTIE_VOLGORDE[a.sectie] - SECTIE_VOLGORDE[b.sectie];
+  if (s) return s;
+  if (a.sectie === 'opnieuw' || a.sectie === 'uitgebeld') {
+    const ra = (a.kaart && a.kaart.plan && a.kaart.plan.rondes) || 0;
+    const rb = (b.kaart && b.kaart.plan && b.kaart.plan.rondes) || 0;
+    if (ra !== rb) return ra - rb;
+  }
+  if (a.sectie === 'terugbellen') return String(a.kaart.due).localeCompare(String(b.kaart.due)) || b.score - a.score;
+  return sorteerPot(a, b);
+}
+
+/** 'vandaag 10:12', 'gisteren 16:40', '3 dagen geleden'. */
+export function geledenMoment(iso, nuMs) {
+  const t = Date.parse(iso || '');
+  if (!Number.isFinite(t)) return '';
+  const uur = new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date(t));
+  const d = dagenTussen(dagInZone(t), dagInZone(nuMs));
+  if (d === 0) return 'vandaag ' + uur;
+  if (d === 1) return 'gisteren ' + uur;
+  return d + ' dagen geleden';
+}
+
+/** Waarom staat hij hier — één korte zin voor op de rij. */
+export function waaromTekst(r, nuMs) {
+  const k = r.kaart;
+  const plan = (k && k.plan) || {};
+  switch (r.sectie) {
+    case 'reageerde': return 'Antwoordde na je laatste poging';
+    case 'terugbellen': return 'Afgesproken: vandaag terugbellen';
+    case 'verlopen': return 'Kreeg de agenda, koos geen moment';
+    case 'vers': return r.aangemeld_dagen != null && r.aangemeld_dagen <= 2 ? 'Vers aangemeld' : 'Heet door LMS-gebruik';
+    case 'opnieuw': return 'Ronde ' + ((plan.rondes || 0) + 1) + ' van ' + MAX_RONDES + (plan.laatste_ronde_at ? ' · vorige poging ' + geledenMoment(plan.laatste_ronde_at, nuMs) : '');
+    case 'uitgebeld': return (plan.rondes || 0) + ' rondes zonder resultaat';
+    case 'nieuw': return 'Nog niet gebeld';
+    default: return '';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -582,17 +902,50 @@ export function stelPottenSamen({
     }
     delete basis._calls;
     const tel = telPerKaart.get(k.id) || null;
-    potten[pot].push({ ...basis, kaart: kaartSamenvatting(k, tel, nuMs, wachtUren) });
+    const plan = belPlan({ kaart: k, pogingen: (tel && tel.pogingen) || [], nuMs });
+    potten[pot].push({ ...basis, kaart: { ...kaartSamenvatting(k, tel, nuMs, wachtUren), plan } });
   }
 
-  const laatstePoging = (r) => Date.parse(r.kaart && r.kaart.laatste_poging || '') || 0;
+  // In belronde: wie nu aan de beurt is bovenaan, daarna op volgende ronde.
+  const volgendeMs = (r) => {
+    const p = r.kaart && r.kaart.plan;
+    if (!p || p.klaar) return 0;
+    return Date.parse(p.volgende_at || '') || 0;
+  };
   potten.terugbellen.sort((a, b) => String(a.kaart.due).localeCompare(String(b.kaart.due)) || b.score - a.score);
-  potten.verlopen.sort((a, b) => b.score - a.score);
-  potten.bezig.sort((a, b) => laatstePoging(a) - laatstePoging(b));
+  potten.verlopen.sort((a, b) => volgendeMs(a) - volgendeMs(b) || b.score - a.score);
+  potten.bezig.sort((a, b) => volgendeMs(a) - volgendeMs(b) ||
+    ((a.kaart.plan && a.kaart.plan.rondes) || 0) - ((b.kaart.plan && b.kaart.plan.rondes) || 0) || b.score - a.score);
   potten.wacht.sort((a, b) => (a.kaart.resterende_uren ?? 99) - (b.kaart.resterende_uren ?? 99));
   potten.later.sort((a, b) => String(a.kaart.due).localeCompare(String(b.kaart.due)));
   potten.ingepland.sort((a, b) => String(b.kaart.afspraak_gevonden_at || '').localeCompare(String(a.kaart.afspraak_gevonden_at || '')));
   potten.afgerond.sort((a, b) => String(b.kaart.gearchiveerd_at || '').localeCompare(String(a.kaart.gearchiveerd_at || '')));
+
+  // ── De Belrij: één lijst, van boven naar onder ─────────────────────────
+  // Elke rij in hoogstens één sectie. Wie in afkoeling zit (net geprobeerd),
+  // staat er niet in — die wacht op zijn volgende ronde.
+  const secties = Object.fromEntries(BELRIJ_SECTIES.map((x) => [x.code, 0]));
+  let wachtOpRonde = 0;
+  let eerstvolgende = null;
+  for (const pot of ['nieuw', 'terugbellen', 'verlopen', 'bezig', 'wacht']) {
+    for (const r of potten[pot]) {
+      const sectie = belrijSectie(r, pot, vandaag);
+      if (!sectie) {
+        const p = r.kaart && r.kaart.plan;
+        if (p && !p.klaar && pot !== 'wacht' && (pot !== 'terugbellen' || String(r.kaart.due) <= vandaag)) {
+          wachtOpRonde += 1;
+          if (p.volgende_at && (!eerstvolgende || p.volgende_at < eerstvolgende)) eerstvolgende = p.volgende_at;
+        }
+        continue;
+      }
+      secties[sectie] += 1;
+      const rij = { ...r, sectie, pot };
+      rij.waarom = waaromTekst(rij, nuMs);
+      potten.belrij.push(rij);
+    }
+  }
+  potten.belrij.sort(sorteerBelrij);
+  const dringend = Object.entries(secties).filter(([c]) => BELRIJ_DRINGEND.has(c)).reduce((n, [, v]) => n + v, 0);
 
   const aantallen = Object.fromEntries(POTTEN.map((p) => [p, potten[p].length]));
   const heet = potten.nieuw.filter((r) => r.label.code === 'heet').length;
@@ -605,7 +958,12 @@ export function stelPottenSamen({
     vandaag,
     potten,
     aantallen,
-    badge: aantallen.terugbellen + aantallen.verlopen + warmOfHeet,
+    // De badge op de knop in Vandaag: wat er NU dringend te bellen valt —
+    // gereageerd, afgesproken, termijn verlopen, vers/heet en de volgende
+    // belronde. Niet de grote rest van Nieuw, niet wie in afkoeling zit.
+    badge: dringend,
+    belrij: { secties, dringend, wacht_op_ronde: wachtOpRonde, eerstvolgende_at: eerstvolgende,
+      eerstvolgende_tekst: eerstvolgende ? momentTekst(eerstvolgende, nuMs) : null },
     nieuw_heet: heet,
     nieuw_warm_of_heet: warmOfHeet,
     niet_getoond: uitsluitRegels(telling),
@@ -684,6 +1042,8 @@ export function kaartSamenvatting(k, tel, nuMs, wachtUren = 48) {
     wa_mislukt: waMislukt(pogingen),
     pogingen,
     archief,
+    // Wat Dave na zijn calls aanklikte (geen gehoor, voicemail, terugbellen…).
+    uitkomsten: logVan(k).slice(-5),
   };
 }
 

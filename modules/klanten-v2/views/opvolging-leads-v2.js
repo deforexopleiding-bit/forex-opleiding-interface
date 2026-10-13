@@ -25,13 +25,16 @@
   if (!window.DFO) return;
   window.DFO.VIEWS = window.DFO.VIEWS || {};
 
+  // 'belrij' is geen eigen pot maar de werklijst: alles wat NU aan de beurt
+  // is, uit alle potten, in volgorde van prioriteit. Daar begint Dave altijd.
   const POTTEN = [
-    { code: 'terugbellen', label: 'Terugbellen', kleur: '#7c4dff' },
+    { code: 'belrij', label: '\u25B6 Nu bellen', kleur: '#d92d20' },
+    { code: 'terugbellen', label: 'Terugbelafspraken', kleur: '#7c4dff' },
     { code: 'verlopen', label: 'Termijn verlopen', kleur: '#e08700' },
-    { code: 'bezig', label: 'Bezig', kleur: '#2f6bff' },
+    { code: 'bezig', label: 'In belronde', kleur: '#2f6bff' },
     { code: 'nieuw', label: 'Nieuw', kleur: '#0ea968' },
     { code: 'wacht', label: 'Wacht op inplanning', kleur: '#2f6bff' },
-    { code: 'later', label: 'Later', kleur: '#6b7280' },
+    { code: 'later', label: 'Opgeladen, komt later', kleur: '#6b7280' },
     { code: 'ingepland', label: 'Ingepland', kleur: '#0ea968' },
     { code: 'afgerond', label: 'Afgerond', kleur: '#6b7280' },
   ];
@@ -64,7 +67,14 @@
     inst: { laden: false, data: null, fout: null, bezig: false, melding: null },
     modal: null,                     // { soort, sleutel, ... }
     bezig: false,
+    toonAlles: {},                   // sectie → true: hele sectie tonen
+    uitleg: false,                   // 'Hoe werkt het?' open
+    ronde: null,                     // belronde-modus: { gebeld, gestart, overgeslagen:Set }
+    gesprek: null,                   // { sleutel, taakId, gezienActief, sinds }
+    logboek: { dag: null, laden: false, data: null, fout: null },
+    logTab: 'tijdlijn',
   };
+  const NIEUW_ZICHTBAAR = 12;
 
   async function haal(url) {
     try {
@@ -123,6 +133,17 @@
   function leegCache() {
     _ld.telling.data = null; _ld.telling.fout = null;
     _ld.potten = {};
+    _ld.logboek.data = null; _ld.logboek.fout = null;
+  }
+
+  async function laadLogboek() {
+    const st = _ld.logboek;
+    if (st.laden) return;
+    st.laden = true; st.fout = null;
+    const j = await haal('/api/opvolging-leads-logboek' + (st.dag ? '?dag=' + encodeURIComponent(st.dag) : ''));
+    st.laden = false;
+    if (j.__error) st.fout = j.__error; else { st.data = j; if (!st.dag) st.dag = j.dag; }
+    teken();
   }
 
   // ── Haken voor opvolging-v2.js ───────────────────────────────────────────
@@ -157,10 +178,10 @@
   // ═════════════════════════════════════════════════════════════════════════
   // DE VIEW
   // ═════════════════════════════════════════════════════════════════════════
-  function eerstePotMetInhoud(aantallen) {
-    for (const p of POTTEN) if ((aantallen && aantallen[p.code]) > 0) return p.code;
-    return 'nieuw';
-  }
+  // Dave begint ALTIJD in 'Nu bellen'. Vroeger opende de tab op de eerste
+  // pot met inhoud, en dat was meestal Bezig: dezelfde mensen die niet
+  // opnemen, terwijl de verse leads in Nieuw wachtten.
+  function eerstePotMetInhoud() { return 'belrij'; }
 
   function leadsView() {
     const g = G();
@@ -176,10 +197,13 @@
     if (pot && (!ps || (!ps.data && !ps.laden && !ps.fout))) straks(() => laadPot(pot));
 
     let h = '<div class="opv lb">';
-    h += '<div class="kop"><div class="info"><b>Trage momenten?</b> Bel warme proefleads en laat ze een call inplannen.</div>' +
+    h += '<div class="kop"><div class="info"><b>Begin altijd bij &ldquo;Nu bellen&rdquo;</b> en werk van boven naar onder. ' +
+      'Wie niet opneemt, schuift vanzelf door naar zijn volgende belronde. ' +
+      '<a href="javascript:void(0)" onclick="window.__opvLb.uitleg()">' + (_ld.uitleg ? 'Verberg uitleg' : 'Hoe werkt het?') + '</a></div>' +
       '<button class="obtn" onclick="window.__opvLb.import()">&#8679; Lijst opladen</button>' +
       g.waLamp() + '</div>';
-    h += dagstrip(t.data);
+    if (_ld.uitleg) h += uitlegBlok();
+    h += dagstrip();
     if (t.fout) h += '<div class="warn">De potten konden niet geladen worden: ' + esc(t.fout) + '</div>';
     for (const m of (t.data && t.data.meldingen) || []) h += '<div class="warn2">' + esc(m) + '</div>';
 
@@ -194,36 +218,46 @@
     else if (!ps || !ps.data) h += '<div class="agleeg">Laden&hellip;</div>';
     else h += potInhoud(pot, ps.data);
 
+    h += logboekBlok();
     h += beheerBlok();
     h += '</div>';
     return h + leadsModalHtml() + g.modalHtml() + g.waPaneelHtml() + g.gesprekPaneelHtml() + g.doorstuurPaneelHtml();
   }
 
-  function dagstrip(d) {
-    if (!d || !d.dag) return '';
-    const v = d.dag;
-    const cel = (n, l) => '<div class="lb-cel"><b>' + esc(n) + '</b><span>' + esc(l) + '</span></div>';
-    const pct = d.week && d.week.pct != null ? d.week.pct + ' %' : '—';
+  /** Vandaag in één oogopslag — uit hetzelfde logboek als onderaan. */
+  function dagstrip() {
+    const st = _ld.logboek;
+    if (!st.data && !st.laden && !st.fout) straks(laadLogboek);
+    const d = st.data && st.data.dag === (st.data.vandaag || st.data.dag) ? st.data : null;
+    if (!d || d.dag !== d.vandaag) return '';
+    const v = d.kpi;
+    const cel = (n, l, titel) => '<div class="lb-cel" title="' + esc(titel || '') + '"><b>' + esc(n) + '</b><span>' + esc(l) + '</span></div>';
+    const w = _ld.telling.data && _ld.telling.data.week;
+    const pct = w && w.pct != null ? w.pct + ' %' : '—';
     return '<div class="lb-strip">' +
-      cel(v.gebeld, 'gebeld') + cel(v.gesproken, 'gesproken') + cel(v.doorgestuurd, 'doorgestuurd') +
-      cel(v.ingepland, 'ingepland') + cel(v.afgerond, 'afgerond') +
-      '<div class="lb-cel breed"><b>' + esc(pct) + '</b><span>doorgestuurd &rarr; ingepland (7 d' +
-      (d.week ? ', ' + esc(d.week.ingepland) + '/' + esc(d.week.doorgestuurd) : '') + ')</span></div></div>';
+      cel(v.leads_gebeld, 'leads gebeld vandaag', v.pogingen + ' belpogingen in ' + v.rondes + ' rondes') +
+      cel(v.opgenomen, 'opgenomen', 'De lijn kwam tot stand en werd niet als voicemail/geen gehoor gemeld') +
+      cel(v.geen_gehoor + v.voicemail, 'geen gehoor / voicemail') +
+      cel(v.ingepland, 'ingepland') + cel(v.doorgestuurd, 'agenda gestuurd') +
+      '<div class="lb-cel breed"><b>' + esc(pct) + '</b><span>agenda gestuurd &rarr; zelf ingepland (7 d' +
+      (w ? ', ' + esc(w.ingepland) + '/' + esc(w.doorgestuurd) : '') + ')</span></div></div>';
   }
 
   const POT_UITLEG = {
-    terugbellen: 'Ze vroegen zelf om een later moment, en die dag is er. Warmer dan de rest: eerst deze.',
+    belrij: 'Alles wat NU aan de beurt is, in volgorde. Werk van boven naar onder. Wie je net probeerde staat er even niet in: die komt terug in zijn volgende ronde.',
+    terugbellen: 'Alle afspraken om terug te bellen. Op de afgesproken dag staan ze bovenaan in Nu bellen.',
     verlopen: 'Ze kregen de agenda maar plantten binnen 48 uur niets in. Nog eens bellen of de link opnieuw sturen.',
-    bezig: 'Al eens gebeld of geappt, nog geen uitkomst. Oudste laatste poging bovenaan.',
-    nieuw: 'Nog niet aangeraakt. Warmste bovenaan.',
+    bezig: 'Al geprobeerd, nog geen uitkomst. Ze komen vanzelf terug in Nu bellen op het moment van hun volgende ronde.',
+    nieuw: 'Nog niet aangeraakt. Warmste bovenaan. De verse en hete staan ook in Nu bellen.',
     wacht: 'Agenda doorgestuurd; ze kiezen zelf. Na 48 uur zonder afspraak komen ze terug in Termijn verlopen.',
-    later: 'Komen terug op de afgesproken dag.',
+    later: 'Opgeladen lijsten, gedoseerd: ze komen op hun dag vanzelf in Nu bellen.',
     ingepland: 'Gelukt — laatste 30 dagen.',
     afgerond: 'Weggegooid in de laatste 60 dagen, met de moeite die ervoor gedaan is.',
   };
 
   function potInhoud(pot, d) {
     const items = d.items || [];
+    if (pot === 'belrij') return belrijInhoud(d);
     let h = '<div class="ronde">' + esc(POT_UITLEG[pot] || '') + '</div>';
     if (pot === 'nieuw' && (d.niet_getoond || []).length) {
       h += '<div class="lb-weg">' + d.niet_getoond.map((r) =>
@@ -247,8 +281,24 @@
       '<span class="lb-pil ' + (k.wa_totaal ? 'groen' : '') + '">WhatsApp ' + esc(k.wa_totaal) + '</span>') : '';
     let extra = '';
     if (k && k.wa_mislukt) extra += '<div class="lb-noot" style="color:var(--o-red)">&#9888; ' + esc(k.wa_mislukt) + '</div>';
-    if (k && pot === 'terugbellen' && k.terugbel_notitie) extra += '<div class="lb-noot">&#128221; ' + esc(k.terugbel_notitie) + '</div>';
-    if (k && pot === 'later') extra += '<div class="lb-noot">Terug op ' + esc(k.due) + (k.terugbel_notitie ? ' &middot; ' + esc(k.terugbel_notitie) : '') + '</div>';
+    const vandaagD = (_ld.telling.data && _ld.telling.data.vandaag) || '';
+    if (k && (pot === 'terugbellen' || r.sectie === 'terugbellen')) {
+      const isVandaag = !vandaagD || String(k.due) <= vandaagD;
+      extra += '<div class="lb-noot"><span class="tag ' + (isVandaag ? 't-red' : 't-purple') + '">' +
+        (isVandaag ? 'vandaag terugbellen' : 'terugbellen op ' + esc(datumNl(k.due))) + '</span>' +
+        (k.terugbel_notitie ? ' &#128221; ' + esc(k.terugbel_notitie) : '') + '</div>';
+    }
+    if (k && pot === 'later') extra += '<div class="lb-noot">Komt in Nu bellen op ' + esc(datumNl(k.due)) + '</div>';
+    if (k && k.plan && ['bezig', 'verlopen', 'terugbellen'].includes(pot) && (k.plan.rondes || k.plan.handmatig)) {
+      const p = k.plan;
+      extra += '<div class="lb-noot lb-plan">Ronde ' + esc(p.rondes) + ' van ' + RONDES_MAX + ' gedaan' +
+        (p.klaar ? ' &middot; <b>nu aan de beurt</b>' : ' &middot; volgende ronde <b>' + esc(momentKort(p.volgende_at)) + '</b>') +
+        (p.uitgebeld ? ' &middot; <span style="color:var(--o-red)">uitgebeld</span>' : '') + '</div>';
+    }
+    if (k && k.uitkomsten && k.uitkomsten.length && pot !== 'afgerond') {
+      const u = k.uitkomsten[k.uitkomsten.length - 1];
+      extra += '<div class="lb-noot zacht">Laatst: ' + esc(u.tekst || u.soort) + ' &middot; ' + esc(momentKort(u.op, true)) + '</div>';
+    }
     if (k && pot === 'wacht') {
       extra += '<div class="lb-noot"><span class="tag ' + (k.resterende_uren ? 't-blue' : 't-red') + '">' +
         (k.resterende_uren ? 'nog ' + esc(k.resterende_uren) + 'u van 48' : 'termijn voorbij') + '</span>' +
@@ -259,6 +309,8 @@
     }
 
     let knoppen = '';
+    const uitkomstKnop = k && k.plan && k.plan.uitkomst_open && pot !== 'ingepland' && pot !== 'afgerond'
+      ? '<button class="obtn lb-uk" onclick="window.__opvLb.uitkomst(\'' + s + '\')" title="Je belde vandaag maar vulde nog niet in hoe het ging">&#9998; Uitkomst</button>' : '';
     if (pot === 'wacht') {
       knoppen = '<button class="obtn wa" onclick="window.__opvLb.herinnering(\'' + s + '\')">&#128233; Herinnering sturen</button>' +
         '<button class="obtn" onclick="window.__opvLb.bel(\'' + s + '\')">&#9742; Bel</button>';
@@ -269,8 +321,14 @@
         '<button class="obtn wa" onclick="window.__opvLb.wa(\'' + s + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvLb.watNu(\'' + s + '\')">Wat nu?</button>';
     }
+    if (r.sectie === 'uitgebeld') {
+      knoppen = '<button class="obtn" onclick="window.__opvLb.afrondNietBereikbaar(\'' + s + '\')">&#128451; Rond af</button>' + knoppen;
+    }
+    knoppen = uitkomstKnop + knoppen;
 
-    return '<div class="row lb-rij"><div class="who">' +
+    const nu = _ld.gesprek && _ld.gesprek.sleutel === s;
+    return '<div class="row lb-rij' + (nu ? ' lb-nu' : '') + '"><div class="who">' +
+      (r.waarom ? '<div class="lb-waarom">' + esc(r.waarom) + '</div>' : '') +
       '<div class="nm">' + esc(r.naam) +
       (r.product_label ? ' <span class="tag t-grey">' + esc(r.product_label) + '</span>' : '') +
       (r.label ? ' <span class="tag ' + (LABEL_KLEUR[r.label.code] || 't-grey') + '">' + esc(r.label.tekst) + ' &middot; ' + esc(r.score) + '</span>' : '') +
@@ -310,6 +368,160 @@
         '<td>' + (ok ? '&#9989; genoeg moeite' : '&#9888; weinig moeite') + '</td></tr>';
     }).join('');
     return h + '</tbody></table></div>';
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // NU BELLEN — DE BELRIJ
+  // ═════════════════════════════════════════════════════════════════════════
+  // Tweeling van MAX_RONDES / BELRIJ_SECTIES in api/_lib/opvolging-leads-pot.js.
+  const RONDES_MAX = 5;
+  const SECTIES = [
+    ['reageerde', 'Reageerde op je bericht', 'Stuurde iets terug na je laatste poging. Bel nu: hij is wakker.'],
+    ['terugbellen', 'Afgesproken terugbellen', 'Vroeg zelf om vandaag gebeld te worden. Een belofte — eerst deze.'],
+    ['verlopen', 'Agenda gekregen, niets ingepland', 'Toonde interesse maar koos binnen 48 uur geen moment.'],
+    ['vers', 'Nieuw: vers of heet', 'Aangemeld in de laatste 2 dagen, of heet door zijn LMS-gebruik. Hoe sneller je belt, hoe hoger de kans.'],
+    ['opnieuw', 'Volgende belronde', 'Nam eerder niet op; zijn volgende ronde is er. Eerste rondes eerst.'],
+    ['nieuw', 'Overige nieuwe leads', 'Nog niet gebeld, warmste eerst. Als alles hierboven gedaan is.'],
+    ['uitgebeld', 'Uitgebeld — rond af', RONDES_MAX + ' rondes zonder resultaat. Stuur een laatste WhatsApp of rond af.'],
+  ];
+
+  /** De belrij zonder wat Dave in deze belronde oversloeg. */
+  function belrijItems(d) {
+    const weg = _ld.ronde ? _ld.ronde.overgeslagen : null;
+    return (d.items || []).filter((r) => !weg || !weg.has(sleutel(r)));
+  }
+
+  function belrijInhoud(d) {
+    const items = belrijItems(d);
+    const b = d.belrij || {};
+    let h = '<div class="ronde">' + esc(POT_UITLEG.belrij) + '</div>';
+    if (b.wacht_op_ronde) {
+      h += '<div class="lb-weg">&#9203; ' + esc(b.wacht_op_ronde) + ' lead' + (b.wacht_op_ronde === 1 ? '' : 's') +
+        ' wacht' + (b.wacht_op_ronde === 1 ? '' : 'en') + ' op hun volgende belronde' +
+        (b.eerstvolgende_tekst ? ' &middot; eerstvolgende <b>' + esc(b.eerstvolgende_tekst) + '</b>' : '') +
+        ' &middot; <a href="javascript:void(0)" onclick="window.__opvLb.kiesPot(\'bezig\')">bekijk In belronde</a></div>';
+    }
+    h += rondeBalk(items);
+    if (!items.length) {
+      return h + '<div class="agleeg">Niemand is nu aan de beurt. ' +
+        (b.eerstvolgende_tekst ? 'De volgende ronde begint ' + esc(b.eerstvolgende_tekst) + '.' : '') + '</div>';
+    }
+    for (const [code, label, uitleg] of SECTIES) {
+      const rijen = items.filter((r) => r.sectie === code);
+      if (!rijen.length) continue;
+      const alles = code !== 'nieuw' || _ld.toonAlles[code];
+      const zicht = alles ? rijen : rijen.slice(0, NIEUW_ZICHTBAAR);
+      h += '<div class="lb-sectie lb-s-' + code + '"><div class="lb-skop"><b>' + esc(label) + '</b> <span class="n">' + esc(rijen.length) +
+        '</span><span class="lb-suitleg">' + esc(uitleg) + '</span></div>' +
+        zicht.map((r) => leadRij(r, r.pot)).join('') +
+        (zicht.length < rijen.length ? '<button class="obtn lb-meer" onclick="window.__opvLb.toonAlles(\'' + code + '\')">Toon alle ' + esc(rijen.length) + '</button>' : '') +
+        '</div>';
+    }
+    return h;
+  }
+
+  /** De balk bovenaan in belronde-modus: wie is de volgende, met één klik bellen. */
+  function rondeBalk(items) {
+    const volgende = items[0] || null;
+    if (!_ld.ronde) {
+      return volgende ? '<div class="lb-rondestart"><button class="obtn p" onclick="window.__opvLb.startRonde()">&#9654; Start belronde</button>' +
+        '<span>Belt de bovenste lead. Na elk gesprek vul je in hoe het ging, en staat de volgende klaar.</span></div>' : '';
+    }
+    const r = _ld.ronde;
+    return '<div class="lb-rondebalk"><div><b>Belronde bezig</b> &middot; ' + esc(r.gebeld) + ' gebeld' +
+      (volgende ? ' &middot; volgende: <b>' + esc(volgende.naam) + '</b> <span class="zacht">(' + esc(volgende.waarom || '') + ')</span>' : ' &middot; niemand meer aan de beurt') + '</div>' +
+      '<div class="lb-rb-knoppen">' +
+      (volgende ? '<button class="obtn p" onclick="window.__opvLb.bel(\'' + sleutel(volgende) + '\')">&#9742; Bel ' + esc(volgende.voornaam || volgende.naam) + '</button>' +
+        '<button class="obtn" onclick="window.__opvLb.overslaan(\'' + sleutel(volgende) + '\')">Overslaan</button>' : '') +
+      '<button class="obtn" onclick="window.__opvLb.stopRonde()">Stop</button></div></div>';
+  }
+
+  function uitlegBlok() {
+    return '<div class="lb-uitleg">' +
+      '<h4>Hoe werkt Leads bellen?</h4>' +
+      '<ol>' +
+      '<li><b>Start altijd in &ldquo;Nu bellen&rdquo;</b> en werk van boven naar onder. De volgorde is de prioriteit: ' +
+      'wie reageerde &rarr; afgesproken terugbellen &rarr; agenda gekregen maar niets ingepland &rarr; verse en hete nieuwe leads &rarr; de volgende belronde &rarr; de rest van Nieuw.</li>' +
+      '<li><b>Na elke call</b> vraagt het scherm hoe het ging: <i>geen gehoor</i>, <i>voicemail</i>, <i>gesproken</i> of <i>foutief nummer</i>. ' +
+      'Gesproken? Dan kies je meteen: inplannen, agenda sturen, terugbellen op een dag die hij zelf noemt, of afronden.</li>' +
+      '<li><b>Geen gehoor schuift vanzelf door.</b> Een lead die je net probeerde, verdwijnt uit Nu bellen tot zijn volgende ronde: ' +
+      'ronde 2 drie uur later (ander moment van de dag), ronde 3 de volgende ochtend, ronde 4 twee dagen later, ronde 5 drie dagen later. ' +
+      'Twee keer kort na elkaar bellen is één ronde. Na ' + RONDES_MAX + ' rondes staat hij bij <i>Uitgebeld</i>: laatste WhatsApp of afronden.</li>' +
+      '<li><b>Stuur na de eerste keer geen gehoor een WhatsApp</b> (het scherm stelt de tekst voor). Antwoordt hij, dan springt hij bovenaan in Nu bellen.</li>' +
+      '<li><b>&ldquo;Moet later terugkomen&rdquo;</b> zet hem in Terugbelafspraken met de datum. Op die dag staat hij bovenaan in Nu bellen.</li>' +
+      '<li><b>Agenda doorsturen</b> zet hem 48 uur in <i>Wacht op inplanning</i>. Kiest hij geen moment, dan komt hij terug als <i>Agenda gekregen, niets ingepland</i>.</li>' +
+      '<li>Onderaan staat het <b>logboek</b>: elke call, elk bericht en elke beslissing per dag.</li>' +
+      '</ol></div>';
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // LOGBOEK
+  // ═════════════════════════════════════════════════════════════════════════
+  function logboekBlok() {
+    const st = _ld.logboek;
+    if (!st.data && !st.laden && !st.fout) straks(laadLogboek);
+    let h = '<div class="lb-logboek"><div class="lb-logkop"><h4>Logboek</h4>' +
+      '<div class="lb-dagnav"><button class="obtn" onclick="window.__opvLb.logDag(-1)">&lsaquo;</button>' +
+      '<span>' + esc(st.data ? langeDag(st.data.dag, st.data.vandaag) : (st.dag ? langeDag(st.dag) : 'vandaag')) + '</span>' +
+      '<button class="obtn" ' + (st.data && st.data.dag >= st.data.vandaag ? 'disabled ' : '') + 'onclick="window.__opvLb.logDag(1)">&rsaquo;</button></div></div>';
+    if (st.fout) return h + '<div class="warn">' + esc(st.fout) + '</div></div>';
+    if (!st.data) return h + '<div class="agleeg">Laden&hellip;</div></div>';
+    const d = st.data, v = d.kpi;
+    const cel = (n, l) => '<div class="lb-cel"><b>' + esc(n) + '</b><span>' + esc(l) + '</span></div>';
+    h += '<div class="lb-strip lb-strip8">' +
+      cel(v.pogingen, 'belpogingen') + cel(v.leads_gebeld, 'leads gebeld') + cel(v.opgenomen, 'opgenomen') +
+      cel(v.geen_gehoor + v.voicemail, 'geen gehoor / voicemail') + cel(v.wa_uit, 'WhatsApp uit') + cel(v.wa_in, 'WhatsApp in') +
+      cel(v.ingepland, 'ingepland') + cel(v.doorgestuurd, 'agenda gestuurd') + cel(v.terugbel, 'terugbelafspraken') +
+      cel(v.afgerond, 'afgerond') + cel(v.nieuw_aangeraakt, 'nieuwe leads aangeraakt') + cel(minuten(v.belseconden), 'aan de lijn') + '</div>';
+    for (const m of d.meldingen || []) h += '<div class="warn2">' + esc(m) + '</div>';
+    h += '<div class="lb-logtabs"><button class="lb-pot' + (_ld.logTab === 'tijdlijn' ? ' on' : '') + '" onclick="window.__opvLb.logTab(\'tijdlijn\')">Alle gebeurtenissen <span class="n">' + esc(d.rijen.length) + '</span></button>' +
+      '<button class="lb-pot' + (_ld.logTab === 'leads' ? ' on' : '') + '" onclick="window.__opvLb.logTab(\'leads\')">Per lead <span class="n">' + esc(d.per_lead.length) + '</span></button></div>';
+    if (_ld.logTab === 'leads') {
+      if (!d.per_lead.length) return h + '<div class="agleeg">Op deze dag is er niets met leads gebeurd.</div></div>';
+      return h + '<div class="lb-tabel"><table><thead><tr><th>Lead</th><th>Calls</th><th>Opgenomen</th><th>Laatste</th></tr></thead><tbody>' +
+        d.per_lead.map((r) => '<tr onclick="window.__opvHist(\'' + esc(r.taak_id) + '\')"><td>' + esc(r.naam) + '</td><td>' + esc(r.calls) +
+          '</td><td>' + esc(r.opgenomen) + '</td><td>' + esc(r.laatste) + '</td></tr>').join('') + '</tbody></table></div></div>';
+    }
+    if (!d.rijen.length) return h + '<div class="agleeg">Op deze dag is er niets met leads gebeurd.</div></div>';
+    h += '<div class="lb-tijdlijn">' + d.rijen.map((r) =>
+      '<div class="lb-tl lb-tl-' + esc(r.soort) + '"><span class="t">' + esc(r.tijd) + '</span><span class="i">' + esc(r.icoon) + '</span>' +
+      '<span class="w"><b>' + esc(r.naam) + '</b> &middot; ' + esc(r.tekst) +
+      (r.duur_sec != null ? ' <span class="zacht">(' + esc(r.duur_sec) + ' s)</span>' : '') +
+      (r.zelf_gemeld ? ' <span class="zacht">&middot; zelf gemeld</span>' : '') + '</span></div>').join('') + '</div>';
+    return h + '</div>';
+  }
+
+  function minuten(sec) {
+    const n = Number(sec) || 0;
+    if (n < 60) return n + ' s';
+    return Math.floor(n / 60) + ' min ' + String(n % 60).padStart(2, '0');
+  }
+  function datumNl(dag) {
+    try {
+      return new Intl.DateTimeFormat('nl-NL', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' })
+        .format(new Date(String(dag).slice(0, 10) + 'T12:00:00Z')).replace(/\./g, '');
+    } catch (_) { return String(dag || ''); }
+  }
+  function langeDag(dag, vandaag) {
+    if (vandaag && dag === vandaag) return 'Vandaag';
+    try {
+      return new Intl.DateTimeFormat('nl-NL', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
+        .format(new Date(String(dag).slice(0, 10) + 'T12:00:00Z'));
+    } catch (_) { return String(dag || ''); }
+  }
+  /** 'nu', 'vandaag 15:30', 'morgen 09:00', 'do 16 okt 09:00'. Met verleden=true: 'vandaag 10:12', 'gisteren …'. */
+  function momentKort(iso, verleden) {
+    const t = Date.parse(iso || '');
+    if (!Number.isFinite(t)) return '';
+    if (!verleden && t <= Date.now()) return 'nu';
+    const f = (o) => new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam', ...o }).format(new Date(t));
+    const dagVan = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date(ms));
+    const uur = f({ hour: '2-digit', minute: '2-digit' });
+    const verschil = Math.round((Date.parse(dagVan(t) + 'T12:00:00Z') - Date.parse(dagVan(Date.now()) + 'T12:00:00Z')) / 86400000);
+    if (verschil === 0) return 'vandaag ' + uur;
+    if (verschil === 1) return 'morgen ' + uur;
+    if (verschil === -1) return 'gisteren ' + uur;
+    return f({ weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '') + ' ' + uur;
   }
 
   // ── Beheer: agendalink & berichten (manager / super_admin) ───────────────
@@ -381,15 +593,48 @@
     if (!r) return '';
     const k = r.kaart || {};
     const s = m.sleutel;
+    if (m.soort === 'uitkomst') {
+      const body =
+        (r.opener ? '<div class="ronde">' + esc(r.opener) + '</div>' : '') +
+        opt('&#128245;', 'var(--o-ambs)', 'Geen gehoor', 'Ging over, niemand nam op. Hij schuift door naar zijn volgende belronde.', "window.__opvLb.kiesUitkomst('" + s + "','geen_gehoor')") +
+        opt('&#128252;', 'var(--o-ambs)', 'Voicemail', 'Kreeg de voicemail (ingesproken of niet). Telt als geen gehoor, niet als gesprek.', "window.__opvLb.kiesUitkomst('" + s + "','voicemail')") +
+        opt('&#128172;', 'var(--o-grns)', 'Gesproken', 'Je had hem aan de lijn. Kies daarna meteen de volgende stap.', "window.__opvLb.kiesUitkomst('" + s + "','gesproken')") +
+        opt('&#10006;', 'var(--o-reds)', 'Foutief nummer', 'Verkeerde persoon of nummer bestaat niet. Rondt de lead meteen af.', "window.__opvLb.kiesUitkomst('" + s + "','foutief_nummer')") +
+        (m.fout ? '<div class="warn">' + esc(m.fout) + '</div>' : '');
+      return venster('Hoe ging de call met ' + esc(r.naam) + '?',
+        k.plan ? 'Ronde ' + esc((k.plan.rondes || 0)) + ' van ' + RONDES_MAX + ' &middot; ' + esc(k.bel_totaal || 0) + '&times; gebeld' : 'Vul in wat er gebeurde', body);
+    }
+    if (m.soort === 'na') {
+      const p = m.plan || k.plan || null;
+      const geenWa = !(Number(k.wa_totaal) > 0);
+      const volgende = _ld.ronde ? belrijItems(((_ld.potten.belrij || {}).data) || {})[0] : null;
+      const body =
+        '<div class="ronde">' + (m.uitkomst === 'voicemail' ? '&#128252; Voicemail genoteerd.' : '&#128245; Geen gehoor genoteerd.') + ' ' +
+        (p ? (p.uitgebeld ? 'Dit was ronde ' + esc(p.rondes) + ': <b>uitgebeld</b>. Stuur een laatste bericht of rond af.'
+          : 'Volgende ronde: <b>' + esc(momentKort(p.volgende_at)) + '</b>. Tot dan staat hij niet in Nu bellen.') : 'De volgende ronde wordt berekend&hellip;') + '</div>' +
+        (geenWa ? opt('&#9993;', 'var(--o-grns)', 'Stuur nu een WhatsApp', 'Na geen gehoor verhoogt een kort bericht de kans dat hij terugbelt of reageert. De tekst staat klaar; je past hem aan waar je wil.', "window.__opvLb.waNaCall('" + s + "')") : '') +
+        opt('&#8635;', 'var(--o-purs)', 'Zelf een moment kiezen', 'Hij is pas bereikbaar na 18u, of je wil het morgenvroeg nog eens proberen.', "window.__opvLb.open('opnieuw','" + s + "')") +
+        (volgende ? '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvLb.bel(\'' + sleutel(volgende) + '\')">&#9742; Volgende: ' + esc(volgende.naam) + '</button>'
+          : '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvLb.sluit()">Klaar</button>');
+      return venster(esc(r.naam), 'Genoteerd', body);
+    }
+    if (m.soort === 'opnieuw') {
+      const knop = (l, w) => '<button class="obtn" onclick="window.__opvLb.opnieuwOm(\'' + s + '\',\'' + w + '\')">' + esc(l) + '</button>';
+      const body = '<div class="ronde">Kies wanneer hij weer in Nu bellen mag verschijnen. Gaat het om een afspraak mét de lead, gebruik dan &ldquo;Moet later terugkomen&rdquo;.</div>' +
+        '<div class="lb-snel">' + knop('over 1 uur', 'u1') + knop('over 3 uur', 'u3') + knop('vanavond 18:00', 'vanavond') + knop('morgenochtend', 'morgen') + '</div>' +
+        (m.fout ? '<div class="warn">' + esc(m.fout) + '</div>' : '');
+      return venster('Opnieuw proberen: ' + esc(r.naam), 'Een eigen moment voor de volgende poging', body);
+    }
     if (m.soort === 'watnu') {
       const verlopen = k.reden_code === 'inplantermijn_verlopen';
       const body =
+        (m.naGesprek ? '<div class="ronde">&#128172; <b>Gesproken</b> genoteerd. Wat spraken jullie af?</div>' : '') +
         (r.opener ? '<div class="ronde">' + esc(r.opener) + '</div>' : '') +
         opt('&#128197;', 'var(--o-grns)', 'Inplannen via Zoom', 'Kies samen een moment terwijl je hem aan de lijn hebt. Daarmee is de kaart klaar.', "window.__opvLb.inplannen('" + s + "')") +
         opt('&#128233;', 'var(--o-accs)', verlopen ? 'Agenda opnieuw doorsturen' : 'Agenda doorsturen',
           'Verstuurt nu de agendalink via WhatsApp. Plant hij niets in binnen 48 uur, dan komt hij terug.', "window.__opvLb.doorsturen('" + s + "')") +
         opt('&#9200;', 'var(--o-purs)', 'Moet later terugkomen', 'Hij noemde zelf een later moment. Schrijf op wat hij zei.', "window.__opvLb.open('terug','" + s + "')") +
-        opt('&#8595;', 'var(--o-ambs)', 'Later vandaag nog eens', 'Blijft vandaag in Bezig staan.', "window.__opvLb.laterVandaag('" + s + "')") +
+        opt('&#8635;', 'var(--o-ambs)', 'Opnieuw proberen', 'Kon niet praten of geen tijd. Kies wanneer hij weer in Nu bellen komt (over 1u, 3u, vanavond, morgen).', "window.__opvLb.open('opnieuw','" + s + "')") +
         opt('&#128451;', 'var(--o-reds)', 'Afronden', 'Weggooien, met reden. Maxim ziet de moeite die gedaan is.', "window.__opvLb.open('afronden','" + s + "')");
       return venster('Wat nu met ' + esc(r.naam) + '?',
         esc(k.bel_totaal || 0) + '&times; gebeld op ' + esc(k.bel_dagen || 0) + ' d &middot; ' + esc(k.wa_totaal || 0) + '&times; WhatsApp', body);
@@ -525,6 +770,55 @@
 
   function herlaadAlles() { leegCache(); _ld.vuil = false; teken(); }
 
+  // ── Het gesprek volgen ───────────────────────────────────────────────────
+  // De softphone zegt niet wanneer een gesprek klaar is; we kijken elke
+  // seconde naar zijn status. Was hij actief en is hij het niet meer, dan is
+  // er net opgehangen: dan vraagt het scherm hoe het ging. Zo hoeft Dave niets
+  // te onthouden en klopt de belcadans.
+  let _gesprekTimer = null;
+  function stopVolgen() { if (_gesprekTimer) { clearInterval(_gesprekTimer); _gesprekTimer = null; } }
+  function softphoneActief() {
+    const sp = window.KlxSoftphone;
+    if (!sp || typeof sp.getStatus !== 'function') return null;
+    try {
+      const st = sp.getStatus();
+      return !!(st && (st.state === 'dialing' || st.state === 'ringing' || st.state === 'connected'));
+    } catch (_) { return null; }
+  }
+  function volgGesprek(s, taakId) {
+    stopVolgen();
+    _ld.gesprek = { sleutel: s, taakId, sinds: Date.now(), gezienActief: false };
+    if (typeof setInterval !== 'function') return;
+    _gesprekTimer = setInterval(() => {
+      const g = _ld.gesprek;
+      if (!g) { stopVolgen(); return; }
+      const actief = softphoneActief();
+      if (actief === null) { stopVolgen(); return; }
+      if (actief) { g.gezienActief = true; return; }
+      if (g.gezienActief) {
+        stopVolgen();
+        _ld.gesprek = null;
+        if (_ld.ronde) _ld.ronde.gebeld += 1;
+        _ld.vuil = true;
+        // Even wachten: de call-log moet eerst als belpoging op de kaart staan.
+        setTimeout(() => {
+          if (!_ld.modal || _ld.modal.soort === 'na') _ld.modal = { soort: 'uitkomst', sleutel: g.sleutel };
+          teken();
+        }, 900);
+        return;
+      }
+      // Nooit gebeld (venster dicht zonder te bellen): na 3 minuten stoppen.
+      if (Date.now() - g.sinds > 180000) { stopVolgen(); _ld.gesprek = null; teken(); }
+    }, 1000);
+  }
+
+  function waTekst(r) {
+    const vn = r.voornaam || String(r.naam || '').split(' ')[0] || '';
+    const prod = r.product === '7-daagse' ? 'de 7-daagse' : r.product === 'Minicursus' ? 'de minicursus' : 'de cursus';
+    return 'Hey ' + vn + ', Dave hier van De Forex Opleiding 👋 Ik probeerde je net even te bellen over ' + prod +
+      '. Hoe bevalt het tot nu toe? Laat gerust weten wanneer ik je best kan bereiken, dan bel ik je dan.';
+  }
+
   window.__opvLb = {
     import: () => { _ld.modal = { soort: 'import', label: '', perDag: 10, csv: '', vv: null, fout: null, klaar: null }; teken(); },
     impVeld: (veld, v) => { const m = _ld.modal; if (!m || m.soort !== 'import') return; m[veld] = v; m.vv = null; m.klaar = null; },
@@ -541,11 +835,73 @@
     kiesPot: (code) => { _ld.pot = code; if (_ld.vuil) { leegCache(); _ld.vuil = false; } teken(); },
     herlaad: () => herlaadAlles(),
     filter: (aan) => { _ld.alleenWaarschuwing = !!aan; teken(); },
-    bel: (s) => metKaart(s, async (id) => { window.__opvBel(id, 'leads-bellen'); }),
+    bel: (s) => metKaart(s, async (id) => {
+      if (_ld.modal) _ld.modal = null;
+      volgGesprek('t:' + id, id);
+      window.__opvBel(id, 'leads-bellen');
+      teken();
+    }),
+    uitleg: () => { _ld.uitleg = !_ld.uitleg; teken(); },
+    toonAlles: (code) => { _ld.toonAlles[code] = true; teken(); },
+    startRonde: () => {
+      _ld.ronde = { gebeld: 0, gestart: Date.now(), overgeslagen: new Set() };
+      const d = _ld.potten.belrij && _ld.potten.belrij.data;
+      const eerste = d ? belrijItems(d)[0] : null;
+      if (eerste) window.__opvLb.bel(sleutel(eerste)); else teken();
+    },
+    stopRonde: () => { _ld.ronde = null; teken(); },
+    overslaan: (s) => { if (_ld.ronde) _ld.ronde.overgeslagen.add(s); teken(); },
+    uitkomst: (s) => metKaart(s, async (id) => { _ld.modal = { soort: 'uitkomst', sleutel: 't:' + id }; teken(); }),
+    kiesUitkomst: async (s, u) => {
+      const m = _ld.modal; if (_ld.bezig) return;
+      if (u === 'foutief_nummer' && typeof confirm === 'function' && !confirm('Foutief nummer: de lead wordt afgerond en komt niet terug. Doorgaan?')) return;
+      _ld.bezig = true; if (m) m.fout = null; teken();
+      try {
+        const { id } = await zorgKaart(s);
+        const j = await post('/api/opvolging-taak-update', { taak_id: id, actie: 'uitkomst', uitkomst: u });
+        leegCache(); _ld.vuil = false;
+        if (u === 'gesproken') _ld.modal = { soort: 'watnu', sleutel: s, naGesprek: true };
+        else if (u === 'foutief_nummer') { _ld.modal = null; toast('Afgerond: foutief nummer.'); }
+        else _ld.modal = { soort: 'na', sleutel: s, uitkomst: u, plan: j.plan || null };
+      } catch (e) { if (_ld.modal) _ld.modal.fout = e.message || 'Niet gelukt'; } finally { _ld.bezig = false; teken(); }
+    },
+    waNaCall: (s) => metKaart(s, async (id, r) => {
+      _ld.modal = null; _ld.vuil = true;
+      window.__opvWa(id);
+      if (typeof window.__opvGesprekTyp === 'function') window.__opvGesprekTyp(waTekst(r));
+      teken();
+    }),
+    opnieuwOm: (s, w) => metKaart(s, async (id) => {
+      const wanneer = w === 'u1' ? new Date(Date.now() + 3600000).toISOString()
+        : w === 'u3' ? new Date(Date.now() + 3 * 3600000).toISOString() : w;
+      try {
+        await post('/api/opvolging-taak-update', { taak_id: id, actie: 'opnieuw_om', wanneer });
+        _ld.modal = null; herlaadAlles(); toast('Staat even uit Nu bellen; komt terug op het gekozen moment.');
+      } catch (e) { if (_ld.modal) { _ld.modal.fout = e.message || 'Niet gelukt'; teken(); } }
+    }),
+    logDag: (delta) => {
+      const st = _ld.logboek;
+      const basis = (st.data && st.data.dag) || st.dag;
+      if (!basis) return;
+      const d = new Date(basis + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + delta);
+      const nieuw = d.toISOString().slice(0, 10);
+      if (st.data && st.data.vandaag && nieuw > st.data.vandaag) return;
+      st.dag = nieuw; st.data = null; st.fout = null; teken();
+    },
+    logTab: (t) => { _ld.logTab = t === 'leads' ? 'leads' : 'tijdlijn'; teken(); },
     wa: (s) => metKaart(s, async (id) => { window.__opvWa(id); }),
     hist: (s) => { const r = _ld.rijen.get(s); if (r && r.kaart) window.__opvHist(r.kaart.taak_id); },
     watNu: (s) => metKaart(s, async () => { _ld.modal = { soort: 'watnu', sleutel: s }; teken(); }),
-    open: (soort, s) => { _ld.modal = { soort, sleutel: s, noot: '', categorie: null, due: soort === 'terug' ? dagPlus(2) : null }; teken(); },
+    open: (soort, s) => {
+      const vooraf = soort === 'afronden' && _ld.modal && _ld.modal.categorie ? _ld.modal.categorie : null;
+      _ld.modal = { soort, sleutel: s, noot: '', categorie: vooraf, due: soort === 'terug' ? dagPlus(2) : null }; teken();
+    },
+    afrondNietBereikbaar: (s) => {
+      const r = _ld.rijen.get(s); const k = (r && r.kaart) || {};
+      _ld.modal = { soort: 'afronden', sleutel: s, categorie: 'niet_bereikbaar',
+        noot: RONDES_MAX + ' belrondes zonder gehoor (' + (k.bel_totaal || 0) + '× gebeld op ' + (k.bel_dagen || 0) + ' dagen, ' + (k.wa_totaal || 0) + ' WhatsApp).' };
+      teken();
+    },
     sluit: () => { _ld.modal = null; if (_ld.vuil) herlaadAlles(); else teken(); },
     typ: (v) => { if (_ld.modal) _ld.modal.noot = String(v == null ? '' : v); },
     kiesDag: (d, stil) => { if (!_ld.modal) return; _ld.modal.due = d; if (!stil) teken(); },
@@ -645,8 +1001,42 @@
 .opv.lb .lb-beheer input,.opv.lb .lb-beheer textarea{width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--o-line);border-radius:9px}
 .opv.lb .lb-beheer .obtn{margin-top:12px}
 .opv .lb-snel,.opv .lb-cats{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.opv.lb .lb-sectie{margin:0 0 18px}
+.opv.lb .lb-skop{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin:0 0 6px;padding:0 2px}
+.opv.lb .lb-skop b{font-size:14px}
+.opv.lb .lb-skop .n{font-size:12px;font-weight:700;background:#eef0f3;border-radius:999px;padding:0 8px}
+.opv.lb .lb-suitleg{font-size:12px;color:var(--o-muted)}
+.opv.lb .lb-s-reageerde .lb-skop .n,.opv.lb .lb-s-terugbellen .lb-skop .n{background:#ede7ff;color:#5b2fd6}
+.opv.lb .lb-s-vers .lb-skop .n{background:var(--o-grns);color:#06603b}
+.opv.lb .lb-s-uitgebeld .lb-skop .n{background:var(--o-reds);color:#a1150b}
+.opv.lb .lb-waarom{font-size:11px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#5b2fd6;margin:0 0 2px}
+.opv.lb .lb-rij.lb-nu{outline:2px solid var(--o-acc,#2f6bff);outline-offset:-2px}
+.opv.lb .lb-plan{color:#1f3b8a}
+.opv.lb .lb-noot.zacht,.opv .zacht{color:var(--o-muted)}
+.opv .lb-uk{border-color:#e08700;color:#8a5200;background:var(--o-ambs)}
+.opv.lb .lb-meer{margin:6px 0 0}
+.opv.lb .lb-rondestart{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px;font-size:12.5px;color:var(--o-muted)}
+.opv.lb .lb-rondebalk{position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#0f172a;color:#fff;border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px}
+.opv.lb .lb-rondebalk .zacht{color:#cbd5e1}
+.opv.lb .lb-rb-knoppen{display:flex;gap:6px;flex-wrap:wrap}
+.opv.lb .lb-uitleg{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:12px 18px;margin:0 0 14px;font-size:13px;line-height:1.5}
+.opv.lb .lb-uitleg h4{margin:4px 0 6px}
+.opv.lb .lb-uitleg li{margin:0 0 6px}
+.opv.lb .lb-logboek{margin-top:28px}
+.opv.lb .lb-logkop{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px}
+.opv.lb .lb-logkop h4{margin:0;font-size:16px}
+.opv.lb .lb-dagnav{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600}
+.opv.lb .lb-strip8{grid-template-columns:repeat(6,minmax(0,1fr))}
+.opv.lb .lb-logtabs{display:flex;gap:6px;margin:0 0 8px;background:#f3f4f6;padding:5px;border-radius:12px;width:max-content;max-width:100%}
+.opv.lb .lb-tijdlijn{background:#fff;border:1px solid var(--o-line);border-radius:12px;max-height:520px;overflow:auto}
+.opv.lb .lb-tl{display:flex;gap:10px;align-items:baseline;padding:7px 12px;border-bottom:1px solid #f1f2f4;font-size:12.5px}
+.opv.lb .lb-tl .t{color:var(--o-muted);font-variant-numeric:tabular-nums;min-width:38px}
+.opv.lb .lb-tl .i{width:18px;text-align:center}
+.opv.lb .lb-tl-ingepland{background:#f0fbf6}
+.opv.lb .lb-tl-afgerond{background:#fafafa}
+.opv .tag.t-purple{background:#ede7ff;color:#5b2fd6}
 .opv .lb-l{display:block;font-size:12.5px;font-weight:650;margin:10px 0 4px}
-@media (max-width:720px){.opv.lb .lb-strip{grid-template-columns:repeat(3,minmax(0,1fr))}.opv.lb .lb-cel.breed{grid-column:span 3}}`;
+@media (max-width:720px){.opv.lb .lb-strip,.opv.lb .lb-strip8{grid-template-columns:repeat(3,minmax(0,1fr))}.opv.lb .lb-cel.breed{grid-column:span 3}}`;
     document.head.appendChild(el);
   }
 

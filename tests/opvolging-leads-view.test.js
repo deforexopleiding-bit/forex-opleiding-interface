@@ -61,10 +61,15 @@ test('de pot Nieuw toont rijen, de tellers en wat er niet getoond wordt', () => 
     items: [rij()],
   };
   st.telling.data = data;
+  st.pot = 'nieuw';
   st.potten.nieuw = { laden: false, fout: null, data };
+  st.logboek.data = { dag: '2026-10-13', vandaag: '2026-10-13', rijen: [], per_lead: [], meldingen: [],
+    kpi: { pogingen: 3, leads_gebeld: 2, rondes: 2, opgenomen: 1, voicemail: 1, geen_gehoor: 1, belseconden: 75,
+      wa_uit: 1, wa_in: 0, doorgestuurd: 1, ingepland: 0, terugbel: 0, afgerond: 0, nieuw_aangeraakt: 1 } };
   for (const r of data.items) st.rijen.set('l:' + r.lead_id, r);
   const html = window.DFO.VIEWS['opvolging/Leads bellen']();
-  assert.match(html, /Trage momenten\?/);
+  assert.match(html, /Begin altijd bij &ldquo;Nu bellen&rdquo;/);
+  assert.match(html, /leads gebeld vandaag/);
   assert.match(html, /lb-pot on[^>]*>Nieuw<span class="n">1</);
   assert.match(html, /8 niet getoond omdat heeft een geplande call/);
   assert.match(html, /25 %/);
@@ -78,7 +83,7 @@ test('escaping: een naam met HTML wordt nooit HTML', () => {
   const st = window.__opvLeadsState;
   const r = rij({ naam: '<img src=x onerror=alert(1)>', opener: '"><script>', chips: [{ tekst: "<b>'x'</b>" }] });
   const data = { aantallen: { nieuw: 1 }, items: [r], niet_getoond: [] };
-  st.telling.data = data; st.potten.nieuw = { data }; st.rijen.set('l:l1', r);
+  st.telling.data = data; st.pot = 'nieuw'; st.potten.nieuw = { data }; st.rijen.set('l:l1', r);
   const html = window.DFO.VIEWS['opvolging/Leads bellen']();
   assert.doesNotMatch(html, /<img src=x/);
   assert.doesNotMatch(html, /"><script>/);
