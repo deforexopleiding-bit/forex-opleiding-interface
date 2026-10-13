@@ -221,7 +221,9 @@ test('potVoorKaart: elke status naar zijn pot', () => {
   assert.equal(k({ reden_code: 'terugbellen' }), 'terugbellen');
   assert.equal(k({ reden_code: 'inplantermijn_verlopen' }), 'verlopen');
   assert.equal(k({}), 'bezig');
-  assert.equal(k({ due: '2026-10-09', reden_code: 'terugbellen' }), 'later');
+  // Een terugbelafspraak staat al vóór de dag zelf in Terugbellen.
+  assert.equal(k({ due: '2026-10-09', reden_code: 'terugbellen' }), 'terugbellen');
+  assert.equal(k({ due: '2026-10-09' }), 'later');
   assert.equal(k({ status: 'wacht_inplanning' }), 'wacht');
   assert.equal(k({ status: 'ingepland', afspraak_gevonden_at: dagenTerug(29) }), 'ingepland');
   assert.equal(k({ status: 'ingepland', afspraak_gevonden_at: dagenTerug(31) }), null);
