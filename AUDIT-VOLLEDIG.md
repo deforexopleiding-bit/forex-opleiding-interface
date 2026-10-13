@@ -681,3 +681,69 @@ een lijst die stil de verkeerde gesprekken toont is erger dan een lege lijst met
 **Algemene regel.** Zit de beslissing over wat iemand ziet in een closure van een viewbestand van
 vijfduizend regels, dan is dat geen stijlkwestie maar een diagnosekwestie. Haal hem eruit vóór je
 hem nodig hebt om een storing te verklaren.
+
+### Les 18 — Een toets die `Date.now` stilzet, stuurt `new Date()` niet
+
+`beoordeelToegangGate()` had `nu = new Date()` als standaard. Dat is hetzelfde moment als
+`Date.now()`, maar niet hetzelfde voor een toets: de Date-**constructor** trekt zich van een
+`Date.now`-stub niets aan. De webhook geeft `nu` niet mee, dus liep de venstertoets via de webhook
+altijd op de echte klok. De fixture was van 10 oktober en het venster is 72 uur, dus de toets stond
+groen tot **13 oktober 14:25 UTC** en daarna rood — zonder dat er één regel code veranderde.
+
+Een halve dag eerder zou dat als "regressie in de toegangspoort" zijn gelezen, en de toegangspoort
+is precies het soort plek waar je dan voorzichtig in gaat zitten rommelen.
+
+**Algemene regel.** Een standaardwaarde die de klok leest, schrijf je als `new Date(Date.now())` en
+niet als `new Date()`. Identiek in productie, stuurbaar in een toets. En zodra een toets een
+tijdvenster meet met een vaste fixture: zet de klok stil, of de toets heeft een houdbaarheidsdatum
+die niemand heeft opgeschreven.
+
+### Les 19 — Een rode toets op main wordt geërfd, niet opgelost
+
+`main` stond op 4 rood. Drie daarvan waren rood **vanaf de merge die ze toevoegde**: #1592 bracht
+een toets die zeven medewerkersrollen eiste terwijl de lijst er op dat moment al acht had, en een
+toets die 'Nederland' eiste bij een land dat diezelfde PR uit de postcode leerde afleiden; #1790
+voegde een tweede opvraging aan een scherm toe en liet de toets op één staan.
+
+Niets daarvan was een productiebug. De kosten zaten elders: zolang er vier rood staan, is "de suite
+is groen op vier bekende na" de norm, en dan kost elke nieuwe rode toets eerst een onderzoek naar de
+vraag of hij bij de bekende vier hoort. Vandaag kostte dat tijd bij de toegangspoort (les 18), waar
+de echte oorzaak de klok was.
+
+**Algemene regel.** Een PR die een rode toets achterlaat, laat geen toets achter maar een rekening.
+Draai de bak vóór de merge, en staat er iets rood dat niet van jou is: zeg het, of maak het groen.
+Niet erven.
+
+### Les 20 — Een lijst-eindpunt dat een mailserver belt, is geen lijst-eindpunt
+
+Gesprekken laadde twintig seconden. Alle aandacht ging naar de query's en de blokgroottes, en de
+tijd zat in één regel: de ongelezen-mail-verrijking opende een **live IMAP-verbinding** naar Strato
+en haalde envelope plus vlaggen op van elk bericht sinds 1 januari. Met een socketTimeout van negen
+seconden, en een cache van zestig seconden die per Vercel-instantie leeft terwijl het scherm elke
+zes seconden polt — dus elke koude instantie betaalde die scan opnieuw.
+
+Diezelfde vraag stond al in de databank: `sync-emails` schrijft elke vijf minuten `is_read`,
+`customer_id` en `mailbox`. "Hoeveel ongelezen mail van deze klant in de mailbox van deze module" is
+daarmee een indexeerbare query.
+
+**Algemene regel.** Een eindpunt dat een lijst tekent, praat met de databank en met niets anders.
+Moet er iets uit een extern systeem komen, dan zet een cron dat in een kolom en leest het eindpunt
+die kolom. De prijs is versheid, en die prijs noem je: markeren in webmail duurt nu vijf minuten in
+plaats van één, en markeren vanuit de module zelf is meteen goed omdat dat pad de kolom zelf
+bijschrijft.
+
+### Les 21 — Een 23505 op een unieke index is "iemand was sneller", geen fout
+
+De belrij kreeg een partiële unieke index: één open rij per persoon. Partieel, dus geen
+ON CONFLICT-arbiter in PostgREST (les van 20 mei), dus SELECT-dan-UPDATE-of-INSERT — en tussen die
+twee zit ruimte waar de cron-ronde en een mens die op "op de lijst zetten" klikt elkaar tegenkomen.
+Wie die race verloor, kreeg de 23505 als harde fout: in de ronde een foutregel en een persoon een
+ronde overgeslagen, op de knop een 500 terwijl de rij er gewoon stond.
+
+Dat is de index die z'n werk doet, niet een storing. Zelfde patroon als de ontdubbeling van de
+supportmail, waar een 23505 op de partiële index "al verwerkt" betekent.
+
+**Algemene regel.** Zet je een unieke index op een pad dat SELECT-dan-INSERT doet, dan hoort bij die
+migratie een code-wijziging: 23505 betekent "lees opnieuw en ga verder op de rij die er al is".
+Alleen die code, elke andere fout gooit door — en vind je daarna alsnog niets, gooi dan de
+oorspronkelijke fout. Een id verzinnen is erger dan een zichtbare fout.
