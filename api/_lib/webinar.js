@@ -40,6 +40,11 @@ export const MIN = 60 * 1000;
 export const UUR = 60 * MIN;
 export const MAIL_VAN = 'events@deforexopleiding.nl';
 export const AANTAL_WEKEN_VOORUIT = 6;
+/** Datumkeuze (2026-10-13): de funnels bieden de eerstvolgende 3 doorgaande sessies aan. */
+export const KEUZE_AANTAL = 3;
+/** Horizon: altijd minstens zoveel komende, niet-overgeslagen sessies (ruim boven KEUZE_AANTAL). */
+export const MIN_KOMENDE_SESSIES = 4;
+const MAX_WEKEN_VOORUIT = 16;
 export const WA_MODULE = 'events';
 const ZOOM_ONTBREEKT = 'volgt vóór de start';
 /** Embed van de sessie van een aanmelding — expliciet via sessie_id (zie cronRonde). */
@@ -181,24 +186,60 @@ export async function haalReeks(sb = supabaseAdmin, slug = 'maandag') {
   return data || null;
 }
 
-/** Zorgt dat de komende weken als sessie bestaan. Overgeslagen weken blijven overgeslagen. */
+/**
+ * Zorgt dat de komende weken als sessie bestaan. Overgeslagen weken blijven
+ * overgeslagen. Horizon (datumkeuze, 2026-10-13): staan er na de standaard
+ * AANTAL_WEKEN_VOORUIT minder dan MIN_KOMENDE_SESSIES doorgaande sessies klaar
+ * (door overgeslagen weken), dan wordt verder vooruit gepland (max 16 weken),
+ * zodat de funnels altijd 3 data kunnen aanbieden.
+ */
 export async function zorgVoorSessies(sb, reeks, { aantal = AANTAL_WEKEN_VOORUIT, nu = new Date() } = {}) {
   if (!reeks?.actief) return { aangemaakt: 0 };
   const starttijd = String(reeks.starttijd || '19:00').slice(0, 5);
-  const rijen = komendeData(reeks.weekdag, aantal, nu).map((datum) => {
-    const start = nlNaarUtc(datum, starttijd);
-    return {
-      reeks_id: reeks.id, datum,
-      starts_at: start.toISOString(),
-      ends_at: new Date(start.getTime() + (Number(reeks.duur_min) || 60) * MIN).toISOString(),
-      status: 'gepland',
-    };
-  });
-  const { data, error } = await sb.from('webinar_sessies')
-    .upsert(rijen, { onConflict: 'reeks_id,datum', ignoreDuplicates: true })
-    .select('id');
-  if (error) throw new Error('webinar_sessies aanmaken: ' + error.message);
-  return { aangemaakt: (data || []).length };
+  const plan = async (weken) => {
+    const rijen = komendeData(reeks.weekdag, weken, nu).map((datum) => {
+      const start = nlNaarUtc(datum, starttijd);
+      return {
+        reeks_id: reeks.id, datum,
+        starts_at: start.toISOString(),
+        ends_at: new Date(start.getTime() + (Number(reeks.duur_min) || 60) * MIN).toISOString(),
+        status: 'gepland',
+      };
+    });
+    const { data, error } = await sb.from('webinar_sessies')
+      .upsert(rijen, { onConflict: 'reeks_id,datum', ignoreDuplicates: true })
+      .select('id');
+    if (error) throw new Error('webinar_sessies aanmaken: ' + error.message);
+    return (data || []).length;
+  };
+  let aangemaakt = await plan(aantal);
+  let weken = aantal;
+  while (weken < MAX_WEKEN_VOORUIT && (await komendeSessies(sb, reeks, { nu })).length < MIN_KOMENDE_SESSIES) {
+    weken = Math.min(MAX_WEKEN_VOORUIT, weken + 4);
+    aangemaakt += await plan(weken);
+  }
+  return { aangemaakt };
+}
+
+/** Komende, doorgaande sessies (status 'gepland', start na nu), vroegste eerst. Zonder planning-stap. */
+export async function komendeSessies(sb, reeks, { nu = new Date(), aantal = null } = {}) {
+  let q = sb.from('webinar_sessies').select('*')
+    .eq('reeks_id', reeks.id).eq('status', 'gepland')
+    .gt('starts_at', nu.toISOString())
+    .order('starts_at', { ascending: true });
+  if (aantal) q = q.limit(aantal);
+  const { data, error } = await q;
+  if (error) throw new Error('komende sessies: ' + error.message);
+  return data || [];
+}
+
+/**
+ * De sessies die de funnels aanbieden: de eerstvolgende KEUZE_AANTAL doorgaande
+ * (zelfde selectie en volgorde als de view website_webinar_volgende).
+ */
+export async function aangebodenSessies(sb, reeks, { nu = new Date() } = {}) {
+  await zorgVoorSessies(sb, reeks, { nu });
+  return komendeSessies(sb, reeks, { nu, aantal: KEUZE_AANTAL });
 }
 
 /** De eerstvolgende actieve sessie (start nog niet voorbij), optioneel ná een datum. */
@@ -290,11 +331,43 @@ export async function verstuurMoment(sb, { aanmelding, sessie, reeks, moment, wa
  * een tweede aanmelding geeft { al_aangemeld: true } en stuurt geen tweede
  * bevestiging (tenzij de eerste nooit verstuurd is).
  */
-export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = null, toestemming = false, nu = new Date() }) {
+/** Komende aanmeldingen van deze persoon (zelfde e-mail óf nummer) op doorgaande sessies. */
+async function komendeAanmeldingenVan(sb, { mail, telefoon, komend }) {
+  const ids = new Set(komend.map((s) => s.id));
+  const lees = async (q, wat) => { const { data, error } = await q; if (error) throw new Error(wat + ': ' + error.message); return data || []; };
+  const rijen = [
+    ...await lees(sb.from('webinar_aanmeldingen').select('*').ilike('email', mail), 'aanmeldingen op e-mail'),
+    ...(telefoon ? await lees(sb.from('webinar_aanmeldingen').select('*').eq('telefoon', telefoon), 'aanmeldingen op nummer') : []),
+  ];
+  const uniek = [...new Map(rijen.map((r) => [r.id, r])).values()].filter((r) => ids.has(r.sessie_id) && !r.is_test);
+  const start = new Map(komend.map((s) => [s.id, String(s.starts_at)]));
+  return uniek.sort((a, b) => start.get(a.sessie_id).localeCompare(start.get(b.sessie_id)));
+}
+
+/**
+ * Aanmelden voor een webinar-sessie.
+ *
+ * Datumkeuze (2026-10-13): `sessieId` = de door de deelnemer gekozen sessie. Die
+ * MOET één van de op dit moment aangeboden sessies zijn (de eerstvolgende
+ * KEUZE_AANTAL doorgaande — aangebodenSessies); verleden, overgeslagen of
+ * onbekend → { ongeldigeSessie: true } (de client wordt niet vertrouwd). Zonder
+ * sessieId (de website van vóór de datumkeuze, of een formulier zonder opties):
+ * de eerstvolgende (oude gedrag) — en wie al voor een komende sessie staat,
+ * blijft daar staan ({ alAangemeld: true }); zonder keuze wordt nooit verplaatst.
+ *
+ * Al aangemeld (zelfde e-mail of nummer) voor een komende sessie:
+ *   - zelfde datum → { alAangemeld: true }, geen tweede bevestiging (tenzij de
+ *     eerste nooit verstuurd is);
+ *   - andere datum → die aanmelding VERPLAATSEN naar de gekozen sessie (claims
+ *     terug op NULL) en een verse bevestiging sturen → { verplaatst: true }.
+ */
+export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = null, toestemming = false, sessieId = null, nu = new Date() }) {
   const reeks = await haalReeks(sb);
   if (!reeks || !reeks.actief) return { geenSessie: true };
-  const sessie = await volgendeSessie(sb, reeks, { nu });
-  if (!sessie) return { geenSessie: true };
+  const aangeboden = await aangebodenSessies(sb, reeks, { nu });
+  if (!aangeboden.length) return { geenSessie: true };
+  let sessie = sessieId ? aangeboden.find((s) => s.id === sessieId) : aangeboden[0];
+  if (!sessie) return { ongeldigeSessie: true, aangeboden };
 
   const mail = String(email).trim().toLowerCase();
   let lead = leadId || null;
@@ -302,16 +375,7 @@ export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = nu
     const { data: l } = await sb.from('leads').select('id').ilike('email', mail).is('verwijderd_op', null).limit(1);
     lead = l?.[0]?.id || null;
   }
-  const rij = { sessie_id: sessie.id, lead_id: lead, voornaam: String(voornaam || '').trim() || null, email: mail, telefoon: telefoon || null, bron: bron || null, toestemming: !!toestemming };
-  let aanmelding; let alAangemeld = false;
-  const { data: nieuw, error: iErr } = await sb.from('webinar_aanmeldingen').insert(rij).select('*').single();
-  if (!iErr) aanmelding = nieuw;
-  else if (iErr.code === '23505') {
-    alAangemeld = true;
-    const { data: bestaand, error: bErr } = await sb.from('webinar_aanmeldingen').select('*')
-      .eq('sessie_id', sessie.id).ilike('email', mail).limit(1);
-    if (bErr || !bestaand?.length) throw new Error('bestaande aanmelding lezen: ' + (bErr?.message || 'niet gevonden'));
-    aanmelding = bestaand[0];
+  const aanvullen = async (aanmelding) => {
     const aanvulling = {};
     if (!aanmelding.telefoon && telefoon) aanvulling.telefoon = telefoon;
     if (!aanmelding.lead_id && lead) aanvulling.lead_id = lead;
@@ -319,11 +383,51 @@ export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = nu
       await sb.from('webinar_aanmeldingen').update(aanvulling).eq('id', aanmelding.id);
       Object.assign(aanmelding, aanvulling);
     }
+  };
+  const bevestig = async (aanmelding) => (!aanmelding.bevestiging_op
+    ? verstuurMoment(sb, { aanmelding, sessie, reeks, moment: BEVESTIGING })
+    : null);
+
+  // Al aangemeld voor een komende sessie (e-mail of nummer)?
+  const komend = await komendeSessies(sb, reeks, { nu });
+  const eerder = await komendeAanmeldingenVan(sb, { mail, telefoon: telefoon || null, komend });
+  // Zonder sessieId geen keuze → een bestaande komende aanmelding blijft staan
+  // (backward-compatible met de website van vóór de datumkeuze).
+  const opGekozen = eerder.find((a) => a.sessie_id === sessie.id) || (sessieId ? null : eerder[0] || null);
+  if (opGekozen) {
+    if (opGekozen.sessie_id !== sessie.id) sessie = komend.find((s) => s.id === opGekozen.sessie_id) || sessie;
+    await aanvullen(opGekozen);
+    return { aanmelding: opGekozen, sessie, reeks, alAangemeld: true, verplaatst: false, bevestiging: await bevestig(opGekozen) };
+  }
+  if (eerder.length) {
+    // Andere datum gekozen → de (vroegste) bestaande aanmelding verplaatsen.
+    const oud = eerder[0];
+    const t = new Date().toISOString();
+    const reset = { sessie_id: sessie.id, verplaatst_van_sessie_id: null, bevestiging_op: null, reminder_dag_op: null, reminder_uur_op: null, live_op: null, updated_at: t };
+    for (const k of ['opvolging_1_op', 'opvolging_2_op']) if (k in oud) reset[k] = null;
+    reset.berichten = { ...(oud.berichten || {}), verplaatst_door_keuze: { op: t, van_sessie_id: oud.sessie_id } };
+    const { data: upd, error: uErr } = await sb.from('webinar_aanmeldingen').update(reset).eq('id', oud.id).select('*');
+    if (uErr) throw new Error('aanmelding verplaatsen: ' + uErr.message);
+    const aanmelding = (upd && upd[0]) || { ...oud, ...reset };
+    await aanvullen(aanmelding);
+    return { aanmelding, sessie, reeks, alAangemeld: false, verplaatst: true, van_sessie_id: oud.sessie_id, bevestiging: await bevestig(aanmelding) };
+  }
+
+  const rij = { sessie_id: sessie.id, lead_id: lead, voornaam: String(voornaam || '').trim() || null, email: mail, telefoon: telefoon || null, bron: bron || null, toestemming: !!toestemming };
+  let aanmelding; let alAangemeld = false;
+  const { data: nieuw, error: iErr } = await sb.from('webinar_aanmeldingen').insert(rij).select('*').single();
+  if (!iErr) aanmelding = nieuw;
+  else if (iErr.code === '23505') {
+    // Race: tegelijk aangemeld (of testaanmelding op dit adres) → als al aangemeld behandelen.
+    alAangemeld = true;
+    const { data: bestaand, error: bErr } = await sb.from('webinar_aanmeldingen').select('*')
+      .eq('sessie_id', sessie.id).ilike('email', mail).limit(1);
+    if (bErr || !bestaand?.length) throw new Error('bestaande aanmelding lezen: ' + (bErr?.message || 'niet gevonden'));
+    aanmelding = bestaand[0];
+    await aanvullen(aanmelding);
   } else throw new Error('aanmelding opslaan: ' + iErr.message);
 
-  let bevestiging = null;
-  if (!aanmelding.bevestiging_op) bevestiging = await verstuurMoment(sb, { aanmelding, sessie, reeks, moment: BEVESTIGING });
-  return { aanmelding, sessie, reeks, alAangemeld, bevestiging };
+  return { aanmelding, sessie, reeks, alAangemeld, verplaatst: false, bevestiging: await bevestig(aanmelding) };
 }
 
 /**
