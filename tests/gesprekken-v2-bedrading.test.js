@@ -118,20 +118,36 @@ test('de focus-stand werkt alleen achter de vlag', () => {
   // lijst ook met de vlag uit kunnen versmallen.
   // `gv` is null zodra de vlag uit staat (of wanneer de teller expres zonder
   // stand rekent), en dan blijft de stand 'geen'.
+  //
+  // De regels zelf staan sinds 13 okt in
+  // modules/shared/inbox-wanbetaler-selectie.js; de view bepaalt alleen nog
+  // welke stand hij meegeeft. Dat is wat hier vastligt. Het GEDRAG (vlag uit
+  // = dezelfde lijst) staat in gesprekken-lege-lijst-bij-timeout.test.js.
   assert.match(b, /const gv = negeerFocus \? null : _gv2\(\);/);
-  assert.match(b, /const focusModus = gv \? \(_ui\.inbox\.focusFilter \|\| 'geen'\) : 'geen';/);
+  assert.match(b, /focusModus: gv \? \(_ui\.inbox\.focusFilter \|\| 'geen'\) : 'geen',/);
 });
 
 test('het zoeken gebeurt vóór de wanbetaler-poort', () => {
   // Anders doet een zoekterm niets in de stand "niet gekoppeld": die stand
   // kijkt naar de volledige lijst, en die was dan nog ongefilterd.
-  const b = lees(SCHERM);
-  const fn = b.slice(b.indexOf('function _selectVisibleInboxItems'));
-  const body = fn.slice(0, fn.indexOf('\n  }') + 4);
-  const zoek = body.indexOf('_ui.inbox.searchQ');
-  const poort = body.indexOf("'is_debtor' in c");
-  assert.ok(zoek > -1 && poort > -1);
-  assert.ok(zoek < poort, 'de zoekfilter staat nog ná de wanbetaler-poort');
+  //
+  // Dit was een vergelijking van twee indexOf's in de view. Sinds de regels in
+  // een eigen bestand staan, kan het GEDRAG getoetst worden in plaats van de
+  // volgorde van twee regels tekst — en dat is wat de bedoeling altijd was.
+  const src = readFileSync(new URL('../modules/shared/inbox-wanbetaler-selectie.js', import.meta.url), 'utf8');
+  const win = {};
+  new Function('window', 'module', src)(win, { exports: {} });
+  const SEL = win.INBOX_WANBETALER_SELECTIE;
+
+  const items = [
+    { id: 'a', customer_id: 'k1', customer_name: 'Andy',  is_debtor: true  },
+    { id: 'b', customer_id: null, customer_name: 'Bibi',  is_debtor: false },
+  ];
+  // Bibi is geen wanbetaler. Zou er eerst op is_debtor gefilterd worden, dan is
+  // zij al weg vóór de zoekterm en vindt "niet gekoppeld" haar nooit.
+  const gv = { focusFilter: (alle) => alle.filter((c) => !c.customer_id) };
+  const uit = SEL.kies(items, { zoek: 'bibi', focusModus: 'niet_gekoppeld', gv, categorie: 'alles' });
+  assert.deepEqual(uit.map((c) => c.id), ['b'], 'de zoekterm wordt ná de wanbetaler-poort toegepast');
 });
 
 test('nog eens klikken zet de stand weer uit', () => {
