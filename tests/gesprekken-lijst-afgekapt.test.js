@@ -49,8 +49,11 @@ test('de banner staat er alleen als de lijst echt afgekapt is', () => {
 test('de banner verschijnt ook boven een LEGE lijst', () => {
   // Juist dan is hij het hardst nodig: "geen gesprekken in dit filter" terwijl
   // je de helft niet hebt opgehaald, is ronduit misleidend.
-  assert.match(SCHERM, /return afgekaptBanner \+ `<div style="padding:44px/);
-  assert.match(SCHERM, /return afgekaptBanner \+ items\.map/);
+  // Sinds 13 okt staat er een tweede banner vóór deze ("deze lijst is
+  // misschien niet actueel"); de afgekapt-banner moet in beide takken blijven
+  // staan, waar hij ook in de rij staat.
+  assert.match(SCHERM, /return verouderdBanner \+ afgekaptBanner \+ `<div style="padding:44px/);
+  assert.match(SCHERM, /return verouderdBanner \+ afgekaptBanner \+ items\.map/);
 });
 
 test('de banner belooft niets over zoeken', () => {

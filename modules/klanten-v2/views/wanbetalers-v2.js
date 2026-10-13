@@ -3233,6 +3233,14 @@
     zichtbaarhaak: null,     // visibilitychange-luisteraar, voor opruimen
   };
 
+  /* Hoe lang de browser op de gesprekkenlijst wacht.
+     Twintig seconden, en dat is geen willekeurig rond getal: het endpoint
+     doet zes verrijkingen achter elkaar en bij een paar honderd gesprekken
+     telt dat op. Vercel kapt zelf af op 60 s, dus dit is nog altijd ruim
+     binnen wat de server mag. Korter wachten betekent niet "sneller falen"
+     maar "een lijst die er leeg uitziet". */
+  const INBOX_LIJST_WACHT_MS = 20000;
+
   async function _fetchInboxConvs() {
     const st = _live.inbox.convs;
     if (st.loading) return;
@@ -3242,11 +3250,38 @@
     // Server-side search-param blijft (helpt bij groot volume).
     const q = new URLSearchParams({ module: 'finance', limit: '1000', status_filter: _ui.inbox.statusFilter || 'all' });
     if (_ui.inbox.searchQ && _ui.inbox.searchQ.trim()) q.set('search', _ui.inbox.searchQ.trim());
-    const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), 10000);
+    // Dit endpoint doet veel: de gesprekken zelf, de laatste mailactiviteit, de
+    // open facturen, de ongelezen mails via IMAP, de werkstand uit
+    // iris_gesprekken (alleen met de vlag aan) en de categorie per gesprek.
+    // Acht seconden was te krap zodra de lijst een paar honderd gesprekken
+    // telt; dan gaf de browser het op terwijl de server gewoon aan het werk was.
+    const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), INBOX_LIJST_WACHT_MS);
     if (mySeq !== st._seq) return;
-    if (j && j.error) st.error = j.error;
-    else {
+    // ── EEN MISLUKTE OPVRAGING IS GEEN LEGE LIJST ────────────────────────────
+    //
+    // Hier stond `if (j && j.error)`. tryFetch geeft bij een timeout of een
+    // netwerkfout `null` terug, en die viel dus in de else-tak: st.items werd
+    // asArr(undefined) = [], st.fetched = true, st.error = null. Een lijst van
+    // nul, gemarkeerd als geslaagd opgehaald, zonder foutmelding.
+    //
+    // Op het scherm is dat niet te onderscheiden van "er zijn geen
+    // wanbetaler-gesprekken". Precies dát is er op 13 oktober gebeurd toen
+    // GESPREKKEN_V2 aan ging: het endpoint doet met de vlag aan drie
+    // opvragingen extra, de respons duurde langer dan de tien seconden van de
+    // browser, en de module meldde "Geen wanbetaler-gesprekken in dit filter"
+    // met categorie "Alles 0" — terwijl een curl 200 met 249 items gaf.
+    //
+    // _fetchOverzicht hiernaast deed het al goed (`if (!j || j.error)`). Dit is
+    // dus geen keuze geweest maar een inconsistentie binnen één bestand.
+    if (!j || j.error) {
+      st.error = (j && j.error) || 'Kon de gesprekken niet laden';
+      // De vorige lijst blijft staan. Een lijst die leegvalt bij een hik is
+      // erger dan een lijst die even oud is: je gaat zoeken naar een klant die
+      // er wel is, en concludeert dat hij niets gestuurd heeft.
+      st.fetched = true;
+    } else {
       st.items = asArr(j?.items); st.fetched = true;
+      st.error = null;
       // Alleen een uitdrukkelijke true. Een ouder endpoint dat het veld
       // niet kent, laat de vlag uit staan in plaats van 'undefined' te
       // laten doorwerken als iets anders dan nee.
@@ -3316,60 +3351,37 @@
   // de gesprekken toont die de wanbetaler-poort wegfiltert: zonder deze
   // volgorde zou een zoekterm daar niets doen en zag je resultaten die er niet
   // bij horen.
+  /**
+   * Welke gesprekken staan er in de lijst?
+   *
+   * De regels staan in modules/shared/inbox-wanbetaler-selectie.js — puur, en
+   * daarom te toetsen met de echte responsvorm. Hier staat alleen welke staat
+   * eraan meegegeven wordt.
+   *
+   * `negeerFocus` en `negeerCategorie` zijn voor de tellers op de knoppen
+   * zelf: die moeten weten hoe groot de lijst is ZONDER hun eigen filter,
+   * anders telt een actief filter zichzelf.
+   */
   function _selectVisibleInboxItems(items, { negeerFocus = false, negeerCategorie = false } = {}) {
-    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
-    const alle = q
-      ? items.filter((c) => (
-          (c.customer_name || '') + ' ' +
-          (c.display_name  || '') + ' ' +
-          (c.phone_number  || '')
-        ).toLowerCase().includes(q))
-      : items;
-
-    const hasDebtorFlag = items.some((c) => 'is_debtor' in c);
-    let out;
-    if (hasDebtorFlag) {
-      out = alle.filter((c) => !!c.is_debtor);
-    } else {
-      // Fallback (legacy respons): overzicht-intersect als voorheen.
-      const wbCids = new Set(asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)));
-      out = wbCids.size
-        ? alle.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
-        : alle;
-    }
-    // G5-deels — de twee standen die met de huidige gegevens al kunnen.
-    // Staat de vlag uit, dan is `modus` altijd 'geen' en geeft focusFilter
-    // letterlijk `out` terug: zelfde lijst, zelfde volgorde.
-    //
-    // `alle` gaat er óók in, en dat is met opzet: 'niet gekoppeld' moet juist
-    // de gesprekken tonen die deze lijst normaal wegfiltert. Een gesprek zonder
-    // klant heeft geen open facturen, dus is_debtor is onwaar — zoeken bínnen
-    // de bestaande selectie zou altijd nul opleveren en eruitzien alsof er
-    // niets aan de hand is.
-    //
-    // `negeerFocus` is voor de tellers op de knoppen zelf: die moeten weten
-    // hoe groot de lijst ZONDER stand is, anders telt een actieve stand
-    // zichzelf.
+    const SEL = window.INBOX_WANBETALER_SELECTIE;
     const gv = negeerFocus ? null : _gv2();
-    const focusModus = gv ? (_ui.inbox.focusFilter || 'geen') : 'geen';
-    if (gv && focusModus !== 'geen') out = gv.focusFilter(alle, out, focusModus);
-    // Categorie (afgeleid uit de CRM-status, server-side). `negeerCategorie`
-    // voor de tellers op de chips zelf.
-    const IC = window.INBOX_CATEGORIE;
-    if (IC && !negeerCategorie) out = out.filter((c) => IC.past(c, _ui.inbox.catFilter));
-
-    const mode = _ui.inbox.sortMode || 'unread_first';
-    out = out.slice().sort((a, b) => {
-      const ta = a.last_activity_at ? Date.parse(a.last_activity_at) : (a.last_message_at ? Date.parse(a.last_message_at) : 0);
-      const tb = b.last_activity_at ? Date.parse(b.last_activity_at) : (b.last_message_at ? Date.parse(b.last_message_at) : 0);
-      if (mode === 'unread_first') {
-        const ua = Number(a.total_unread ?? a.unread_count) > 0 ? 1 : 0;
-        const ub = Number(b.total_unread ?? b.unread_count) > 0 ? 1 : 0;
-        if (ua !== ub) return ub - ua;
-      }
-      return tb - ta;
+    if (!SEL) {
+      // Hard falen, niet stil doorgaan met een halve selectie. Dit script staat
+      // in index.html vóór deze view; ontbreekt het, dan is dat een
+      // bedradingsfout en geen gebruikersprobleem — en een lijst die dan de
+      // verkeerde gesprekken toont, is erger dan een lege lijst met een fout.
+      console.error('[wanbetalers-v2] inbox-wanbetaler-selectie.js ontbreekt');
+      return [];
+    }
+    return SEL.kies(items, {
+      zoek: _ui.inbox.searchQ,
+      overzichtKlantIds: asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)),
+      focusModus: gv ? (_ui.inbox.focusFilter || 'geen') : 'geen',
+      categorie: negeerCategorie ? 'alles' : _ui.inbox.catFilter,
+      sorteer: _ui.inbox.sortMode || 'unread_first',
+      gv,
+      ic: window.INBOX_CATEGORIE || null,
     });
-    return out;
   }
   // BP3 v30 (2026-09-04) — GEDEELDE reply-detectie. Server (inbox-thread-
   // unified) levert mail-items als channel='email' met subject/mailbox/
@@ -4507,6 +4519,15 @@
     // de volgende poll. "Zoeken vindt het wel" zou dus pas na een halve minuut
     // kloppen, en een halve waarheid op een waarschuwing is erger dan geen
     // waarheid.
+    // Een oude lijst die zegt dat hij oud is. Zonder deze regel is een
+    // mislukte verversing onzichtbaar zodra er al een lijst stond: je kijkt
+    // naar iets van een minuut geleden en denkt dat het nu is.
+    const verouderdBanner = (st.error && st.items.length)
+      ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
+          <b>Deze lijst is misschien niet actueel.</b> De laatste verversing mislukte (${esc(String(st.error))}).
+        </div>`
+      : '';
+
     const afgekaptBanner = (_gv2() && st.afgekapt)
       ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
           <b>Je ziet niet alle gesprekken.</b> Er zijn er ${esc(String(st.totaal ?? '?'))}; hiervan passen er ${esc(String(asArr(st.items).length))} in één keer, de oudste vallen af.
@@ -4530,9 +4551,9 @@
         belofte_vandaag: 'Geen toezegging met de datum van vandaag.',
       };
       const tekst = LEEG[modus] || 'Geen wanbetaler-gesprekken in dit filter.';
-      return afgekaptBanner + `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
+      return verouderdBanner + afgekaptBanner + `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
     }
-    return afgekaptBanner + items.map((c) => {
+    return verouderdBanner + afgekaptBanner + items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';

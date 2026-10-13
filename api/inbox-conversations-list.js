@@ -268,14 +268,34 @@ export default async function handler(req, res) {
       ));
       if (custIds.length > 0) {
         const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
-        const { data: invRows, error: iErr } = await supabaseAdmin
-          .from('invoices')
-          .select('customer_id, amount_total, amount_paid, credited_amount, status')
-          .in('customer_id', custIds)
-          .in('status', OPEN_STATUSES);
+        // In blokken, en parallel. Dit was één `.in()` met alle klant-id's
+        // erin — tot 1000 uuid's in één PostgREST-URL. De rest van het repo
+        // knipt zulke lijsten op bij 100 à 200 (coaching-earnings,
+        // dunning-engine, inbox-categorie) met dezelfde reden erbij: de URL
+        // kort houden. Deze was de uitzondering, en bij 249 gesprekken komt
+        // dat in de buurt van de grens.
+        //
+        // Faalt een blok, dan verrijken we niet en staat is_debtor op false
+        // voor iedereen in dat blok. Dat is dezelfde stille uitkomst als
+        // hiervoor; de console zegt het, en de client ziet nu in elk geval dat
+        // de opvraging zelf mislukte als het hele endpoint omvalt.
+        const invBlokken = await Promise.all(
+          inBlokken(custIds).map((blok) => supabaseAdmin
+            .from('invoices')
+            .select('customer_id, amount_total, amount_paid, credited_amount, status')
+            .in('customer_id', blok)
+            .in('status', OPEN_STATUSES))
+        );
+        const invRows = [];
+        let iErr = null;
+        for (const r of invBlokken) {
+          if (r.error) { iErr = r.error; continue; }
+          invRows.push(...(r.data || []));
+        }
         if (iErr) {
           console.error('[inbox-conversations-list] invoices batch:', iErr.message);
-        } else {
+        }
+        {
           for (const inv of invRows || []) {
             const total = Number(inv.amount_total)    || 0;
             const paid  = Number(inv.amount_paid)     || 0;
@@ -337,15 +357,27 @@ export default async function handler(req, res) {
       // Alleen zinvol in de finance-inbox (wanbetalers); events/onboarding-conv
       // hebben geen pre-incassobrieven — sla de query daar over.
       if (moduleRaw === 'finance' && custIds.length > 0) {
-        const { data: briefRows, error: bErr } = await supabaseAdmin
-          .from('dunning_briefs')
-          .select('customer_id, sent_at')
-          .in('customer_id', custIds)
-          .in('template_code', ['incasso_pre_nl', 'incasso_pre_be'])
-          .not('sent_at', 'is', null);
+        // In blokken en parallel, om dezelfde reden als bij de facturen
+        // hierboven: één .in() met alle klant-id's maakt de PostgREST-URL zo
+        // lang als de lijst, en die lijst is inmiddels een paar honderd.
+        const briefBlokken = await Promise.all(
+          inBlokken(custIds).map((blok) => supabaseAdmin
+            .from('dunning_briefs')
+            .select('customer_id, sent_at')
+            .in('customer_id', blok)
+            .in('template_code', ['incasso_pre_nl', 'incasso_pre_be'])
+            .not('sent_at', 'is', null))
+        );
+        const briefRows = [];
+        let bErr = null;
+        for (const r of briefBlokken) {
+          if (r.error) { bErr = r.error; continue; }
+          briefRows.push(...(r.data || []));
+        }
         if (bErr) {
           console.error('[inbox-conversations-list] dunning_briefs batch:', bErr.message);
-        } else {
+        }
+        {
           for (const b of briefRows || []) {
             if (!b.customer_id || !b.sent_at) continue;
             const prev = briefSentByCustomer.get(b.customer_id);
@@ -443,42 +475,56 @@ export default async function handler(req, res) {
     // het tóevallig in het blok zat dat misging.
     if (gesprekkenV2Aan()) {
       try {
+        // ── DE BLOKKEN NAAST ELKAAR, NIET ACHTER ELKAAR ──────────────────
+        //
+        // Dit stond met `await` in de lus: bij 249 gesprekken zijn dat twee
+        // blokken iris_gesprekken, daarna profiles, daarna iris_beloftes —
+        // allemaal serieel, bovenop de basisquery, de mail-aggregatie, de
+        // facturen en de IMAP-verrijking die er al voor staan. Met de vlag aan
+        // liep de respons daardoor over de tien seconden die de browser
+        // wachtte, en zag de module een lege lijst.
+        //
+        // De drie groepen blijven wél na elkaar: namen en beloftes hebben de
+        // sleutels uit `standen` nodig. Binnen elke groep kan alles parallel.
         const sleutels = items.map((r) => werkSleutel(r.id)).filter(Boolean);
         const standen = new Map();
-        for (const blok of inBlokken(sleutels)) {
-          const { data, error } = await supabaseAdmin
+        const standBlokken = await Promise.all(
+          inBlokken(sleutels).map((blok) => supabaseAdmin
             .from('iris_gesprekken')
             .select('extern_uniek, status, toegewezen_aan, contact_id')
-            .in('extern_uniek', blok);
+            .in('extern_uniek', blok))
+        );
+        for (const { data, error } of standBlokken) {
           if (error) throw new Error('iris_gesprekken: ' + error.message);
           for (const rij of (data || [])) standen.set(rij.extern_uniek, rij);
         }
 
-        // De namen van wie het heeft. Zonder naam staat er een uuid in beeld,
-        // en dan is "van wie is dit" geen antwoord maar een nieuwe vraag.
-        const namen = new Map();
+        // De namen van wie het heeft, en de beloftes van vandaag. Die twee
+        // hangen aan `standen` maar niet aan elkaar, dus ze gaan samen.
+        //
+        // Beloftes: NIET de status 'belofte_loopt'. Die staat wel in de tabel
+        // maar wordt door niets gezet, en een filter dat altijd leeg is leert
+        // je dat het scherm niet klopt.
         const toegewezenIds = [...new Set([...standen.values()]
           .map((r) => r.toegewezen_aan).filter(Boolean))];
-        for (const blok of inBlokken(toegewezenIds)) {
-          const { data } = await supabaseAdmin
-            .from('profiles')
-            .select('id, full_name, email')
-            .in('id', blok);
-          for (const p of (data || [])) namen.set(p.id, p.full_name || p.email || null);
-        }
-
-        // Beloftes van vandaag. NIET de status 'belofte_loopt': die staat wel
-        // in de tabel maar wordt door niets gezet, en een filter die altijd
-        // leeg is leert je dat het scherm niet klopt.
         const contactIds = [...new Set([...standen.values()]
           .map((r) => r.contact_id).filter(Boolean))];
+
+        const [naamBlokken, belofteBlokken] = await Promise.all([
+          Promise.all(inBlokken(toegewezenIds).map((blok) => supabaseAdmin
+            .from('profiles').select('id, full_name, email').in('id', blok))),
+          Promise.all(inBlokken(contactIds).map((blok) => supabaseAdmin
+            .from('iris_beloftes').select('contact_id, datum')
+            .eq('status', 'actief').in('contact_id', blok))),
+        ]);
+
+        const namen = new Map();
+        for (const { data } of naamBlokken) {
+          for (const pr of (data || [])) namen.set(pr.id, pr.full_name || pr.email || null);
+        }
+
         const metBelofte = new Set();
-        for (const blok of inBlokken(contactIds)) {
-          const { data } = await supabaseAdmin
-            .from('iris_beloftes')
-            .select('contact_id, datum')
-            .eq('status', 'actief')
-            .in('contact_id', blok);
+        for (const { data } of belofteBlokken) {
           for (const b of (data || [])) {
             if (isVandaag(b.datum)) metBelofte.add(b.contact_id);
           }
