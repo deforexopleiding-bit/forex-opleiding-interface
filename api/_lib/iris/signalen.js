@@ -93,24 +93,35 @@ export const LMS_BRON = 'handmatig';
 export const LMS_GESLOTEN_STATUSSEN = Object.freeze(['afgehandeld', 'auto_gesloten']);
 
 /**
- * De kolommen die hlms_signaal ECHT heeft.
+ * De kolommen die wij van hlms_signaal OPVRAGEN.
  *
- * Nagemeten op `pg_attribute` van `public.hlms_signaal`, 1 oktober 2026. Dit is
- * de volledige lijst — zeventien kolommen, niet meer.
+ * Zeventien, en met opzet niet meer — ook al heeft de tabel er inmiddels meer.
  *
- * ── WAT ER NIET IN STAAT, EN WAAROM DAT ZO VERRADERLIJK IS ──────────────────
- * De migratiebestanden in de LMS-repo voegen kolommen toe die in de DATABANK
- * niet bestaan: `aangemaakt_op`, `bak`, `wacht_tot`, `wacht_reden`,
- * `controle_op`, `voorstel_datum`, `in_behandeling_door`,
- * `in_behandeling_sinds`. Die migraties zijn (nog) niet gedraaid.
+ * ── DE GESCHIEDENIS, WANT DIE VERKLAART DE KEUZE ────────────────────────────
+ * Deze opvraging is twee keer stukgegaan op een kolom die er niet was: eerst
+ * `created_at` (verzonnen), daarna `aangemaakt_op` — gelezen uit een
+ * migratiebestand in de LMS-repo dat toen nog niet gedraaid was. Allebei gaven
+ * ze elke vijf minuten een 400 in de logs. Een repo is geen schema.
  *
- * Een repo is dus geen schema. Dat is precies hoe deze bug twee keer gemaakt is:
- * eerst met `created_at` (verzonnen), daarna met `aangemaakt_op` (uit de
- * migratiebestanden gelezen, en nog steeds fout). Alleen een meting op de
- * databank zelf telt.
+ * ── EN NU HET OMGEKEERDE ────────────────────────────────────────────────────
+ * Nagemeten in dfo-lms op 13 oktober 2026 HEEFT hlms_signaal die kolommen wél:
+ * `aangemaakt_op`, `wacht_tot`, `wacht_reden`, `bak`, `in_behandeling_door`,
+ * `in_behandeling_sinds`, `controle_op`, `voorstel_datum`, `crm_onboarding_id`
+ * — erbij gekomen sinds 1 oktober.
  *
- * Gevolg voor het tijdstempel: `eerste_op` is het enige veld dat zegt wanneer
- * het signaal ontstond, en dat is ook wat we willen weten.
+ * We vragen ze toch NIET op. Niet uit voorzichtigheid om de vorm, maar omdat
+ * een kolom in deze lijst een HARDE eis wordt: een LMS waar die migratie niet
+ * gedraaid is (een nieuwe omgeving, een herstel uit een oudere dump) geeft dan
+ * weer een 400 op de hele opvraging, en dan staan er geen signalen meer in de
+ * Post. De zeventien hieronder hebben er altijd gestaan.
+ *
+ * Wil je er een gebruiken, dan is dat een eigen wijziging met een eigen
+ * terugvalpad — zoals intake-gesprek-stand.js doet: opvragen mét de nieuwe
+ * kolom, en bij een foutmelding die de kolomnaam noemt opnieuw zonder.
+ *
+ * Gevolg voor het tijdstempel: `eerste_op` is wanneer het signaal ontstond, en
+ * dat is ook de vraag die we willen beantwoorden. `aangemaakt_op` zou nu
+ * bestaan, maar zegt iets anders (wanneer de RIJ gemaakt is).
  */
 export const SIGNAAL_KOLOMMEN =
   'id, onderwerp, student_id, mentor_id, soort, zwaarte, status, bron, bewijs, ' +

@@ -143,7 +143,10 @@ const CRON = readFileSync(new URL('../api/cron-iris-werk.js', import.meta.url), 
 const ENDPOINT = readFileSync(new URL('../api/iris-instellingen.js', import.meta.url), 'utf8');
 const SCHERM = readFileSync(new URL('../modules/iris/iris.js', import.meta.url), 'utf8');
 const INDEX = readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8');
-const BACKFILL = readFileSync(new URL('../docs/sql-migrations/2026-10-12-iris-laatste-outbound-backfill.sql', import.meta.url), 'utf8');
+// De versie van 12 okt filterde op richting 'out' en zou 0 rijen hebben
+// gevuld; die staat nu in archived/ met een ⛔-kop. Zie
+// tests/iris-richting-uit-niet-out.test.js.
+const BACKFILL = readFileSync(new URL('../docs/sql-migrations/2026-10-13-iris-laatste-outbound-backfill.sql', import.meta.url), 'utf8');
 
 test("'nieuw' zit niet meer in de werkbak", () => {
   // Nog niet ingedeeld is niet hetzelfde als op ons wachtend. Dat is waarom
@@ -200,8 +203,13 @@ test('zoeken binnen de werkbak beperkt ook de kandidaten', () => {
 test('elk uitgaand bericht zet nu laatste_outbound', () => {
   // Dit was het echte gat: de kolom bestond, maar werd alleen door
   // iris-verstuur.js gezet — en dat pad heeft nauwelijks gedraaid.
+  //
+  // DEZE TOETS WAS ZELF HET PROBLEEM. Hij pinde `vorm.richting === 'out'` vast
+  // — een vergelijking die altijd onwaar is, want waRichting() geeft 'uit'. De
+  // toets was groen en certificeerde daarmee de bug: er werd nooit gestempeld.
+  // Nu op de beslisfunctie, die geen tekst meer te kiezen heeft.
   assert.match(CRON, /async function stempelOutbound\(gesprekId, wanneer\)/);
-  const stempels = (CRON.match(/if \(vorm\.richting === 'out'\) await stempelOutbound\(/g) || []).length;
+  const stempels = (CRON.match(/if \(isUitgaand\(vorm\)\) await stempelOutbound\(/g) || []).length;
   assert.equal(stempels, 2, 'WhatsApp én mail horen te stempelen');
   // Alleen vooruit: de synchronisatie leest met een terugblik, dus berichten
   // komen niet gegarandeerd in volgorde langs.
@@ -221,7 +229,7 @@ test('er is GEEN generated column, en dat is met opzet', () => {
   // precies de tabelherschrijving die we vermijden.
   const alters = actief.match(/ALTER TABLE[^;]*/gi) || [];
   assert.equal(alters.length, 1, 'precies één ALTER: RLS op het spoor');
-  assert.match(alters[0], /iris_outbound_backfill_20261012 ENABLE ROW LEVEL SECURITY/);
+  assert.match(alters[0], /iris_outbound_backfill_20261013 ENABLE ROW LEVEL SECURITY/);
   assert.doesNotMatch(actief, /ALTER TABLE public\.iris_gesprekken/i);
 });
 
@@ -242,8 +250,8 @@ test('de backfill doet één batch per run en zegt hoeveel', () => {
 test('er is een terugweg, met het spoor erbij', () => {
   // Een rollback die je moet samenstellen terwijl er iets misgaat, is geen
   // rollback.
-  assert.match(BACKFILL, /CREATE TABLE IF NOT EXISTS public\.iris_outbound_backfill_20261012/);
-  assert.match(BACKFILL, /INSERT INTO public\.iris_outbound_backfill_20261012/);
+  assert.match(BACKFILL, /CREATE TABLE IF NOT EXISTS public\.iris_outbound_backfill_20261013/);
+  assert.match(BACKFILL, /INSERT INTO public\.iris_outbound_backfill_20261013/);
   assert.match(BACKFILL, /-- UPDATE public\.iris_gesprekken g\n-- SET laatste_outbound = NULL/);
   // En de terugweg wist niet wat de code sindsdien zelf schreef.
   assert.match(BACKFILL, /--   AND g\.laatste_outbound = s\.gezet_op;/);

@@ -47,16 +47,66 @@ export function leesBron(sleutel) {
 }
 
 /**
- * De richting van een WhatsApp-bericht.
+ * De twee waarden die `iris_berichten.richting` kan hebben.
+ *
+ * ── WAAROM DIT EEN CONSTANTE IS EN GEEN LOSSE TEKST ─────────────────────────
+ * Er zijn hier TWEE woordenlijsten in het spel, en ze lijken op elkaar:
+ *
+ *   · de BRON (`whatsapp_messages.direction`) gebruikt 'in' / 'out'
+ *   · ONZE kolom (`iris_berichten.richting`) gebruikt 'in' / 'uit',
+ *     afgedwongen door een CHECK in de fase-1-migratie
+ *
+ * `waRichting()` hieronder vertaalt van de eerste naar de tweede. Dat is
+ * precies de plek waar het misging: in H3 (#1780) kwam er een regel
+ * `if (vorm.richting === 'out')` in cron-iris-werk, en die is ALTIJD onwaar —
+ * `vorm.richting` komt uit deze functie en is dus 'uit'. Gevolg: de stempel op
+ * `laatste_outbound` werd nooit gezet, en de hele "wacht op ons"-regel van H3
+ * stond stil in productie zonder één foutmelding.
+ *
+ * Een vergelijking op een letterlijke tekst die er plausibel uitziet, faalt
+ * stil. Een vergelijking op `RICHTING.uit` kan hoogstens een ReferenceError
+ * geven, en dat ziet iemand meteen.
+ */
+export const RICHTING = Object.freeze({ IN: 'in', UIT: 'uit' });
+
+/** De waarden die de BRONtabellen gebruiken voor "door ons verstuurd". */
+export const BRON_UITGAAND = Object.freeze(['out', 'outbound']);
+
+/**
+ * De richting van een WhatsApp-bericht, in ONZE woorden.
  *
  * whatsapp_messages.direction is 'in' of 'out' — NIET 'inbound'/'outbound'.
  * Dat is een val waar inbox-thread-unified.js al een expliciete normalisatie
  * voor heeft moeten inbouwen (zie de bug-fix-notitie daar). We lopen er hier
  * niet opnieuw in.
+ *
+ * Let op de ASYMMETRIE: 'out' gaat erin, 'uit' komt eruit. Wie de uitkomst
+ * hiervan later met 'out' vergelijkt, vergelijkt met de invoer.
  */
 export function waRichting(ruw) {
   const s = String(ruw || '').toLowerCase();
-  return (s === 'out' || s === 'outbound') ? 'uit' : 'in';
+  return BRON_UITGAAND.includes(s) ? RICHTING.UIT : RICHTING.IN;
+}
+
+/**
+ * Is dit een bericht dat WIJ verstuurd hebben?
+ *
+ * Eén plek waar die vraag beantwoord wordt, zodat de aanroeper niet zelf een
+ * tekst hoeft te kiezen. Dat was de hele fout: twee aanroepers kozen 'out'.
+ */
+export function isUitgaand(vorm) {
+  return vorm?.richting === RICHTING.UIT;
+}
+
+/**
+ * Is dit een bericht van de KLANT?
+ *
+ * Staat hier naast isUitgaand() en niet als `!isUitgaand()`: een vorm zonder
+ * richting is geen van beide, en die twee gevallen mogen niet stil in elkaar
+ * overlopen.
+ */
+export function isInkomend(vorm) {
+  return vorm?.richting === RICHTING.IN;
 }
 
 /**
@@ -81,7 +131,7 @@ export const ONZE_MAILBOXEN = Object.freeze([
 /** Is deze mail door ons verstuurd of aan ons gericht? */
 export function mailRichting(vanAdres) {
   const a = String(vanAdres || '').toLowerCase().trim();
-  return (a && ONZE_MAILBOXEN.includes(a)) ? 'uit' : 'in';
+  return (a && ONZE_MAILBOXEN.includes(a)) ? RICHTING.UIT : RICHTING.IN;
 }
 
 /**
