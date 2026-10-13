@@ -351,7 +351,9 @@ async function komendeAanmeldingenVan(sb, { mail, telefoon, komend }) {
  * MOET één van de op dit moment aangeboden sessies zijn (de eerstvolgende
  * KEUZE_AANTAL doorgaande — aangebodenSessies); verleden, overgeslagen of
  * onbekend → { ongeldigeSessie: true } (de client wordt niet vertrouwd). Zonder
- * sessieId: de eerstvolgende (oude gedrag).
+ * sessieId (de website van vóór de datumkeuze, of een formulier zonder opties):
+ * de eerstvolgende (oude gedrag) — en wie al voor een komende sessie staat,
+ * blijft daar staan ({ alAangemeld: true }); zonder keuze wordt nooit verplaatst.
  *
  * Al aangemeld (zelfde e-mail of nummer) voor een komende sessie:
  *   - zelfde datum → { alAangemeld: true }, geen tweede bevestiging (tenzij de
@@ -364,7 +366,7 @@ export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = nu
   if (!reeks || !reeks.actief) return { geenSessie: true };
   const aangeboden = await aangebodenSessies(sb, reeks, { nu });
   if (!aangeboden.length) return { geenSessie: true };
-  const sessie = sessieId ? aangeboden.find((s) => s.id === sessieId) : aangeboden[0];
+  let sessie = sessieId ? aangeboden.find((s) => s.id === sessieId) : aangeboden[0];
   if (!sessie) return { ongeldigeSessie: true, aangeboden };
 
   const mail = String(email).trim().toLowerCase();
@@ -389,8 +391,11 @@ export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = nu
   // Al aangemeld voor een komende sessie (e-mail of nummer)?
   const komend = await komendeSessies(sb, reeks, { nu });
   const eerder = await komendeAanmeldingenVan(sb, { mail, telefoon: telefoon || null, komend });
-  const opGekozen = eerder.find((a) => a.sessie_id === sessie.id);
+  // Zonder sessieId geen keuze → een bestaande komende aanmelding blijft staan
+  // (backward-compatible met de website van vóór de datumkeuze).
+  const opGekozen = eerder.find((a) => a.sessie_id === sessie.id) || (sessieId ? null : eerder[0] || null);
   if (opGekozen) {
+    if (opGekozen.sessie_id !== sessie.id) sessie = komend.find((s) => s.id === opGekozen.sessie_id) || sessie;
     await aanvullen(opGekozen);
     return { aanmelding: opGekozen, sessie, reeks, alAangemeld: true, verplaatst: false, bevestiging: await bevestig(opGekozen) };
   }

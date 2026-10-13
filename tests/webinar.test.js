@@ -508,6 +508,35 @@ test('datumkeuze: al aangemeld — zelfde datum = "al gereserveerd"; andere datu
   assert.match(verzonden.mails[0].subject, /maandag 26 oktober/);
 });
 
+test('datumkeuze: backward-compatible — de body van de huidige website (zonder sessie_id) = eerstvolgende maandag; zonder keuze nooit verplaatsen', async () => {
+  reset();
+  const db = nieuweDb();
+  const reeks = db.tab.webinar_reeksen[0];
+  // Exact wat de live website nu stuurt (geen sessie_id-veld).
+  const oudeBody = { voornaam: 'Piet', email: 'piet@example.com', telefoon: '+31655556666', bron: 'webinar-v1', toestemming: true };
+  const v = valideer(oudeBody);
+  assert.ok(v.ok); assert.equal(v.waarden.sessieId, null);
+  const r = await W.meldAan(db, { ...v.waarden, nu: DONDERDAG });
+  assert.equal(r.sessie.datum, '2026-10-12', 'eerstvolgende maandag');
+  assert.equal(r.alAangemeld, false); assert.equal(r.verplaatst, false);
+  assert.equal(verzonden.mails.length, 1);
+  // Nog eens (oude website): al aangemeld, geen tweede bevestiging.
+  reset();
+  const nogEens = await W.meldAan(db, { ...v.waarden, nu: DONDERDAG });
+  assert.equal(nogEens.alAangemeld, true); assert.equal(nogEens.verplaatst, false);
+  assert.equal(verzonden.mails.length, 0);
+  // Staat iemand op een LATERE komende sessie (bv. gekozen via de nieuwe site),
+  // dan verplaatst een aanmelding zonder keuze hem NIET terug naar de eerstvolgende.
+  const [, d19] = await W.aangebodenSessies(db, reeks, { nu: DONDERDAG });
+  await W.meldAan(db, { voornaam: 'Sanne', email: 'sanne@example.com', telefoon: null, bron: 'webinar-v2', sessieId: d19.id, nu: DONDERDAG });
+  reset();
+  const zonderKeuze = await W.meldAan(db, { voornaam: 'Sanne', email: 'sanne@example.com', telefoon: null, bron: 'webinar-v1', nu: DONDERDAG });
+  assert.equal(zonderKeuze.alAangemeld, true); assert.equal(zonderKeuze.verplaatst, false);
+  assert.equal(zonderKeuze.sessie.id, d19.id, 'blijft op de eigen (latere) sessie');
+  assert.equal(db.tab.webinar_aanmeldingen.filter((a) => a.email === 'sanne@example.com').length, 1, 'geen dubbele aanmelding');
+  assert.equal(verzonden.mails.length, 0);
+});
+
 test('datumkeuze: wordt de gekozen week later overgeslagen, dan schuift de bestaande logica de aanmelder door (verplaats-mail)', async () => {
   reset();
   const db = nieuweDb();
