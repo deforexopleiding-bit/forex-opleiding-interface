@@ -563,3 +563,121 @@ en werden ze rood om iets wat gewoon goed stond. Grenzen horen op een echt anker
 `return scrim(` — het einde van het blok), en een telling hoort de EIGENSCHAP te toetsen ('elke
 uitgang draagt de bezig-vlag') in plaats van een getal dat bij elke uitbreiding met de hand mee
 moet. Het commentaar in die tests vroeg daar zelf al om.
+
+## Sessie 12-13 oktober 2026 — Iris-hapers, taak 6, en drie keer dezelfde toetsfout
+
+### Les 13 — Een toets die een letterlijke tekst vastpint, kan een bug certificeren
+
+Vier keer in één sessie, en de vierde kostte productie.
+
+De eerste drie waren onschuldig: `tests/iris-dode-knop.test.js`, `tests/iris-actie.test.js` en
+`tests/iris-werkbak.test.js` pinden allemaal een `?v=`-nummer *letterlijk* vast
+(`assert.match(INDEX, /iris\.js\?v=22/)`). Zo'n toets **eist een bump en valt dan om op precies
+die bump**: de volgende PR die het bestand aanraakt, maakt hem rood om iets dat goed gaat.
+
+De vierde was van een andere orde. H3 (#1780) voegde toe:
+
+```js
+if (vorm.richting === 'out') await stempelOutbound(...)
+```
+
+en de bijbehorende toets:
+
+```js
+const stempels = (CRON.match(/if \(vorm\.richting === 'out'\) await stempelOutbound\(/g) || []).length;
+assert.equal(stempels, 2);
+```
+
+`vorm.richting` komt uit `waRichting()`, en die geeft `'uit'`. De vergelijking was dus **altijd
+onwaar** — `laatste_outbound` werd nooit gestempeld, en omdat `balBijOns()` bij een lege kolom
+`true` teruggeeft stond de hele "wacht op ons"-regel stil in productie. Zonder foutmelding, alleen
+een lijst die te lang bleef. **De toets was groen en pinde de kapotte tekst vast.**
+
+**Algemene regel.** Een toets die een string-literal uit de implementatie herhaalt, toetst dat de
+code niet veranderd is — niet dat ze klopt. Twee concrete vormen:
+
+- **Getallen die horen te schuiven** (cache-busters, versies): toets de *eigenschap*. Een
+  ondergrens (`Number(m[1]) >= 22`) of een bereik, nooit een gelijkheid.
+- **Waarden met twee woordenlijsten** (hier: de bron gebruikt `'out'`, onze kolom `'uit'`): maak er
+  één constante van, en laat de toets de *keten* aflopen —
+  `vormWa({direction:'out'}).richting === 'uit'` en `isUitgaand(vorm) === true`. Een vergelijking op
+  `RICHTING.UIT` kan hoogstens een `ReferenceError` geven, en dat ziet iemand meteen; een
+  vergelijking op een plausibele tekst faalt stil.
+- Kan de SQL de constante niet importeren, dan **houdt een toets de twee bij elkaar**
+  (`SQL.includes("richting = '" + RICHTING.UIT + "'")`). Dat was de koppeling die ontbrak: de
+  backfill had exact dezelfde fout en zou 0 rijen hebben gevuld.
+
+### Les 14 — Een mislukte opvraging is geen leeg antwoord
+
+`_fetchInboxConvs` in `wanbetalers-v2.js`:
+
+```js
+const j = await tryFetch(..., 10000);
+if (j && j.error) st.error = j.error;
+else { st.items = asArr(j?.items); st.fetched = true; }
+```
+
+`tryFetch` geeft bij een timeout `null` terug. Die viel in de **else**-tak: `st.items` werd
+`asArr(undefined)` = `[]`, `st.fetched = true`, `st.error` bleef **null**. Een lijst van nul,
+gemarkeerd als geslaagd opgehaald, zonder foutmelding — op het scherm niet te onderscheiden van
+"er zijn er geen".
+
+Gevolg op 13 oktober: Wanbetalers → Gesprekken toonde "Geen wanbetaler-gesprekken in dit filter"
+en "Alles 0", terwijl een curl 200 met 249 items gaf. Uren uitsluiten in het filter, dat de
+oorzaak niet was. `_fetchOverzicht`, twintig regels hoger in hetzelfde bestand, deed het al goed
+(`if (!j || j.error)`) — het was geen keuze maar een inconsistentie.
+
+**Algemene regel.** `!antwoord` en `antwoord.error` zijn hetzelfde geval en horen in dezelfde tak.
+En: een mislukte verversing hoort de vorige gegevens **niet te wissen**. Een lijst die leegvalt bij
+een hik stuurt je op zoek naar een klant die er wel is. Laat staan wat er stond, met een regel
+erboven dat het misschien niet actueel is.
+
+Bijkomend: een vlag die alleen de respons *langzamer* maakt, lijkt een functionele bug. Met
+`GESPREKKEN_V2` aan deed het endpoint drie opvragingen extra, serieel, bovenop vijf bestaande
+verrijkingen. Het wachtbudget van de client was de echte grens — niet die van Vercel.
+
+### Les 15 — Een nabouw die ruimer is dan het echte ding, bewijst niets
+
+De nep-PostgREST in de belrij-toetsen stond in drie kopieën, en twee ervan pasten
+`update(velden)` toe op wat de filters *tot dan toe* selecteerden — niet op de rijen uit de
+`.in('id', …)` die erna komt. Daardoor raakte een UPDATE méér rijen dan in productie, en liet de
+toets die juist moest bewijzen dát er **één** reden werd afgevinkt, een echte bug door: hij vinkte
+álle onverwerkte redenen af, de handmatige erbij.
+
+Nu één kopie in `tests/vast/nep-db.js` die de mutatie pas toepast als de keten wordt uitgevoerd.
+Die strengere nabouw vond meteen een tweede fout: zonder expliciete `status: 'open'` op de insert
+vond de volgende ronde de rij niet terug en maakte een **tweede** rij voor dezelfde persoon.
+
+**Algemene regel.** Bouw een nabouw nooit permissiever dan het echte ding; bij twijfel strenger.
+En zet hem op één plek — drie kopieën is drie kansen dat er één meegeeft. Toets de omkering:
+haal de fix eruit en kijk of de toets echt rood wordt. Drie keer deze sessie bleek een groene
+toets niets te bewijzen.
+
+### Les 16 — Een repo is geen schema, en een toets die dat vastpint verjaart
+
+`NIET_IN_DE_DATABANK` in `tests/iris-signalen.test.js` beweerde dat negen kolommen op
+`hlms_signaal` niet bestaan. Op 1 oktober waren ze er bij gekomen. Een toets die een onwaarheid
+vastpint is erger dan geen toets: de volgende lezer vertrouwt hem.
+
+Nu drie lijsten in plaats van twee: **wat we opvragen** (17, heeft er altijd gestaan), **wat
+bestaat maar we niet opvragen** (9, sinds 1 okt), en **wat er nooit was** (7). Die middelste is
+het punt: een kolom in de select is een **harde eis** — een LMS waar die migratie niet gedraaid is
+geeft een 400 op de hele opvraging, en dan staan er geen signalen meer in de Post, niet één kolom
+minder. Wie zo'n kolom wil gebruiken, bouwt een eigen terugvalpad zoals
+`intake-gesprek-stand.js`: opvragen mét de kolom, en bij een fout die de kolomnaam noemt opnieuw
+zonder.
+
+### Les 17 — Een functie die beslist wat de gebruiker ziet, hoort toetsbaar te zijn
+
+`_selectVisibleInboxItems` stond als closure-functie in `wanbetalers-v2.js` en was door geen
+enkele toets te bereiken, terwijl ze de hele zichtbare lijst bepaalt: zoekterm, wanbetaler-scope,
+werkstand, categorie, sortering. Toen de lijst leeg bleek, kostte het uitsluiten van die functie
+het grootste deel van de tijd — en ze was de oorzaak niet.
+
+Nu in `modules/shared/inbox-wanbetaler-selectie.js`: puur, alles als parameter, en te toetsen met
+de echte responsvorm. De view geeft alleen de staat mee en **faalt luid** als het script ontbreekt;
+een lijst die stil de verkeerde gesprekken toont is erger dan een lege lijst met een foutmelding.
+
+**Algemene regel.** Zit de beslissing over wat iemand ziet in een closure van een viewbestand van
+vijfduizend regels, dan is dat geen stijlkwestie maar een diagnosekwestie. Haal hem eruit vóór je
+hem nodig hebt om een storing te verklaren.
