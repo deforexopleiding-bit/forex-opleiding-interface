@@ -208,7 +208,8 @@
     for (const m of (t.data && t.data.meldingen) || []) h += '<div class="warn2">' + esc(m) + '</div>';
 
     h += '<div class="lb-potten">' + POTTEN.map((p) => {
-      const n = aantallen ? aantallen[p.code] : null;
+      // Bij Nu bellen: wat dringend is (de rest van Nieuw staat er ook in, maar onderaan).
+      const n = p.code === 'belrij' && t.data && t.data.belrij ? t.data.belrij.dringend : (aantallen ? aantallen[p.code] : null);
       return '<button class="lb-pot' + (p.code === pot ? ' on' : '') + '" style="--pk:' + p.kleur + '" onclick="window.__opvLb.kiesPot(\'' + p.code + '\')">' +
         esc(p.label) + '<span class="n">' + (n == null ? '&middot;' : esc(n)) + '</span></button>';
     }).join('') + '</div>';
@@ -236,7 +237,7 @@
     const pct = w && w.pct != null ? w.pct + ' %' : '—';
     return '<div class="lb-strip">' +
       cel(v.leads_gebeld, 'leads gebeld vandaag', v.pogingen + ' belpogingen in ' + v.rondes + ' rondes') +
-      cel(v.opgenomen, 'opgenomen', 'De lijn kwam tot stand en werd niet als voicemail/geen gehoor gemeld') +
+      cel(v.opgenomen, 'lijn opgenomen', 'De lijn kwam tot stand. Een voicemail telt hier mee tot je na de call Voicemail of Geen gehoor aanklikt.') +
       cel(v.geen_gehoor + v.voicemail, 'geen gehoor / voicemail') +
       cel(v.ingepland, 'ingepland') + cel(v.doorgestuurd, 'agenda gestuurd') +
       '<div class="lb-cel breed"><b>' + esc(pct) + '</b><span>agenda gestuurd &rarr; zelf ingepland (7 d' +
@@ -280,6 +281,9 @@
     const pil = k ? ('<span class="lb-pil">&#9742; ' + esc(k.bel_totaal) + ' op ' + esc(k.bel_dagen) + ' d</span>' +
       '<span class="lb-pil ' + (k.wa_totaal ? 'groen' : '') + '">WhatsApp ' + esc(k.wa_totaal) + '</span>') : '';
     let extra = '';
+    if (k && k.plan && k.plan.reageerde && k.plan.antwoord) {
+      extra += '<div class="lb-noot lb-antwoord">&#128172; &ldquo;' + esc(k.plan.antwoord) + '&rdquo;</div>';
+    }
     if (k && k.wa_mislukt) extra += '<div class="lb-noot" style="color:var(--o-red)">&#9888; ' + esc(k.wa_mislukt) + '</div>';
     const vandaagD = (_ld.telling.data && _ld.telling.data.vandaag) || '';
     if (k && (pot === 'terugbellen' || r.sectie === 'terugbellen')) {
@@ -1012,6 +1016,7 @@
 .opv.lb .lb-waarom{font-size:11px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#5b2fd6;margin:0 0 2px}
 .opv.lb .lb-rij.lb-nu{outline:2px solid var(--o-acc,#2f6bff);outline-offset:-2px}
 .opv.lb .lb-plan{color:#1f3b8a}
+.opv.lb .lb-antwoord{background:#f5f0ff;border-radius:8px;padding:5px 9px;color:#3b1d8f;font-style:italic;display:inline-block}
 .opv.lb .lb-noot.zacht,.opv .zacht{color:var(--o-muted)}
 .opv .lb-uk{border-color:#e08700;color:#8a5200;background:var(--o-ambs)}
 .opv.lb .lb-meer{margin:6px 0 0}
