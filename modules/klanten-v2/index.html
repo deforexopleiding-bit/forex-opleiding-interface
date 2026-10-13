@@ -244,11 +244,6 @@
        scherm valt terug op de oude opmaak als window.GESPREKKEN_V2 er niet
        is. Zie docs/iris/02-gesprekken-audit.md, gaten G3 en G9. -->
   <script src="../shared/gesprekken-v2.js?v=6"></script>
-  <!-- Welke gesprekken Wanbetalers → Gesprekken toont. MOET vóór
-       wanbetalers-v2.js staan; die view faalt luid als dit script ontbreekt,
-       want een lijst die stil de verkeerde gesprekken toont is erger dan een
-       lege lijst met een foutmelding. -->
-  <script src="../shared/inbox-wanbetaler-selectie.js?v=1"></script>
   <!-- Spraak naar tekst. MOET vóór wanbetalers-v2.js én iris.js staan: allebei
        die schermen tonen geen microfoon als window.IRIS_SPRAAK er niet is.
        Stond eerst alleen vóór iris.js; sinds de gesprekken-module dezelfde
@@ -256,13 +251,13 @@
        schermen — een tweede zou betekenen dat een verbetering aan de ene kant
        de andere niet bereikt. -->
   <script src="../iris/spraak.js?v=1"></script>
-  <script src="views/wanbetalers-v2.js?v=69"></script>
+  <script src="views/wanbetalers-v2.js?v=68"></script>
   <script src="views/setter-payout-v2.js?v=10"></script>
   <script src="views/opvolging-v2.js?v=76"></script>
   <!-- Opvolging → tab Leads bellen (proefleads minicursus / 7-daagse). Eigen
        bestand; hergebruikt window.__opvGedeeld uit opvolging-v2.js, dus NA dat
        bestand. -->
-  <script src="views/opvolging-leads-v2.js?v=4"></script>
+  <script src="views/opvolging-leads-v2.js?v=5"></script>
   <!-- Opvolging → tab Call-rapport (per closer en per setter, per dag). Eigen
        bestand naast opvolging-v2.js; leest labels en kleuren uit
        window.CallUitkomstCategorie hierboven. Na opvolging-v2.js. -->
