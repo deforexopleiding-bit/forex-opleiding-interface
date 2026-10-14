@@ -161,14 +161,15 @@ lijst" niet na te rekenen.
 
 ## 3. Wanneer
 
-* **Dagelijks 02:10 UTC** — `/api/cron/factuurstand-spiegel-sync`. Bewust
-  vroeg in de nacht, want de opvolgmotor aan LMS-kant draait 's nachts en
-  moet een **verse** factuurstand voor zich vinden. Het botst niet met de
-  CRM-nachtcrons (01:05, 02:30, 03:00, 03:30).
-  > ⚠️ Dit uur is afgestemd op een **aanname** over de LMS-motor, niet op een
-  > gemeten feit — het exacte uur daarvan ligt aan de andere kant van de brug.
-  > Draait die motor vóór 02:10, dan moet dit uur naar voren. Eén regel in
-  > `vercel.json`.
+* **Elk uur op :10 UTC** — `/api/cron/factuurstand-spiegel-sync` (sinds
+  14 oktober 2026, P3; daarvoor één keer per nacht om 02:10). Tien minuten
+  na `cron-finance-sync` (:00), die de facturen uit Teamleader haalt, zodat
+  een betaling binnen het uur in het LMS staat. De ronde van 02:10 zit er nog
+  tussen, dus de opvolgmotor aan LMS-kant (02:40) vindt nog altijd een verse
+  stand. Het LMS heft de automatische betaalpauze elk uur op :25 op.
+* **Op verzoek voor één student** — `POST /api/lms-factuurstand-nu` (P2), de
+  knop "Nu ophalen" in het LMS: ververst de open facturen van die klant uit
+  Teamleader en schrijft alleen die ene spiegelrij.
 * **Direct na elke factuurwijziging** — `spiegelFactuurstandNaWijziging()`
   wordt aangeroepen door:
   * `api/_lib/register-payment-internal.js` (betaling geregistreerd),

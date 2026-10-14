@@ -3,7 +3,7 @@
 // De RONDE van de factuurstand-spiegel, als gedeelde logica.
 //
 // Twee ingangen gebruiken dit bestand:
-//   - api/cron/factuurstand-spiegel-sync.js  — dagelijks, met CRON_SECRET;
+//   - api/cron/factuurstand-spiegel-sync.js  — elk uur op :10, met CRON_SECRET;
 //   - api/factuurstand-spiegel-sync-run.js   — de knop in het CRM, met een
 //     ingelogde gebruiker en `students.all.view`.
 // Eén implementatie, twee ingangen: er is geen tweede versie die kan afwijken.
