@@ -20,7 +20,7 @@
 // `invoices`, en bij tien is het geen kwestie óf er eentje ooit afwijkt.
 //
 // ── DE HERSYNC IS DE WAARHEID, DE AANROEP IS SNELHEID ────────────────────
-// `api/cron/factuurstand-spiegel-sync.js` draait dit dagelijks voor iedereen.
+// `api/cron/factuurstand-spiegel-sync.js` draait dit elk uur voor iedereen.
 // De aanroep bij een factuurwijziging (betaald / gecrediteerd / TL-sync) is
 // er alleen zodat het meteen klopt. Vergeet iemand later een aanroep bij een
 // nieuw endpoint — en dat gebeurt — dan is dat hooguit een dag vertraging in

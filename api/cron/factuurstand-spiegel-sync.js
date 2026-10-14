@@ -6,19 +6,17 @@
 // De logica staat in `api/_lib/factuurstand-sync.js` en wordt gedeeld met de
 // knop in het CRM (`api/factuurstand-spiegel-sync-run.js`).
 //
-// ── HET UUR, EN WAAROM DIT UUR ───────────────────────────────────────────
-// 02:10 UTC. De opvolgmotor aan LMS-kant draait 's nachts en moet een verse
-// factuurstand voor zich vinden; die volgorde is de hele reden dat dit een
-// nachtelijke ronde is en geen ochtendronde zoals de onboarding-spiegel
-// (07:20). Vroeg genoeg om ruim vóór elke plausibele LMS-ronde klaar te
-// zijn, en het botst niet met de andere nachtcrons van het CRM
-// (01:05 events-cms-cleanup, 02:30 cancellation-cleanup, 03:00/03:30 de
-// archiveerrondes).
+// ── ELK UUR, OP :10 (sinds 14 okt 2026 — P3) ─────────────────────────────
+// Was één keer per nacht (02:10 UTC). Een student die betaalde bleef dan tot
+// de volgende nacht geblokkeerd, terwijl de CRM-facturen al elk uur uit
+// Teamleader komen (`cron-finance-sync`, op :00). Daarom nu elk uur, tien
+// minuten na die sync, zodat de spiegel de verse facturen ziet. De ronde van
+// 02:10 blijft er gewoon tussen zitten: de opvolgmotor aan LMS-kant (02:40)
+// vindt dus nog altijd een verse stand. Het LMS heft de automatische
+// betaalpauze elk uur op :25 op (`/api/opvolging/factuur-uur/`).
 //
-// LET OP — dit uur is afgestemd op een AANNAME over de LMS-motor, niet op een
-// gemeten feit: het exacte uur daarvan is aan de andere kant van de brug
-// bepaald. Draait die motor vóór 02:10, dan hoort dit uur naar voren. Eén
-// regel in vercel.json, en verder niets.
+// Belasting: één ronde leest de actieve studenten (~300) en de open facturen
+// in bulk en schrijft alleen de spiegelrijen; geen Teamleader-calls.
 //
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 // DROOGLOOP: ?dry=1 — dezelfde logica, nul schrijfacties.
