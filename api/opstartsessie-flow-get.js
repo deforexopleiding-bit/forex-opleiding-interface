@@ -1,9 +1,9 @@
 // api/opstartsessie-flow-get.js
 //
-// Leest de boek-flow-schakelaar (A/B) uit app_settings.opstartsessie_flow en
+// Leest de boek-flow-schakelaar (A/B/C) uit app_settings.opstartsessie_flow en
 // geeft 'm terug voor het Funnels-dashboard. A is de veilige fallback.
 //
-//   GET → { default: 'A'|'B', per_funnel: { <bron>: 'A'|'B' } }
+//   GET → { default: 'A'|'B'|'C', per_funnel: { <bron>: 'A'|'B'|'C' } }
 //
 // Permission: leads.view (zelfde als het funnel-dashboard).
 
@@ -27,10 +27,10 @@ export default async function handler(req, res) {
   try {
     const { data } = await supabaseAdmin.from('app_settings').select('value').eq('key', KEY).maybeSingle();
     const v = (data && data.value && typeof data.value === 'object') ? data.value : {};
-    const def = v.default === 'B' ? 'B' : 'A';
+    const def = (v.default === 'B' || v.default === 'C') ? v.default : 'A';
     const per = {};
     if (v.per_funnel && typeof v.per_funnel === 'object' && !Array.isArray(v.per_funnel)) {
-      for (const [k, val] of Object.entries(v.per_funnel)) if (val === 'A' || val === 'B') per[k] = val;
+      for (const [k, val] of Object.entries(v.per_funnel)) if (val === 'A' || val === 'B' || val === 'C') per[k] = val;
     }
     return res.status(200).json({ default: def, per_funnel: per });
   } catch (e) {

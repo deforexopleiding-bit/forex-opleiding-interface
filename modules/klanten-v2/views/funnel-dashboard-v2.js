@@ -41,10 +41,12 @@
   // de 7-daagse- en mini-cursus-varianten. Webinar/website boeken niet via deze
   // flow, dus daar geen schakelaar.
   const FLOW_PRODUCTS = new Set(['7-daagse', 'minicursus']);
+  const FLOWS = ['A', 'B', 'C'];
+  const normFlow = (x) => (x === 'B' || x === 'C' ? x : 'A');
   const flowOf = (bron) => {
     const c = st.flowCfg || {};
     const per = c.per_funnel || {};
-    return per[bron] === 'A' || per[bron] === 'B' ? per[bron] : (c.default === 'B' ? 'B' : 'A');
+    return FLOWS.includes(per[bron]) ? per[bron] : normFlow(c.default);
   };
 
   // ── Amsterdam-datums ──────────────────────────────────────────────────────
@@ -123,12 +125,12 @@
     rerender();
   };
 
-  // ── Boek-flow A/B-schakelaar ──────────────────────────────────────────────
+  // ── Boek-flow A/B/C-schakelaar ────────────────────────────────────────────
   async function fetchFlow(force) {
     if (!force && st.flowFetched && !st.flowErr) return;
     try {
       const j = await window.KV.authedJson('/api/opstartsessie-flow-get');
-      st.flowCfg = { default: j.default === 'B' ? 'B' : 'A', per_funnel: (j.per_funnel && typeof j.per_funnel === 'object') ? j.per_funnel : {} };
+      st.flowCfg = { default: normFlow(j.default), per_funnel: (j.per_funnel && typeof j.per_funnel === 'object') ? j.per_funnel : {} };
       st.flowErr = null;
     } catch (e) {
       st.flowErr = (e && e.status === 403) ? 'Geen rechten om de boek-flow te zien.' : 'Kon boek-flow niet laden.';
@@ -142,7 +144,7 @@
       const j = await window.KV.authedJson('/api/opstartsessie-flow-set', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
       });
-      st.flowCfg = { default: j.default === 'B' ? 'B' : 'A', per_funnel: j.per_funnel || {} };
+      st.flowCfg = { default: normFlow(j.default), per_funnel: j.per_funnel || {} };
       st.flowErr = null;
     } catch (e) {
       st.flowErr = (e && e.status === 403) ? 'Geen rechten om de boek-flow te wijzigen (leads.update).' : 'Opslaan van de boek-flow mislukte.';
@@ -153,13 +155,13 @@
     if (st.flowSaving) return;
     const c = st.flowCfg || { default: 'A', per_funnel: {} };
     const per = Object.assign({}, c.per_funnel);
-    per[variant] = flow === 'B' ? 'B' : 'A';
-    saveFlow({ default: c.default === 'B' ? 'B' : 'A', per_funnel: per });
+    per[variant] = normFlow(flow);
+    saveFlow({ default: normFlow(c.default), per_funnel: per });
   };
   window.__flowAll = function (flow) {
     if (st.flowSaving) return;
-    // Globaal: zet default en wis alle per-funnel-afwijkingen (echt alles op A of B).
-    saveFlow({ default: flow === 'B' ? 'B' : 'A', per_funnel: {} });
+    // Globaal: zet default en wis alle per-funnel-afwijkingen (echt alles op A, B of C).
+    saveFlow({ default: normFlow(flow), per_funnel: {} });
   };
 
   // ── Render-helpers ────────────────────────────────────────────────────────
@@ -329,18 +331,19 @@
     const funnels = (registry || []).filter((r) => r && FLOW_PRODUCTS.has(r.product));
     if (!funnels.length) return '';
     const saving = st.flowSaving;
-    const def = st.flowCfg ? (st.flowCfg.default === 'B' ? 'B' : 'A') : 'A';
-    const pill = (bron, flow, active) => `<button class="btn btn-sm" style="font-size:11px;padding:3px 11px;${active ? (flow === 'B' ? 'background:#0A7490;color:#fff;font-weight:700;' : 'background:var(--surface-2);font-weight:700;') : 'opacity:.55;background:transparent'}" ${saving ? 'disabled' : ''} onclick="window.__flowSet('${esc(bron)}','${flow}')">${flow}</button>`;
+    const def = st.flowCfg ? normFlow(st.flowCfg.default) : 'A';
+    const pillStyle = { A: 'background:var(--surface-2);font-weight:700;', B: 'background:#0A7490;color:#fff;font-weight:700;', C: 'background:#B07D2B;color:#fff;font-weight:700;' };
+    const pill = (bron, flow, active) => `<button class="btn btn-sm" style="font-size:11px;padding:3px 11px;${active ? pillStyle[flow] : 'opacity:.55;background:transparent'}" ${saving ? 'disabled' : ''} onclick="window.__flowSet('${esc(bron)}','${flow}')">${flow}</button>`;
     const rows = funnels.map((r) => {
       const f = flowOf(r.bron);
       return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
         <span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.naam)} <span style="color:var(--text-3);font-family:var(--mono,monospace);font-size:10px">${esc(r.bron)}</span></span>
-        <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}</span>
+        <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}${pill(r.bron, 'C', f === 'C')}</span>
       </div>`;
     }).join('');
     return `<details class="fd-flow" style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
       <summary style="cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
-        Boek-flow (A/B) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = nieuwe snelle flow · default ${def}</span>
+        Boek-flow (A/B/C) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = snelle flow, C = korte route (geen quiz) · default ${def}</span>
         ${saving ? '<span style="margin-left:auto;color:var(--text-3);font-size:11px">Opslaan…</span>' : ''}
       </summary>
       <div style="margin-top:8px">
@@ -348,6 +351,7 @@
           <span style="font-size:11px;color:var(--text-3)">Globaal:</span>
           <button class="btn btn-sm btn-ghost" style="font-size:11px;padding:3px 10px" ${saving ? 'disabled' : ''} onclick="window.__flowAll('A')">Alles op A</button>
           <button class="btn btn-sm btn-primary" style="font-size:11px;padding:3px 10px;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('B')">Alles op B</button>
+          <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#B07D2B;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('C')">Alles op C</button>
           ${st.flowErr ? `<span style="color:var(--amber);font-size:11px;margin-left:auto">${esc(st.flowErr)}</span>` : ''}
         </div>
         ${rows}
