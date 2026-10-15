@@ -22,6 +22,8 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [] } = {}) {
       if (op === 'notnull') return w != null;
       if (op === 'in') return v.includes(w);
       if (op === 'gte') return String(w) >= String(v);
+      if (op === 'lt') return String(w) < String(v);
+      if (op === 'like') return String(w ?? '').startsWith(String(v).replace(/%$/, ''));
       return true;
     });
     const uitvoeren = () => {
@@ -57,6 +59,8 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [] } = {}) {
       not: (a) => { st.filters.push(['notnull', a]); return k; },
       in: (a, b) => { st.filters.push(['in', a, b]); return k; },
       gte: (a, b) => { st.filters.push(['gte', a, b]); return k; },
+      lt: (a, b) => { st.filters.push(['lt', a, b]); return k; },
+      like: (a, b) => { st.filters.push(['like', a, b]); return k; },
       order: () => k,
       limit: (n) => { st.limiet = n; return k; },
       insert: (r) => { st.rijen = Array.isArray(r) ? r : [r]; return k; },
