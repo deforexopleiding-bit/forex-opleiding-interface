@@ -189,12 +189,16 @@ test('api: verwijderen = rij weg + alle PDF\'s onder <id>/; onbekend → 404', a
 
 test('bedrading: module "Strategie-scans" alleen via scan.use, allowlist, script-tag, view, SQL', () => {
   const shell = lees('modules/shared/design-system/app-shell.js');
-  assert.match(shell, /\{ g: 'Leren & Events',\s+id: 'scans',\s+naam: 'Strategie-scans',[^\n]*roles: \[\], permKey: 'scan\.use', tabs: \['Overzicht'\]/);
+  assert.match(shell, /\{ g: 'Leren & Events',\s+id: 'scans',\s+naam: 'Strategie-scans',[^\n]*roles: \[\], permKey: 'scan\.use', tabs: \['Overzicht'(, 'Dashboard')?\]/);
   assert.ok(shell.indexOf("id: 'scans'") > shell.indexOf("id: 'webinar'"), 'direct onder Webinar');
   assert.match(lees('modules/klanten-v2/klanten-v2.js'), /'support', 'scans'\]\);/);
   const html = lees('modules/klanten-v2/index.html');
   assert.match(html, /<script src="views\/scans-v2\.js\?v=\d+"><\/script>/);
-  assert.match(html, /app-shell\.js\?v=1e3/); assert.match(html, /klanten-v2\.js\?v=1f7/);
+  // Minstens deze versies (latere wijzigingen hogen ze verder op).
+  for (const [f, v] of [['app-shell', '1e3'], ['klanten-v2', '1f7']]) {
+    const nu = (html.match(new RegExp(`${f}\\.js\\?v=([0-9a-z]+)"`)) || [])[1];
+    assert.ok(nu && parseInt(nu, 36) >= parseInt(v, 36), f + ' v=' + nu);
+  }
   const view = lees('modules/klanten-v2/views/scans-v2.js');
   assert.match(view, /window\.DFO\.VIEWS\['scans\/Overzicht'\] = scansView;/);
   assert.match(view, /window\.KV_V2_ADD\('scans'\)/);

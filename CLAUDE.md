@@ -144,6 +144,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   upload → mail → status 'verstuurd'; mail mislukt = uploads weer weg.
   Fase 3: CRM-module "Strategie-scans" (`views/scans-v2.js`, MODS-item in de groep
   "Leren & Events" zonder rollen, alleen `permKey: 'scan.use'`) + `api/scans-overzicht.js`.
+  Fase 4: tab Dashboard (`GET /api/scans-overzicht?dashboard=1&van&tot&groep`, pure
+  rekenkern `api/_lib/scan-dashboard.js`): scans per week/maand (NL-tijd) met klant-deel,
+  verdeling categorie/traject/aanpak, conversie + dealwaarde (elke deal één keer).
+  Concepten tellen niet mee.
   /scan toont het logo per thema (`/img/scan/logo-navy.png` / `logo-wit.png`) en max.
   2 beelden in de flow (`/img/scan/scan-intro-*`, `scan-trading-*`, srcset). Klant-status
   (`api/_lib/scan-klant.js`): automatisch = gewonnen deal (accepted, niet
