@@ -98,6 +98,11 @@
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', nav: false, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
     { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Leads bellen', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
 
+    // Strategie-scans (2026-10-15) — Dave's werkplek: overzicht van alle scans/
+    // rapporten + klant-status. Gevoelige/financiële info, dus GEEN rollen:
+    // alleen wie het recht scan.use heeft (Dave persoonlijk + admin/manager,
+    // super_admin via '*') ziet het item. De scan zelf draait op /scan.
+    { g: 'Verkoop & Financiën',    id: 'scans',            naam: 'Strategie-scans',   icon: I.target,   color: 'amber',   roles: [], permKey: 'scan.use', tabs: ['Overzicht'] },
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
     { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor'],           tabs: ['Overzicht', 'Coaching', 'Events', 'Uitbetalingen', 'Reiskosten', 'Certificaten'] },

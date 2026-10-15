@@ -378,7 +378,11 @@ test('bedrading: cron elke minuut, eigen module, bronlijsten, cache-busters, SQL
   // gewijzigd zijn (de dode knop, H2). Dit pint een exacte waarde, dus hij
   // schuift mee bij elke bump -- dat is de bedoeling: het dwingt af dat er
   // een bump IS zodra het bestand verandert.
-  for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e1'], ['klanten-v2', '1f6']]) assert.match(html, new RegExp(`${f}\\.js\\?v=${v}"`), f);
+  // Minstens deze versies (latere modules hogen ze verder op).
+  for (const [f, v] of [['icons', '1b2'], ['app-shell', '1e1'], ['klanten-v2', '1f6']]) {
+    const nu = (html.match(new RegExp(`${f}\\.js\\?v=([0-9a-z]+)"`)) || [])[1];
+    assert.ok(nu && parseInt(nu, 36) >= parseInt(v, 36), f + ' v=' + nu);
+  }
   // Minstens de versie van de webinar-PR (latere PR's mogen verder ophogen).
   for (const [f, v] of [['leads-v2.js', 28], ['funnel-dashboard-v2.js', 3], ['leadsonderhoud-v2.js', 66]]) {
     const m = html.match(new RegExp(`views/${f.replace('.', '\\.')}\\?v=(\\d+)"`));
