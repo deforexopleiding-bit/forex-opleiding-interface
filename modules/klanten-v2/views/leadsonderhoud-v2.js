@@ -489,7 +489,7 @@
                 <td style="padding:8px 10px">${esc(l.traject || '—')}</td>
                 <td style="padding:8px 10px">${warmteBar(l.score)}</td>
                 <td style="padding:8px 10px">${callBadge}${heeftCall ? `<div style="color:var(--text-3);font-size:11px;margin-top:2px">${esc(fmtDatumAbsoluut(l.afspraak_op))}</div>` : ''}</td>
-                <td class="optional" style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
+                <td class="optional" style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span>${window.DFOLabIndex ? window.DFOLabIndex.badge(l) : ''}</td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td class="optional" style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
                 <td class="optional" style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
@@ -3375,7 +3375,7 @@
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
           <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
         </td>
-        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
+        <td style="padding:8px 10px">${esc(s.bron_label)}${window.DFOLabIndex ? window.DFOLabIndex.badgeVoorEmail(s.email, s.booking_source === 'the-lab') : ''}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
         <td style="padding:8px 10px">${badge}</td>
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
         <td style="padding:8px 10px">${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</td>

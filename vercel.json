@@ -264,6 +264,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/cron-lab-opvolging",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron-setter-cash-release",
       "schedule": "0 6 * * *"
     },
