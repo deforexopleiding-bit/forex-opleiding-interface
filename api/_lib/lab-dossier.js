@@ -147,6 +147,42 @@ export async function leesLmsStand({ authIds = null, sinds = null } = {}) {
 }
 
 /**
+ * Wat een lab-lead deed in Jouw route (okt 2026): de gekozen ingang en wanneer
+ * hij een video uitkeek. Per lab-lead-id. FAIL-SOFT: een LMS zonder de migratie
+ * hlms_lab_lead_gebeurtenis.sql (of een leesfout) geeft een lege kaart — de
+ * motor gedraagt zich dan zoals vóór Jouw route.
+ *
+ * @returns {Promise<Map<string, { route: string|null, routeOp: number|null, videoOp: number|null }>>}
+ */
+export async function leesLabGedrag(leadIds) {
+  const uit = new Map();
+  const lms = getDfoLmsClient();
+  const ids = [...new Set((leadIds || []).filter(Boolean))];
+  if (!lms || !ids.length) return uit;
+  try {
+    for (let i = 0; i < ids.length; i += 200) {
+      const deel = ids.slice(i, i + 200);
+      const [rt, gb] = await Promise.all([
+        lms.from('hlms_lab_lead').select('id, route, route_gekozen_op').in('id', deel),
+        lms.from('hlms_lab_lead_gebeurtenis').select('lead_id, soort, op').in('lead_id', deel).eq('soort', 'video_voltooid'),
+      ]);
+      for (const r of rt.error ? [] : rt.data || []) {
+        uit.set(r.id, { route: r.route || null, routeOp: r.route_gekozen_op ? Date.parse(r.route_gekozen_op) : null, videoOp: null });
+      }
+      for (const g of gb.error ? [] : gb.data || []) {
+        const x = uit.get(g.lead_id) || { route: null, routeOp: null, videoOp: null };
+        const t = Date.parse(g.op);
+        if (Number.isFinite(t) && (x.videoOp == null || t < x.videoOp)) x.videoOp = t;
+        uit.set(g.lead_id, x);
+      }
+    }
+  } catch (e) {
+    console.warn('[lab-dossier] leesLabGedrag (soft):', e?.message || e);
+  }
+  return uit;
+}
+
+/**
  * Funnel per hook (of campagne). PURE.
  *
  * Eén lead = één e-mailadres. Hij telt bij de hook van zijn EERSTE aanmelding
@@ -172,7 +208,7 @@ export function aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten = new Set(), 
     if (em && !eerste.has(em)) eerste.set(em, k);
   }
   const rijen = new Map();
-  const leeg = (k) => ({ sleutel: k, touches: touches.get(k) || 0, leads: 0, ingelogd: 0, gestart: 0, afgewerkt: 0, geboekt: 0, klant: 0 });
+  const leeg = (k) => ({ sleutel: k, touches: touches.get(k) || 0, leads: 0, ingelogd: 0, gestart: 0, afgewerkt: 0, geboekt: 0, klant: 0, route: { lab: 0, kort: 0, praten: 0 } });
   for (const [em, k] of eerste) {
     if (!rijen.has(k)) rijen.set(k, leeg(k));
     const r = rijen.get(k);
@@ -183,13 +219,30 @@ export function aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten = new Set(), 
     if (isAfgerond(l.sessie)) r.afgewerkt++;
     if (l.labLead?.sessie_geboekt_op || l.geboekt) r.geboekt++;
     if (klanten.has(em)) r.klant++;
+    const rt = l.route || l.labLead?.route;
+    if (rt && r.route[rt] != null) r.route[rt]++;
   }
   const lijst = [...rijen.values()].sort((a, b) => b.leads - a.leads || a.sleutel.localeCompare(b.sleutel));
   const totaal = lijst.reduce((t, r) => {
     for (const k of ['touches', 'leads', 'ingelogd', 'gestart', 'afgewerkt', 'geboekt', 'klant']) t[k] += r[k];
+    for (const k of ['lab', 'kort', 'praten']) t.route[k] += r.route[k];
     return t;
-  }, { sleutel: 'Totaal', touches: 0, leads: 0, ingelogd: 0, gestart: 0, afgewerkt: 0, geboekt: 0, klant: 0 });
-  return { rijen: lijst, totaal };
+  }, { sleutel: 'Totaal', touches: 0, leads: 0, ingelogd: 0, gestart: 0, afgewerkt: 0, geboekt: 0, klant: 0, route: { lab: 0, kort: 0, praten: 0 } });
+  return { rijen: lijst, totaal, perRoute: perRoute(eerste, lmsPerEmail) };
+}
+
+/** Conversie per gekozen route (Jouw route): leads en geboekt. PURE. */
+export function perRoute(eersteOfEmails, lmsPerEmail) {
+  const uit = { lab: { leads: 0, geboekt: 0 }, kort: { leads: 0, geboekt: 0 }, praten: { leads: 0, geboekt: 0 }, geen: { leads: 0, geboekt: 0 } };
+  const emails = eersteOfEmails instanceof Map ? [...eersteOfEmails.keys()] : [...(eersteOfEmails || [])];
+  for (const em of emails) {
+    const l = lmsPerEmail.get(em) || {};
+    const rt = l.route || l.labLead?.route || 'geen';
+    const b = uit[rt] || uit.geen;
+    b.leads++;
+    if (l.labLead?.sessie_geboekt_op || l.geboekt) b.geboekt++;
+  }
+  return uit;
 }
 
 /** Lees het volledige dossier van één lead (op lead-id of e-mail). */

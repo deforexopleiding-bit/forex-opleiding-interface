@@ -17,6 +17,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
+import { leesLabGedrag } from './_lib/lab-dossier.js';
 import { alleenDaglijst } from './_lib/opvolging-lijst.js';
 import { telefoonNlBe } from './_lib/phone-e164.js';
 import { LAB_BEL_REDEN, leadStand, beslis, taakRij } from './_lib/lab-belmelding.js';
@@ -59,6 +60,8 @@ export async function draaiBelmelding(nu = Date.now()) {
     sessies = sessies.concat(data || []);
   }
   const sessiePer = nieuwste(sessies);
+  // Jouw route: de gekozen ingang (fail-soft — zonder migratie gewoon leeg).
+  const gedragPer = await leesLabGedrag(leads.map((l) => l.id));
 
   // Geboekt in het CRM: een geplande of gehouden afspraak sinds de aanmelding.
   const emails = [...new Set(leads.map((l) => String(l.email || '').toLowerCase()).filter(Boolean))];
@@ -96,7 +99,7 @@ export async function draaiBelmelding(nu = Date.now()) {
       const sessie = sessiePer.get(labLead.auth_id) || null;
       const aangemeld = Date.parse(labLead.aangemaakt_op) - 86400000;
       const crm = (geboektSinds.get(String(labLead.email || '').toLowerCase()) || []).some((t) => t >= aangemeld);
-      const s = leadStand({ labLead, sessie, geboektInCrm: crm });
+      const s = leadStand({ labLead, sessie, geboektInCrm: crm, gedrag: gedragPer.get(labLead.id) || null });
       const bestaand = perLead.get(labLead.id) || { gehad: new Set(), open: [] };
       const besluit = beslis(s, { gehad: bestaand.gehad, heeftOpen: bestaand.open.length > 0 }, nu);
       if (!besluit) continue;
