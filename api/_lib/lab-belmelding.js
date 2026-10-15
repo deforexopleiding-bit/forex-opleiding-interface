@@ -61,9 +61,11 @@ export function werkdagVoor(ms) {
   return volgende.toISOString().slice(0, 10);
 }
 
+// Een tijdstip als ms, ISO-tekst of — zo komt `snapshot->>afgerondOp` binnen —
+// ms als tekst ("1760551200000").
 const ms = (v) => {
   if (v == null || v === '') return null;
-  const n = typeof v === 'number' ? v : Date.parse(v);
+  const n = typeof v === 'number' ? v : /^\d{10,}$/.test(String(v)) ? Number(v) : Date.parse(v);
   return Number.isFinite(n) ? n : null;
 };
 
