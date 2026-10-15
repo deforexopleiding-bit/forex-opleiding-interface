@@ -1244,6 +1244,7 @@
         </div>
 
         <div class="tk-det-side">
+          ${window.DFOLabDossier && window.DFOLabDossier.kaart ? window.DFOLabDossier.kaart(l) : ''}
           <div class="sv-card">
             <div class="sv-card-head">${svg(I.check)}Status wijzigen</div>
             <div class="sv-card-body">

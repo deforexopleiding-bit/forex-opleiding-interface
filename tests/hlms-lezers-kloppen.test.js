@@ -91,7 +91,9 @@ function vindGebruik() {
       const meld = (soort, kol) => {
         const k = String(kol || '').trim();
         if (!k || k === '*' || k === 'count') return;
-        gebruik.push({ bestand, tabel, soort, kolom: k.includes(':') ? k.split(':').pop().trim() : k });
+        // `alias:kolom->>pad` leest de kolom `kolom`; het json-pad is geen kolom.
+        const zonderAlias = k.includes(':') ? k.split(':').pop().trim() : k;
+        gebruik.push({ bestand, tabel, soort, kolom: zonderAlias.split('->')[0].trim() });
       };
 
       for (const sm of rest.matchAll(/\.select\(\s*(?:`([^`]*)`|'([^']*)'|"([^"]*)")/g)) {

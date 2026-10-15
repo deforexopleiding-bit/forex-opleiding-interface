@@ -116,7 +116,7 @@
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'E-mails', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
