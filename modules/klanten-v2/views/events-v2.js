@@ -547,18 +547,54 @@
     <button class="btn btn-ghost btn-sm" onclick="__evRetry('${block}'${arg ? `,'${arg}'` : ''})">Opnieuw</button></div>`;
   const skel = () => `<div class="pad"><div class="card"><div class="card-body" style="padding:22px;opacity:.55"><div style="height:12px;background:var(--surface-2);border-radius:4px;width:60%;margin-bottom:12px"></div><div style="height:8px;background:var(--surface-2);border-radius:4px;width:80%"></div></div></div></div>`;
   const emptyBlk = (title, sub) => `<div class="empty" style="padding:44px 20px"><div class="empty-t">${esc(title)}</div><div class="empty-s">${esc(sub || '')}</div></div>`;
-  function _fmtDate(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleDateString('nl-NL', { day:'2-digit', month:'2-digit', year:'numeric' }) : ''; }
-  function _fmtTime(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' }) : ''; }
+  // Events-tijden tonen en invoeren we altijd in Europe/Amsterdam (DST-bewust),
+  // onafhankelijk van de tijdzone van de browser. events.starts_at is timestamptz
+  // (een tijdstip); de weergave en de invoer-conversie hieronder formatteren en
+  // interpreteren consequent op deze zone.
+  const EV_ZONE = 'Europe/Amsterdam';
+  function _fmtDate(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleDateString('nl-NL', { timeZone: EV_ZONE, day:'2-digit', month:'2-digit', year:'numeric' }) : ''; }
+  function _fmtTime(iso) { if (!iso) return ''; const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleTimeString('nl-NL', { timeZone: EV_ZONE, hour:'2-digit', minute:'2-digit' }) : ''; }
   function _fmtDateTime(iso) { const d = _fmtDate(iso), t = _fmtTime(iso); return d + (t ? ' ' + t : ''); }
-  // BUG 2 FIX — datetime-local input wil "YYYY-MM-DDTHH:mm" in LOKALE tijd,
-  // zonder timezone-suffix. .slice(0,16) op ISO faalt bij Z-suffix (UTC)
-  // omdat Nederland +1/+2 uur voor loopt → tijd wordt fout getoond.
+  // De UTC-offset (in minuten) van Europe/Amsterdam op dit tijdstip, DST-bewust
+  // via Intl (zomer +120, winter +60).
+  function _evZoneOffsetMin(instant) {
+    const naam = new Intl.DateTimeFormat('en-US', { timeZone: EV_ZONE, timeZoneName: 'longOffset' })
+      .formatToParts(instant).find((p) => p.type === 'timeZoneName');
+    const m = (naam && naam.value ? naam.value : 'GMT+00:00').match(/GMT([+-])(\d{2}):?(\d{2})/);
+    if (!m) return 0;
+    return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
+  }
+  // Zet een wandklok-waarde uit een datetime-local-veld (bedoeld als Amsterdamse
+  // tijd) om naar een offset-gekwalificeerde ISO met de juiste offset voor die
+  // datum (+02:00 zomer, +01:00 winter). Zo wordt 18:00 ook echt 18:00 Amsterdam
+  // opgeslagen i.p.v. als UTC gelezen. Leeg veld blijft null.
+  function _amsterdamLokaalNaarIso(lokaal) {
+    if (!lokaal) return null;
+    const m = String(lokaal).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return null;
+    const y = +m[1], mo = +m[2], d = +m[3], h = +m[4], mi = +m[5];
+    const alsUtc = Date.UTC(y, mo - 1, d, h, mi);
+    // Twee passes: offset op de ruwe wandklok, dan op het berekende tijdstip
+    // (vangt de randgevallen rond de DST-wissel netjes op).
+    let off = _evZoneOffsetMin(new Date(alsUtc));
+    off = _evZoneOffsetMin(new Date(alsUtc - off * 60000));
+    const p = (n) => String(n).padStart(2, '0');
+    const ao = Math.abs(off);
+    return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00${off < 0 ? '-' : '+'}${p(Math.floor(ao / 60))}:${p(ao % 60)}`;
+  }
+  // Zet een opgeslagen ISO-tijd om naar de waarde voor een datetime-local-veld,
+  // altijd in Europe/Amsterdam (DST-bewust), onafhankelijk van de browser-tijdzone.
   function _isoToLocalInput(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     if (!Number.isFinite(d.getTime())) return '';
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: EV_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(d);
+    const g = (t) => ((parts.find((p) => p.type === t) || {}).value || '');
+    let hh = g('hour'); if (hh === '24') hh = '00';
+    return `${g('year')}-${g('month')}-${g('day')}T${hh}:${g('minute')}`;
   }
   function _showToast(msg) {
     const el = document.getElementById('kv-toast');
@@ -2773,6 +2809,12 @@
       const httpMethod = isEdit ? 'PATCH' : 'POST';
       const body = { ...form };
       delete body.id;   // veiligheidshalve strippen mocht 'ie in form zitten
+      // De datetime-local-velden zijn Amsterdamse wandklok-tijd. Zet ze om naar
+      // een offset-gekwalificeerde ISO (DST-bewust), anders leest de timestamptz-
+      // kolom de tijd als UTC en schuift het event +1/+2 uur op.
+      if (form.starts_at) body.starts_at = _amsterdamLokaalNaarIso(form.starts_at);
+      if (form.ends_at) body.ends_at = _amsterdamLokaalNaarIso(form.ends_at);
+      else if ('ends_at' in body && !form.ends_at) body.ends_at = null;
       if (form.capacity != null && form.capacity !== '') body.capacity = Number(form.capacity);
       const j = await window.KV.authedJson(url, { method:httpMethod, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
       if (j?.error) throw new Error(j.error);
