@@ -140,6 +140,26 @@
     ['logboek', 'Logboek', I.doc],
   ];
 
+  /**
+   * Op welk tabblad openen we?
+   *
+   * `?v2tab=instellingen` opent meteen de Instellingen. Dat is er niet voor de
+   * sier: een instructie als "ga naar Iris, dan Instellingen, dan scroll naar
+   * onderen" is een instructie die misgaat, en een link die op de juiste plek
+   * uitkomt is er geen. De andere v2-modules lezen v2tab al (zie
+   * closer-topbar.js); Iris deed dat nog niet.
+   *
+   * Een onbekende waarde wordt stil de Post — een tikfout in een link hoort een
+   * leeg scherm niet op te leveren.
+   */
+  function beginTab() {
+    try {
+      const v = new URLSearchParams(window.location.search).get('v2tab');
+      const k = String(v || '').trim().toLowerCase();
+      return TABS.some(([sleutel]) => sleutel === k) ? k : 'post';
+    } catch { return 'post'; }
+  }
+
   const FILTER_LABELS = {
     wacht_op_ons: 'Wacht op ons',
     // Nieuw sinds H3: status 'nieuw' is hier naartoe verhuisd. Nog niet
@@ -198,7 +218,7 @@
   /* ── Toestand ─────────────────────────────────────────────────────────── */
 
   const S = {
-    tab: 'post',
+    tab: beginTab(),
     filter: 'wacht_op_ons',
     categorie: null,
     zoek: '',
@@ -215,6 +235,11 @@
     gesprek: { bezig: false, fout: null, data: null, voorId: null },
     dossier: { bezig: false, fout: null, data: null, voorId: null },
     instellingen: { bezig: false, fout: null, data: null, opgehaald: false },
+    // De vier templates die Iris mist (docs/iris/template-wensen.md), met hun
+    // stand bij ons én bij 360dialog. Eigen stand, want dit tabblad haalt 'm
+    // apart op: het overzicht doet een netwerkaanroep naar 360dialog en dat
+    // mag de instellingen zelf niet ophouden.
+    templates: { bezig: false, fout: null, data: null, opgehaald: false, actie: null, bericht: null },
     // Wat er nú moet gebeuren. Staat op élke tab, dus buiten de tab-toestanden.
     aandacht: { regel: null, tellingen: null, bezig: false, opgehaald: false },
     pollTimer: null,
@@ -2332,6 +2357,7 @@
       ${systeemafzendersBlok(inst)}
       ${belrijEigenaarBlok(inst)}
       ${belrijEscalatieBlok(inst)}
+      ${templateWensenBlok()}
       <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
         <div><b>uit</b> — Iris doet niets in deze categorie.</div>
         <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
@@ -2386,6 +2412,148 @@
    * geen tweede concept) zitten in CODE, niet in deze instelling. Ze staan er
    * alleen bij zodat wie dit aanzet weet wat hem daarna nog tegenhoudt.
    */
+  /**
+   * De vier templates die Iris mist — en de knop om ze in te dienen.
+   *
+   * ── WAAROM DIT EEN KNOP IS EN GEEN REGEL IN EEN DOCUMENT ────────────────
+   * De lijst stond in docs/iris/template-wensen.md met de bedoeling dat iemand
+   * ze bij Meta zou intypen. Dat lukte niet: de 360dialog-hub was niet te
+   * openen, en het enige werkende pad in de code (scripts/360-templates-upload.mjs)
+   * vraagt een terminal met de servicesleutel erin. Dus bleef de lijst staan en
+   * viel Iris elke keer terug op mail.
+   *
+   * ── WAT DEZE KNOP NIET DOET ─────────────────────────────────────────────
+   * Hij keurt niets goed. Meta beoordeelt, en dat duurt minuten tot uren. Tot
+   * de stand bij ÓNS op "goedgekeurd" staat, verstuurt Iris de template niet —
+   * dat is dezelfde regel als altijd en daarom staat per template of ze hem kan
+   * sturen, niet alleen wat 360dialog ervan vindt.
+   */
+  const TPL_STAND = {
+    APPROVED: ['Goedgekeurd', 'var(--emerald)'],
+    SUBMITTED: ['In beoordeling', 'var(--amber)'],
+    REJECTED: ['Afgekeurd', 'var(--rose)'],
+    PAUSED: ['Gepauzeerd', 'var(--amber)'],
+    DISABLED: ['Uitgezet', 'var(--text-3)'],
+    LOCAL: ['Nog niet ingediend', 'var(--text-3)'],
+  };
+
+  function templateWensenBlok() {
+    const st = S.templates;
+    if (!st.opgehaald && !st.bezig) queueMicrotask(haalTemplates);
+
+    const kop = `<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Templates die Iris mist</div>`;
+
+    if (st.bezig && !st.data) {
+      return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">${kop}${skelet(3)}</div>`;
+    }
+    if (st.fout && !st.data) {
+      return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+        ${kop}<div style="font-size:11.5px;color:var(--rose)">⚠ ${esc(st.fout)}</div></div>`;
+    }
+    const d = st.data;
+    if (!d) return '';
+
+    const items = d.items || [];
+    const teDoen = (d.te_doen || []).length;
+    const regels = items.map((i) => {
+      const stand = String(i.bij_ons?.status || 'LOCAL').toUpperCase();
+      const [label, kleur] = TPL_STAND[stand] || [stand, 'var(--text-3)'];
+      const extern = i.bij_360?.status ? ` · bij 360dialog: ${esc(String(i.bij_360.status).toLowerCase())}` : '';
+      return `<div style="padding:7px 0;border-top:1px solid var(--border);min-width:0">
+        <div style="display:flex;gap:9px;align-items:baseline;min-width:0">
+          <code style="font-size:11.5px;flex:1;min-width:0;word-break:break-all">${esc(i.naam)}</code>
+          <span style="font-size:11px;color:${kleur};font-weight:600;white-space:nowrap">${esc(label)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:3px">${esc(i.waarvoor || '')}${extern}</div>
+        ${i.bij_ons?.afkeurreden ? `<div style="font-size:11px;color:var(--rose);margin-top:3px">Reden: ${esc(i.bij_ons.afkeurreden)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    const bezig = st.actie !== null;
+    return `<div style="margin-top:18px;border:1px solid var(--border);border-radius:8px;padding:11px 13px">
+      ${kop}
+      <div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">
+        Buiten het venster van 24 uur mag er alleen een goedgekeurde template weg.
+        Deze vier horen bij de categorieën waar Iris nu op mail terugvalt. Ze gaan
+        naar de lijn <b>${esc(d.lijn || '')}</b> — dezelfde lijn waarop Iris verstuurt.
+      </div>
+      ${d.fout_360 ? `<div style="font-size:11px;color:var(--amber);margin-bottom:4px">⚠ De stand bij 360dialog is niet op te halen: ${esc(d.fout_360)}</div>` : ''}
+      ${regels}
+      <!-- Het aantal staat achter een punt en niet tussen ronde haakjes. De
+           toets in tests/iris-scherm-volledig.test.js zoekt aanroepen van
+           functies die niet bestaan, en leest een woord met een open haakje
+           erachter als zo'n aanroep — ook in een stuk schermtekst. Dat is een
+           nuttige toets met een ruwe regel; een label aanpassen is goedkoper
+           dan die regel oprekken. (Deze uitleg zelf trapte er ook in.) -->
+      <div style="display:flex;gap:7px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <button class="chip" style="font-size:11.5px;padding:4px 11px${teDoen && !bezig ? ';font-weight:600' : ''}"
+          ${bezig || !teDoen ? 'disabled' : ''} onclick="__irisTemplatesIndienen()"
+          ${teDoen ? '' : 'title="Alle vier staan al bij 360dialog."'}>
+          ${st.actie === 'indienen' ? 'Bezig…' : (teDoen ? `Indienen · ${teDoen}` : 'Alles staat er al')}
+        </button>
+        <button class="chip" style="font-size:11.5px;padding:4px 11px" ${bezig ? 'disabled' : ''} onclick="__irisTemplatesStatus()">
+          ${st.actie === 'status' ? 'Bezig…' : 'Status vernieuwen'}
+        </button>
+      </div>
+      ${st.bericht ? `<div style="font-size:11.5px;color:var(--text-2);margin-top:7px">${esc(st.bericht)}</div>` : ''}
+      ${st.fout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:5px">⚠ ${esc(st.fout)}</div>` : ''}
+      <div style="font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.5">
+        Indienen is geen goedkeuren: Meta beoordeelt, meestal binnen minuten tot
+        uren. Iris verstuurt een template pas als de stand hierboven
+        <b>Goedgekeurd</b> is — druk daarna dus nog een keer op <b>Status
+        vernieuwen</b>. Twee keer indienen kan geen dubbele template geven: wat
+        er al staat, wordt overgeslagen.
+      </div>
+    </div>`;
+  }
+
+  async function haalTemplates() {
+    const st = S.templates;
+    st.bezig = true;
+    st.fout = null;
+    hertekenen();
+    try {
+      st.data = await haal('/api/iris-templates');
+    } catch (e) {
+      st.fout = e?.message || 'De templatelijst is niet op te halen.';
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+      hertekenen();
+    }
+  }
+
+  /** Indienen en status vernieuwen lopen langs hetzelfde pad: doen, dan opnieuw ophalen. */
+  async function templateActie(actie, body, kort) {
+    const st = S.templates;
+    st.actie = kort;
+    st.fout = null;
+    st.bericht = null;
+    hertekenen();
+    try {
+      const j = await haalRuw('/api/iris-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie, ...(body || {}) }),
+      });
+      st.bericht = j?.uitleg || 'Gelukt.';
+      const mislukt = (j?.items || []).filter((i) => i.actie === 'mislukt' || i.actie === 'geweigerd');
+      if (mislukt.length) {
+        st.fout = mislukt.map((i) => `${i.naam}: ${i.reden}`).join(' · ');
+      }
+    } catch (e) {
+      st.fout = e?.message || 'Dat lukte niet.';
+    } finally {
+      st.actie = null;
+      st.opgehaald = false;
+      hertekenen();
+      await haalTemplates();
+    }
+  }
+
+  window.__irisTemplatesIndienen = () => templateActie('indienen', null, 'indienen');
+  window.__irisTemplatesStatus = () => templateActie('status_vernieuwen', null, 'status');
+
   function belrijEscalatieBlok(inst) {
     const bronnen = S.instellingen?.data?.belrij_bronnen
       || ['wanbetaler', 'onboarding', 'mentorsignaal', 'geen_reactie', 'hand'];
