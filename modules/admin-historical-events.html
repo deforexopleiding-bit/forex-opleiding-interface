@@ -422,6 +422,31 @@ function renderSelectedDeals() {
   }));
 }
 
+// Zet een datetime-local-waarde (Amsterdamse wandklok-tijd) om naar een offset-
+// gekwalificeerde ISO met de juiste offset voor die datum (+02:00 zomer, +01:00
+// winter), DST-bewust en onafhankelijk van de browser-tijdzone. starts_at is een
+// timestamptz; zonder offset zou de tijd als UTC gelezen worden en +1/+2 uur
+// opschuiven.
+function amsterdamLokaalNaarIso(lokaal) {
+  if (!lokaal) return null;
+  const m = String(lokaal).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3], h = +m[4], mi = +m[5];
+  const zoneOffsetMin = (instant) => {
+    const deel = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Amsterdam', timeZoneName: 'longOffset' })
+      .formatToParts(instant).find((p) => p.type === 'timeZoneName');
+    const mm = (deel && deel.value ? deel.value : 'GMT+00:00').match(/GMT([+-])(\d{2}):?(\d{2})/);
+    if (!mm) return 0;
+    return (mm[1] === '-' ? -1 : 1) * (Number(mm[2]) * 60 + Number(mm[3]));
+  };
+  const alsUtc = Date.UTC(y, mo - 1, d, h, mi);
+  let off = zoneOffsetMin(new Date(alsUtc));
+  off = zoneOffsetMin(new Date(alsUtc - off * 60000));
+  const p = (n) => String(n).padStart(2, '0');
+  const ao = Math.abs(off);
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00${off < 0 ? '-' : '+'}${p(Math.floor(ao / 60))}:${p(ao % 60)}`;
+}
+
 // ── Opslaan ─────────────────────────────────────────────────────────────
 async function save() {
   const msg = document.getElementById('msg'); msg.innerHTML = '';
@@ -430,7 +455,7 @@ async function save() {
   const location = document.getElementById('evLocation').value.trim();
   if (!title)   { msg.innerHTML = '<div class="msg err">Naam vereist.</div>'; return; }
   if (!dateVal) { msg.innerHTML = '<div class="msg err">Datum vereist.</div>'; return; }
-  const startsAtIso = new Date(dateVal).toISOString();
+  const startsAtIso = amsterdamLokaalNaarIso(dateVal);
 
   const payload = {
     title,
