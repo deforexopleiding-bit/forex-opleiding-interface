@@ -56,6 +56,7 @@ export async function sendEmailViaSmtp({
   handtekening = false, // opt-in: voeg de vaste handtekening (HTML+tekst) toe
   headers   = null,
   hergebruik = false,
+  attachments = null, // optioneel: nodemailer-bijlagen, bv. een .ics-uitnodiging
 } = {}) {
   const mailbox = String(fromMailbox || '').toLowerCase();
   if (!mailbox || !SMTP_ACCOUNTS[mailbox]) {
@@ -113,6 +114,7 @@ export async function sendEmailViaSmtp({
     if (headers && typeof headers === 'object') mailOpts.headers = headers;
     if (cc)   mailOpts.cc   = cc;
     if (bcc)  mailOpts.bcc  = bcc;
+    if (Array.isArray(attachments) && attachments.length) mailOpts.attachments = attachments;
     // Threading: Gmail/Outlook groeperen het antwoord onder het origineel.
     if (inReplyTo) {
       mailOpts.inReplyTo  = inReplyTo;

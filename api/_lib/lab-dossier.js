@@ -90,6 +90,29 @@ export function minutenInLab(sessie) {
 
 const SESSIE_LICHT = 'sessie_id, auth_id, stap, stappen, voortgang, gestart_op, bijgewerkt_op, afgerond:snapshot->>afgerond, leadscore:snapshot->leadscore';
 const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, utm, toegang_van, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, sessie_moment, is_test, aangemaakt_op';
+// Sinds hlms_lab_lead_gebeurtenis.sql (15 okt): de gekozen route. Apart, zodat
+// een LMS zonder die migratie het dossier niet breekt.
+const LEAD_ROUTE_KOLOMMEN = 'route, route_gekozen_op';
+
+/** De ingang die de lead koos, leesbaar. */
+export const ROUTE_LABELS = Object.freeze({ lab: 'Ik heb 20 minuten (The Lab)', kort: 'Ik heb 5 minuten (korte route)', praten: 'Ik wil meteen praten' });
+
+/** Wat een gebeurtenis zegt, voor Dave. PURE. */
+export function gebeurtenisRegel(g) {
+  const d = g?.data || {};
+  switch (g?.soort) {
+    case 'kaart_getoond': return 'Boekingskaart in The Lab getoond' + (d.na ? ` (na ${d.na})` : '');
+    case 'kaart_geklikt': return 'Klikte op de boekingskaart in The Lab';
+    case 'kaart_gesloten': return 'Sloot de boekingskaart in The Lab';
+    case 'route_gekozen': return 'Koos: ' + (ROUTE_LABELS[g.sleutel] || g.sleutel);
+    case 'route_terugkeer': return 'Kwam terug na een pauze';
+    case 'video_gestart': return 'Startte video' + (d.titel ? `: ${d.titel}` : '');
+    case 'video_voltooid': return 'Keek video uit' + (d.titel ? `: ${d.titel}` : '');
+    case 'bevestiging_ics': return 'Zette de sessie in zijn agenda (.ics)';
+    case 'terugbellen_gevraagd': return 'Vroeg om teruggebeld te worden';
+    default: return String(g?.soort || '');
+  }
+}
 
 /** Nieuwste sessie per auth_id. PURE. */
 export function nieuwstePerAuth(sessies) {
@@ -192,7 +215,7 @@ export async function leesDossier({ leadId = null, email = null }) {
   if (tf) console.warn('[lab-dossier] lab_aanmeldingen (soft):', tf.message);
 
   const lms = getDfoLmsClient();
-  let labLead = null; let sessie = null; let lmsFout = null;
+  let labLead = null; let sessie = null; let lmsFout = null; let gebeurtenissen = [];
   if (lms) {
     let q = lms.from('hlms_lab_lead').select(LEAD_KOLOMMEN).limit(1);
     q = leadId && !mail ? q.eq('crm_lead_id', leadId) : q.ilike('email', mail);
@@ -203,6 +226,12 @@ export async function leesDossier({ leadId = null, email = null }) {
         .select('sessie_id, stap, stappen, voortgang, gestart_op, bijgewerkt_op, snapshot')
         .eq('auth_id', labLead.auth_id).order('bijgewerkt_op', { ascending: false }).limit(1);
       if (se) lmsFout = se.message; else sessie = ss?.[0] || null;
+      // Route en gebeurtenissen: fail-soft (een LMS zonder de migratie = leeg).
+      const { data: rt } = await lms.from('hlms_lab_lead').select(LEAD_ROUTE_KOLOMMEN).eq('id', labLead.id).maybeSingle();
+      if (rt) Object.assign(labLead, rt);
+      const { data: gb, error: ge } = await lms.from('hlms_lab_lead_gebeurtenis')
+        .select('soort, sleutel, data, op').eq('lead_id', labLead.id).order('op', { ascending: true }).limit(200);
+      if (!ge) gebeurtenissen = gb || [];
     }
   } else {
     lmsFout = 'LMS niet geconfigureerd';
@@ -252,5 +281,11 @@ export async function leesDossier({ leadId = null, email = null }) {
     vragen: vragenUitSnapshot(snap),
     afspraken,
     opvolging,
+    route: labLead?.route ? { code: labLead.route, label: ROUTE_LABELS[labLead.route] || labLead.route, op: labLead.route_gekozen_op || null } : null,
+    gebeurtenissen: gebeurtenissen.map((g) => ({ op: g.op, soort: g.soort, regel: gebeurtenisRegel(g) })),
+    video: {
+      gestart: gebeurtenissen.filter((g) => g.soort === 'video_gestart').length,
+      voltooid: gebeurtenissen.filter((g) => g.soort === 'video_voltooid').length,
+    },
   };
 }

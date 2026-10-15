@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { renderAfspraakMail, platteTekstAfspraak } from './mail-shell-afspraak.js';
+import { maakIcs } from './ics.js';
 
 export const MIN = 60 * 1000;
 export const UUR = 60 * MIN;
@@ -68,7 +69,98 @@ export function bouwContext(appt) {
     tijdNL:   fmtTijdNL(appt.scheduled_at),
     zoom:     appt.zoom_join_url || '',
     selfUrl:  appt.afspraak_token ? selfServiceUrl(appt.afspraak_token) : SELFSERVICE_BASE,
+    // The Lab: wie de sessie geeft (gezet door de cron uit _lib/lab-gastheer.js).
+    gastheer: appt.gastheer_voornaam || null,
   };
+}
+
+// ── THE LAB ────────────────────────────────────────────────────────────────
+// Een boeking vanuit The Lab (booking_source 'the-lab') is geen
+// kennismakingsgesprek maar de STRATEGIESESSIE van 30 minuten met Dave. Zelfde
+// momenten, eigen teksten:
+//   · de bevestiging zegt wat we bespreken en draagt een .ics-uitnodiging;
+//   · de korte herinnering valt 1 uur vooraf (niet 2) en gaat alleen per mail —
+//     de goedgekeurde WhatsApp-template zegt "over 2 uur". Voor WhatsApp staan
+//     de Lab-templates klaar in docs/whatsapp-templates-the-lab.md;
+//   · elke mail draagt de link om te verzetten (de self-service-pagina).
+export const LAB_BRON = 'the-lab';
+export const LAB_DUUR_MIN = 30;
+export function isLabAfspraak(a) { return String(a?.booking_source || '') === LAB_BRON; }
+
+export const LAB_BESPREKEN = [
+  'je resultaat uit The Lab: wat ging goed, waar liep je vast',
+  'je doel met trading en hoeveel tijd je er echt voor hebt',
+  'of trading bij je past, en zo ja: welke route daarbij hoort',
+];
+
+function metWie(c) { return c.gastheer ? `met ${c.gastheer}` : 'met ons team'; }
+function besprekenHtml() {
+  return '<br><br><b>Wat we bespreken:</b><br>' + LAB_BESPREKEN.map((x) => '• ' + x).join('<br>');
+}
+
+/** De .ics bij de bevestiging. PURE. */
+export function labIcsBijlage(a, c) {
+  const titel = `Strategiesessie ${metWie(c)} — De Forex Opleiding`;
+  const beschrijving = [
+    `Dertig minuten ${metWie(c)}.`,
+    'Wat we bespreken:', ...LAB_BESPREKEN.map((x) => '- ' + x),
+    c.zoom ? `Deelnemen: ${c.zoom}` : 'De Zoom-link staat in je bevestigingsmail.',
+    `Verzetten: ${c.selfUrl}`,
+  ].join('\n');
+  return {
+    filename: 'strategiesessie.ics',
+    contentType: 'text/calendar; charset=utf-8; method=PUBLISH',
+    content: maakIcs({ uid: a.id || a.afspraak_token || a.scheduled_at, start: a.scheduled_at, duurMin: LAB_DUUR_MIN, titel, beschrijving, locatie: c.zoom || 'Zoom', url: c.zoom || c.selfUrl }),
+  };
+}
+
+const LAB_MAIL = {
+  bevestiging: (a, c) => ({
+    subject: `Je strategiesessie ${metWie(c)} staat vast`,
+    titel: 'Je strategiesessie staat vast ✅',
+    inleiding: `Hoi ${c.voornaam}, top. Je strategiesessie van 30 minuten ${metWie(c)} staat gepland. De uitnodiging voor je agenda zit in de bijlage.${besprekenHtml()}`,
+    details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Duur', waarde: '30 minuten' }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r24: (a, c) => ({
+    subject: `Morgen: je strategiesessie ${metWie(c)}`,
+    titel: 'Morgen is het zover',
+    inleiding: `Hoi ${c.voornaam}, morgen spreek je ${c.gastheer || 'ons team'} — 30 minuten, via Zoom. Neem je resultaat uit The Lab erbij en denk even na over één vraag: wat wil je over een jaar met trading bereikt hebben?`,
+    details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r2: (a, c) => ({
+    subject: `Over een uur: je strategiesessie ${metWie(c)}`,
+    titel: 'Over een uur is het zover',
+    inleiding: `Hoi ${c.voornaam}, om ${c.tijdNL} start je strategiesessie ${metWie(c)}. Zit je er een paar minuten vroeger klaar voor? Een rustige plek en je laptop of gsm volstaan.`,
+    details: [{ label: 'Wanneer', waarde: `Vandaag om ${c.tijdNL}` }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r30: (a, c) => ({
+    subject: 'Over 30 minuten begint je strategiesessie',
+    titel: 'Over 30 minuten begint je sessie',
+    inleiding: `Hoi ${c.voornaam}, over 30 minuten (${c.tijdNL}) begint je strategiesessie ${metWie(c)}. We houden je plek graag vrij — laat je even weten of het lukt?`,
+    details: [{ label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  zoom5: (a, c) => ({
+    subject: 'We beginnen zo — je strategiesessie',
+    titel: 'We beginnen zo! ⏱️',
+    inleiding: `Hoi ${c.voornaam}, over ongeveer 5 minuten start je strategiesessie ${metWie(c)}. Klik hieronder om te joinen.`,
+    cta: c.zoom ? { label: 'Nu deelnemen', url: c.zoom } : null,
+    voetnoot: 'Lukt het inloggen niet meteen? Stuur ons even een berichtje, dan helpen we je er zo doorheen.',
+  }),
+};
+
+/** De Lab-variant van een moment (mail + of er WhatsApp mag). PURE. */
+export function labVariant(key, a, c) {
+  const bouw = LAB_MAIL[key];
+  if (!bouw) return null;
+  const args = bouw(a, c);
+  if (key !== 'zoom5' && key !== 'r30') args.voetnoot = selfServiceVoetnoot(a, c);
+  const mail = bouwMail(args);
+  if (key === 'bevestiging') mail.attachments = [labIcsBijlage(a, c)];
+  return { mail, whatsapp: key !== 'r2' };
 }
 
 function zoomDetail(zoom) {
@@ -140,7 +232,8 @@ export const MOMENTEN = [
     key: 'r2',
     kolom: 'reminder_2u_at',
     venster: { onder: 30 * MIN, boven: 2 * UUR },
-    match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.reminder_2u_at && t > 30 * MIN && t <= 2 * UUR; },
+    // The Lab: 1 uur vooraf in plaats van 2 (zie labVariant).
+    match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.reminder_2u_at && t > 30 * MIN && t <= (isLabAfspraak(a) ? UUR : 2 * UUR); },
     waTemplate: 'afspraak_reminder_2u_v1',
     waVars: (a, c) => [c.voornaam, c.tijdNL],
     mail: (a, c) => bouwMail({

@@ -39,7 +39,8 @@ import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
-import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR } from './_lib/afspraak-berichten.js';
+import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR, isLabAfspraak, labVariant } from './_lib/afspraak-berichten.js';
+import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { logAfspraakFail } from './_lib/afspraak-faillog.js';
 import { classifySendError, MAX_ATTEMPTS, backoffMinNaPoging } from './_lib/send-error-classify.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
@@ -59,7 +60,7 @@ function isoMinuut(d) {
   return new Date(d).toISOString().slice(0, 16);
 }
 
-const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, bevestiging_wa_sent_at, bevestiging_mail_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token, lead_email_undeliverable_at, lead_email_undeliverable_reason, bevestiging_mail_attempts, bevestiging_mail_next_at, bevestiging_wa_attempts, bevestiging_wa_next_at, bevestiging_gaveup_at';
+const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, booking_source, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, bevestiging_wa_sent_at, bevestiging_mail_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token, lead_email_undeliverable_at, lead_email_undeliverable_reason, bevestiging_mail_attempts, bevestiging_mail_next_at, bevestiging_wa_attempts, bevestiging_wa_next_at, bevestiging_gaveup_at';
 
 // Near-term geplande afspraken uit een GHL-agenda-import (ghl_calendar_id NOT
 // NULL). Verbreed van alleen-opstartsessie naar ALLE afspraak-agenda's; rijen
@@ -153,8 +154,9 @@ async function logAfspraakMailInThread({ toEmail, subject, text }) {
 // Eén bevestigings-mail versturen. Returnt per-kanaal-uitkomst.
 async function stuurMailBevestiging(appt, moment, ctx) {
   try {
-    const { subject, text, html } = moment.mail(appt, ctx);
-    const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html });
+    const lab = isLabAfspraak(appt) ? labVariant(moment.key, appt, ctx) : null;
+    const { subject, text, html, attachments = null } = lab ? lab.mail : moment.mail(appt, ctx);
+    const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html, attachments });
     if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
     return r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
   } catch (e) {
@@ -384,9 +386,14 @@ async function unclaimRow(id, kolom) {
 async function verstuur(appt, moment, welkomPhoneId) {
   const ctx = bouwContext(appt);
   const uitkomst = { wa: null, mail: null };
+  // The Lab: eigen teksten, en geen WhatsApp waar de goedgekeurde template
+  // niet klopt (de 1u-herinnering — de template zegt "over 2 uur").
+  const lab = isLabAfspraak(appt) ? labVariant(moment.key, appt, ctx) : null;
 
   // ── WhatsApp (welkom-lijn) ──
-  if (!welkomPhoneId) {
+  if (lab && !lab.whatsapp) {
+    uitkomst.wa = { ok: false, skipped: 'lab-geen-passende-template' };
+  } else if (!welkomPhoneId) {
     uitkomst.wa = { ok: false, skipped: 'welkom-phone-ontbreekt' };
   } else if (!appt.lead_phone) {
     uitkomst.wa = { ok: false, skipped: 'geen-telefoon' };
@@ -430,8 +437,8 @@ async function verstuur(appt, moment, welkomPhoneId) {
     uitkomst.mail = { ok: false, skipped: 'email-onbezorgbaar' };
   } else {
     try {
-      const { subject, text, html } = moment.mail(appt, ctx);
-      const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html });
+      const { subject, text, html, attachments = null } = lab ? lab.mail : moment.mail(appt, ctx);
+      const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html, attachments });
       if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
       uitkomst.mail = r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
     } catch (e) {
@@ -566,6 +573,11 @@ export default async function handler(req, res) {
     // 1) Zoom-backfill (stille sync, ook in dry-run).
     await backfillZoom(kandidaten, summary);
 
+    // The Lab: wie de sessie geeft, één keer per run (voor de teksten).
+    const gastheer = await leesLabGastheer().catch(() => null);
+    const stempelGastheer = (rijen) => { for (const a of rijen) if (isLabAfspraak(a)) a.gastheer_voornaam = gastheer?.voornaam || null; return rijen; };
+    stempelGastheer(kandidaten);
+
     // 2) Welkom-lijn éénmaal resolven (alleen relevant als we versturen).
     const welkomPhoneId = live ? await resolveWelkomPhoneId() : null;
     if (live) summary.welkom_phone = welkomPhoneId ? 'ok' : 'ontbreekt';
@@ -575,7 +587,7 @@ export default async function handler(req, res) {
     //     call vooruit ligt.
     try {
       const bevMoment = MOMENTEN.find((m) => m.key === 'bevestiging');
-      const bevRows = await haalBevestigingKandidaten(nowMs);
+      const bevRows = stempelGastheer(await haalBevestigingKandidaten(nowMs));
       summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, live, nowMs });
     } catch (e) {
       summary.errors.push({ step: 'bevestiging', error: e?.message || String(e) });
