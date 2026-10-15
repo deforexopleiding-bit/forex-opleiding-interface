@@ -142,8 +142,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   pdfkit, Fraunces/Inter-WOFF in `api/_lib/fonts/scan/`, includeFiles in vercel.json),
   mail vanaf info@ (`api/mailer.js`), privé bucket `scan-rapporten`. Volgorde:
   upload → mail → status 'verstuurd'; mail mislukt = uploads weer weg.
-  Fase 3: CRM-module "Strategie-scans" (`views/scans-v2.js`, MODS-item zonder
-  rollen, alleen `permKey: 'scan.use'`) + `api/scans-overzicht.js`. Klant-status
+  Fase 3: CRM-module "Strategie-scans" (`views/scans-v2.js`, MODS-item in de groep
+  "Leren & Events" zonder rollen, alleen `permKey: 'scan.use'`) + `api/scans-overzicht.js`.
+  /scan toont het logo per thema (`/img/scan/logo-navy.png` / `logo-wit.png`) en max.
+  2 beelden in de flow (`/img/scan/scan-intro-*`, `scan-trading-*`, srcset). Klant-status
   (`api/_lib/scan-klant.js`): automatisch = gewonnen deal (accepted, niet
   archived/declined) via lead / klant van de lead / e-mail; handmatig
   (`scans.klant_status_handmatig`) heeft voorrang, bron wordt getoond.

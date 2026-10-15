@@ -16,13 +16,18 @@
   // Thema vóór de eerste paint (geen flits): opgeslagen keuze, anders systeemvoorkeur.
   (function () { var t = 'dark'; try { var s = localStorage.getItem('dfo-scan-theme'); if (s) t = s; else if (window.matchMedia && matchMedia('(prefers-color-scheme:light)').matches) t = 'light'; } catch (e) {} document.documentElement.setAttribute('data-theme', t); })();
 </script>
-<link rel="stylesheet" href="/modules/scan/scan.css?v=2">
+<link rel="stylesheet" href="/modules/scan/scan.css?v=3">
 <script src="/modules/shared/supabase-client.js"></script>
 </head>
 <body>
 <canvas id="bg" aria-hidden="true"></canvas>
 <div class="brandbar"><div class="wrap bb">
-  <div class="brand"><span class="em">F</span><span class="nm">De Forex Opleiding<small>Strategie-scan</small></span></div>
+  <!-- Logo per thema (2026-10-15): navy op licht, wit op donker — zelfde vorm, geen chip nodig. -->
+  <div class="brand">
+    <img class="logo logo-licht" src="/img/scan/logo-navy.png" width="400" height="226" alt="De Forex Opleiding">
+    <img class="logo logo-donker" src="/img/scan/logo-wit.png" width="400" height="226" alt="De Forex Opleiding">
+    <span class="sep" aria-hidden="true"></span><span class="nm">Strategie-scan</span>
+  </div>
   <div class="bb-right">
     <span class="opslag" id="opslag" hidden></span>
     <button class="mini" id="bewaarBtn" type="button" hidden>Concept opslaan</button>
@@ -45,6 +50,11 @@
       <h1 class="disp">Ontdek wat traden <em>jou</em> kan brengen.</h1>
       <p class="sub">Een professionele analyse van jouw situatie, doelen en profiel. Je loopt 'm samen met <span data-assessor>Dave</span> door; daarna ontvang je een persoonlijk rapport met een helder, eerlijk beeld en het best passende vervolg.</p>
     </div>
+    <!-- Beeld 1 van 2 (sfeer, onder de introtekst). -->
+    <figure class="beeld introbeeld">
+      <img src="/img/scan/scan-intro-1400.jpg" srcset="/img/scan/scan-intro-800.jpg 800w, /img/scan/scan-intro-1400.jpg 1400w"
+        sizes="(max-width: 760px) 100vw, 684px" width="1400" height="932" alt="Live sessie bij De Forex Opleiding" decoding="async" fetchpriority="high">
+    </figure>
     <div class="meta">
       <span class="mchip"><b>±15</b> minuten</span>
       <span class="mchip"><b>8</b> onderdelen</span>
@@ -121,6 +131,11 @@
     </div>
 
     <div class="card sell" id="sellCard" hidden>
+      <!-- Beeld 2 van 2 (rustig, bij de volgende stap). -->
+      <figure class="beeld sellbeeld">
+        <img src="/img/scan/scan-trading-1200.jpg" srcset="/img/scan/scan-trading-700.jpg 700w, /img/scan/scan-trading-1200.jpg 1200w"
+          sizes="(max-width: 760px) 100vw, 624px" width="1200" height="1200" alt="Samen de markt lezen tijdens een sessie" loading="lazy" decoding="async">
+      </figure>
       <div class="seclabel">Jouw volgende stap</div>
       <h3 class="rh" id="sellTitle"></h3>
       <p class="selllead" id="sellLead"></p>
