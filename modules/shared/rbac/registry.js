@@ -134,6 +134,7 @@ const FEATURE_REGISTRY = [
     { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },
     { key:'opvolging.whatsapp.sturen', label:'WhatsApp sturen' },
     { key:'calls.closer', label:'Closer: dagrapportage-topbar (eigen calls beoordelen)' },
+    { key:'scan.use', label:'Strategie-scan afnemen en rapporten zien (gevoelig: Dave + admins)' },
   ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },

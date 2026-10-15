@@ -152,6 +152,8 @@
 .callrap .cr-rij:last-child{border-bottom:0}
 .callrap .cr-rij .t{font-weight:600}
 .callrap .cr-rij .u{color:var(--cr-muted);margin-top:2px;word-break:break-word}
+.callrap .cr-rij .scan{display:inline-block;margin-top:5px;font-size:12px;font-weight:700;color:var(--cr-accent,#b07d12);text-decoration:none}
+.callrap .cr-rij .scan:hover{text-decoration:underline}
 .callrap .cr-rij .n{margin-top:4px;background:var(--cr-soft);border-radius:6px;padding:6px 8px;white-space:pre-wrap;word-break:break-word}
 .callrap .cr-leeg{color:var(--cr-muted);font-size:13px;font-style:italic}
 .callrap h4.cr-sectie{font-size:14px;margin:6px 0 10px}
@@ -189,7 +191,17 @@
       '<div class="u">' + esc(M.categorieInfo(r.categorie).label) + ' &middot; status ' + esc(status) +
       ' &middot; ' + setter + '</div>' +
       (r.snelle_notitie ? '<div class="n">' + esc(r.snelle_notitie) + '</div>' : '') +
+      scanLink(r) +
       '</div>';
+  }
+
+  // Strategie-scan (2026-10-15): bij een webinar-boeking een link naar de
+  // scan-pagina, alleen voor wie de scan mag afnemen (recht scan.use). Opent in
+  // een eigen tab: die pagina heeft geen CRM-navigatie en kan gedeeld worden.
+  function scanLink(r) {
+    const mag = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('scan.use'));
+    if (!mag || r.booking_source !== 'webinar' || !r.appointment_id) return '';
+    return '<a class="scan" href="/scan?afspraak=' + encodeURIComponent(r.appointment_id) + '" target="_blank" rel="noopener">Strategie-scan &rarr;</a>';
   }
 
   function uitklap(sleutel, titel, rijen, M) {

@@ -130,6 +130,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
 - /modules/control-center.html — Approvals + Audit log
 - /modules/admin.html — Gebruikersbeheer (ADMIN_ROLES: super_admin/admin/manager) +
   Approval-queue tab (#approval-queue) voor D-module payment-arrangements
+- /scan (rewrite → /modules/scan/index.html) — Strategie-scan (fase 1, 2026-10-15):
+  losse pagina ZONDER CRM-navigatie (Dave deelt 'm via screenshare), recht
+  `scan.use` (Dave persoonlijk + admin/manager; sales-rol bewust niet). Tabel
+  `scans` (RLS + REVOKE, alleen service-role). Scoremodel in
+  `modules/scan/scan-model.js`, gedeeld door browser en `api/scan.js` — de
+  server rekent ALTIJD zelf; antwoorden = likert 1..5 of optie-index.
+  "Nu nog niet" alleen bij Schulden. Override + notitie apart bewaard.
+  Ingang: `/scan?afspraak=<id>` (link in het call-rapport bij webinar-calls).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
