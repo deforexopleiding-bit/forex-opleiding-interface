@@ -10,6 +10,10 @@
 // gebeurde, telt mee ongeacht wanneer: een lead uit week 1 die in week 2
 // boekt, is een boeking voor de hook van week 1.
 //
+// `uitnodiging`: per hook hoe vaak de slimme uitnodiging / vaste balk uit het
+// LMS ("Plan je sessie met Dave") getoond werd en hoeveel leads daarna boekten
+// (_lib/lab-uitnodiging.js).
+//
 // Testaanmeldingen (`is_test`) tellen nooit mee in de cijfers; ze staan wel in
 // de lijst, met een label.
 
@@ -18,6 +22,8 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { periodeUitQuery } from './funnel-stats.js';
 import { aggregeerFunnel, labStatus, leesLabGedrag, leesLmsStand } from './_lib/lab-dossier.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
+import { uitnodigingPerSleutel, leesUitnodigingGebeurtenissen } from './_lib/lab-uitnodiging.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -51,12 +57,15 @@ export default async function handler(req, res) {
   // LMS-stand per e-mail.
   let lmsFout = null;
   const lmsPerEmail = new Map();
+  let gebeurtenissen = new Map();
   if (emails.length) {
     try {
       const authIds = [...new Set(aanmeldingen.map((a) => a.lms_auth_id).filter(Boolean))];
       const { leads, sessiePerAuth } = await leesLmsStand({ authIds });
       const gedrag = await leesLabGedrag(leads.map((l) => l.id));
       for (const l of leads) lmsPerEmail.set(String(l.email).toLowerCase(), { labLead: l, sessie: sessiePerAuth.get(l.auth_id) || null, route: gedrag.get(l.id)?.route || null });
+      // Sessiebalk + slimme uitnodiging (fail-soft).
+      gebeurtenissen = await leesUitnodigingGebeurtenissen(getDfoLmsClient(), leads.map((l) => l.id));
     } catch (e) {
       lmsFout = e?.message || 'LMS onbereikbaar';
       console.error('[lab-statistieken] LMS:', lmsFout);
@@ -83,6 +92,7 @@ export default async function handler(req, res) {
   }
 
   const { rijen, totaal, perRoute } = aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten, per);
+  const uitnodiging = uitnodigingPerSleutel(aanmeldingen, lmsPerEmail, gebeurtenissen, per);
 
   // De lijst: één regel per e-mail, nieuwste aanmelding eerst.
   const gezien = new Set();
@@ -102,5 +112,5 @@ export default async function handler(req, res) {
     });
   }
 
-  return res.status(200).json({ ok: true, per, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, per_route: perRoute, leads });
+  return res.status(200).json({ ok: true, per, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, per_route: perRoute, uitnodiging, leads });
 }

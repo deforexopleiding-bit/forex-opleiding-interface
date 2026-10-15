@@ -12,6 +12,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
+import { AANLEIDING_LABELS } from './lab-uitnodiging.js';
 import { LAB_SLUG } from './lab-config.js';
 
 /** De vragen uit de vragenlaag van het LMS (kopie van src/features/lab/lab-vragen.ts). */
@@ -110,6 +111,11 @@ export function gebeurtenisRegel(g) {
     case 'video_voltooid': return 'Keek video uit' + (d.titel ? `: ${d.titel}` : '');
     case 'bevestiging_ics': return 'Zette de sessie in zijn agenda (.ics)';
     case 'terugbellen_gevraagd': return 'Vroeg om teruggebeld te worden';
+    case 'uitnodiging_getoond': return 'Kreeg de uitnodiging "Plan je sessie met Dave"' + (AANLEIDING_LABELS[d.aanleiding] ? ` (${AANLEIDING_LABELS[d.aanleiding]})` : '');
+    case 'uitnodiging_gesloten': return 'Sloot de uitnodiging';
+    case 'uitnodiging_niet_nu': return 'Koos "Niet nu" bij de uitnodiging';
+    case 'uitnodiging_geboekt': return d.bron === 'balk' ? 'Boekte via de sessiebalk' : 'Boekte via de uitnodiging';
+    case 'balk_geklikt': return 'Klikte op de sessiebalk ("Plan in")';
     default: return String(g?.soort || '');
   }
 }

@@ -324,6 +324,27 @@
       '<th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--text-3)">Ingang</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-3)">Leads</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-3)">Geboekt</th></tr></thead><tbody>' + rijen + '</tbody></table>';
   }
 
+  // "Plan je sessie met Dave" in het LMS: uitnodiging en vaste balk → boeking.
+  const AANLEIDING = { tweede_pagina: '2e pagina', tijd: '45 s op een pagina', nieuwe_dag: 'terug op een nieuwe dag', video: 'na een video', exit: 'wilde de pagina verlaten' };
+  function uitnodigingBlok(u) {
+    if (!u || !u.totaal || !u.rijen || !u.rijen.length) return '';
+    const kop = ['', 'Leads', 'Zagen uitnodiging', 'Keer getoond', 'Boekte in uitnodiging', 'Boekte na uitnodiging', 'Klikte balk', 'Boekte via balk'];
+    const cel = (n, van) => '<td style="padding:8px 10px;text-align:right;white-space:nowrap"><b>' + n + '</b>' + (van != null ? '<div style="font-size:11px;color:var(--text-3)">' + pct(n, van) + '</div>' : '') + '</td>';
+    const rij = (r, vet) => '<tr style="border-top:1px solid var(--border)' + (vet ? ';background:var(--surface-2,rgba(0,0,0,.02))' : '') + '">' +
+      '<td style="padding:8px 10px;font-weight:' + (vet ? 700 : 600) + '">' + esc(r.sleutel) + '</td>' +
+      cel(r.leads, null) + cel(r.gezien, r.leads) + '<td style="padding:8px 10px;text-align:right;color:var(--text-3)">' + r.getoond + '</td>' +
+      cel(r.via_uitnodiging, r.gezien) + cel(r.geboekt_na, r.gezien) + cel(r.balk_geklikt, r.leads) + cel(r.via_balk, r.balk_geklikt) + '</tr>';
+    const aanl = Object.keys(u.perAanleiding || {}).map((k) => {
+      const a = u.perAanleiding[k];
+      return esc(AANLEIDING[k] || k) + ': ' + a.getoond + '× getoond, ' + a.geboekt + ' geboekt';
+    }).join(' · ');
+    return '<div style="margin-top:22px;font-weight:600">Plan je sessie met Dave <span style="font-weight:400;color:var(--text-3);font-size:12px">— uitnodiging en vaste balk in het LMS → boeking</span></div>' +
+      '<div style="overflow-x:auto;margin-top:8px" data-lab-uitnodiging><table style="width:100%;border-collapse:collapse;font-size:13px">' +
+      '<thead><tr>' + kop.map((k, i) => '<th style="padding:8px 10px;text-align:' + (i ? 'right' : 'left') + ';font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">' + k + '</th>').join('') + '</tr></thead>' +
+      '<tbody>' + u.rijen.map((r) => rij(r, false)).join('') + rij(u.totaal, true) + '</tbody></table></div>' +
+      '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Boekte in/na uitnodiging t.o.v. wie ze zag; boekte via balk t.o.v. wie klikte.' + (aanl ? ' Per aanleiding — ' + aanl + '.' : '') + '</div>';
+  }
+
   function leadLijst(leads) {
     if (!leads.length) return '<div style="color:var(--text-3);font-size:13px">Geen aanmeldingen in deze periode.</div>';
     return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr>' +
@@ -348,6 +369,7 @@
     else if (d) {
       inhoud = (d.lms_fout ? '<div style="margin-bottom:10px;padding:8px 12px;background:var(--amber-soft,#FFF4E0);border-radius:6px;font-size:12px">Het LMS was niet bereikbaar: ingelogd/gestart/afgewerkt staan daardoor op 0. (' + esc(d.lms_fout) + ')</div>' : '') +
         funnelTabel(d) +
+        uitnodigingBlok(d.uitnodiging) +
         '<div style="margin-top:22px;font-weight:600">Lab-leads <span style="font-weight:400;color:var(--text-3);font-size:12px">— klik voor het dossier</span></div>' +
         '<div style="margin-top:8px">' + leadLijst(d.leads || []) + '</div>';
     } else inhoud = '';
