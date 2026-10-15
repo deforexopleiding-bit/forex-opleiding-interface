@@ -9,8 +9,8 @@
 // migratiebestand in de LMS-repo dat toen niet gedraaid was — en gaf dezelfde
 // 400. Een repo is geen schema.
 //
-// De dump in tests/vast/hlms-kolommen-20261013.json is een METING op
-// `information_schema` van dfo-lms, 13 oktober 2026. Geen aanname.
+// De dumps in tests/vast/hlms-kolommen-<datum>*.json zijn METINGEN op
+// `information_schema` van dfo-lms (13 en 15 oktober 2026). Geen aanname.
 //
 // ── DE RICHTING VAN DEZE TOETS, EN WAAROM DAT UITMAAKT ──────────────────────
 // Hij faalt als een lezer een kolom gebruikt die NIET in de dump staat. Hij
@@ -34,7 +34,12 @@ const HIER = dirname(fileURLToPath(import.meta.url));
 const WORTEL = join(HIER, '..');
 const API = join(WORTEL, 'api');
 
-const DUMP = JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261013.json'), 'utf8'));
+// Twee metingen: de brede van 13 oktober en die van 15 oktober na de migratie
+// hlms_lab_lead.sql (hlms_rol, hlms_lab_*, hlms_les — daar zaten ze nog niet in).
+const DUMP = {
+  ...JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261013.json'), 'utf8')),
+  ...JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261015-lab.json'), 'utf8')),
+};
 
 // VERWACHT, NIET GEMETEN — tabellen die nog niet in de meting staan (nieuw uit
 // een LMS-migratie, of nog nooit meegemeten). Apart bestand met de bron per

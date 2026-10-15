@@ -1,13 +1,4 @@
 {
-  "_LEES_MIJ": "NIET GEMETEN. Kolommen die het CRM leest uit tabellen die (nog) niet in de meting hlms-kolommen-20261013.json staan. Bron per tabel hieronder. Zodra er een nieuwe meting is, verhuist de tabel naar die dump en verdwijnt hij hier — tests/hlms-lezers-kloppen.test.js dwingt dat af.",
-  "_bron": {
-    "hlms_rol": "Bestaande LMS-tabel; kolommen zoals het LMS ze dagelijks leest in src/lib/supabase/hlms-rol.ts (fetchEigenRollen) en schrijft volgens docs/trial-accounts.md.",
-    "hlms_lab_lead": "Nieuw in dfo-lms-prototype supabase/hlms_lab_lead.sql (The Lab-leads, 15 okt 2026).",
-    "hlms_lab_sleutel": "Nieuw in dfo-lms-prototype supabase/hlms_lab_lead.sql (The Lab-leads, 15 okt 2026).",
-    "hlms_lab_sessie": "Bestaande LMS-tabel; kolommen uit dfo-lms-prototype supabase/hlms_lab_sessie.sql + hlms_lab_ronde.sql (ronde_id), dagelijks beschreven door src/lib/supabase/hlms-lab-sessie.ts."
-  },
-  "hlms_rol": "id,auth_id,rol,aangemaakt_op,geldig_tot",
-  "hlms_lab_lead": "id,auth_id,email,voornaam,achternaam,telefoon,herkomst,crm_lead_id,hook,utm,toegang_van,toegang_tot,eerste_login_op,laatste_login_op,kwalificatie,sessie_geboekt_op,sessie_moment,sessie_afspraak_id,is_test,aangemaakt_op,bijgewerkt_op",
-  "hlms_lab_sleutel": "id,lead_id,sleutel_hash,doel,aangemaakt_op,laatst_gebruikt_op,keer_gebruikt",
-  "hlms_lab_sessie": "sessie_id,auth_id,naam,stap,stappen,voortgang,eindcijfer,snapshot,gestart_op,bijgewerkt_op,ronde_id"
+  "_LEES_MIJ": "NIET GEMETEN. Kolommen die het CRM leest uit hlms-tabellen die (nog) in geen enkele meting (tests/vast/hlms-kolommen-*.json) staan, met de bron per tabel in _bron. Zodra er een meting is, verhuist de tabel naar een dump en verdwijnt hij hier — tests/hlms-lezers-kloppen.test.js dwingt dat af. Leeg sinds de meting van 15 okt 2026 (hlms-kolommen-20261015-lab.json).",
+  "_bron": {}
 }
