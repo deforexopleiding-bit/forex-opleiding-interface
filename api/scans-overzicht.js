@@ -6,6 +6,8 @@
 //            de deals of handmatig — api/_lib/scan-klant.js). Filteren/sorteren
 //            doet de view (paar honderd rijen per jaar).
 //   GET    /api/scans-overzicht?leads=<zoek> → { leads:[…] } (max 10) voor "Nieuwe scan"
+//   GET    /api/scans-overzicht?dashboard=1&van=YYYY-MM-DD&tot=YYYY-MM-DD&groep=week|maand
+//            → dashboard-cijfers (fase 4, api/_lib/scan-dashboard.js)
 //   POST   /api/scans-overzicht  { actie:'klant_status', id, klant_status: 'klant'|'in_gesprek'|'geen_klant'|null }
 //            → handmatige klant-status zetten (null = terug naar automatisch)
 //   DELETE /api/scans-overzicht?id=<uuid>  → scan + bijbehorende PDF's weg
@@ -15,11 +17,13 @@
 import { supabaseAdmin, createUserClient } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bepaalKlant, laadKlantContext, KLANT_STATUSSEN } from './_lib/scan-klant.js';
+import { berekenScanDashboard } from './_lib/scan-dashboard.js';
 
 export const SCAN_RECHT = 'scan.use';
 const BUCKET = 'scan-rapporten';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX = 2000;
+const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const LIJST_KOLOMMEN = 'id, lead_id, afspraak_id, assessor_id, status, deelnemer_naam, deelnemer_email, deelnemer_telefoon, '
   + 'readiness_score, categorie, aanbevolen_aanpak, aanbevolen_traject, doel, rapport_pdf_ref, certificaat_pdf_ref, '
@@ -85,6 +89,17 @@ export function maakHandler(deps = {}) {
 
         const scans = await leesScans(db);
         const ctx = await laadKlantContext(db, scans);
+        if (q.dashboard != null) {
+          const datum = (x) => (typeof x === 'string' && DATUM_RE.test(x) ? x : null);
+          const van = datum(q.van); const tot = datum(q.tot);
+          if ((q.van && !van) || (q.tot && !tot) || (van && tot && van > tot)) return res.status(400).json({ error: 'Ongeldige periode' });
+          const groep = q.groep === 'week' || q.groep === 'maand' ? q.groep : null;
+          const metKlant = scans.map((s) => ({ ...s, klant: bepaalKlant(s, ctx) }));
+          return res.status(200).json({
+            migratie_nodig: scans.some((s) => s._migratie_nodig),
+            ...berekenScanDashboard(metKlant, { van, tot, groep, nu: nu() }),
+          });
+        }
         const assessorIds = [...new Set(scans.map((s) => s.assessor_id).filter(Boolean))];
         const profielen = assessorIds.length
           ? await lees(db.from('profiles').select('id, full_name, email').in('id', assessorIds), 'profiles') : [];

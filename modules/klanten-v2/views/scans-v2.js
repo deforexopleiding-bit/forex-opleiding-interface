@@ -313,8 +313,161 @@
     return `<div class="pad">${kop}${nieuwHtml()}${migratie}${kpiHtml(lijst)}${filters}${tabel}</div>`;
   }
 
+  // ══ Fase 4 (2026-10-15): Dashboard ═════════════════════════════════════════
+  // Scans per periode (met daarin hoeveel er klant werden), verdeling van
+  // categorie / traject / aanpak, en conversie naar klant met dealwaarde.
+  // Cijfers: GET /api/scans-overzicht?dashboard=1 (api/_lib/scan-dashboard.js).
+  // Concepten tellen niet mee (nog geen uitkomst).
+  const dash = window.__scDash = window.__scDash || { periode: '90', groep: '', van: '', tot: '', loading: false, data: null, fout: null, sleutel: null };
+  const DASH_PERIODES = [['30', '30 dagen'], ['90', '90 dagen'], ['jaar', 'Dit jaar'], ['alles', 'Alles'], ['eigen', 'Eigen periode']];
+  const eur = (n) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+  const pctTxt = (p) => String(p).replace('.', ',') + '%';
+  const vandaagStr = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const dagTerug = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+
+  function dashPeriode() {
+    if (dash.periode === '30') return { van: dagTerug(29), tot: vandaagStr() };
+    if (dash.periode === '90') return { van: dagTerug(89), tot: vandaagStr() };
+    if (dash.periode === 'jaar') return { van: new Date().getFullYear() + '-01-01', tot: vandaagStr() };
+    if (dash.periode === 'eigen') return { van: dash.van || '', tot: dash.tot || '' };
+    return { van: '', tot: '' };
+  }
+  async function laadDash(force) {
+    const p = dashPeriode();
+    const qs = 'dashboard=1' + (p.van ? '&van=' + p.van : '') + (p.tot ? '&tot=' + p.tot : '') + (dash.groep ? '&groep=' + dash.groep : '');
+    if (dash.loading || (!force && dash.sleutel === qs && dash.data)) return;
+    dash.loading = true; dash.fout = null; dash.sleutel = qs; rerender();
+    try {
+      dash.data = await window.KV.authedJson('/api/scans-overzicht?' + qs);
+    } catch (e) {
+      dash.fout = e && e.status === 403 ? 'Geen toegang tot de strategie-scans (recht scan.use).' : 'Kon het dashboard niet laden' + (e && e.status ? ' (HTTP ' + e.status + ')' : '');
+      console.error('[scans-v2] dashboard:', e && e.status, e && (e.body || e.message));
+    }
+    dash.loading = false; rerender();
+  }
+  window.__scDashF = function (k, v) {
+    dash[k] = v;
+    // Eigen periode: pas laden als begin én eind gekozen zijn.
+    if (dash.periode === 'eigen' && (!dash.van || !dash.tot)) { rerender(); return; }
+    laadDash(true);
+  };
+
+  const DASH_CSS = `<style>
+    .scd-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-2);margin:2px 0 8px}
+    .scd-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+    .scd-klant{fill:var(--emerald)} .scd-rest{fill:var(--scd-rest,#CBD2DC)}
+    :root[data-theme="dark"] .scd-rest{fill:#3A4352} :root[data-theme="dark"] .scd-legend .r{background:#3A4352!important}
+    .scd-grid{stroke:var(--border,#E3E7ED);stroke-width:1}
+    .scd-as{fill:var(--text-3);font-size:10.5px}
+    .scd-tot{fill:var(--text-2);font-size:10.5px;font-weight:600}
+    .scd-bar rect{transition:opacity .12s} .scd-bar:hover rect{opacity:.82}
+    .scd-hrow{display:grid;grid-template-columns:minmax(120px,1.4fr) 2fr auto;gap:10px;align-items:center;font-size:12.5px;padding:5px 0}
+    .scd-htrack{height:8px;border-radius:4px;background:var(--surface-2,#F1F3F6);overflow:hidden}
+    .scd-hfill{height:100%;border-radius:4px;background:var(--m,var(--amber))}
+    .scd-num{color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+    .scd-conv td,.scd-conv th{padding:6px 8px;font-size:12.5px;border-bottom:1px solid var(--border,#E3E7ED);text-align:left}
+    .scd-conv td.r,.scd-conv th.r{text-align:right;font-variant-numeric:tabular-nums}
+    .scd-conv tr.scd-sec th{padding-top:14px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
+    .scd-mini{display:inline-block;width:46px;height:6px;border-radius:3px;background:var(--surface-2,#F1F3F6);vertical-align:middle;margin-right:6px;overflow:hidden}
+    .scd-mini b{display:block;height:100%;background:var(--emerald);border-radius:3px}
+  </style>`;
+
+  /** Kolommen per periode: klant geworden (onder, groen) + nog geen klant (boven, grijs). */
+  function kolommenSvg(reeks) {
+    const W = 1100; const H = 240; const L = 34; const R = 8; const T = 18; const B = 26;
+    const max = Math.max(1, ...reeks.map((r) => r.scans));
+    const stap = max <= 5 ? 1 : max <= 10 ? 2 : Math.ceil(max / 4);
+    const top = Math.ceil(max / stap) * stap;
+    const y = (v) => T + (H - T - B) * (1 - v / top);
+    const n = reeks.length || 1; const slot = (W - L - R) / n; const bw = Math.max(4, Math.min(42, slot * 0.62));
+    const elke = Math.max(1, Math.ceil(n / 12));
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Aantal scans per periode, met daarin het aantal dat klant werd" style="display:block">`;
+    for (let v = 0; v <= top; v += stap) {
+      s += `<line class="scd-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="scd-as" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`;
+    }
+    reeks.forEach((r, i) => {
+      const cx = L + slot * i + slot / 2; const x = cx - bw / 2;
+      const k = r.klanten; const rest = r.scans - k;
+      const titel = `${r.label}: ${r.scans} scan${r.scans === 1 ? '' : 's'}, ${k} klant geworden`;
+      s += `<g class="scd-bar"><title>${esc(titel)}</title><rect x="${cx - slot / 2}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent"/>`;
+      if (k > 0) s += `<rect class="scd-klant" x="${x}" y="${y(k)}" width="${bw}" height="${y(0) - y(k)}" rx="3"/>`;
+      if (rest > 0) {
+        const y0 = y(k) - (k > 0 ? 2 : 0); // 2px gat tussen de segmenten
+        s += `<rect class="scd-rest" x="${x}" y="${y(r.scans)}" width="${bw}" height="${Math.max(1, y0 - y(r.scans))}" rx="3"/>`;
+      }
+      if (r.scans > 0 && n <= 16) s += `<text class="scd-tot" x="${cx}" y="${y(r.scans) - 5}" text-anchor="middle">${r.scans}</text>`;
+      if (i % elke === 0) s += `<text class="scd-as" x="${cx}" y="${H - 8}" text-anchor="middle">${esc(r.label)}</text>`;
+      s += '</g>';
+    });
+    return s + '</svg>';
+  }
+
+  function verdelingKaart(titel, rijen) {
+    const max = Math.max(1, ...rijen.map((r) => r.aantal));
+    return `<div class="card" style="margin:0"><div class="card-head"><div class="card-title">${esc(titel)}</div></div><div class="card-body">
+      ${rijen.map((r) => `<div class="scd-hrow"><span>${esc(r.naam)}</span>
+        <span class="scd-htrack" title="${esc(r.naam)}: ${r.aantal} (${pctTxt(r.pct)})"><span class="scd-hfill" style="display:block;width:${(r.aantal / max) * 100}%"></span></span>
+        <span class="scd-num"><b>${r.aantal}</b> · ${pctTxt(r.pct)}</span></div>`).join('')}
+    </div></div>`;
+  }
+
+  /** Conversie naar klant: één tabel, per categorie / traject / aanpak (vergelijkbaar onder elkaar). */
+  function conversieTabel(c) {
+    const sectie = (titel, rijen) => `<tr class="scd-sec"><th colspan="5">${esc(titel)}</th></tr>` + rijen.map((r) => `<tr><td>${esc(r.naam)}</td>
+      <td class="r">${r.scans}</td><td class="r">${r.klanten}</td>
+      <td class="r" style="white-space:nowrap">${r.scans ? `<span class="scd-mini"><b style="width:${Math.min(100, r.conversie)}%"></b></span>${pctTxt(r.conversie)}` : '—'}</td>
+      <td class="r" style="white-space:nowrap">${r.dealwaarde ? eur(r.dealwaarde) : '—'}</td></tr>`).join('');
+    return `<div class="card" style="margin:0 0 12px"><div class="card-head"><div class="card-title">Conversie naar klant</div>
+      <div style="color:var(--text-3);font-size:12px">Dealwaarde = gewonnen deals die bij de scan horen</div></div>
+      <div class="tbl-wrap"><table class="scd-conv" style="width:100%;border-collapse:collapse">
+      <thead><tr><th></th><th class="r">Scans</th><th class="r">Klant geworden</th><th class="r">Conversie</th><th class="r">Dealwaarde</th></tr></thead>
+      <tbody>${sectie('Per categorie', c.categorie)}${sectie('Per traject', c.traject)}${sectie('Per aanpak', c.aanpak)}</tbody></table></div></div>`;
+  }
+
+  function dashboardView() {
+    const p = dashPeriode();
+    const qs = 'dashboard=1' + (p.van ? '&van=' + p.van : '') + (p.tot ? '&tot=' + p.tot : '') + (dash.groep ? '&groep=' + dash.groep : '');
+    if (dash.sleutel !== qs && !dash.loading && !(dash.periode === 'eigen' && (!p.van || !p.tot))) queueMicrotask(() => laadDash(false));
+    const filters = `<div class="toolbar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+      ${DASH_PERIODES.map(([v, l]) => `<button class="chip ${dash.periode === v ? 'on' : ''}" onclick="__scDashF('periode','${v}')">${l}</button>`).join('')}
+      ${dash.periode === 'eigen' ? `<input type="date" class="filter-sel" value="${esc(dash.van)}" onchange="__scDashF('van', this.value)" aria-label="Vanaf">
+        <input type="date" class="filter-sel" value="${esc(dash.tot)}" onchange="__scDashF('tot', this.value)" aria-label="Tot en met">` : ''}
+      <select class="filter-sel" onchange="__scDashF('groep', this.value)" aria-label="Per week of maand">
+        ${[['', 'Indeling: automatisch'], ['week', 'Per week'], ['maand', 'Per maand']].map(([v, l]) => `<option value="${v}"${dash.groep === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+    </div>`;
+    const kop = `<div style="margin-bottom:12px"><div style="font-size:18px;font-weight:700">Dashboard strategie-scans</div>
+      <div style="color:var(--text-3);font-size:12.5px">Afgeronde en verstuurde scans in de gekozen periode. Klant = gewonnen deal (automatisch) of handmatig gezet.</div></div>`;
+    if (dash.fout) return `<div class="pad">${DASH_CSS}${kop}${filters}<div class="card"><div class="card-body" style="color:var(--rose)">${esc(dash.fout)}</div></div></div>`;
+    const d = dash.data;
+    if (!d) return `<div class="pad">${DASH_CSS}${kop}${filters}<div style="color:var(--text-3);font-size:12.5px">${dash.periode === 'eigen' && (!p.van || !p.tot) ? 'Kies een begin- en einddatum.' : 'Dashboard laden…'}</div></div>`;
+    const t = d.totaal;
+    const tegel = (label, val, sub) => `<div class="card" style="padding:12px 14px;margin:0"><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">${label}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:2px">${val}</div><div style="color:var(--text-3);font-size:11.5px">${sub}</div></div>`;
+    const tegels = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:12px">
+      ${tegel('Scans', t.scans, t.concepten ? t.concepten + ' concept' + (t.concepten === 1 ? '' : 'en') + ' niet meegeteld' : 'afgerond of verstuurd')}
+      ${tegel('Rapport verstuurd', t.verstuurd, t.scans ? pctTxt(t.verstuurd_pct) + ' van de scans' : '—')}
+      ${tegel('Klant geworden', t.klanten, t.scans ? pctTxt(t.conversie) + ' conversie · ' + t.klanten_automatisch + ' auto, ' + t.klanten_handmatig + ' handmatig' : '—')}
+      ${tegel('Dealwaarde', eur(t.dealwaarde), t.deals ? t.deals + ' deal' + (t.deals === 1 ? '' : 's') + ' · gem. ' + eur(t.gem_dealwaarde) + (t.klanten_zonder_deal ? ' · ' + t.klanten_zonder_deal + ' klant zonder deal' : '') : (t.klanten ? t.klanten_zonder_deal + ' klant(en) zonder gekoppelde deal' : 'nog geen gewonnen deals'))}
+      ${tegel('Gem. readiness', t.gem_readiness != null ? t.gem_readiness : '—', 'van de 100')}
+    </div>`;
+    const reeksTabel = `<details style="margin-top:8px;font-size:12px"><summary style="cursor:pointer;color:var(--text-3)">Cijfers per ${d.periode.groep}</summary>
+      <table class="scd-conv" style="width:100%;border-collapse:collapse;margin-top:6px"><thead><tr><th>${d.periode.groep === 'week' ? 'Week van' : 'Maand'}</th><th class="r">Scans</th><th class="r">Klant geworden</th></tr></thead>
+      <tbody>${d.reeks.map((r) => `<tr><td>${esc(r.label)}</td><td class="r">${r.scans}</td><td class="r">${r.klanten}</td></tr>`).join('')}</tbody></table></details>`;
+    const grafiek = `<div class="card" style="margin-bottom:12px"><div class="card-head"><div class="card-title">Scans per ${d.periode.groep}</div>
+      <div style="color:var(--text-3);font-size:12px">${esc(d.periode.van)} t/m ${esc(d.periode.tot)}</div></div><div class="card-body">
+      <div class="scd-legend"><span><i style="background:var(--emerald)"></i>Klant geworden</span><span><i class="r" style="background:#CBD2DC"></i>Nog geen klant</span></div>
+      ${d.reeks.length ? kolommenSvg(d.reeks) : '<div style="color:var(--text-3);font-size:12.5px">Geen scans in deze periode.</div>'}
+      ${reeksTabel}</div></div>`;
+    const grid = (html) => `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px">${html}</div>`;
+    return `<div class="pad">${DASH_CSS}${kop}${filters}${tegels}${grafiek}
+      ${grid(verdelingKaart('Uitkomst-categorie', d.verdeling.categorie) + verdelingKaart('Aanbevolen traject', d.verdeling.traject) + verdelingKaart('Aanbevolen aanpak', d.verdeling.aanpak))}
+      ${conversieTabel(d.conversie)}
+      ${dash.loading ? '<div style="color:var(--text-3);font-size:12px">Bijwerken…</div>' : ''}</div>`;
+  }
+
   window.DFO.VIEWS = window.DFO.VIEWS || {};
   window.DFO.VIEWS['scans/Overzicht'] = scansView;
+  window.DFO.VIEWS['scans/Dashboard'] = dashboardView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('scans');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('scans');
 })();
