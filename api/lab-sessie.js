@@ -10,6 +10,10 @@
 //   POST /api/lab-sessie   { moment: ISO } → boekt in dezelfde agenda als de
 //                            kennismakingsgesprekken, met bron 'the-lab'.
 //
+// De sessie is met de GASTHEER (_lib/lab-gastheer.js — Dave). Elk antwoord
+// draagt `gastheer: { voornaam, naam, foto_url, initialen }` (of null) voor de
+// boekingskaart; bij een boeking wordt hij eigenaar van de afspraak.
+//
 // Schaarste wordt NOOIT verzonnen: `deze_week` is het werkelijke aantal vrije
 // momenten tot en met zondag, uit dezelfde agenda waaruit geboekt wordt.
 
@@ -20,6 +24,7 @@ import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-
 import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+import { leesLabGastheer } from './_lib/lab-gastheer.js';
 
 const VENSTER_DAGEN = 14;
 const DUUR_MIN = 30;
@@ -99,15 +104,20 @@ export default async function handler(req, res) {
   const geboekt = lab.sessie_moment && Date.parse(lab.sessie_moment) > Date.now() - 3600 * 1000
     ? { moment: lab.sessie_moment } : null;
 
+  const gastheer = await leesLabGastheer();
+  const zichtbaar = gastheer
+    ? { voornaam: gastheer.voornaam, naam: gastheer.naam, foto_url: gastheer.foto_url, initialen: gastheer.initialen }
+    : null;
+
   if (req.method === 'GET') {
-    if (geboekt) return res.status(200).json({ ok: true, geboekt, momenten: [], deze_week: null });
+    if (geboekt) return res.status(200).json({ ok: true, geboekt, momenten: [], deze_week: null, gastheer: zichtbaar });
     try {
       const v = await vrijeMomenten();
-      if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true });
-      return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten) });
+      if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar });
+      return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten), gastheer: zichtbaar });
     } catch (e) {
       console.error('[lab-sessie] slots ophalen:', e?.message || e);
-      return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true });
+      return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar });
     }
   }
 
@@ -142,6 +152,8 @@ export default async function handler(req, res) {
         lead_name: [lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lead.voornaam,
         lead_email: lead.email,
         lead_phone: lead.telefoon_e164 || lead.telefoon,
+        // De gastheer is de eigenaar van het gesprek (niet de setter).
+        owner_id: gastheer?.id || null,
       },
       scheduledAt: iso, durationMinutes: DUUR_MIN, source: LAB_SLUG,
     });
@@ -162,5 +174,5 @@ export default async function handler(req, res) {
     userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
   });
 
-  return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null });
+  return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null, gastheer: zichtbaar });
 }

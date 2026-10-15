@@ -38,6 +38,8 @@ mock.module(url('api/public-opstartsessie-free-slots.js'), { defaultExport: _slo
 } });
 
 const { default: sessie, momentenUitSlots, aantalDezeWeek } = await import(url('api/lab-sessie.js'));
+const { _resetGastheerCache, initialen, gastheerUitProfiel } = await import(url('api/_lib/lab-gastheer.js'));
+const DAVE = { id: 'prof-dave', email: 'dave@deforexopleiding.nl', full_name: 'Dave Heylen', avatar_url: null, is_active: true, role: 'sales' };
 const { default: nieuweLink, ANTWOORD } = await import(url('api/lab-nieuwe-link.js'));
 
 process.env.GHL_CALENDAR_ID = 'cal';
@@ -46,7 +48,8 @@ process.env.GHL_PIT_TOKEN = 'tok';
 const LAB = { id: 'll-1', auth_id: 'auth-1', email: 'lead@voorbeeld.be', voornaam: 'Lien', achternaam: null, telefoon: '+32472223752', crm_lead_id: 'lead-1', toegang_tot: new Date(Date.now() + 5 * 86400000).toISOString(), sessie_moment: null };
 
 beforeEach(() => {
-  crm = maakFakeDb({ leads: [{ id: 'lead-1', voornaam: 'Lien', email: 'lead@voorbeeld.be', telefoon_e164: '+32472223752' }] }, { rpc: { upsert_lead: upsertLeadRpc } });
+  crm = maakFakeDb({ leads: [{ id: 'lead-1', voornaam: 'Lien', email: 'lead@voorbeeld.be', telefoon_e164: '+32472223752' }], profiles: [{ ...DAVE }], app_settings: [] }, { rpc: { upsert_lead: upsertLeadRpc } });
+  _resetGastheerCache();
   lms = maakFakeDb({ 'auth.users': [{ id: 'auth-1', email: 'lead@voorbeeld.be', token: 'goed' }], hlms_lab_lead: [{ ...LAB }] });
   mails = []; geboekt = [];
   const morgen = new Date(Date.now() + 86400000);
@@ -124,4 +127,40 @@ test('nieuwe link na het verlopen: wijst naar de boekingspagina', async () => {
   await vraag(nieuweLink, 'POST', null, { email: 'lead@voorbeeld.be' });
   assert.match(mails[0].html, /naar=sessie/);
   assert.match(mails[0].html, /Plan mijn strategiesessie/);
+});
+
+test('GASTHEER: de kaart krijgt Daves naam en initialen (geen foto → null, geen e-mail of rol)', async () => {
+  const r = await vraag(sessie, 'GET', 'goed');
+  assert.deepEqual(r.body.gastheer, { voornaam: 'Dave', naam: 'Dave Heylen', foto_url: null, initialen: 'DH' });
+});
+
+test('GASTHEER: Dave wordt EIGENAAR van de afspraak, de bron blijft the-lab (geen setter)', async () => {
+  const g = await vraag(sessie, 'GET', 'goed');
+  await vraag(sessie, 'POST', 'goed', { moment: g.body.momenten[0] });
+  assert.equal(geboekt[0].lead.owner_id, 'prof-dave');
+  assert.equal(geboekt[0].source, 'the-lab');
+});
+
+test('GASTHEER: app_settings.lab_gastheer wint; een inactief profiel telt niet', async () => {
+  crm.tabellen.profiles.push({ id: 'prof-ander', email: 'x@deforexopleiding.nl', full_name: 'Ander Persoon', avatar_url: 'https://cdn.voorbeeld/foto.jpg', is_active: true });
+  crm.tabellen.app_settings.push({ key: 'lab_gastheer', value: { profiel_id: 'prof-ander' } });
+  const r = await vraag(sessie, 'GET', 'goed');
+  assert.equal(r.body.gastheer.naam, 'Ander Persoon');
+  assert.equal(r.body.gastheer.foto_url, 'https://cdn.voorbeeld/foto.jpg');
+  assert.equal(gastheerUitProfiel({ id: 'x', full_name: 'Weg', is_active: false }), null);
+});
+
+test('GASTHEER: niemand gevonden → null, en boeken werkt gewoon zonder eigenaar', async () => {
+  crm.tabellen.profiles = [];
+  const g = await vraag(sessie, 'GET', 'goed');
+  assert.equal(g.body.gastheer, null);
+  const r = await vraag(sessie, 'POST', 'goed', { moment: g.body.momenten[0] });
+  assert.equal(r.statusCode, 200);
+  assert.equal(geboekt[0].lead.owner_id, null);
+});
+
+test('initialen', () => {
+  assert.equal(initialen('Dave Heylen'), 'DH');
+  assert.equal(initialen('dave'), 'D');
+  assert.equal(initialen(''), null);
 });

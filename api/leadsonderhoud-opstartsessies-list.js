@@ -402,7 +402,7 @@ export default async function handler(req, res) {
       // van de kennismakingsgesprekken-agenda.
       let cq = supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, ghl_appointment_id, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
+        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, ghl_appointment_id, booking_source, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
         .not('ghl_appointment_id', 'is', null)
         .limit(limit);
       if (useRange) {
@@ -449,8 +449,10 @@ export default async function handler(req, res) {
           id              : 'appt:' + c.id,          // prefix → detailmodal herkent de call
           bron_type       : 'ghl_call',
           created_at      : c.scheduled_at,
-          booking_source  : null,
-          bron_label      : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda'),
+          // De bron van een directe boeking (bv. 'the-lab' vanuit het LMS) —
+          // zo herkent de lijst een Lab-gesprek ook zonder submission.
+          booking_source  : c.booking_source || null,
+          bron_label      : c.booking_source === 'the-lab' ? 'The Lab' : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda'),
           naam            : c.lead_name,
           email           : c.lead_email,
           telefoon        : c.lead_phone,
