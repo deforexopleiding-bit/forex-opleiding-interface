@@ -44,20 +44,23 @@ test('maximaal 2 beelden in de flow, via srcset uit /img/scan (geen base64), the
   const html = lees('modules/scan/index.html');
   const figuren = html.match(/<figure class="beeld[^"]*">/g) || [];
   assert.equal(figuren.length, 2);
-  assert.match(html, /<figure class="beeld introbeeld">\s*<img src="\/img\/scan\/scan-intro-1400\.jpg" srcset="\/img\/scan\/scan-intro-800\.jpg 800w, \/img\/scan\/scan-intro-1400\.jpg 1400w"/);
+  assert.match(html, /<figure class="beeld introbeeld">\s*<img src="\/img\/scan\/scan-intro-les-1400\.jpg" srcset="\/img\/scan\/scan-intro-les-800\.jpg 800w, \/img\/scan\/scan-intro-les-1400\.jpg 1400w"[^>]*width="1400" height="788"/);
+  // De oude "AI in Actie"-seminarfoto is weg (bestanden + verwijzingen).
+  assert.doesNotMatch(html, /scan-intro-(800|1400)\.jpg/);
+  assert.ok(!existsSync(pad('img/scan/scan-intro-800.jpg')) && !existsSync(pad('img/scan/scan-intro-1400.jpg')), 'oude AI-foto verwijderd');
   assert.match(html, /<figure class="beeld sellbeeld">\s*<img src="\/img\/scan\/scan-trading-1200\.jpg" srcset="\/img\/scan\/scan-trading-700\.jpg 700w, \/img\/scan\/scan-trading-1200\.jpg 1200w"[\s\S]*?loading="lazy"/);
   assert.ok(html.indexOf('introbeeld') < html.indexOf('class="meta"'), 'intro-beeld onder de introtekst');
   assert.ok(html.indexOf('sellbeeld') > html.indexOf('id="sellCard"'), 'tweede beeld in "Jouw volgende stap" (valt mee weg bij "Nu nog niet")');
   assert.doesNotMatch(html, /data:image/);
   const css = lees('modules/scan/scan.css');
   assert.match(css, /:root:not\(\[data-theme="light"\]\) \.beeld img\{filter:brightness\(\.74\) saturate\(\.88\)\}/);
-  assert.match(lees('modules/scan/index.html'), /scan\.css\?v=3/);
+  assert.match(lees('modules/scan/index.html'), /scan\.css\?v=4/);
 });
 
 test('bestanden: bestaan, juiste maten (zoals in de HTML), geoptimaliseerd', () => {
   const verwacht = {
     'img/scan/logo-navy.png': [400, 226], 'img/scan/logo-wit.png': [400, 226],
-    'img/scan/scan-intro-800.jpg': [800, 533], 'img/scan/scan-intro-1400.jpg': [1400, 932],
+    'img/scan/scan-intro-les-800.jpg': [800, 450], 'img/scan/scan-intro-les-1400.jpg': [1400, 788],
     'img/scan/scan-trading-700.jpg': [700, 700], 'img/scan/scan-trading-1200.jpg': [1200, 1200],
   };
   for (const [p, [w, h]] of Object.entries(verwacht)) {

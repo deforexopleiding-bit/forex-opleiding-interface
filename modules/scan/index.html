@@ -16,7 +16,7 @@
   // Thema vóór de eerste paint (geen flits): opgeslagen keuze, anders systeemvoorkeur.
   (function () { var t = 'dark'; try { var s = localStorage.getItem('dfo-scan-theme'); if (s) t = s; else if (window.matchMedia && matchMedia('(prefers-color-scheme:light)').matches) t = 'light'; } catch (e) {} document.documentElement.setAttribute('data-theme', t); })();
 </script>
-<link rel="stylesheet" href="/modules/scan/scan.css?v=3">
+<link rel="stylesheet" href="/modules/scan/scan.css?v=4">
 <script src="/modules/shared/supabase-client.js"></script>
 </head>
 <body>
@@ -52,8 +52,8 @@
     </div>
     <!-- Beeld 1 van 2 (sfeer, onder de introtekst). -->
     <figure class="beeld introbeeld">
-      <img src="/img/scan/scan-intro-1400.jpg" srcset="/img/scan/scan-intro-800.jpg 800w, /img/scan/scan-intro-1400.jpg 1400w"
-        sizes="(max-width: 760px) 100vw, 684px" width="1400" height="932" alt="Live sessie bij De Forex Opleiding" decoding="async" fetchpriority="high">
+      <img src="/img/scan/scan-intro-les-1400.jpg" srcset="/img/scan/scan-intro-les-800.jpg 800w, /img/scan/scan-intro-les-1400.jpg 1400w"
+        sizes="(max-width: 760px) 100vw, 684px" width="1400" height="788" alt="Mentor licht een chart toe tijdens een les bij De Forex Opleiding" decoding="async" fetchpriority="high">
     </figure>
     <div class="meta">
       <span class="mchip"><b>±15</b> minuten</span>

@@ -238,6 +238,7 @@ label.lab{display:block;font-size:11px;letter-spacing:.14em;text-transform:upper
 .beeld img{display:block;width:100%;height:100%;object-fit:cover}
 .beeld::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(201,162,63,.18)}
 .introbeeld{margin:26px 0 4px;aspect-ratio:16/7}
+.introbeeld img{object-position:center 35%}
 .introbeeld::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(6,13,18,0) 40%,rgba(6,13,18,.55) 100%),linear-gradient(90deg,rgba(6,13,18,.25),transparent 55%)}
 .sellbeeld{margin:-6px 0 22px;aspect-ratio:16/6}
 .sellbeeld img{object-position:center 30%}
