@@ -138,6 +138,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   server rekent ALTIJD zelf; antwoorden = likert 1..5 of optie-index.
   "Nu nog niet" alleen bij Schulden. Override + notitie apart bewaard.
   Ingang: `/scan?afspraak=<id>` (link in het call-rapport bij webinar-calls).
+  Fase 2: `api/scan-rapport.js` — rapport- + certificaat-PDF (`api/_lib/scan-pdf.js`,
+  pdfkit, Fraunces/Inter-WOFF in `api/_lib/fonts/scan/`, includeFiles in vercel.json),
+  mail vanaf info@ (`api/mailer.js`), privé bucket `scan-rapporten`. Volgorde:
+  upload → mail → status 'verstuurd'; mail mislukt = uploads weer weg.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

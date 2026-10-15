@@ -226,6 +226,9 @@ label.lab{display:block;font-size:11px;letter-spacing:.14em;text-transform:upper
 .dave label.lab{margin-top:14px}
 .dave textarea.txt{resize:vertical;line-height:1.5;font-size:14px}
 .dave select.txt{padding:11px 12px;font-size:13.5px}
+.navr{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.vinfo{font-size:12px;color:var(--muted);text-align:right;margin-top:10px;min-height:16px}
+.pdfrij{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:18px;font-size:12px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:50;background:var(--surface2);color:var(--strong);border:1px solid var(--goldline);border-radius:12px;padding:12px 18px;font-size:13.5px;box-shadow:0 20px 50px -20px rgba(0,0,0,.7);max-width:calc(100vw - 32px)}
 @media (max-width:560px){.recgrid{grid-template-columns:1fr}.card{padding:22px}.lk span{display:none}.lk{padding:13px 2px}.dave .dgrid{grid-template-columns:1fr}.conf{display:none}.bb{gap:8px}.bb-right{gap:7px}.brand{gap:8px}.brand .nm{font-size:11px;letter-spacing:.1em;white-space:nowrap}.brand .nm small{display:none}.opslag:not(.fout){display:none}.mini{padding:6px 10px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.item{opacity:1!important}}

@@ -16,7 +16,7 @@
   // Thema vóór de eerste paint (geen flits): opgeslagen keuze, anders systeemvoorkeur.
   (function () { var t = 'dark'; try { var s = localStorage.getItem('dfo-scan-theme'); if (s) t = s; else if (window.matchMedia && matchMedia('(prefers-color-scheme:light)').matches) t = 'light'; } catch (e) {} document.documentElement.setAttribute('data-theme', t); })();
 </script>
-<link rel="stylesheet" href="/modules/scan/scan.css?v=1">
+<link rel="stylesheet" href="/modules/scan/scan.css?v=2">
 <script src="/modules/shared/supabase-client.js"></script>
 </head>
 <body>
@@ -160,17 +160,22 @@
       <label class="lab" for="oSamen">Samenvatting</label><textarea class="txt" id="oSamen" rows="3"></textarea>
       <label class="lab" for="oAdvies">Advies &amp; vervolg</label><textarea class="txt" id="oAdvies" rows="4"></textarea>
       <label class="lab" for="oNotitie">Notitie (intern — komt niet in het rapport)</label><textarea class="txt" id="oNotitie" rows="3"></textarea>
+      <div class="pdfrij"><span>Voorbeeld als PDF:</span><button class="mini" id="pdfRapportBtn" type="button">Rapport</button><button class="mini" id="pdfCertBtn" type="button">Certificaat</button></div>
       <div class="nav"><button class="btn ghost" id="herstelBtn" type="button">Berekende uitkomst herstellen</button><button class="btn ghost" id="conceptBtn" type="button">Opslaan als concept</button></div>
     </details>
 
     <div class="nav">
       <button class="btn ghost" id="aanpasBtn" type="button">← Antwoorden aanpassen</button>
-      <button class="btn" id="afrondBtn" type="button">Afronden &amp; opslaan →</button>
+      <div class="navr">
+        <button class="btn ghost" id="afrondBtn" type="button">Afronden &amp; opslaan</button>
+        <button class="btn" id="verstuurBtn" type="button">Verstuur rapport (info@) →</button>
+      </div>
     </div>
+    <p class="vinfo" id="vInfo"></p>
   </section>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-<script type="module" src="/modules/scan/scan-app.js?v=1"></script>
+<script type="module" src="/modules/scan/scan-app.js?v=2"></script>
 </body>
 </html>

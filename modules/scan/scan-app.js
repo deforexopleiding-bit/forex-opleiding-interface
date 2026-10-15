@@ -22,7 +22,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const noMo = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches);
 
 const S = {
-  id: null, afspraak_id: null, lead_id: null, status: 'concept',
+  id: null, afspraak_id: null, lead_id: null, status: 'concept', verstuurd_op: null,
   antwoorden: {}, override: {}, notitie: '',
   assessor: 'Dave', datum: new Date(), stap: 0, dir: 1,
 };
@@ -91,6 +91,7 @@ function deelnemer() {
   return { naam: $('naam').value.trim(), email: $('mail').value.trim(), telefoon: $('tel').value.trim() };
 }
 function statusTekst(s) { return s === 'verstuurd' ? 'Rapport verstuurd' : s === 'afgerond' ? 'Afgerond' : 'Concept'; }
+function tijdTekst(d) { return new Date(d).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
 function zetOpslag(tekst, fout) {
   const el = $('opslag'); el.hidden = false; el.textContent = tekst; el.classList.toggle('fout', !!fout);
 }
@@ -333,8 +334,60 @@ function toonResultaat(animeer) {
   window.scrollTo(0, 0);
 }
 function zetAfrondKnop() {
-  $('afrondBtn').textContent = S.status === 'concept' ? 'Afronden & opslaan →' : 'Wijzigingen opslaan';
+  $('afrondBtn').textContent = S.status === 'concept' ? 'Afronden & opslaan' : 'Wijzigingen opslaan';
+  $('verstuurBtn').textContent = S.status === 'verstuurd' ? 'Opnieuw versturen →' : 'Verstuur rapport (info@) →';
+  $('conceptBtn').textContent = S.status === 'concept' ? 'Opslaan als concept' : 'Opslaan';
+  const mail = deelnemer().email;
+  $('vInfo').textContent = S.status === 'verstuurd' && S.verstuurd_op
+    ? 'Verstuurd op ' + tijdTekst(S.verstuurd_op) + (mail ? ' naar ' + mail : '') + '.'
+    : (mail ? 'Rapport + certificaat gaan vanaf info@ naar ' + mail + '.' : 'Vul bij de start een e-mailadres in om het rapport te kunnen versturen.');
 }
+
+// ── Rapport: voorbeeld-PDF en versturen (fase 2) ───────────────────────────
+async function pdfVoorbeeld(soort) {
+  // Venster meteen openen (in de klik), anders blokkeert de browser de pop-up.
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:system-ui;padding:24px;color:#555">PDF wordt gemaakt…</p>');
+  try {
+    leesPaneel();
+    const b = await bewaar();
+    if (!b.ok) throw new Error(b.fout);
+    const token = await window.AuthShared.getAccessToken();
+    const r = await fetch('/api/scan-rapport?id=' + encodeURIComponent(S.id) + '&soort=' + soort, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'PDF maken mislukt'); }
+    const url = URL.createObjectURL(await r.blob());
+    if (w) w.location.href = url; else window.open(url, '_blank');
+  } catch (e) {
+    if (w) w.close();
+    toast(e.message || 'PDF maken mislukt');
+  }
+}
+$('pdfRapportBtn').addEventListener('click', () => pdfVoorbeeld('rapport'));
+$('pdfCertBtn').addEventListener('click', () => pdfVoorbeeld('certificaat'));
+
+$('verstuurBtn').addEventListener('click', async () => {
+  leesPaneel();
+  const mail = deelnemer().email;
+  if (!mail) { toast('Vul eerst het e-mailadres van de deelnemer in (bij de start).'); return; }
+  const vraag = (S.status === 'verstuurd' ? 'Het rapport is al eens verstuurd. Opnieuw ' : '') + 'rapport + certificaat mailen naar ' + mail + '?';
+  if (!window.confirm(vraag)) return;
+  $('verstuurBtn').disabled = true; $('afrondBtn').disabled = true;
+  const knop = $('verstuurBtn').textContent; $('verstuurBtn').textContent = 'Versturen…';
+  try {
+    const b = await bewaar(S.status === 'concept' ? 'afgerond' : undefined);
+    if (!b.ok) { toast(b.fout); return; }
+    const r = await api('POST', '/api/scan-rapport', { id: S.id });
+    if (!r.ok || !r.data.scan) { toast(r.data.error || 'Versturen mislukt'); return; }
+    S.status = r.data.scan.status; S.verstuurd_op = r.data.scan.verstuurd_op;
+    zetOpslag('Rapport verstuurd · ' + tijdTekst(S.verstuurd_op));
+    $('bewaarBtn').textContent = 'Opslaan';
+    toast('Rapport en certificaat verstuurd naar ' + mail + '.');
+  } finally {
+    $('verstuurBtn').disabled = false; $('afrondBtn').disabled = false;
+    $('verstuurBtn').textContent = knop;
+    zetAfrondKnop();
+  }
+});
 $('aanpasBtn').addEventListener('click', () => ga(0));
 $('afrondBtn').addEventListener('click', async () => {
   leesPaneel();
@@ -352,12 +405,12 @@ function vulDeelnemer(p) {
   $('naam').value = p.naam || ''; $('mail').value = p.email || ''; $('tel').value = p.telefoon || '';
 }
 function laadScan(s) {
-  S.id = s.id; S.status = s.status; S.lead_id = s.lead_id; S.afspraak_id = s.afspraak_id;
+  S.id = s.id; S.status = s.status; S.lead_id = s.lead_id; S.afspraak_id = s.afspraak_id; S.verstuurd_op = s.verstuurd_op || null;
   S.antwoorden = normaliseerAntwoorden(s.antwoorden); S.override = s.override || {}; S.notitie = s.dave_notitie || '';
   S.datum = s.aangemaakt ? new Date(s.aangemaakt) : new Date();
   if (s.assessor_naam) zetAssessor(s.assessor_naam);
   vulDeelnemer({ naam: s.deelnemer_naam, email: s.deelnemer_email, telefoon: s.deelnemer_telefoon });
-  zetOpslag(statusTekst(s.status));
+  zetOpslag(s.status === 'verstuurd' && s.verstuurd_op ? 'Rapport verstuurd · ' + tijdTekst(s.verstuurd_op) : statusTekst(s.status));
   $('bewaarBtn').textContent = s.status === 'concept' ? 'Concept opslaan' : 'Opslaan';
   prog();
   if (s.status !== 'concept') { toonResultaat(false); return; }
