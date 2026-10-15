@@ -35,6 +35,9 @@ import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 
 export const BERICHT_OK = 'Gelukt! Check je mailbox: je link naar The Lab is onderweg.';
+// Het LMS-deel mislukte: de opvolgcron probeert het opnieuw. Dan beloven we geen
+// mail die nog niet weg is. Dit zegt niets over het adres (een storing, geen bestaan).
+export const BERICHT_LATER = 'Gelukt! We zetten je account klaar — je link komt binnen enkele minuten in je mailbox.';
 
 /** Herkomst-kanaal voor leads.soort. PURE. */
 export function soortUitUtm({ utm_source, fbclid }) {
@@ -188,5 +191,5 @@ export default async function handler(req, res) {
   });
 
   console.log('[lab-aanmelding]', { aanmelding: aanmeldingId, lead: leadId, resultaat: uitkomst.resultaat, mail: uitkomst.mail_status, wa: uitkomst.wa_status, hook: d.hook, test: d.is_test });
-  return res.status(200).json({ ok: true, event_id: eventId, bericht: BERICHT_OK });
+  return res.status(200).json({ ok: true, event_id: eventId, bericht: uitkomst.resultaat === 'lms_fout' ? BERICHT_LATER : BERICHT_OK });
 }

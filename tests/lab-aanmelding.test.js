@@ -213,6 +213,7 @@ test('LMS-migratie nog niet gedraaid: geen trial zonder einddatum, wel een gewoo
   assert.equal((lms.tabellen.hlms_rol || []).length, 0);
   assert.equal(crm.tabellen.lab_aanmeldingen[0].resultaat, 'lms_fout');
   assert.equal(mails.length, 0);
+  assert.match(r.body.bericht, /klaar/, 'geen belofte van een mail die nog niet weg is');
 });
 
 test('CRM-migratie nog niet gedraaid: aanmelding werkt gewoon door', async () => {
