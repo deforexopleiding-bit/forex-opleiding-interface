@@ -127,6 +127,15 @@
     tijd += regel('Strategiesessie', geboekt ? '<b>' + esc(datum(geboekt)) + '</b>' : '<span style="color:var(--text-3)">niet geboekt</span>');
     h += sectie('Verloop', tijd);
 
+    // Welke ingang hij koos en wat hij buiten de simulatie deed (kaart, video's).
+    if (d.route || (d.gebeurtenissen && d.gebeurtenissen.length)) {
+      let rt = '';
+      if (d.route) rt += regel('Gekozen route', '<b>' + esc(d.route.label) + '</b>' + (d.route.op ? ' <span style="color:var(--text-3)">· ' + esc(datum(d.route.op)) + '</span>' : ''));
+      if (d.video && (d.video.gestart || d.video.voltooid)) rt += regel('Video\'s', esc(d.video.gestart + ' gestart · ' + d.video.voltooid + ' uitgekeken'));
+      rt += (d.gebeurtenissen || []).map((g) => regel(datum(g.op), esc(g.regel))).join('');
+      h += sectie('Route en gedrag', rt);
+    }
+
     if (d.kwalificatie.length) {
       h += sectie('Kwalificatie (einde The Lab)', d.kwalificatie.map((k) => regel(k.vraag, '<b>' + esc(k.antwoord) + '</b>')).join(''));
     }

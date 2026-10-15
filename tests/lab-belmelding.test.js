@@ -62,6 +62,13 @@ test('LAB AF: pas na 5 minuten zonder boeking, niet ervoor', () => {
   assert.deepEqual(geldendeRedenen(af(5), NU), ['lab_af_niet_geboekt']);
 });
 
+test('LAB AF: de 5 minuten tellen vanaf afgerondOp (ms als tekst), niet vanaf de laatste hartslag', () => {
+  // De lead kijkt nog naar zijn resultaat: de hartslag is 10 s oud, afgerond 6 min geleden.
+  const s = leadStand({ labLead: LEAD(), sessie: SESSIE({ afgerond: 'true', voortgang: 100, afgerond_op: String(NU - 6 * MIN), bijgewerkt_op: iso(NU - 10000) }) });
+  assert.equal(s.afgerondOp, NU - 6 * MIN);
+  assert.deepEqual(geldendeRedenen(s, NU), ['lab_af_niet_geboekt']);
+});
+
 test('INVESTEREN: ja en misschien meteen, nee nooit', () => {
   for (const [antw, verwacht] of [['ja', ['lab_investeren']], ['misschien', ['lab_investeren']], ['nee', []]]) {
     const s = leadStand({ labLead: LEAD({ kwalificatie: { investeren: antw } }), sessie: SESSIE() });

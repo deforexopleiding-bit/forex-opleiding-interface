@@ -1,0 +1,5 @@
+{
+  "_bron": "information_schema.columns op dfo-lms (absicpdidnoblirngiia), gemeten 15 okt 2026 na hlms_lab_lead_gebeurtenis.sql",
+  "hlms_lab_lead": "id,auth_id,email,voornaam,achternaam,telefoon,herkomst,crm_lead_id,hook,utm,toegang_van,toegang_tot,eerste_login_op,laatste_login_op,kwalificatie,sessie_geboekt_op,sessie_moment,sessie_afspraak_id,is_test,aangemaakt_op,bijgewerkt_op,route,route_gekozen_op",
+  "hlms_lab_lead_gebeurtenis": "id,lead_id,soort,sleutel,data,op"
+}

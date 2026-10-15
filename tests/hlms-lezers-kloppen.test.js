@@ -39,6 +39,8 @@ const API = join(WORTEL, 'api');
 const DUMP = {
   ...JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261013.json'), 'utf8')),
   ...JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261015-lab.json'), 'utf8')),
+  // Na hlms_lab_lead_gebeurtenis.sql (route + gebeurtenissen van een lab-lead).
+  ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261015-gebeurtenis.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
 };
 
 // VERWACHT, NIET GEMETEN — tabellen die nog niet in de meting staan (nieuw uit

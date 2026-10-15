@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { labStatus, aggregeerFunnel, vragenUitSnapshot, kwalificatieRegels, minutenInLab, isAfgerond } from '../api/_lib/lab-dossier.js';
+import { labStatus, aggregeerFunnel, vragenUitSnapshot, kwalificatieRegels, minutenInLab, isAfgerond, gebeurtenisRegel, ROUTE_LABELS } from '../api/_lib/lab-dossier.js';
 
 const nu = Date.parse('2026-10-15T12:00:00Z');
 const toekomst = '2026-10-20T00:00:00Z';
@@ -73,4 +73,14 @@ test('kwalificatie en tijd in The Lab', () => {
   assert.deepEqual(kwalificatieRegels({ doel: 'vermogen', tijd: '3_6u', investeren: 'misschien' }).map((r) => r.antwoord), ['Vermogen opbouwen', '3 tot 6 uur', 'Misschien']);
   assert.deepEqual(kwalificatieRegels(null), []);
   assert.equal(minutenInLab({ gestart_op: '2026-10-15T10:00:00Z', bijgewerkt_op: '2026-10-15T10:21:30Z' }), 22);
+});
+
+test('GEBEURTENISSEN: elke soort heeft een leesbare regel voor Dave', () => {
+  assert.equal(gebeurtenisRegel({ soort: 'kaart_getoond', data: { na: 'trade 1' } }), 'Boekingskaart in The Lab getoond (na trade 1)');
+  assert.equal(gebeurtenisRegel({ soort: 'kaart_geklikt' }), 'Klikte op de boekingskaart in The Lab');
+  assert.equal(gebeurtenisRegel({ soort: 'route_gekozen', sleutel: 'kort' }), 'Koos: ' + ROUTE_LABELS.kort);
+  assert.equal(gebeurtenisRegel({ soort: 'video_voltooid', data: { titel: 'Market Structure' } }), 'Keek video uit: Market Structure');
+  for (const s of ['kaart_gesloten', 'route_terugkeer', 'video_gestart', 'bevestiging_ics', 'terugbellen_gevraagd']) {
+    assert.ok(gebeurtenisRegel({ soort: s }).length > 5, s);
+  }
 });
