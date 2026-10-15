@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Strategie-scan</title>
+<!-- Strategie-scan (fase 1, 2026-10-15) — bereikbaar via /scan (vercel.json-rewrite).
+     Bewust ZONDER CRM-navigatie: Dave deelt dit scherm met de deelnemer.
+     Opmaak + rekenlogica volgens de goedgekeurde mockup; het scoremodel staat in
+     scan-model.js (gedeeld met api/scan.js, dat bij elke opslag opnieuw rekent). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  // Thema vóór de eerste paint (geen flits): opgeslagen keuze, anders systeemvoorkeur.
+  (function () { var t = 'dark'; try { var s = localStorage.getItem('dfo-scan-theme'); if (s) t = s; else if (window.matchMedia && matchMedia('(prefers-color-scheme:light)').matches) t = 'light'; } catch (e) {} document.documentElement.setAttribute('data-theme', t); })();
+</script>
+<link rel="stylesheet" href="/modules/scan/scan.css?v=1">
+<script src="/modules/shared/supabase-client.js"></script>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="brandbar"><div class="wrap bb">
+  <div class="brand"><span class="em">F</span><span class="nm">De Forex Opleiding<small>Strategie-scan</small></span></div>
+  <div class="bb-right">
+    <span class="opslag" id="opslag" hidden></span>
+    <button class="mini" id="bewaarBtn" type="button" hidden>Concept opslaan</button>
+    <span class="conf">Vertrouwelijk</span>
+    <button class="tgl" id="tgl" type="button" aria-label="Wissel thema"></button>
+  </div>
+</div></div>
+<div class="prog"><div class="pf" id="pf"></div></div>
+<div class="wrap"><div class="dots" id="dots" hidden></div></div>
+
+<div class="wrap">
+  <!-- LADEN / GEEN TOEGANG / FOUT -->
+  <section id="laden" class="screen melding"><div class="spinner" aria-hidden="true"></div><p>Scan laden…</p></section>
+  <section id="melding" class="screen melding" hidden><h2 class="disp" id="mTitel"></h2><p id="mTekst"></p></section>
+
+  <!-- INTRO -->
+  <section id="intro" class="screen fade" hidden>
+    <div class="eyebrow">Persoonlijke strategie-scan</div>
+    <div class="hero">
+      <h1 class="disp">Ontdek wat traden <em>jou</em> kan brengen.</h1>
+      <p class="sub">Een professionele analyse van jouw situatie, doelen en profiel. Je loopt 'm samen met <span data-assessor>Dave</span> door; daarna ontvang je een persoonlijk rapport met een helder, eerlijk beeld en het best passende vervolg.</p>
+    </div>
+    <div class="meta">
+      <span class="mchip"><b>±15</b> minuten</span>
+      <span class="mchip"><b>8</b> onderdelen</span>
+      <span class="mchip"><b>1</b> persoonlijk rapport</span>
+    </div>
+    <div class="card" style="margin-top:26px">
+      <div class="form">
+        <div class="f"><label class="lab" for="naam">Naam deelnemer</label><input class="txt" id="naam" autocomplete="off" maxlength="120"></div>
+        <div class="f"><label class="lab" for="mail">E-mailadres</label><input class="txt" id="mail" type="email" autocomplete="off" maxlength="254"></div>
+        <div class="f"><label class="lab" for="tel">Telefoon</label><input class="txt" id="tel" type="tel" autocomplete="off" maxlength="40"></div>
+      </div>
+      <p class="ferr" id="introFout" role="alert" hidden></p>
+      <div class="trust"><span class="stars">★★★★★</span> 4,7/5 · Vertrouwd door 300+ cursisten</div>
+    </div>
+    <div class="nav"><span></span><button class="btn" id="startBtn" type="button">Begin de scan →</button></div>
+  </section>
+
+  <!-- STEPS -->
+  <section id="steps" class="screen" hidden>
+    <div class="card" id="stepCard">
+      <div class="stephead"><span class="sicon" id="sIcon"></span><div><div class="stepnum" id="sIdx"></div><h2 class="steptitle disp" id="sTitle"></h2></div></div>
+      <div class="stepsub" id="sSub"></div>
+      <div id="sItems"></div>
+    </div>
+    <div class="nav">
+      <button class="btn ghost" id="backBtn" type="button">← Vorige</button>
+      <button class="btn" id="nextBtn" type="button">Volgende →</button>
+    </div>
+  </section>
+
+  <!-- ANALYSE -->
+  <section id="analyse" class="screen" hidden>
+    <svg class="anring" viewBox="0 0 120 120" aria-hidden="true"><defs><linearGradient id="gg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e0bd5f"/><stop offset="1" stop-color="#c9a23f"/></linearGradient></defs>
+      <circle class="trk" cx="60" cy="60" r="52"/><circle class="arc" cx="60" cy="60" r="52"/></svg>
+    <h2 class="disp">Je scan wordt geanalyseerd</h2>
+    <div class="anlist">
+      <div class="anstep"><span class="ck">1</span>Antwoorden verzamelen</div>
+      <div class="anstep"><span class="ck">2</span>Profiel per onderdeel berekenen</div>
+      <div class="anstep"><span class="ck">3</span>Passende aanpak &amp; traject bepalen</div>
+      <div class="anstep"><span class="ck">4</span>Persoonlijk rapport samenstellen</div>
+    </div>
+  </section>
+
+  <!-- RESULT (preview) -->
+  <section id="result" class="screen" hidden>
+    <div class="card">
+      <div class="rhead">
+        <div><div class="eyebrow">Strategie-scan · rapport</div><div class="who disp" id="rName" style="margin-top:6px"></div></div>
+        <div class="meta2" id="rMeta"></div>
+      </div>
+      <div class="goal" id="goalLine" hidden></div>
+      <div class="gaugewrap">
+        <div class="gauge"><svg width="168" height="168" viewBox="0 0 168 168" aria-hidden="true">
+          <defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e0bd5f"/><stop offset="1" stop-color="#c9a23f"/></linearGradient>
+          <linearGradient id="gggr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5fd0a3"/><stop offset="1" stop-color="#2f9e74"/></linearGradient></defs>
+          <circle cx="84" cy="84" r="70" fill="none" stroke="var(--gtrack)" stroke-width="12"/>
+          <circle id="gaugeArc" cx="84" cy="84" r="70" fill="none" stroke="url(#gg)" stroke-width="12" stroke-linecap="round" transform="rotate(-90 84 84)" stroke-dasharray="439.8" stroke-dashoffset="439.8"/>
+        </svg><div class="num"><b id="gNum">0</b><span>Readiness</span></div></div>
+        <div class="verdict"><span class="vbadge" id="vBadge"><span class="vd"></span><span id="vLabel"></span></span><p id="vText"></p></div>
+      </div>
+      <div class="recgrid" id="recgrid"></div>
+    </div>
+
+    <div class="card">
+      <div class="seclabel">Profiel per onderdeel</div>
+      <div class="pill-bars" id="bars"></div>
+    </div>
+
+    <div class="card report">
+      <h3 class="rh">Samenvatting</h3><p id="samenvatting"></p>
+      <h3 class="rh">Wat opvalt</h3><div id="duiding"></div>
+      <h3 class="rh">Advies &amp; vervolg</h3><p id="advies"></p>
+      <div class="disc">Resultaten verschillen per persoon en zijn niet gegarandeerd. Traden brengt risico op verlies met zich mee. Dit rapport is een persoonlijke analyse op basis van je eigen antwoorden en vormt geen financieel advies.</div>
+    </div>
+
+    <div class="card sell" id="sellCard" hidden>
+      <div class="seclabel">Jouw volgende stap</div>
+      <h3 class="rh" id="sellTitle"></h3>
+      <p class="selllead" id="sellLead"></p>
+      <ul class="benefits" id="benefits"></ul>
+      <div class="proofrow">
+        <div class="ptile"><b>300+</b><span>cursisten begeleid</span></div>
+        <div class="ptile"><b>4,7/5</b><span>beoordeling</span></div>
+        <div class="ptile"><b>1-op-1</b><span>persoonlijke aanpak</span></div>
+      </div>
+      <div class="cta2">
+        <div><div class="ct"><b>Klaar om te starten?</b> <span data-assessor>Dave</span> neemt dit rapport zo met je door en laat zien hoe je kunt beginnen.</div><div class="scarce" id="sellScarce"></div></div>
+        <span class="btn" aria-hidden="true">Bespreek mijn plan →</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="seclabel" style="text-align:center">Gaat mee in je rapportmail</div>
+      <div class="cert">
+        <div class="seal">F</div>
+        <div class="ce">De Forex Opleiding</div>
+        <h3 class="disp">Strategie-scan voltooid</h3>
+        <div class="nm disp" id="certnaam"></div>
+        <div class="dt" id="certdatum"></div>
+      </div>
+    </div>
+
+    <!-- Alleen voor de assessor: aanpassen vóór verzenden (staat standaard dicht). -->
+    <details class="card dave" id="davePanel">
+      <summary><span>Aanpassen vóór verzenden</span><small>alleen voor de assessor</small></summary>
+      <p class="dhint" id="dHint"></p>
+      <div class="dgrid">
+        <div><label class="lab" for="oCat">Conclusie (categorie)</label><select class="txt" id="oCat"></select></div>
+        <div><label class="lab" for="oAanpak">Aanbevolen aanpak</label><select class="txt" id="oAanpak"></select></div>
+        <div><label class="lab" for="oTraject">Aanbevolen traject</label><select class="txt" id="oTraject"></select></div>
+      </div>
+      <label class="lab" for="oVerdict">Conclusietekst</label><textarea class="txt" id="oVerdict" rows="3"></textarea>
+      <label class="lab" for="oSamen">Samenvatting</label><textarea class="txt" id="oSamen" rows="3"></textarea>
+      <label class="lab" for="oAdvies">Advies &amp; vervolg</label><textarea class="txt" id="oAdvies" rows="4"></textarea>
+      <label class="lab" for="oNotitie">Notitie (intern — komt niet in het rapport)</label><textarea class="txt" id="oNotitie" rows="3"></textarea>
+      <div class="nav"><button class="btn ghost" id="herstelBtn" type="button">Berekende uitkomst herstellen</button><button class="btn ghost" id="conceptBtn" type="button">Opslaan als concept</button></div>
+    </details>
+
+    <div class="nav">
+      <button class="btn ghost" id="aanpasBtn" type="button">← Antwoorden aanpassen</button>
+      <button class="btn" id="afrondBtn" type="button">Afronden &amp; opslaan →</button>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="/modules/scan/scan-app.js?v=1"></script>
+</body>
+</html>

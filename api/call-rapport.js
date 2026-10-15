@@ -191,6 +191,8 @@ export function bouwCallRapport({
       // vóór 1 oktober, nog niet gebackfilld).
       setter_via_keten: !!keten && keten.diepte > 0,
       snelle_notitie: a.snelle_notitie || null,
+      // Webinar-boekingen = strategie-scans: de rapportregel krijgt een "Start scan"-link.
+      booking_source: a.booking_source || null,
       // Heet hier voorganger_id, met opzet niet zoals de kolom: dit is een
       // rapportregel, geen afspraakrij. tests/setter-keten.test.js zoekt naar
       // plekken die een opvolger MAKEN, en daar hoort dit bestand niet bij.
