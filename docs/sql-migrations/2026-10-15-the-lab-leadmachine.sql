@@ -29,7 +29,7 @@
 select to_regclass('public.lab_aanmeldingen') is not null as aanmeldingen_bestaat,
        to_regclass('public.lab_meta_events')  is not null as meta_bestaat,
        to_regclass('public.lab_opvolging')    is not null as opvolging_bestaat;
-select slug, label, actief, vragenlijst from public.booking_sources where slug = 'the-lab';
+select * from public.booking_sources where slug = 'the-lab';
 
 
 -- ── 1. lab_aanmeldingen ───────────────────────────────────────────────────
@@ -128,9 +128,24 @@ CREATE POLICY lab_opvolging_staff ON public.lab_opvolging
 
 
 -- ── 4. De agendabron the-lab ──────────────────────────────────────────────
-INSERT INTO public.booking_sources (slug, label, actief, vragenlijst)
-VALUES ('the-lab', 'The Lab', true, false)
-ON CONFLICT (slug) DO NOTHING;
+-- Defensief: booking_sources en de kolom vragenlijst worden eerst opgezocht
+-- (de tabel staat in migrations/046, de kolom kwam later). Eén DO-blok, zodat
+-- de SQL-editor het in één keer draait.
+DO $$
+BEGIN
+  IF to_regclass('public.booking_sources') IS NULL THEN
+    RAISE NOTICE 'booking_sources bestaat niet — agendabron the-lab overgeslagen';
+  ELSIF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'booking_sources' AND column_name = 'vragenlijst') THEN
+    INSERT INTO public.booking_sources (slug, label, actief, vragenlijst)
+    VALUES ('the-lab', 'The Lab', true, false)
+    ON CONFLICT (slug) DO NOTHING;
+  ELSE
+    INSERT INTO public.booking_sources (slug, label, actief)
+    VALUES ('the-lab', 'The Lab', true)
+    ON CONFLICT (slug) DO NOTHING;
+  END IF;
+END $$;
 
 NOTIFY pgrst, 'reload schema';
 
@@ -142,4 +157,4 @@ select to_regclass('public.lab_aanmeldingen') is not null as aanmeldingen_bestaa
        to_regclass('public.lab_opvolging')    is not null as opvolging_bestaat;
 select tablename, policyname from pg_policies
  where schemaname = 'public' and tablename in ('lab_aanmeldingen','lab_meta_events','lab_opvolging');
-select slug, label, actief, vragenlijst from public.booking_sources where slug = 'the-lab';
+select * from public.booking_sources where slug = 'the-lab';

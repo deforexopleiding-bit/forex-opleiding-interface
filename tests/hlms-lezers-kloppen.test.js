@@ -35,8 +35,16 @@ const WORTEL = join(HIER, '..');
 const API = join(WORTEL, 'api');
 
 const DUMP = JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261013.json'), 'utf8'));
+
+// VERWACHT, NIET GEMETEN — tabellen die nog niet in de meting staan (nieuw uit
+// een LMS-migratie, of nog nooit meegemeten). Apart bestand met de bron per
+// tabel, zodat het verschil tussen "gemeten" en "verwacht" zichtbaar blijft.
+// De toets onderaan eist dat een tabel hier verdwijnt zodra hij gemeten is.
+const VERWACHT_RUW = JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-verwacht-lab.json'), 'utf8'));
+const VERWACHT = Object.fromEntries(Object.entries(VERWACHT_RUW).filter(([t]) => !t.startsWith('_')));
+
 const KOLOMMEN = Object.fromEntries(
-  Object.entries(DUMP).map(([t, c]) => [t, new Set(c.split(',').map((x) => x.trim()))])
+  Object.entries({ ...VERWACHT, ...DUMP }).map(([t, c]) => [t, new Set(c.split(',').map((x) => x.trim()))])
 );
 
 const FILTERS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'ilike', 'is', 'in', 'contains', 'overlaps'];
@@ -166,4 +174,12 @@ test('hlms_student heeft geen `naam` en geen `product` — de twee namen waar je
   assert.ok(!KOLOMMEN.hlms_student.has('product'));
   assert.ok(KOLOMMEN.hlms_student.has('voornaam'));
   assert.ok(KOLOMMEN.hlms_student.has('product_soort'));
+});
+
+test('verwacht-bestand: geen tabel die al gemeten is, en elke tabel heeft een bron', () => {
+  // Staat een tabel in de meting, dan hoort hij uit het verwacht-bestand: een
+  // meting wint altijd van een verwachting.
+  const dubbel = Object.keys(VERWACHT).filter((t) => DUMP[t]);
+  assert.deepEqual(dubbel, [], `gemeten, dus weg uit hlms-kolommen-verwacht-lab.json: ${dubbel.join(', ')}`);
+  for (const t of Object.keys(VERWACHT)) assert.ok(VERWACHT_RUW._bron?.[t], `${t} mist zijn bron`);
 });

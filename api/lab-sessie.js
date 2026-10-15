@@ -162,5 +162,5 @@ export default async function handler(req, res) {
     userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
   });
 
-  return res.status(200).json({ ok: true, geboekt: { moment: iso }, zoom_join_url: afspraak.zoom_join_url || null });
+  return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null });
 }
