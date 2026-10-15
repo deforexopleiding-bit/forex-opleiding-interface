@@ -1,0 +1,7 @@
+{
+  "hlms_rol": "id,auth_id,rol,aangemaakt_op,geldig_tot",
+  "hlms_lab_lead": "id,auth_id,email,voornaam,achternaam,telefoon,herkomst,crm_lead_id,hook,utm,toegang_van,toegang_tot,eerste_login_op,laatste_login_op,kwalificatie,sessie_geboekt_op,sessie_moment,sessie_afspraak_id,is_test,aangemaakt_op,bijgewerkt_op",
+  "hlms_lab_sleutel": "id,lead_id,sleutel_hash,doel,aangemaakt_op,laatst_gebruikt_op,keer_gebruikt",
+  "hlms_lab_sessie": "sessie_id,auth_id,naam,stap,stappen,voortgang,eindcijfer,snapshot,gestart_op,bijgewerkt_op,ronde_id",
+  "hlms_les": "id,sectie_id,titel,beschrijving,volgorde,trial_zichtbaar,aangemaakt_op,datum,paar,trade_soort,trade_resultaat,trade_aard"
+}
