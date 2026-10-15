@@ -24,6 +24,11 @@
       "maxDuration": 300,
       "memory": 1024
     },
+    "api/scan-rapport.js": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "api/_lib/fonts/scan/**"
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
