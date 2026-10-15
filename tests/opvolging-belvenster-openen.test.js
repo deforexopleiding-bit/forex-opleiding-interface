@@ -132,18 +132,19 @@ test('geen enkele Bellen-knop belt nog rechtstreeks', () => {
   assert.doesNotMatch(VIEW, /sp\.call\(/, 'er staat nog een rechtstreekse call() in de view');
 });
 
-test('er zijn precies vier Bellen-knoppen, en ze komen allemaal hier uit', () => {
+test('er zijn precies vijf Bellen-knoppen, en ze komen allemaal hier uit', () => {
   // De definities heten `window.__opvBel = ` en tellen dus niet mee in deze
   // telling; wat hier staat zijn de aanroepen in de knoppen zelf.
   const werklijst    = [...VIEW.matchAll(/__opvBel\(/g)].length;
   const uitDeAgenda  = [...VIEW.matchAll(/__opvCallBel\(/g)].length;
-  assert.equal(werklijst, 2, 'werklijst + aanmeldkaart');
+  assert.equal(werklijst, 3, 'werklijst + aanmeldkaart + Bel nu (The Lab)');
   assert.equal(uitDeAgenda, 2, 'nog af te ronden + zoomcalls');
 });
 
 test('de werklijst en de aanmeldkaart geven hun eigen plek door', () => {
   assert.match(VIEW, /__opvBel\(\\'' \+ t\.id \+ '\\', \\'werklijst\\'\)/);
   assert.match(VIEW, /__opvBel\(\\'' \+ t\.id \+ '\\', \\'aanmeldkaart\\'\)/);
+  assert.match(VIEW, /__opvBel\(\\'' \+ t\.id \+ '\\', \\'labbellen\\'\)/);
 });
 
 test('de achterstand en de zoomcalls worden uit elkaar gehouden', () => {

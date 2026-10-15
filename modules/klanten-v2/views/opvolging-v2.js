@@ -1717,7 +1717,64 @@
     // Zonder deze regels toont de badge de rauwe sleutel.
     zoom_geannuleerd: ['Zoomcall geannuleerd', 't-red'],
     zoom_bevestigen: ['Zoomcall bevestigen', 't-purple'],
+    // cron-lab-belmelding / lab-terugbellen: een warme lab-lead.
+    lab_bellen: ['The Lab · bel nu', 't-red'],
   };
+
+  /**
+   * BEL NU — THE LAB. Warme lab-leads staan bovenaan, boven alles: wie The Lab
+   * net afwerkte of zelf vroeg om te bellen, belt Dave binnen het kwartier.
+   * Volgorde: zelf gevraagd, Lab af, wil investeren, 24u stil — oudste eerst.
+   */
+  const LAB_BEL_VOLGORDE = ['lab_vraag', 'lab_af_niet_geboekt', 'lab_investeren', 'lab_stil_24u'];
+  const LAB_BEL_LABEL = {
+    lab_vraag: 'Vroeg zelf om te bellen',
+    lab_af_niet_geboekt: 'Lab afgewerkt, nog niet geboekt',
+    lab_investeren: 'Wil investeren in begeleiding',
+    lab_stil_24u: '24u stil in The Lab',
+  };
+  function isLabBel(t) { return !!t && t.reden === 'lab_bellen'; }
+  // Het dossier op taak-id: geen naam of e-mail in een onclick-string (een
+  // apostrof in een naam zou die breken).
+  window.__opvLabDossier = function (id) {
+    const t = ((_live.taken.data && _live.taken.data.taken) || []).find((x) => x.id === id);
+    if (!t || !window.DFOLabDossier) return;
+    const ref = t.bron_ref || {};
+    window.DFOLabDossier.open({ leadId: ref.crm_lead_id || null, email: t.email || null, naam: t.naam || null });
+  };
+  function labBelBlok(taken, dag) {
+    if (!taken.length) return '';
+    const rang = (t) => { const i = LAB_BEL_VOLGORDE.indexOf(t.reden_code); return i < 0 ? 99 : i; };
+    const lijst = taken.slice().sort((a, b) => rang(a) - rang(b) || String(a.created_at).localeCompare(String(b.created_at)));
+    return '<div class="sh" data-opv-blok="lab-bellen"><div class="ic" style="background:#fde8ea">&#9742;</div>' +
+      '<h3>Bel nu &mdash; The Lab</h3><span class="n">' + lijst.length + '</span></div>' +
+      '<div class="ronde">Warme leads uit The Lab. Bel ze <b>nu</b>: wie net afwerkte of zelf vroeg om te bellen, is binnen het kwartier het warmst. ' +
+      'Boekt de lead intussen een sessie, dan verdwijnt de kaart vanzelf.</div>' +
+      lijst.map((t) => labBelKaart(t, dag)).join('');
+  }
+  function labBelKaart(t, dag) {
+    const ref = t.bron_ref || {};
+    const minuten = t.created_at ? Math.max(0, Math.round((Date.now() - new Date(t.created_at)) / 60000)) : null;
+    return '<div class="row" data-opv-lab="' + esc(t.reden_code || '') + '" style="border-left:3px solid #c22b3e">' +
+      '<div class="who">' +
+      '<div class="nm">' + esc(t.naam) +
+        ' <span class="tag t-red">' + esc(LAB_BEL_LABEL[t.reden_code] || 'The Lab') + '</span>' +
+        (t.is_test ? ' <span class="tag t-grey">TEST</span>' : '') +
+        (ref.hook ? ' <span class="tag t-grey">hook: ' + esc(ref.hook) + '</span>' : '') +
+        (minuten != null ? ' <span class="tag ' + (minuten > 15 ? 't-amber' : 't-blue') + '">' + (minuten < 60 ? minuten + ' min' : Math.round(minuten / 60) + ' u') + ' geleden</span>' : '') +
+      '</div>' +
+      '<div class="mt">' +
+        (t.telefoon ? '<span style="color:#111827;font-size:13px;font-weight:600">' + esc(t.telefoon) + '</span>' : '<span class="tag t-amber">geen gsm</span>') +
+        (t.bel_totaal ? '<span class="pil aan">&#9742; ' + t.bel_totaal + '&times;</span>' : '') +
+      '</div>' +
+      (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
+      '</div>' +
+      '<div class="act">' +
+        belKnop(t.telefoon, 'window.__opvBel(\'' + t.id + '\', \'labbellen\')') +
+        '<button class="obtn" onclick="window.__opvLabDossier(\'' + t.id + '\')">Lab-dossier</button>' +
+        '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
+      '</div></div>';
+  }
 
   /**
    * De badge 'Bevestigd op 01/09' met de notitie eronder.
@@ -3295,6 +3352,8 @@
       waLamp() + '</div>';
     // De balk staat boven de weekbalk: wat er nú aan de beurt is hoort het
     // eerste te zijn wat je ziet, niet iets waar je langs moet scrollen.
+    // Warme lab-leads vóór alles: die bel je binnen het kwartier.
+    if (st.data && !st.error) h += labBelBlok((st.data.taken || []).filter(isLabBel), dag);
     h += nuDoenBalk(dag);
     h += weekbalk(dag);
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
@@ -3313,7 +3372,7 @@
     // dat is geen archief, want morgen staat hij gewoon terug.
     const aanmeldingen = alles.filter((t) => isAanmelding(t) && !klaarVoorVandaag(t));
     const klaar        = alles.filter((t) => isAanmelding(t) && klaarVoorVandaag(t));
-    const rest         = alles.filter((t) => !isAanmelding(t));
+    const rest         = alles.filter((t) => !isAanmelding(t) && !isLabBel(t));
     const r1 = rest.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
     const r2 = rest.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
     const wacht = st.data.wacht || [];
