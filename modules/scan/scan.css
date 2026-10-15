@@ -62,11 +62,15 @@ body::before{content:"";position:fixed;inset:-25%;z-index:-2;pointer-events:none
 .wrap{max-width:720px;margin:0 auto;padding-left:max(18px,env(safe-area-inset-left,0px));padding-right:max(18px,env(safe-area-inset-right,0px))}
 .eyebrow{font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--gold)}
 .brandbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--barbg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
-.bb{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0}
-.brand{display:flex;align-items:center;gap:11px}
-.brand .em{width:30px;height:30px;border-radius:7px;border:1px solid var(--goldline);display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:700;color:var(--gold2);font-size:15px;background:var(--goldsoft)}
-.brand .nm{font-size:12.5px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--fg)}
-.brand .nm small{display:block;font-size:9.5px;letter-spacing:.24em;color:var(--muted);font-weight:500}
+/* Alleen boven/onder: een padding-shorthand hier wiste de zijmarge van .wrap (logo en knop plakten op mobiel tegen de rand). */
+.bb{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px;padding-bottom:12px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+/* Logo per thema: navy op licht, wit op donker (zelfde vorm/verhouding). */
+.brand .logo{height:46px;width:auto;display:block;flex:none}
+:root[data-theme="light"] .brand .logo-donker{display:none}
+:root:not([data-theme="light"]) .brand .logo-licht{display:none}
+.brand .sep{width:1px;height:24px;background:var(--line2);flex:none}
+.brand .nm{font-size:10.5px;font-weight:600;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .conf{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);border-radius:999px;padding:5px 11px;white-space:nowrap}
 .prog{height:2px;background:transparent}
 .prog .pf{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));width:0;transition:width .45s cubic-bezier(.4,0,.2,1);box-shadow:0 0 12px rgba(201,162,63,.5)}
@@ -229,6 +233,19 @@ label.lab{display:block;font-size:11px;letter-spacing:.14em;text-transform:upper
 .navr{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
 .vinfo{font-size:12px;color:var(--muted);text-align:right;margin-top:10px;min-height:16px}
 .pdfrij{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:18px;font-size:12px;color:var(--muted)}
+/* Beelden in de flow (max. 2): gekaderd, thema-bewust gedimd, met de donkere overlay van de mockup. */
+.beeld{position:relative;margin:0;border-radius:16px;overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 70px -40px rgba(0,0,0,.8)}
+.beeld img{display:block;width:100%;height:100%;object-fit:cover}
+.beeld::after{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 0 1px rgba(201,162,63,.18)}
+.introbeeld{margin:26px 0 4px;aspect-ratio:16/7}
+.introbeeld::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(6,13,18,0) 40%,rgba(6,13,18,.55) 100%),linear-gradient(90deg,rgba(6,13,18,.25),transparent 55%)}
+.sellbeeld{margin:-6px 0 22px;aspect-ratio:16/6}
+.sellbeeld img{object-position:center 30%}
+.sellbeeld::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,rgba(6,13,18,.05),rgba(6,13,18,.45))}
+:root:not([data-theme="light"]) .beeld img{filter:brightness(.74) saturate(.88)}
+:root[data-theme="light"] .beeld{border-color:var(--line2);box-shadow:0 24px 50px -36px rgba(14,42,56,.45)}
+:root[data-theme="light"] .introbeeld::before{background:linear-gradient(180deg,rgba(14,42,56,0) 50%,rgba(14,42,56,.28) 100%)}
+:root[data-theme="light"] .sellbeeld::before{background:linear-gradient(180deg,rgba(14,42,56,0),rgba(14,42,56,.18))}
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:50;background:var(--surface2);color:var(--strong);border:1px solid var(--goldline);border-radius:12px;padding:12px 18px;font-size:13.5px;box-shadow:0 20px 50px -20px rgba(0,0,0,.7);max-width:calc(100vw - 32px)}
-@media (max-width:560px){.recgrid{grid-template-columns:1fr}.card{padding:22px}.lk span{display:none}.lk{padding:13px 2px}.dave .dgrid{grid-template-columns:1fr}.conf{display:none}.bb{gap:8px}.bb-right{gap:7px}.brand{gap:8px}.brand .nm{font-size:11px;letter-spacing:.1em;white-space:nowrap}.brand .nm small{display:none}.opslag:not(.fout){display:none}.mini{padding:6px 10px}}
+@media (max-width:560px){.recgrid{grid-template-columns:1fr}.card{padding:22px}.lk span{display:none}.lk{padding:13px 2px}.dave .dgrid{grid-template-columns:1fr}.conf{display:none}.bb{gap:8px}.bb-right{gap:7px}.brand{gap:8px}.brand .logo{height:40px}.brand .sep,.brand .nm{display:none}.introbeeld{aspect-ratio:16/9}.sellbeeld{aspect-ratio:16/8}.opslag:not(.fout){display:none}.mini{padding:6px 10px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.item{opacity:1!important}}

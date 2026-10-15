@@ -208,7 +208,11 @@ test('bedrading: bucket-SQL privé + alleen PDF; pagina-knoppen + cache-busters'
   const html = lees('modules/scan/index.html');
   assert.match(html, /id="verstuurBtn"[^>]*>Verstuur rapport \(info@\) →</);
   assert.match(html, /id="pdfRapportBtn"/); assert.match(html, /id="pdfCertBtn"/);
-  assert.match(html, /scan-app\.js\?v=2/); assert.match(html, /scan\.css\?v=2/);
+  // Minstens v=2 (latere wijzigingen hogen ze verder op).
+  for (const f of ['scan-app\\.js', 'scan\\.css']) {
+    const v = Number((html.match(new RegExp(f + '\\?v=(\\d+)')) || [])[1]);
+    assert.ok(v >= 2, f + ' v=' + v);
+  }
   const app = lees('modules/scan/scan-app.js');
   assert.match(app, /api\('POST', '\/api\/scan-rapport', \{ id: S\.id \}\)/);
   assert.match(app, /window\.confirm\(/);
