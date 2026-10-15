@@ -1,0 +1,166 @@
+// api/lab-sessie.js
+//
+// De strategiesessie boeken vanuit de trial-omgeving van het LMS, zonder dat
+// de lead iets opnieuw typt. De lead is al ingelogd in het LMS; zijn sessie
+// gaat als bearer mee en wordt bij het LMS-project zelf gecontroleerd
+// (lmsGebruikerUitToken). Naam, e-mail en gsm komen uit zijn lab-lead-rij.
+//
+//   GET  /api/lab-sessie   → vrije momenten (14 dagen), echte telling voor deze
+//                            week, en de boeking als die er al is.
+//   POST /api/lab-sessie   { moment: ISO } → boekt in dezelfde agenda als de
+//                            kennismakingsgesprekken, met bron 'the-lab'.
+//
+// Schaarste wordt NOOIT verzonnen: `deze_week` is het werkelijke aantal vrije
+// momenten tot en met zondag, uit dezelfde agenda waaruit geboekt wordt.
+
+import { supabaseAdmin } from './supabase.js';
+import { applyLabCors, labPreflight } from './_lib/lab-cors.js';
+import { lmsGebruikerUitToken, noteerBoeking, LabAccountFout } from './_lib/dfo-lms-lab-account.js';
+import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-opstartsessie-free-slots.js';
+import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
+import { LAB_SLUG } from './_lib/lab-config.js';
+import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+
+const VENSTER_DAGEN = 14;
+const DUUR_MIN = 30;
+
+/** Slots → lijst ISO-momenten in de toekomst (min. 2 uur vooruit). PURE. */
+export function momentenUitSlots(slots, nu = Date.now()) {
+  const uit = [];
+  for (const dag of slots || []) {
+    for (const t of dag.times || []) {
+      const [h, m] = String(t).split(':').map(Number);
+      const ms = amsMidnightMs(dag.date) + (h * 60 + m) * 60000;
+      if (ms >= nu + 2 * 3600 * 1000) uit.push(new Date(ms).toISOString());
+    }
+  }
+  return uit.sort();
+}
+
+/** Hoeveel momenten vallen er nog in deze week (t/m zondag, Amsterdam). PURE. */
+export function aantalDezeWeek(momenten, nu = Date.now()) {
+  const vandaag = amsPartsOf(nu).date;
+  const dow = new Date(vandaag + 'T12:00:00Z').getUTCDay(); // 0 = zondag
+  const totZondag = dow === 0 ? 0 : 7 - dow;
+  const einde = amsMidnightMs(vandaag) + (totZondag + 1) * 86400000;
+  return momenten.filter((iso) => Date.parse(iso) < einde).length;
+}
+
+async function vrijeMomenten() {
+  const calendarId = process.env.GHL_CALENDAR_ID;
+  const token = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
+  if (!calendarId || !token) return { ok: false, momenten: [] };
+  const vandaag = amsPartsOf(Date.now()).date;
+  const startMs = amsMidnightMs(vandaag);
+  const endMs = startMs + VENSTER_DAGEN * 86400000 - 1;
+  const raw = await fetchGhlSlots({ calendarId, token, startMs, endMs });
+  return { ok: true, momenten: momentenUitSlots(normaliseer(raw)) };
+}
+
+function bearer(req) {
+  const h = String(req.headers?.authorization || '');
+  return h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : null;
+}
+
+async function crmLead(labLead) {
+  if (labLead.crm_lead_id) {
+    const { data, error } = await supabaseAdmin.from('leads')
+      .select('id, voornaam, achternaam, email, telefoon, telefoon_e164, customer_id, source_ref')
+      .eq('id', labLead.crm_lead_id).maybeSingle();
+    if (error) console.warn('[lab-sessie] lead lezen (soft):', error.message);
+    if (data) return data;
+  }
+  // Geen (of verdwenen) CRM-lead: alsnog aanmaken uit de lab-lead-rij.
+  const { data, error } = await supabaseAdmin.rpc('upsert_lead', { p: {
+    voornaam: labLead.voornaam, achternaam: labLead.achternaam, email: labLead.email,
+    telefoon: labLead.telefoon, telefoon_e164: labLead.telefoon,
+    bron: LAB_SLUG, soort: LAB_SLUG, traject: LAB_SLUG,
+  } });
+  if (error) throw new Error('upsert_lead: ' + error.message);
+  const rij = Array.isArray(data) ? data[0] : data;
+  return { id: rij?.id, voornaam: labLead.voornaam, achternaam: labLead.achternaam, email: labLead.email, telefoon: labLead.telefoon, customer_id: null, source_ref: null };
+}
+
+export default async function handler(req, res) {
+  applyLabCors(req, res, 'GET, POST, OPTIONS');
+  if (labPreflight(req, res, ['GET', 'POST'])) return;
+
+  let wie;
+  try {
+    wie = await lmsGebruikerUitToken(bearer(req));
+  } catch (e) {
+    console.error('[lab-sessie] LMS-sessie controleren:', e?.message || e);
+    return res.status(503).json({ ok: false, code: 'lms_onbereikbaar' });
+  }
+  if (!wie) return res.status(401).json({ ok: false, code: 'geen_sessie' });
+  if (!wie.labLead) return res.status(403).json({ ok: false, code: 'geen_lab_lead' });
+  const lab = wie.labLead;
+
+  const geboekt = lab.sessie_moment && Date.parse(lab.sessie_moment) > Date.now() - 3600 * 1000
+    ? { moment: lab.sessie_moment } : null;
+
+  if (req.method === 'GET') {
+    if (geboekt) return res.status(200).json({ ok: true, geboekt, momenten: [], deze_week: null });
+    try {
+      const v = await vrijeMomenten();
+      if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true });
+      return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten) });
+    } catch (e) {
+      console.error('[lab-sessie] slots ophalen:', e?.message || e);
+      return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true });
+    }
+  }
+
+  // POST — boeken
+  if (geboekt) return res.status(409).json({ ok: false, code: 'al_geboekt', geboekt });
+  const moment = String(req.body?.moment || '');
+  const ms = Date.parse(moment);
+  if (!Number.isFinite(ms)) return res.status(400).json({ ok: false, code: 'ongeldig_moment' });
+
+  // Het moment moet NU nog vrij zijn, in dezelfde agenda.
+  let vrij;
+  try { vrij = await vrijeMomenten(); } catch (e) {
+    console.error('[lab-sessie] slots (boeken):', e?.message || e);
+    return res.status(503).json({ ok: false, code: 'agenda_onbereikbaar' });
+  }
+  if (!vrij.ok) return res.status(503).json({ ok: false, code: 'agenda_onbereikbaar' });
+  const iso = new Date(ms).toISOString();
+  if (!vrij.momenten.includes(iso)) return res.status(409).json({ ok: false, code: 'moment_weg' });
+
+  let lead;
+  try { lead = await crmLead(lab); } catch (e) {
+    console.error('[lab-sessie] lead:', e?.message || e);
+    return res.status(500).json({ ok: false, code: 'lead_fout' });
+  }
+  if (!lead?.id) return res.status(500).json({ ok: false, code: 'lead_fout' });
+
+  let afspraak;
+  try {
+    afspraak = await createAppointmentForLead({
+      lead: {
+        ...lead,
+        lead_name: [lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lead.voornaam,
+        lead_email: lead.email,
+        lead_phone: lead.telefoon_e164 || lead.telefoon,
+      },
+      scheduledAt: iso, durationMinutes: DUUR_MIN, source: LAB_SLUG,
+    });
+  } catch (e) {
+    console.error('[lab-sessie] boeken mislukt', { code: e?.code, fout: e?.message });
+    return res.status(502).json({ ok: false, code: 'boeken_mislukt' });
+  }
+
+  try {
+    await noteerBoeking(lab.id, { moment: iso, afspraakId: afspraak.appointment_id });
+  } catch (e) {
+    // De afspraak staat in de agenda; enkel het vinkje in het LMS ontbreekt.
+    console.error('[lab-sessie] boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+  }
+
+  await stuurLabEvent({
+    eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
+    userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
+  });
+
+  return res.status(200).json({ ok: true, geboekt: { moment: iso }, zoom_join_url: afspraak.zoom_join_url || null });
+}

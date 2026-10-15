@@ -44,7 +44,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Amsterdam-midnight (respecteert DST). Copie van follow-up-ghl-free-slots.js
 // zodat public-endpoint standalone werkt (geen shared-lib-koppeling).
-function amsMidnightMs(dateStr) {
+export function amsMidnightMs(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const utc = Date.UTC(y, m - 1, d, 0, 0, 0);
   const dtf = new Intl.DateTimeFormat('en-US', {
@@ -59,7 +59,7 @@ function amsMidnightMs(dateStr) {
   return utc - offMin * 60000;
 }
 
-function amsPartsOf(ms) {
+export function amsPartsOf(ms) {
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -73,7 +73,7 @@ function amsPartsOf(ms) {
   };
 }
 
-async function fetchGhlSlots({ calendarId, token, startMs, endMs }) {
+export async function fetchGhlSlots({ calendarId, token, startMs, endMs }) {
   // v=2 (2026-08-27): parity met api/follow-up-ghl-free-slots.js —
   // timezone-param meesturen zodat GHL Amsterdam-lokale datum-keys
   // retourneert i.p.v. UTC (wat een off-by-one op de datum-grens gaf).
@@ -104,7 +104,7 @@ async function fetchGhlSlots({ calendarId, token, startMs, endMs }) {
 // Elk slot-element kan string zijn OF een object met .startTime/.start.
 // Grouping op Amsterdam-lokale datum die uit de ISO volgt (respecteert DST).
 // v=2 (2026-08-27): parity met follow-up-ghl-free-slots.js normaliseer().
-function normaliseer(raw) {
+export function normaliseer(raw) {
   const byDate = new Map();
   const push = (iso) => {
     if (!iso) return;
