@@ -1,27 +1,56 @@
 # Templates die Iris mist
 
 **Voor:** Maxim, om bij Meta te laten goedkeuren
-**Datum:** 21 september 2026
+**Datum:** 21 september 2026 · indienen vanuit het scherm sinds 15 oktober 2026
+
+## Deze vier hoef je niet meer over te typen
+
+Ze staan sinds 15 oktober als gegevens in
+[`api/_lib/iris/template-wensen.js`](../../api/_lib/iris/template-wensen.js) en
+zijn met één knop in te dienen bij 360dialog:
+
+**Iris → Instellingen → Templates die Iris mist**
+(`/modules/klanten-v2/?v2preview=iris&v2tab=instellingen`)
+
+Dat dient ze in op het **klantnummer** — de lijn waarop Iris verstuurt. Twee keer
+drukken kan geen dubbele template geven: wat er al staat, wordt overgeslagen.
+Indienen is géén goedkeuren: Meta beoordeelt, en Iris verstuurt pas als de stand
+bij ons op *Goedgekeurd* staat. Druk daarna dus nog een keer op **Status
+vernieuwen**.
+
+De teksten onder "Gevraagd" zijn de bron. `tests/iris-template-wensen.test.js`
+houdt de code daartegen aan, dus een wijziging in dit document zonder dezelfde
+wijziging in de code geeft een rode toets. De blokken met `>` zijn de
+templateteksten zelf — daar leest die toets uit, dus zet er niets anders in.
+
+---
 
 Buiten het servicevenster van 24 uur mag er alleen een door Meta goedgekeurde
 template weg. Iris kiest er zelf een die bij de categorie past
 (`api/_lib/iris/templates.js`). Past er geen, dan gaat het bericht via mail —
 en komt de gewenste template hier te staan.
 
-**Deze lijst is nog niet tegen de databank gehouden.** Deze sessie heeft geen
-toegang tot het CRM-project, dus wat er werkelijk aan goedgekeurde templates
-staat is niet nagekeken. Draai eerst:
+**Gemeten op 15 oktober 2026.** In `whatsapp_meta_templates` staan er twee op
+APPROVED: `aanmaning_dag7` en `opvolging_geen_reactie2`. Dat zijn precies de
+terugvalkeuzes in de tabel hieronder — de vier eerste keuzes bestaan nog niet.
+Iris kan dus niets sturen over een betaalafspraak, een factuurvraag, een
+inlogprobleem of een mentorplanning zonder op de terugval of op mail uit te
+komen.
+
+Zelf nakijken:
 
 ```sql
 select name, language, category, status, approved_at
 from whatsapp_meta_templates
-where status = 'APPROVED'
-order by name;
+order by status, name;
 ```
 
-Staat een template hieronder er al in, streep hem dan door. Staat er iets in
-wat hier ontbreekt, laat het weten — dan kan de voorkeurslijst in
-`templates.js` erop aangepast worden.
+Of in het scherm: **Iris → Instellingen → Templates die Iris mist** toont per
+template de stand bij ons én bij 360dialog. Dat scherm is ook waar je ze
+indient.
+
+Ontbreekt hier een template die Iris wél zou moeten kunnen sturen, laat het
+weten — dan kan de voorkeurslijst in `templates.js` erop aangepast worden.
 
 ---
 
