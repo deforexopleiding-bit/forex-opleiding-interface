@@ -7,15 +7,24 @@
 
 import crypto from 'node:crypto';
 
-export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [] } = {}) {
+export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {} } = {}) {
   const tabellen = {};
   for (const [k, v] of Object.entries(start)) tabellen[k] = v.map((r) => ({ ...r }));
   const log = { inserts: [], updates: [], rpc: [] };
 
   function bouwer(tabel) {
     const st = { filters: [], head: false, patch: null, rijen: null, enkel: null, limiet: null };
+    // 'kolom->>sleutel' leest een veld uit een jsonb-kolom, zoals PostgREST.
+    const veld = (r, k) => {
+      if (typeof k === 'string' && k.includes('->>')) {
+        const [kol, sleutel] = k.split('->>');
+        const v = r[kol]?.[sleutel];
+        return v == null ? v : String(v);
+      }
+      return r[k];
+    };
     const pas = (r) => st.filters.every(([op, k, v]) => {
-      const w = r[k];
+      const w = veld(r, k);
       if (op === 'eq') return w === v;
       if (op === 'ilike') return String(w ?? '').toLowerCase() === String(v).toLowerCase();
       if (op === 'is') return v === null ? w == null : w === v;
@@ -34,8 +43,9 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [] } = {}) {
       if (st.rijen) {
         const nieuw = st.rijen.map((r) => ({ id: r.id || crypto.randomUUID(), ...r }));
         for (const r of nieuw) {
-          const uniek = (tabel === 'hlms_rol' && t.some((x) => x.auth_id === r.auth_id && x.rol === r.rol));
-          if (uniek) return { data: null, error: { code: '23505', message: 'duplicate' } };
+          const dubbel = (tabel === 'hlms_rol' && t.some((x) => x.auth_id === r.auth_id && x.rol === r.rol))
+            || (typeof uniek[tabel] === 'function' && uniek[tabel](r, t));
+          if (dubbel) return { data: null, error: { code: '23505', message: 'duplicate' } };
         }
         t.push(...nieuw);
         log.inserts.push({ tabel, rijen: nieuw });

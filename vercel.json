@@ -268,6 +268,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron-lab-belmelding",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron-setter-cash-release",
       "schedule": "0 6 * * *"
     },
