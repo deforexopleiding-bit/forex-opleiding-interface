@@ -6,7 +6,8 @@
 // (lmsGebruikerUitToken). Naam, e-mail en gsm komen uit zijn lab-lead-rij.
 //
 //   GET  /api/lab-sessie   → vrije momenten (14 dagen), echte telling voor deze
-//                            week, en de boeking als die er al is.
+//                            week, en de boeking als die er al is (met de
+//                            verzetlink `verzet_url` voor de sessiebalk).
 //   POST /api/lab-sessie   { moment: ISO } → boekt in dezelfde agenda als de
 //                            kennismakingsgesprekken, met bron 'the-lab'.
 //
@@ -25,6 +26,7 @@ import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js
 import { LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
+import { selfServiceUrl } from './_lib/afspraak-berichten.js';
 
 const VENSTER_DAGEN = 14;
 const DUUR_MIN = 30;
@@ -60,6 +62,31 @@ async function vrijeMomenten() {
   const endMs = startMs + VENSTER_DAGEN * 86400000 - 1;
   const raw = await fetchGhlSlots({ calendarId, token, startMs, endMs });
   return { ok: true, momenten: momentenUitSlots(normaliseer(raw)) };
+}
+
+const GEANNULEERD = new Set(['cancelled', 'canceled', 'geannuleerd']);
+
+/**
+ * De geboekte afspraak in het CRM: de verzetlink (selfservice) en het actuele
+ * moment — verzette de lead via die link, dan klopt het moment in het LMS niet
+ * meer. Fail-soft: zonder afspraak-id of bij een leesfout blijft het zoals het was.
+ */
+export async function geboektMetVerzet(geboekt, afspraakId) {
+  if (!geboekt || !afspraakId) return geboekt;
+  try {
+    const { data, error } = await supabaseAdmin.from('follow_up_appointments')
+      .select('id, scheduled_at, status, afspraak_token').eq('id', afspraakId).maybeSingle();
+    if (error) { console.warn('[lab-sessie] afspraak lezen (soft):', error.message); return geboekt; }
+    if (!data || GEANNULEERD.has(String(data.status || '').toLowerCase())) return geboekt;
+    return {
+      ...geboekt,
+      moment: data.scheduled_at ? new Date(data.scheduled_at).toISOString() : geboekt.moment,
+      verzet_url: data.afspraak_token ? selfServiceUrl(data.afspraak_token) : null,
+    };
+  } catch (e) {
+    console.warn('[lab-sessie] afspraak lezen (soft):', e?.message || e);
+    return geboekt;
+  }
 }
 
 function bearer(req) {
@@ -110,7 +137,10 @@ export default async function handler(req, res) {
     : null;
 
   if (req.method === 'GET') {
-    if (geboekt) return res.status(200).json({ ok: true, geboekt, momenten: [], deze_week: null, gastheer: zichtbaar });
+    if (geboekt) {
+      const g = await geboektMetVerzet(geboekt, lab.sessie_afspraak_id);
+      return res.status(200).json({ ok: true, geboekt: g, verzet_url: g.verzet_url || null, momenten: [], deze_week: null, gastheer: zichtbaar });
+    }
     try {
       const v = await vrijeMomenten();
       if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar });

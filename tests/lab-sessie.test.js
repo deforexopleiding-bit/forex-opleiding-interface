@@ -164,3 +164,24 @@ test('initialen', () => {
   assert.equal(initialen('dave'), 'D');
   assert.equal(initialen(''), null);
 });
+
+test('GEBOEKT: de verzetlink en het actuele moment uit de afspraak in het CRM (voor de sessiebalk)', async () => {
+  const oud = new Date(Date.now() + 86400000).toISOString();
+  const verzet = new Date(Date.now() + 2 * 86400000).toISOString();
+  lms.tabellen.hlms_lab_lead[0] = { ...LAB, sessie_moment: oud, sessie_geboekt_op: 'x', sessie_afspraak_id: 'afspraak-9' };
+  crm.tabellen.follow_up_appointments = [{ id: 'afspraak-9', scheduled_at: verzet, status: 'scheduled', afspraak_token: '11111111-2222-3333-4444-555555555555' }];
+  const r = await vraag(sessie, 'GET', 'goed');
+  assert.equal(r.statusCode, 200);
+  assert.match(r.body.verzet_url, /\/afspraak\/11111111-2222-3333-4444-555555555555$/);
+  assert.equal(r.body.geboekt.moment, verzet);
+  // Geannuleerd: geen verzetlink, het LMS-moment blijft.
+  crm.tabellen.follow_up_appointments[0].status = 'cancelled';
+  const r2 = await vraag(sessie, 'GET', 'goed');
+  assert.equal(r2.body.verzet_url, null);
+  assert.equal(r2.body.geboekt.moment, oud);
+  // Zonder afspraak-id (oude boeking): gewoon zoals vroeger.
+  lms.tabellen.hlms_lab_lead[0].sessie_afspraak_id = null;
+  const r3 = await vraag(sessie, 'GET', 'goed');
+  assert.equal(r3.body.verzet_url, null);
+  assert.equal(r3.body.geboekt.moment, oud);
+});
