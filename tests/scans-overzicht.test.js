@@ -191,7 +191,13 @@ test('bedrading: module "Strategie-scans" alleen via scan.use, allowlist, script
   const shell = lees('modules/shared/design-system/app-shell.js');
   assert.match(shell, /\{ g: 'Leren & Events',\s+id: 'scans',\s+naam: 'Strategie-scans',[^\n]*roles: \[\], permKey: 'scan\.use', tabs: \['Overzicht'(, 'Dashboard')?\]/);
   assert.ok(shell.indexOf("id: 'scans'") > shell.indexOf("id: 'webinar'"), 'direct onder Webinar');
-  assert.match(lees('modules/klanten-v2/klanten-v2.js'), /'support', 'scans'\]\);/);
+  // Lidmaatschap, niet de PLAATS in de rij. Dit stond op /'support', 'scans'\]\);/
+  // en eiste daarmee dat 'scans' de laatste was — de volgende module die erbij
+  // komt (iris, 16 okt) maakt die toets dan rood zonder dat er iets aan de
+  // scan-module mis is.
+  const _alw = lees('modules/klanten-v2/klanten-v2.js');
+  const _lijst = _alw.slice(_alw.indexOf('const V2_ACTIVE_ALLOWLIST'));
+  assert.match(_lijst.slice(0, _lijst.indexOf(');')), /'scans'/);
   const html = lees('modules/klanten-v2/index.html');
   assert.match(html, /<script src="views\/scans-v2\.js\?v=\d+"><\/script>/);
   // Minstens deze versies (latere wijzigingen hogen ze verder op).

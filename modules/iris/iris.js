@@ -6,9 +6,11 @@
 // De code staat in modules/iris/ zoals de opdracht vraagt, maar registreert
 // zich als schil-weergave (DFO.VIEWS['iris/']). Een losse pagina zou navigatie,
 // rechten en uiterlijk opnieuw moeten bouwen; nu erft Iris die van de schil.
-// Zolang 'iris' niet in V2_ACTIVE_ALLOWLIST staat, is dit scherm alleen
-// bereikbaar via ?v2preview=iris. Dat is met opzet: eerst kijken, dan
-// vrijgeven.
+// Sinds 16 oktober 2026 staat 'iris' in V2_ACTIVE_ALLOWLIST en in de zijbalk
+// voor super_admin, manager en sales (MODS in app-shell.js). ?v2preview=iris is
+// dus niet meer nodig om hier te komen — maar de parameter blijft wél in de
+// links die we zelf maken, omdat de boot-logica de module daaruit leest en een
+// hash als `#iris/dossier/<id>` zonder die parameter op het Dashboard uitkomt.
 //
 // ── WAT DEZE VERSIE DOET ─────────────────────────────────────────────────────
 // Lezen. De Post-lijst met filters, één gesprek met zijn berichten, en de
@@ -3432,5 +3434,5 @@
 window.DFO.VIEWS['iris/'] = irisView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('iris');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('iris');
-  console.debug('[iris] v=1 — Post leest mee. Bereikbaar via ?v2preview=iris tot de vlag omgaat.');
+  console.debug('[iris] Post leest mee. In de zijbalk voor super_admin, manager en sales.');
 })();

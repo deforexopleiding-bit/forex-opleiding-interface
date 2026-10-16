@@ -68,19 +68,43 @@
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS, permKey: 'customer.module.access', tabs: ['Overzicht'] },
     { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor', 'super_admin', 'admin', 'manager'], tabs: [] },
     { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
-    // Iris (2026-09-21) — SLAPEND. Geen `roles` en geen `permKey`, dus
-    // visMods() laat 'em standaard weg: geen sidebar-item, voor niemand.
-    // Hij wordt alleen bereikbaar met `preview: true` + `?v2preview=iris`
-    // in de URL, zodat de module bekeken kan worden voordat hij vrijgegeven
-    // wordt. Vrijgeven = later `roles:`/`permKey: 'iris.view'` invullen; de
-    // rechten (iris.view, iris.versturen, …) staan al in role_permissions.
+    // Iris — VRIJGEGEVEN op 16 oktober 2026 (was slapend sinds 21 september).
+    // `roles: SAMS` zet 'em in de zijbalk voor super_admin, manager en sales;
+    // die laatste is waarom het nu gebeurt: Dave moet haar zien. Daarmee is
+    // `?v2preview=iris` niet meer nodig om bij de module te komen.
+    //
+    // GEEN permKey, en dat is een keuze en geen vergetelheid. visMods() is
+    // ADDITIEF (`roles.some(...) || _permGrantsVis(m)`), dus een permKey kan
+    // alleen zichtbaarheid TOEVOEGEN. `iris.view` staat in
+    // 2026-09-21-iris-fase1-rechten.sql ook op true voor `administratie`, dus
+    // `permKey: 'iris.view'` erbij zou Iris ook in de zijbalk van die rol
+    // zetten — breder dan afgesproken. Moet administratie er later bij, dan is
+    // de rol toevoegen aan `roles` het eerlijke gebaar; een permKey als
+    // vangnet verbergt wie er precies bij kan.
+    //
+    // De `preview: true`-vlag is wég. Die maakte de module zichtbaar voor
+    // ELKE rol die `?v2preview=iris` in de URL zette, ook mentor en marketing
+    // — bedoeld om te kunnen kijken vóór de vrijgave. Nu de rollen kloppen is
+    // dat alleen nog een omweg om het item in een zijbalk te krijgen waar het
+    // niet hoort. Het is géén rechten-omweg (de endpoints eisen `iris.view`
+    // server-side), maar een leeg scherm met 403's is een slechtere uitleg dan
+    // geen menu-item.
+    //
+    // LET OP — `?v2preview=iris` staat nog WEL in de links die we zelf maken
+    // (api/_lib/iris/opvolging.js, api/_lib/iris/belrij-bronnen.js, en in
+    // `bron_link`-waarden die al in de databank staan). Die parameter is daar
+    // niet overbodig maar dragend: de boot-logica in klanten-v2.js leest de
+    // module uit `?v2preview=`, en pas als die er niet staat uit de hash. Een
+    // link als `#iris/dossier/<id>` komt dus NIET op Iris uit zonder de
+    // parameter, want die hele string is geen module-id. Niet weghalen zonder
+    // de hash-afhandeling eerst te verbouwen.
     //
     // DEZE ENTRY IS NIET OPTIONEEL. Een view registreren in DFO.VIEWS is
     // maar de helft: zonder regel in MODS geeft goMod() een stille `return`
     // (`const m = MODS.find(...); if (!m) return;`) en valt curMod() terug
     // op visMods()[0] — het scherm toont dan Dashboard zonder enige fout in
     // de console. Precies dat gebeurde bij de eerste Iris-deploy.
-    { g: 'Klanten & communicatie', id: 'iris',             naam: 'Iris',              icon: I.sparkle,  color: 'violet',  roles: [], preview: true, tabs: [] },
+    { g: 'Klanten & communicatie', id: 'iris',             naam: 'Iris',              icon: I.sparkle,  color: 'violet',  roles: SAMS, tabs: [] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
     // Support (2026-09-22) — de CRM-kant van de widget op de website. Zie
