@@ -154,50 +154,121 @@ test('een komma-lijst werkt ook — ?v2preview=wanbetalers,iris', () => {
   assert.equal(DFO.curMod().id, 'iris');
 });
 
-/* ── 3. Onzichtbaar zónder ?v2preview ─────────────────────────────────── */
+/* ── 3. Vrijgegeven: zichtbaar voor drie rollen, voor de rest niet ────── */
+//
+// Deze bak stond tot 16 oktober op de KOP: hij eiste dat Iris in geen enkele
+// zijbalk stond. Dat was juist zolang de module sliep. Nu is hij vrijgegeven
+// voor super_admin, manager en sales (Dave), en is de eis dus niet "voor
+// niemand" maar "voor precies die drie". Dat is de helft die stil kan
+// verschuiven: een rolset uitbreiden kost één woord en levert geen foutmelding
+// op bij degene die het niet had mogen zien.
 
-test('zonder ?v2preview staat iris in geen enkele zijbalk', () => {
+const MAG = ['super_admin', 'manager', 'sales'];
+const MAG_NIET = ['mentor', 'marketing', 'appointmentsetter'];
+
+test('iris staat in de zijbalk voor super_admin, manager en sales', () => {
   const DFO = laadSchil('');
-  for (const rol of ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'appointmentsetter']) {
+  for (const rol of MAG) {
     DFO.setRoles([rol]);
-    const zichtbaar = DFO.visMods().map((m) => m.id);
-    assert.ok(!zichtbaar.includes('iris'), `iris is zichtbaar voor rol ${rol} — hij hoort nog slapend te zijn`);
+    const zichtbaar = DFO.visMods().filter((m) => m.nav !== false).map((m) => m.id);
+    assert.ok(zichtbaar.includes('iris'), `iris staat NIET in de zijbalk van ${rol}`);
   }
 });
 
-test('zonder ?v2preview levert goMod(iris) geen iris-scherm op', () => {
-  // Het gedrag van vóór deze wijziging, en het gedrag dat we willen houden
-  // zolang de module niet is vrijgegeven: de MODS-entry alleen is niet genoeg.
+test('en voor geen enkele andere rol', () => {
   const DFO = laadSchil('');
-  DFO.setRoles(['manager']);
+  for (const rol of MAG_NIET) {
+    DFO.setRoles([rol]);
+    assert.ok(!DFO.visMods().map((m) => m.id).includes('iris'),
+      `iris is zichtbaar voor ${rol} — die rol hoort Iris niet te zien`);
+  }
+  // Een administratie-user houdt na pickShellRoles() een LEGE rolset over
+  // (administratie zit niet in SHELL_ROLES). Zo iemand ziet alleen modules met
+  // een permKey waar hij het recht voor heeft — en Iris heeft er geen.
+  DFO.setRoles([]);
+  assert.ok(!DFO.visMods().map((m) => m.id).includes('iris'));
+});
+
+test('zonder ?v2preview opent iris nu gewoon', () => {
+  // Precies het omgekeerde van de oude toets. Dit is waarom de PR bestaat.
+  const DFO = laadSchil('');
+  DFO.setRoles(['sales']);
+  DFO.goMod('iris');
+  assert.equal(DFO.S.mod, 'iris');
+  assert.equal(DFO.curMod().id, 'iris');
+});
+
+test('maar een mentor komt er nog steeds niet in', () => {
+  const DFO = laadSchil('');
+  DFO.setRoles(['mentor']);
   DFO.goMod('iris');
   assert.notEqual(DFO.curMod().id, 'iris');
 });
 
-test('iris heeft geen roles en geen permKey — vrijgeven is een bewuste stap', () => {
+test('iris heeft roles en GEEN permKey — dat laatste is een keuze', () => {
+  // permKey zou alleen zichtbaarheid TOEVOEGEN (visMods is additief), en
+  // `iris.view` staat voor administratie op true. Een permKey erbij zou Iris
+  // dus breder zetten dan afgesproken, zonder dat dat ergens te zien is.
   const DFO = laadSchil('');
   const iris = DFO.MODS.find((m) => m.id === 'iris');
-  assert.deepEqual(iris.roles, [], 'roles gevuld → iris verschijnt in de zijbalk');
-  assert.equal(iris.permKey, undefined, 'permKey gezet → iris verschijnt bij iedereen met dat recht');
-  assert.equal(iris.preview, true);
+  assert.deepEqual([...iris.roles].sort(), [...MAG].sort());
+  assert.equal(iris.permKey, undefined,
+    'permKey gezet → ook administratie ziet Iris in de zijbalk');
+  assert.equal(iris.preview, undefined,
+    'de preview-vlag hoort weg nu de rollen kloppen — anders tovert ?v2preview= het item in elke zijbalk');
 });
 
-test('de preview-vlag verandert niets voor de bestaande modules', () => {
-  // Alleen een MOD met `preview: true` hoort het nieuwe pad te lopen. Staat de
-  // vlag ergens anders, dan is een module onbedoeld met een URL-parameter uit
-  // de zijbalk te toveren.
+test('geen enkele module heeft de preview-vlag nog', () => {
+  // De vlag bestaat nog als mechanisme (voor een volgende slapende module),
+  // maar er hoort er nu geen gebruik van te maken. Staat 'ie ergens, dan is die
+  // module met een URL-parameter in een zijbalk te krijgen waar hij niet hoort.
   const DFO = laadSchil('');
-  const metVlag = DFO.MODS.filter((m) => m.preview).map((m) => m.id);
-  assert.deepEqual(metVlag, ['iris']);
+  assert.deepEqual(DFO.MODS.filter((m) => m.preview).map((m) => m.id), []);
 });
 
-test('?v2preview van een gewone module verruimt niets', () => {
-  // wanbetalers is SAM-only. Een mentor die 'em opvraagt met de parameter
-  // hoort 'em nog steeds niet te zien: de parameter opent alleen slapende
-  // modules, hij is geen rechten-omweg.
-  const DFO = laadSchil('?v2preview=wanbetalers');
-  DFO.setRoles(['mentor']);
-  assert.ok(!DFO.visMods().map((m) => m.id).includes('wanbetalers'));
+test('iris staat onder Klanten & communicatie, direct naast Wanbetalers', () => {
+  const DFO = laadSchil('');
+  const iris = DFO.MODS.find((m) => m.id === 'iris');
+  assert.equal(iris.g, 'Klanten & communicatie');
+  const ids = DFO.MODS.filter((m) => m.g === 'Klanten & communicatie').map((m) => m.id);
+  assert.equal(ids[ids.indexOf('iris') - 1], 'wanbetalers',
+    'iris hoort direct na wanbetalers te staan — daar wordt hij gezocht');
+});
+
+test("'iris' staat in V2_ACTIVE_ALLOWLIST, anders is de weergave dormant", () => {
+  // KV_V2_ADD gooit een registratie weg die niet in de allowlist staat. Zonder
+  // deze regel verschijnt het menu-item wél (MODS) en blijft het scherm leeg.
+  const bron = lees('modules/klanten-v2/klanten-v2.js');
+  const regel = bron.slice(bron.indexOf('const V2_ACTIVE_ALLOWLIST'));
+  assert.match(regel.slice(0, regel.indexOf(');')), /'iris'/);
+});
+
+test('de links die we zelf maken houden ?v2preview=iris — die is dragend', () => {
+  // Niet overbodig geworden: klanten-v2.js leest de boot-module uit
+  // `?v2preview=`, en pas als die ontbreekt uit de hash. `#iris/dossier/<id>`
+  // is als geheel geen module-id, dus zonder de parameter landt zo'n link op
+  // het Dashboard. Weghalen vraagt eerst een hash-parser die het eerste
+  // segment pakt.
+  assert.match(lees('api/_lib/iris/opvolging.js'), /v2preview=iris/);
+  assert.match(lees('api/_lib/iris/belrij-bronnen.js'), /v2preview=iris#iris\//);
+  const kv = lees('modules/klanten-v2/klanten-v2.js');
+  assert.match(kv, /get\('v2preview'\)/);
+});
+
+test('sales heeft iris.view, dus het menu-item is voor Dave geen doodlopende weg', () => {
+  // Het item zichtbaar maken zonder het recht erachter geeft een scherm vol
+  // 403's. De rechten staan in de migratie van 21 september; deze toets houdt
+  // de zijbalk en die migratie aan elkaar.
+  const sql = lees('docs/sql-migrations/2026-09-21-iris-fase1-rechten.sql');
+  for (const rol of ['manager', 'sales']) {
+    const re = new RegExp(`'${rol}', 'iris\\.view', true`);
+    assert.match(sql, re, `${rol} krijgt iris.view niet in de rechten-migratie`);
+  }
+  // En de keerzijde: de rollen die het item niet zien, hebben het recht ook niet.
+  for (const rol of ['mentor', 'marketing', 'appointmentsetter']) {
+    const re = new RegExp(`'${rol}', 'iris\\.view', false`);
+    assert.match(sql, re, `${rol} staat niet expliciet op false in de rechten-migratie`);
+  }
 });
 
 /* ── 4. De browser moet de nieuwe bestanden ook echt ophalen ──────────── */
