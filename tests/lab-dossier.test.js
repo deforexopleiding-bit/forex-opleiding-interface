@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { labStatus, aggregeerFunnel, vragenUitSnapshot, kwalificatieRegels, minutenInLab, isAfgerond, gebeurtenisRegel, ROUTE_LABELS } from '../api/_lib/lab-dossier.js';
+import { labStatus, aggregeerFunnel, vragenUitSnapshot, kwalificatieRegels, minutenInLab, isAfgerond, gebeurtenisRegel, ROUTE_LABELS, perRoute } from '../api/_lib/lab-dossier.js';
 
 const nu = Date.parse('2026-10-15T12:00:00Z');
 const toekomst = '2026-10-20T00:00:00Z';
@@ -48,8 +48,9 @@ test('funnel: eerste hook telt, touches apart, test telt niet', () => {
   const { rijen, totaal } = aggregeerFunnel(aanm, lms, new Set(['a@x.be']));
   const h1 = rijen.find((r) => r.sleutel === 'H01');
   const h2 = rijen.find((r) => r.sleutel === 'H02');
-  assert.deepEqual({ ...h1 }, { sleutel: 'H01', touches: 2, leads: 2, ingelogd: 1, gestart: 1, afgewerkt: 1, geboekt: 2, klant: 1 });
-  assert.deepEqual({ ...h2 }, { sleutel: 'H02', touches: 2, leads: 1, ingelogd: 1, gestart: 1, afgewerkt: 0, geboekt: 0, klant: 0 });
+  const geenRoute = { lab: 0, kort: 0, praten: 0 };
+  assert.deepEqual({ ...h1 }, { sleutel: 'H01', touches: 2, leads: 2, ingelogd: 1, gestart: 1, afgewerkt: 1, geboekt: 2, klant: 1, route: geenRoute });
+  assert.deepEqual({ ...h2 }, { sleutel: 'H02', touches: 2, leads: 1, ingelogd: 1, gestart: 1, afgewerkt: 0, geboekt: 0, klant: 0, route: geenRoute });
   assert.equal(totaal.leads, 3);
 });
 
@@ -83,4 +84,21 @@ test('GEBEURTENISSEN: elke soort heeft een leesbare regel voor Dave', () => {
   for (const s of ['kaart_gesloten', 'route_terugkeer', 'video_gestart', 'bevestiging_ics', 'terugbellen_gevraagd']) {
     assert.ok(gebeurtenisRegel({ soort: s }).length > 5, s);
   }
+});
+
+test('PER ROUTE: leads en geboekt per gekozen ingang; zonder keuze apart', () => {
+  const lms = new Map([
+    ['a@x.be', { route: 'lab', labLead: { sessie_geboekt_op: '2026-10-16T10:00:00Z' } }],
+    ['b@x.be', { route: 'kort', labLead: {} }],
+    ['c@x.be', { route: 'praten', geboekt: true }],
+    ['d@x.be', { labLead: {} }],
+  ]);
+  const pr = perRoute(['a@x.be', 'b@x.be', 'c@x.be', 'd@x.be'], lms);
+  assert.deepEqual(pr, { lab: { leads: 1, geboekt: 1 }, kort: { leads: 1, geboekt: 0 }, praten: { leads: 1, geboekt: 1 }, geen: { leads: 1, geboekt: 0 } });
+  const f = aggregeerFunnel(
+    [{ email: 'a@x.be', hook: 'H1', aangemaakt: '1' }, { email: 'b@x.be', hook: 'H1', aangemaakt: '2' }],
+    lms,
+  );
+  assert.deepEqual(f.rijen[0].route, { lab: 1, kort: 1, praten: 0 });
+  assert.equal(f.perRoute.lab.leads, 1);
 });

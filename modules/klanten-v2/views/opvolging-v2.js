@@ -1726,9 +1726,10 @@
    * net afwerkte of zelf vroeg om te bellen, belt Dave binnen het kwartier.
    * Volgorde: zelf gevraagd, Lab af, wil investeren, 24u stil — oudste eerst.
    */
-  const LAB_BEL_VOLGORDE = ['lab_vraag', 'lab_af_niet_geboekt', 'lab_investeren', 'lab_stil_24u'];
+  const LAB_BEL_VOLGORDE = ['lab_vraag', 'lab_praten', 'lab_af_niet_geboekt', 'lab_investeren', 'lab_stil_24u'];
   const LAB_BEL_LABEL = {
     lab_vraag: 'Vroeg zelf om te bellen',
+    lab_praten: 'Wilde meteen praten',
     lab_af_niet_geboekt: 'Lab afgewerkt, nog niet geboekt',
     lab_investeren: 'Wil investeren in begeleiding',
     lab_stil_24u: '24u stil in The Lab',

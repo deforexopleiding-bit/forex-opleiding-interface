@@ -29,7 +29,7 @@ mock.module(url('api/_lib/lab-opvolging.js'), { namedExports: { ...(await import
 const { default: cron } = await import(url('api/cron-lab-opvolging.js'));
 
 const twee = new Date(Date.now() - 2 * 86400000).toISOString();
-function opzet({ live, geboekt = false, agenda = false } = {}) {
+function opzet({ live, geboekt = false, agenda = false, video = false } = {}) {
   crm = maakFakeDb({
     app_settings: live ? [{ key: 'lab_opvolging_live', value: 'true' }] : [],
     lab_aanmeldingen: [{ id: 'a1', aangemaakt: twee, lead_id: 'l1', email: 'lien@x.be', voornaam: 'Lien', telefoon_e164: '+32472223752', toestemming: true, lms_auth_id: 'auth-1', resultaat: 'nieuw_account' }],
@@ -40,6 +40,7 @@ function opzet({ live, geboekt = false, agenda = false } = {}) {
   lms = maakFakeDb({
     hlms_lab_lead: [{ id: 'll1', auth_id: 'auth-1', email: 'lien@x.be', voornaam: 'Lien', toegang_tot: new Date(Date.now() + 5 * 86400000).toISOString(), sessie_geboekt_op: geboekt ? twee : null, aangemaakt_op: twee }],
     hlms_lab_sessie: [],
+    hlms_lab_lead_gebeurtenis: video ? [{ lead_id: 'll1', soort: 'video_voltooid', sleutel: 'mat-1', op: twee }] : [],
   });
 }
 beforeEach(() => { mails = []; });
@@ -63,8 +64,10 @@ test('live aan: de nudge gaat één keer uit, met een loginlink naar The Lab', a
   const b = await run();
   assert.equal(b.verstuurd.length, 1);
   assert.equal(mails.length, 1);
-  assert.equal(mails[0].subject, 'Je eerste trade wacht op je');
-  assert.match(mails[0].html, /\/the-lab\/start\/\?s=[^"&]+&amp;naar=lab|\/the-lab\/start\/\?s=[^"]+naar=lab/);
+  // Jouw route: niet gestart → het actieplan (startvideo, Lab of meteen Dave).
+  assert.equal(mails[0].subject, 'Geen 20 minuten? Dan 5.');
+  assert.match(mails[0].html, /\/the-lab\/start\/\?s=[^"]+"/);
+  assert.doesNotMatch(mails[0].html, /naar=lab/);
   assert.deepEqual(crm.tabellen.lab_opvolging.map((o) => [o.stap, o.kanaal, o.status]).sort(), [['niet-gestart-24u', 'mail', 'verstuurd'], ['niet-gestart-24u', 'whatsapp', 'overgeslagen']]);
   await run();
   assert.equal(mails.length, 1, 'niet nog eens');
@@ -76,4 +79,10 @@ test('geboekt in het LMS of via de agenda: niets meer', async () => {
   opzet({ live: true, agenda: true });
   await run();
   assert.equal(mails.length, 0);
+});
+
+test('JOUW ROUTE: startvideo uitgekeken, geen Lab na een dag → "nu de praktijk", niet de niet-gestart-nudge', async () => {
+  opzet({ live: false, video: true });
+  const b = await run();
+  assert.deepEqual(b.droog, [{ email: 'lien@x.be', stap: 'video-geen-lab' }]);
 });

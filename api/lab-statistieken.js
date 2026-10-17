@@ -20,7 +20,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodeUitQuery } from './funnel-stats.js';
-import { aggregeerFunnel, labStatus, leesLmsStand } from './_lib/lab-dossier.js';
+import { aggregeerFunnel, labStatus, leesLabGedrag, leesLmsStand } from './_lib/lab-dossier.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { uitnodigingPerSleutel, leesUitnodigingGebeurtenissen } from './_lib/lab-uitnodiging.js';
@@ -62,7 +62,8 @@ export default async function handler(req, res) {
     try {
       const authIds = [...new Set(aanmeldingen.map((a) => a.lms_auth_id).filter(Boolean))];
       const { leads, sessiePerAuth } = await leesLmsStand({ authIds });
-      for (const l of leads) lmsPerEmail.set(String(l.email).toLowerCase(), { labLead: l, sessie: sessiePerAuth.get(l.auth_id) || null });
+      const gedrag = await leesLabGedrag(leads.map((l) => l.id));
+      for (const l of leads) lmsPerEmail.set(String(l.email).toLowerCase(), { labLead: l, sessie: sessiePerAuth.get(l.auth_id) || null, route: gedrag.get(l.id)?.route || null });
       // Sessiebalk + slimme uitnodiging (fail-soft).
       gebeurtenissen = await leesUitnodigingGebeurtenissen(getDfoLmsClient(), leads.map((l) => l.id));
     } catch (e) {
@@ -90,7 +91,7 @@ export default async function handler(req, res) {
     for (const l of ld || []) if (l.status === 'gewonnen' || l.customer_id) klanten.add(String(l.email).toLowerCase());
   }
 
-  const { rijen, totaal } = aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten, per);
+  const { rijen, totaal, perRoute } = aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten, per);
   const uitnodiging = uitnodigingPerSleutel(aanmeldingen, lmsPerEmail, gebeurtenissen, per);
 
   // De lijst: één regel per e-mail, nieuwste aanmelding eerst.
@@ -107,9 +108,9 @@ export default async function handler(req, res) {
     leads.push({
       lead_id: a.lead_id, email: em, voornaam: a.voornaam, hook: a.hook, campagne: a.utm_campaign,
       aangemeld: a.aangemaakt, status, is_test: a.is_test,
-      stap: l.sessie?.stap ?? null, stappen: l.sessie?.stappen ?? null,
+      stap: l.sessie?.stap ?? null, stappen: l.sessie?.stappen ?? null, route: l.route || null,
     });
   }
 
-  return res.status(200).json({ ok: true, per, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, uitnodiging, leads });
+  return res.status(200).json({ ok: true, per, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, per_route: perRoute, uitnodiging, leads });
 }
