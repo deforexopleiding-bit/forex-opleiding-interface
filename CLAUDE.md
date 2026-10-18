@@ -149,7 +149,7 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   verdeling categorie/traject/aanpak, conversie + dealwaarde (elke deal één keer).
   Concepten tellen niet mee.
   /scan toont het logo per thema (`/img/scan/logo-navy.png` / `logo-wit.png`) en max.
-  2 beelden in de flow (`/img/scan/scan-intro-*`, `scan-trading-*`, srcset). Klant-status
+  2 beelden in de flow (`/img/scan/scan-intro-les-*` = lesfoto, `scan-trading-*`, srcset). Klant-status
   (`api/_lib/scan-klant.js`): automatisch = gewonnen deal (accepted, niet
   archived/declined) via lead / klant van de lead / e-mail; handmatig
   (`scans.klant_status_handmatig`) heeft voorrang, bron wordt getoond.
