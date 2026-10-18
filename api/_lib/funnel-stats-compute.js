@@ -36,6 +36,9 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   'kennismakingscursus-v4',
   'kennismakingscursus-v5',
   'kennismakingscursus-v6',
+  // 2026-10-18: twee nieuwe funnels met eigen design (v7 lange verkooppagina, v8 modern).
+  'kennismakingscursus-v7',
+  'kennismakingscursus-v8',
   '7-daagse-v1',
   '7-daagse-v2',
   '7-daagse-v3',
@@ -54,6 +57,8 @@ export const VARIANT_INFO = Object.freeze({
   // meteen in beeld, B = belofte + beeld + knop, formulier lager).
   'kennismakingscursus-v5': { label: 'Mini-cursus (v5 · A)', groep: 'kmc' },
   'kennismakingscursus-v6': { label: 'Mini-cursus (v6 · B)', groep: 'kmc' },
+  'kennismakingscursus-v7': { label: 'Mini-cursus (v7)', groep: 'kmc' },
+  'kennismakingscursus-v8': { label: 'Mini-cursus (v8)', groep: 'kmc' },
   '7-daagse-v1':            { label: '7-daagse (v1)',    groep: '7-daagse' },
   '7-daagse-v2':            { label: '7-daagse (v2)',    groep: '7-daagse' },
   '7-daagse-v3':            { label: '7-daagse (v3 · A)', groep: '7-daagse' },
