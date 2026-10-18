@@ -31,10 +31,19 @@
 //              ghl_form_submission_id, event_date_label, first_name,
 //              last_name, email, phone, matched_event_id, matched_attendee_id,
 //              match_candidate_ids, resolved_at, notes, attendee_status,
-//              questionnaire_filled, questionnaire_filled_at,
+//              questionnaire_filled, questionnaire_filled_at,   (zie VRAGENLIJST hieronder)
 //              matched_event: { id, title, starts_at, niveau, capacity, signups_closed } | null }],
 //     counts: { matched, ambiguous, no_match, invalid_payload, total },
 //     limit, offset }
+//
+// VRAGENLIJST (fix 2026-10-18): `questionnaire_filled` = de attendee heeft een
+// assessment_response_id — exact de bron van het detailpaneel
+// (events-attendee-assessment-get) en van de capaciteitsregel (isPlekBezet).
+// `questionnaire_filled_at` = het INVUL-moment (assessment_responses.submitted_at,
+// anders created_at, anders event_attendees.assessment_linked_at).
+// NIET meetellen: event_kwalificatie_submissions. Dat is de kwalificatie-quiz van
+// STAP 1 op de website, opgeslagen vóórdat de aanmelding bestaat; hij gaf een ✓
+// met een tijd vóór het inschrijfmoment terwijl het detail "geen vragenlijst" zei.
 //
 // `id` = inbox-id als er een inbox-rij bij hoort, anders 'attendee:<uuid>'.
 // Alleen inbox-ids kunnen naar de resolve-flow; attendee-rijen zijn altijd
@@ -98,7 +107,7 @@ export default async function handler(req, res) {
     // ── 1) Beide bronnen volledig ophalen (volume: honderden rijen) ────────
     const [attendees, inbox] = await Promise.all([
       haalAlles(() => supabaseAdmin.from('event_attendees')
-        .select('id, event_id, first_name, last_name, email, phone, status, created_at, registered_at, created_via, source, assessment_response_id')
+        .select('id, event_id, first_name, last_name, email, phone, status, created_at, registered_at, created_via, source, assessment_response_id, assessment_linked_at')
         .eq('is_test', false)
         .order('created_at', { ascending: true })),
       haalAlles(() => supabaseAdmin.from('event_signup_inbox')
@@ -147,6 +156,7 @@ export default async function handler(req, res) {
         notes                 : ib ? ib.notes : null,
         attendee_status       : a.status || null,
         _assessment_response_id: a.assessment_response_id || null,
+        _assessment_linked_at : a.assessment_linked_at || null,
       });
     }
     let dedupedInbox = 0;
@@ -162,6 +172,7 @@ export default async function handler(req, res) {
         matched_attendee_id: null,   // verwijzing naar een niet-bestaande attendee niet doorgeven
         attendee_status: null,
         _assessment_response_id: null,
+        _assessment_linked_at : null,
       });
     }
 
@@ -184,35 +195,28 @@ export default async function handler(req, res) {
         .in('id', ids));
     const eventById = new Map(eventRows.map((e) => [e.id, e]));
 
-    // Vragenlijst: oude flow via assessment_responses, nieuwe flow (FASE 1)
-    // via event_kwalificatie_submissions. Fail-soft: bij een fout → niet ingevuld.
-    const filledAtByAttendee = new Map();
+    // Vragenlijst: ingevuld = assessment_response_id gezet (zie VRAGENLIJST
+    // bovenaan). Hier alleen het invul-moment opzoeken; fail-soft: bij een
+    // leesfout valt de tijd terug op assessment_linked_at, het ✓ blijft kloppen.
+    const respAt = new Map();
     try {
       const respIds = pagina.map((r) => r._assessment_response_id).filter(Boolean);
       const resp = await haalPerChunk(respIds, (ids) =>
         supabaseAdmin.from('assessment_responses').select('id, submitted_at, created_at').in('id', ids));
-      const respAt = new Map(resp.map((r) => [r.id, r.submitted_at || r.created_at || null]));
-      for (const r of pagina) {
-        if (r._assessment_response_id && respAt.has(r._assessment_response_id)) {
-          filledAtByAttendee.set(r.matched_attendee_id, respAt.get(r._assessment_response_id));
-        }
-      }
-      const attIds = pagina.map((r) => r.matched_attendee_id).filter(Boolean);
-      const subs = await haalPerChunk(attIds, (ids) =>
-        supabaseAdmin.from('event_kwalificatie_submissions').select('attendee_id, created_at').in('attendee_id', ids));
-      for (const s of subs) {
-        if (!filledAtByAttendee.has(s.attendee_id)) filledAtByAttendee.set(s.attendee_id, s.created_at || null);
-      }
+      for (const r of resp) respAt.set(r.id, r.submitted_at || r.created_at || null);
     } catch (e) {
       console.error('[events-signup-inbox-list questionnaire-fetch]', e?.message || e);
     }
 
-    const rows = pagina.map(({ _assessment_response_id, ...r }) => ({
-      ...r,
-      matched_event           : r.matched_event_id ? (eventById.get(r.matched_event_id) || null) : null,
-      questionnaire_filled    : !!(r.matched_attendee_id && filledAtByAttendee.has(r.matched_attendee_id)),
-      questionnaire_filled_at : r.matched_attendee_id ? (filledAtByAttendee.get(r.matched_attendee_id) || null) : null,
-    }));
+    const rows = pagina.map(({ _assessment_response_id, _assessment_linked_at, ...r }) => {
+      const ingevuld = !!(r.matched_attendee_id && _assessment_response_id);
+      return {
+        ...r,
+        matched_event           : r.matched_event_id ? (eventById.get(r.matched_event_id) || null) : null,
+        questionnaire_filled    : ingevuld,
+        questionnaire_filled_at : ingevuld ? (respAt.get(_assessment_response_id) || _assessment_linked_at || null) : null,
+      };
+    });
 
     return res.status(200).json({
       rows,

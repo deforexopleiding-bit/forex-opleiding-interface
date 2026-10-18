@@ -4368,15 +4368,13 @@
             const evDate  = r.matched_event?.starts_at ? _fmtDate(r.matched_event.starts_at) : (r.event_date_label || '');
             const ms = r.match_status || 'onbekend';
             const [mc, ml] = ms === 'matched' ? ['ok','Matched'] : ms === 'ambiguous' ? ['warn','Ambigu'] : ms === 'no_match' ? ['danger','Geen match'] : ['neutral','Ongeldig'];
-            // BUG 4a FIX — signup-inbox-list retourneert `questionnaire_filled`
-            // (boolean) direct in de response, uit gejoinde event_attendees.
-            // Autoritatief: r.questionnaire_filled. Fallback op oude velden alleen
-            // als 'ie ontbreekt (achterwaartse compat).
-            const hasQuest = r.questionnaire_filled === true
-              || (!('questionnaire_filled' in r) && !!(r.matched_attendee?.assessment_response_id || r.assessment_response_id));
-            // Punt 3 — toon tijdstip vragenlijst-invulling naast vinkje.
-            // Bron: r.questionnaire_filled_at (bevestigd in api/events-signup-
-            // inbox-list.js regel 133).
+            // signup-inbox-list levert `questionnaire_filled`: true alleen bij een
+            // gekoppelde assessment_response_id — dezelfde bron als het
+            // detailpaneel (events-attendee-assessment-get), dus lijst en detail
+            // spreken elkaar niet tegen. De kwalificatie-quiz van stap 1 telt
+            // bewust NIET (fix 2026-10-18).
+            const hasQuest = r.questionnaire_filled === true;
+            // Tijd naast het vinkje = het INVUL-moment (questionnaire_filled_at).
             const qDate = hasQuest && r.questionnaire_filled_at ? _fmtDate(r.questionnaire_filled_at) : '';
             const qTime = hasQuest && r.questionnaire_filled_at ? _fmtTime(r.questionnaire_filled_at) : '';
             const questCell = ms === 'matched'
@@ -4385,7 +4383,7 @@
                       <span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px;line-height:1">✓</span>
                       ${qDate ? `<div class="mono" style="font-size:10px;color:var(--text-3);line-height:1.15">${esc(qDate)}${qTime ? ' ' + esc(qTime) : ''}</div>` : ''}
                     </div>`
-                  : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)
+                  : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--text-3);font-size:11.5px">nog niet</span>`)
               : `<span title="Nog geen match — vragenlijst onbekend" style="color:var(--text-3);font-size:12px">—</span>`;
             const insDate = _fmtDate(r.received_at);
             const insTime = _fmtTime(r.received_at);
