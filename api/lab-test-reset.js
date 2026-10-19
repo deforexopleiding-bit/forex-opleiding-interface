@@ -102,26 +102,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, code: 'afspraak_annuleren' });
   }
 
-  // ── 3. De test-strategiescan ──────────────────────────────────────────────
-  // Bij elke Lab-boeking staat er een scan klaar (_lib/lab-scan.js). Voor een
-  // test-afspraak is dat een TEST-concept in Daves Strategie-scans; dat gaat
-  // weg met de afspraak. Alleen concepten van DEZE geannuleerde test-afspraken
-  // met de TEST-naam — een scan die Dave al invulde (afgerond) blijft staan.
-  const ids = (afspraken || []).map((a) => a.id);
-  let scansGewist = 0;
-  if (ids.length) {
-    const { data: weg, error: se } = await supabaseAdmin.from('scans')
-      .delete()
-      .in('afspraak_id', ids)
-      .eq('status', 'concept')
-      .like('deelnemer_naam', 'TEST · %')
-      .select('id');
-    if (se) {
-      console.error('[lab-test-reset] test-scan opruimen:', se.message);
-      return res.status(500).json({ ok: false, code: 'scan_opruimen' });
-    }
-    scansGewist = (weg || []).length;
-  }
-
-  return res.status(200).json({ ok: true, taken_gearchiveerd: gearchiveerd, afspraken_geannuleerd: (afspraken || []).length, scans_gewist: scansGewist });
+  return res.status(200).json({ ok: true, taken_gearchiveerd: gearchiveerd, afspraken_geannuleerd: (afspraken || []).length });
 }

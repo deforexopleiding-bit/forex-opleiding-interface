@@ -34,7 +34,6 @@ import { LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { selfServiceUrl } from './_lib/afspraak-berichten.js';
-import { maakLabScan } from './_lib/lab-scan.js';
 
 const VENSTER_DAGEN = 14;
 const DUUR_MIN = 30;
@@ -130,21 +129,6 @@ export async function boekTestAfspraak({ lab, iso, eigenaarId }) {
   return { appointment_id: data.id, zoom_join_url: null };
 }
 
-/**
- * De strategiescan voor deze boeking (status concept, Dave als assessor) —
- * zie _lib/lab-scan.js. Fail-soft: een scan die niet lukt, houdt de boeking
- * nooit tegen; Dave kan hem dan nog zelf starten vanuit de afspraak.
- */
-async function strategiescanVoor({ lab, leadId, afspraakId, gastheer, test }) {
-  try {
-    const r = await maakLabScan(supabaseAdmin, { lab, leadId, afspraakId, assessorId: gastheer?.id || null, test });
-    return r.id;
-  } catch (e) {
-    console.error('[lab-sessie] strategiescan klaarzetten (soft):', { afspraakId, fout: e?.message || e });
-    return null;
-  }
-}
-
 function bearer(req) {
   const h = String(req.headers?.authorization || '');
   return h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : null;
@@ -236,8 +220,7 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('[lab-sessie] test-boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
     }
-    const scanId = await strategiescanVoor({ lab, leadId: null, afspraakId: test.appointment_id, gastheer, test: true });
-    return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: test.appointment_id, zoom_join_url: null, gastheer: zichtbaar, test: true, scan_id: scanId });
+    return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: test.appointment_id, zoom_join_url: null, gastheer: zichtbaar, test: true });
   }
 
   let lead;
@@ -260,7 +243,7 @@ export default async function handler(req, res) {
       },
       scheduledAt: iso, durationMinutes: DUUR_MIN, source: LAB_SLUG,
       // In Daves agenda (GHL/Google) meteen herkenbaar.
-      ghlTitel: `The Lab · strategiescan · ${[lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lab.voornaam || 'lead'}`,
+      ghlTitel: `The Lab · strategiesessie · ${[lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lab.voornaam || 'lead'}`,
     });
   } catch (e) {
     console.error('[lab-sessie] boeken mislukt', { code: e?.code, fout: e?.message });
@@ -274,12 +257,10 @@ export default async function handler(req, res) {
     console.error('[lab-sessie] boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
   }
 
-  const scanId = await strategiescanVoor({ lab, leadId: lead.id, afspraakId: afspraak.appointment_id, gastheer, test: false });
-
   await stuurLabEvent({
     eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
     userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
   });
 
-  return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null, gastheer: zichtbaar, scan_id: scanId });
+  return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null, gastheer: zichtbaar });
 }

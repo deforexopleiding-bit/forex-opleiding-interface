@@ -2248,11 +2248,11 @@
       // hierboven, en die leest alleen wat Dave zelf heeft vastgelegd.
       const label = c.label ? ' <span class="tag t-grey">' + esc(c.label) + '</span>' : '';
       // WAAR DE BOEKING VANDAAN KOMT — alleen The Lab krijgt een eigen chip:
-      // daar weet Dave dat er een strategiescan klaarstaat en een Lab-dossier.
+      // een strategiesessie na The Lab, met een Lab-dossier achter de klik.
       const bron = c.bron === 'the-lab'
         ? ' <span class="tag t-amber" data-bron="the-lab" style="cursor:pointer" role="button" tabindex="0" ' +
           'onclick="window.__opvLabDossierVanCall(' + i + ')" ' +
-          'title="Geboekt vanuit The Lab — klik voor zijn Lab-antwoorden. De strategiescan staat klaar in Strategie-scans.">The Lab &middot; strategiescan</span>'
+          'title="Strategiesessie geboekt vanuit The Lab — klik voor zijn Lab-antwoorden.">The Lab</span>'
         : '';
       return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
@@ -4887,7 +4887,7 @@
   };
 
   window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
-  // Chip "The Lab · strategiescan" op een call: het Lab-dossier van die lead
+  // Chip "The Lab" op een call: het Lab-dossier van die lead
   // (antwoorden, kwalificatie, gedrag) — op e-mail, zoals Leadsonderhoud › The Lab.
   window.__opvLabDossierVanCall = (i) => {
     const c = callOp(i);

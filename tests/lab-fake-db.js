@@ -60,11 +60,6 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {}, 
         return { data: nieuw, error: null };
       }
       let rijen = t.filter(pas);
-      if (st.wissen) {
-        tabellen[tabel] = t.filter((r) => !rijen.includes(r));
-        log.updates.push({ tabel, gewist: rijen.length });
-        return { data: rijen.map((r) => ({ ...r })), error: null };
-      }
       if (st.patch) {
         for (const r of rijen) Object.assign(r, st.patch);
         log.updates.push({ tabel, patch: st.patch, aantal: rijen.length });
@@ -88,7 +83,6 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {}, 
       limit: (n) => { st.limiet = n; return k; },
       insert: (r) => { st.rijen = Array.isArray(r) ? r : [r]; return k; },
       update: (p) => { st.patch = p; return k; },
-      delete: () => { st.wissen = true; return k; },
       maybeSingle: async () => { const r = uitvoeren(); return { data: r.data?.[0] || null, error: r.error }; },
       single: async () => { const r = uitvoeren(); return { data: r.data?.[0] || null, error: r.error || (r.data?.[0] ? null : { message: 'geen rij' }) }; },
       then: (ok, nok) => Promise.resolve(uitvoeren()).then(ok, nok),
