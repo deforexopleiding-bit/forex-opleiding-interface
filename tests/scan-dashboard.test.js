@@ -97,5 +97,10 @@ test('bedrading: tab Dashboard in de module, view geregistreerd, cache-busters, 
   assert.match(view, /<title>\$\{esc\(titel\)\}<\/title>/, 'tooltip per kolom');
   assert.match(view, /Cijfers per \$\{d\.periode\.groep\}/, 'tabelweergave onder de grafiek');
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /app-shell\.js\?v=1e4/); assert.match(html, /views\/scans-v2\.js\?v=2/);
+  // Een ONDERGRENS en geen vast nummer: dit stond op v=1e4 en viel om zodra een
+  // andere PR de schil aanraakte en de cache-buster ophoogde (iris, 16 okt).
+  // De eis is "de browser haalt een versie op die deze wijziging bevat".
+  const _asV = (html.match(/app-shell\.js\?v=([0-9a-z]+)"/) || [])[1];
+  assert.ok(_asV && parseInt(_asV, 36) >= parseInt('1e4', 36), 'app-shell v=' + _asV);
+  assert.match(html, /views\/scans-v2\.js\?v=\d+/);
 });

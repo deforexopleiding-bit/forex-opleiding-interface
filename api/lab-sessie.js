@@ -15,6 +15,13 @@
 // draagt `gastheer: { voornaam, naam, foto_url, initialen }` (of null) voor de
 // boekingskaart; bij een boeking wordt hij eigenaar van de afspraak.
 //
+// TESTLEADS (is_test: de testleads én de "Lab-lead (test)"-accounts van de
+// admins) boeken via exact dezelfde weg — zelfde momenten, zelfde controle —
+// maar het CRM maakt er een TEST-afspraak van (is_test = true): GEEN afspraak
+// in Daves GHL-agenda, geen Zoom, geen bevestigingen of herinneringen (die
+// vragen een ghl_calendar_id), geen interne melding en geen Meta-event. Zo
+// stoort een test Dave nooit. Zie boekTestAfspraak().
+//
 // Schaarste wordt NOOIT verzonnen: `deze_week` is het werkelijke aantal vrije
 // momenten tot en met zondag, uit dezelfde agenda waaruit geboekt wordt.
 
@@ -89,6 +96,28 @@ export async function geboektMetVerzet(geboekt, afspraakId) {
   }
 }
 
+/**
+ * De TEST-afspraak van een testlead: alleen een rij in follow_up_appointments
+ * met is_test = true (uit Daves agenda- en opvolgweergaven gefilterd). Geen
+ * CRM-lead, geen GHL, geen Zoom.
+ */
+export async function boekTestAfspraak({ lab, iso, eigenaarId }) {
+  const { data, error } = await supabaseAdmin.from('follow_up_appointments').insert({
+    lead_name: `TEST · ${lab.voornaam || 'lab-lead'}`,
+    lead_email: lab.email,
+    lead_phone: null,
+    scheduled_at: iso,
+    duration_minutes: DUUR_MIN,
+    status: 'scheduled',
+    voicememo_status: 'skipped',
+    owner_id: eigenaarId || null,
+    booking_source: LAB_SLUG,
+    is_test: true,
+  }).select('id').single();
+  if (error) throw new Error('test-afspraak: ' + error.message);
+  return { appointment_id: data.id, zoom_join_url: null };
+}
+
 function bearer(req) {
   const h = String(req.headers?.authorization || '');
   return h.toLowerCase().startsWith('bearer ') ? h.slice(7).trim() : null;
@@ -138,7 +167,9 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     if (geboekt) {
-      const g = await geboektMetVerzet(geboekt, lab.sessie_afspraak_id);
+      // Een TEST-afspraak heeft geen GHL-afspraak achter zich: de verzetpagina
+      // zou die proberen te verzetten. Daarom geen verzetlink voor testleads.
+      const g = lab.is_test === true ? geboekt : await geboektMetVerzet(geboekt, lab.sessie_afspraak_id);
       return res.status(200).json({ ok: true, geboekt: g, verzet_url: g.verzet_url || null, momenten: [], deze_week: null, gastheer: zichtbaar });
     }
     try {
@@ -166,6 +197,20 @@ export default async function handler(req, res) {
   if (!vrij.ok) return res.status(503).json({ ok: false, code: 'agenda_onbereikbaar' });
   const iso = new Date(ms).toISOString();
   if (!vrij.momenten.includes(iso)) return res.status(409).json({ ok: false, code: 'moment_weg' });
+
+  if (lab.is_test === true) {
+    let test;
+    try { test = await boekTestAfspraak({ lab, iso, eigenaarId: gastheer?.id || null }); } catch (e) {
+      console.error('[lab-sessie] test-afspraak:', e?.message || e);
+      return res.status(500).json({ ok: false, code: 'boeken_mislukt' });
+    }
+    try {
+      await noteerBoeking(lab.id, { moment: iso, afspraakId: test.appointment_id });
+    } catch (e) {
+      console.error('[lab-sessie] test-boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+    }
+    return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: test.appointment_id, zoom_join_url: null, gastheer: zichtbaar, test: true });
+  }
 
   let lead;
   try { lead = await crmLead(lab); } catch (e) {
