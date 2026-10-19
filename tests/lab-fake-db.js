@@ -7,7 +7,13 @@
 
 import crypto from 'node:crypto';
 
-export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {} } = {}) {
+// `verplicht` = NOT NULL-kolommen zonder default, per tabel, zoals in productie
+// (bv. follow_up_appointments: lead_name, lead_ghl_contact_id, scheduled_at).
+// Een insert zonder zo'n kolom geeft 23502 — anders blijft een test groen die
+// in productie een 500 geeft (zo glipte de test-boeking van #1822 erdoor).
+export const VERPLICHT_FOLLOW_UP = Object.freeze(['lead_name', 'lead_ghl_contact_id', 'scheduled_at']);
+
+export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {}, verplicht = { follow_up_appointments: VERPLICHT_FOLLOW_UP } } = {}) {
   const tabellen = {};
   for (const [k, v] of Object.entries(start)) tabellen[k] = v.map((r) => ({ ...r }));
   const log = { inserts: [], updates: [], rpc: [] };
@@ -46,6 +52,8 @@ export function maakFakeDb(start = {}, { rpc = {}, ontbrekend = [], uniek = {} }
           const dubbel = (tabel === 'hlms_rol' && t.some((x) => x.auth_id === r.auth_id && x.rol === r.rol))
             || (typeof uniek[tabel] === 'function' && uniek[tabel](r, t));
           if (dubbel) return { data: null, error: { code: '23505', message: 'duplicate' } };
+          const mist = (verplicht[tabel] || []).find((k) => r[k] == null);
+          if (mist) return { data: null, error: { code: '23502', message: `null value in column "${mist}" of relation "${tabel}" violates not-null constraint` } };
         }
         t.push(...nieuw);
         log.inserts.push({ tabel, rijen: nieuw });
