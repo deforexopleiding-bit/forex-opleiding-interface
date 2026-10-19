@@ -561,3 +561,137 @@ test('endpoint: 409 SESSIE_ONGELDIG bij een niet-aangeboden sessie; antwoord bev
   assert.ok(src.includes("if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });"));
   assert.ok(src.includes('verplaatst: r.verplaatst === true,'));
 });
+
+// ── Herinneringen: juiste moment + juiste dag-tekst (fix 2026-10-19) ─────────
+// Webinar ma 19 okt 19:00 NL = 17:00Z. Bug: wie van een latere datum naar
+// "vandaag" wisselde (verplaatsen), kreeg direct na de bevestiging "Morgen is
+// het zover", omdat de oude aangemeld_op telde.
+test('dagWoord: zelfde dag = vanavond/vandaag, volgende dag = morgen, anders "op <datum>"', () => {
+  const start = '2026-10-19T17:00:00Z';                       // ma 19:00 NL
+  assert.equal(W.dagWoord(start, new Date('2026-10-19T10:15:00Z')), 'vanavond');
+  assert.equal(W.dagWoord('2026-10-19T11:00:00Z', new Date('2026-10-19T07:00:00Z')), 'vandaag', '13:00 → vandaag');
+  assert.equal(W.dagWoord(start, new Date('2026-10-18T17:00:00Z')), 'morgen');
+  assert.equal(W.dagWoord(start, new Date('2026-10-17T10:00:00Z')), 'op maandag 19 oktober');
+  // NL-kalender, niet UTC: zo 18 okt 23:30 NL (21:30Z) is nog "morgen".
+  assert.equal(W.dagWoord(start, new Date('2026-10-18T21:30:00Z')), 'morgen');
+  const c = (nu) => W.bouwContext({ aanmelding: { voornaam: 'Anna' }, sessie: { starts_at: start, ends_at: '2026-10-19T18:00:00Z' }, reeks: { zoom_url: 'https://zoom.us/j/x' }, nu: new Date(nu) });
+  const morgen = W.bouwMail('dag', c('2026-10-18T17:00:00Z'));
+  assert.equal(morgen.subject, 'Morgen om 19:00: het webinar');
+  assert.match(morgen.text, /Morgen is het zover/);
+  const vanavond = W.bouwMail('dag', c('2026-10-19T10:15:00Z'));
+  assert.equal(vanavond.subject, 'Vanavond om 19:00: het webinar');
+  assert.match(vanavond.text, /Vanavond is het zover[\s\S]*vanavond om 19:00/);
+  assert.doesNotMatch(vanavond.text, /morgen/i);
+  const later = W.bouwMail('dag', c('2026-10-17T10:00:00Z'));
+  assert.equal(later.subject, 'Op maandag 19 oktober om 19:00: het webinar');
+});
+
+test('momenten: "dag" alleen op de kalenderdag ervóór; geen reminder binnen 10 min na aanmelden', () => {
+  const start = '2026-10-19T17:00:00Z';
+  const [dag, uur, live] = W.MOMENTEN;
+  const op = (iso) => new Date(iso);
+  // Zelfde dag (12:15 NL), oude aanmelding: valt in het 24u-venster maar is vandaag → nooit "morgen".
+  assert.equal(W.momentIsAanDeBeurt(dag, { startsAt: start, aangemeldOp: '2026-10-14T10:00:00Z', nu: op('2026-10-19T10:16:00Z') }), false);
+  assert.equal(W.momentIsAanDeBeurt(dag, { startsAt: start, aangemeldOp: '2026-10-14T10:00:00Z', nu: op('2026-10-18T21:30:00Z') }), true, 'zo 23:30 NL: nog de dag ervoor');
+  assert.equal(W.momentIsAanDeBeurt(dag, { startsAt: start, aangemeldOp: '2026-10-14T10:00:00Z', nu: op('2026-10-18T22:00:00Z') }), false, 'ma 00:00 NL: te laat voor "morgen"');
+  // Aangemeld 65 min vooraf: "uur" pas 10 min na de bevestiging, niet tegelijk.
+  assert.equal(W.momentIsAanDeBeurt(uur, { startsAt: start, aangemeldOp: '2026-10-19T15:55:00Z', nu: op('2026-10-19T16:01:00Z') }), false);
+  assert.equal(W.momentIsAanDeBeurt(uur, { startsAt: start, aangemeldOp: '2026-10-19T15:55:00Z', nu: op('2026-10-19T16:05:00Z') }), true);
+  // Aangemeld 5 min vóór de start: geen "live" 5 min na de bevestiging.
+  assert.equal(W.momentIsAanDeBeurt(live, { startsAt: start, aangemeldOp: '2026-10-19T16:55:00Z', nu: op('2026-10-19T17:01:00Z') }), false);
+  // opSessieSinds: het verplaats-moment telt als het later is dan aangemeld_op.
+  assert.equal(W.opSessieSinds({ aangemeld_op: '2026-10-14T10:00:00Z', berichten: { verplaatst_door_keuze: { op: '2026-10-19T10:15:00Z' } } }), '2026-10-19T10:15:00.000Z');
+  assert.equal(W.opSessieSinds({ aangemeld_op: '2026-10-14T10:00:00Z', berichten: {} }), '2026-10-14T10:00:00.000Z');
+});
+
+async function herinneringenScenario({ aanmelden, rondes }) {
+  reset();
+  const db = nieuweDb();
+  await aanmelden(db);
+  const tellingen = {};
+  for (const iso of rondes) tellingen[iso] = await W.cronRonde(db, { nu: new Date(iso), wachtMs: 0 });
+  return { db, tellingen };
+}
+
+test('webinar VANDAAG — nieuwe aanmelding om 12:15 NL: alleen bevestiging, geen "morgen"; uur-reminder om 18:00, live om 19:00', async () => {
+  const MA_1215 = new Date('2026-10-19T10:15:00Z');
+  const rondes = ['2026-10-19T10:16:00Z', '2026-10-19T12:00:00Z', '2026-10-19T14:00:00Z', '2026-10-19T16:01:00Z', '2026-10-19T17:01:00Z'];
+  const { tellingen } = await herinneringenScenario({
+    aanmelden: async (db) => { await W.meldAan(db, { voornaam: 'Anna', email: 'anna@example.com', telefoon: '+31633334444', bron: 'webinar-v1', nu: MA_1215 }); db.tab.webinar_aanmeldingen[0].aangemeld_op = MA_1215.toISOString(); },
+    rondes,
+  });
+  assert.equal(verzonden.mails[0].subject, 'Je bent aangemeld: webinar op maandag 19 oktober');
+  assert.deepEqual(rondes.map((r) => tellingen[r].dag), [0, 0, 0, 0, 0], 'nooit een dag-reminder');
+  assert.equal(tellingen['2026-10-19T16:01:00Z'].uur, 1);
+  assert.equal(tellingen['2026-10-19T17:01:00Z'].live, 1);
+  assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_bevestiging', 'webinar_reminder_uur', 'webinar_live']);
+  assert.ok(!verzonden.mails.some((m) => /morgen/i.test(m.subject + m.text)), 'nergens "morgen"');
+});
+
+test('webinar VANDAAG — de gemelde bug: eerder aangemeld voor 26 okt, om 12:15 NL "vandaag" gekozen → geen "Morgen is het zover"', async () => {
+  const MA_1215 = new Date('2026-10-19T10:15:00Z');
+  const rondes = ['2026-10-19T10:16:00Z', '2026-10-19T10:20:00Z', '2026-10-19T16:01:00Z'];
+  const { db, tellingen } = await herinneringenScenario({
+    aanmelden: async (db) => {
+      const reeks = db.tab.webinar_reeksen[0];
+      const woe = new Date('2026-10-14T10:00:00Z');
+      const d26 = (await W.aangebodenSessies(db, reeks, { nu: woe }))[1];
+      assert.equal(d26.datum, '2026-10-26');
+      await W.meldAan(db, { voornaam: 'Anna', email: 'anna@example.com', telefoon: '+31633334444', bron: 'webinar-v1', sessieId: d26.id, nu: woe });
+      db.tab.webinar_aanmeldingen[0].aangemeld_op = woe.toISOString();
+      const vandaag = (await W.aangebodenSessies(db, reeks, { nu: MA_1215 }))[0];
+      assert.equal(vandaag.datum, '2026-10-19');
+      const r = await W.meldAan(db, { voornaam: 'Anna', email: 'anna@example.com', telefoon: '+31633334444', bron: 'webinar-v1', sessieId: vandaag.id, nu: MA_1215 });
+      assert.equal(r.verplaatst, true);
+      reset();
+    },
+    rondes,
+  });
+  assert.equal(tellingen['2026-10-19T10:16:00Z'].dag, 0, 'vóór de fix: 1 ("Morgen is het zover")');
+  assert.equal(tellingen['2026-10-19T10:20:00Z'].dag, 0);
+  assert.equal(tellingen['2026-10-19T16:01:00Z'].uur, 1);
+  assert.equal(db.tab.webinar_aanmeldingen[0].reminder_dag_op, null);
+  assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_reminder_uur']);
+});
+
+test('webinar OVER 2 DAGEN (aanmelding za 17 okt): niets op zaterdag; "Morgen" op zo 19:00 NL; uur + live op maandag', async () => {
+  const ZA = new Date('2026-10-17T10:00:00Z');
+  const rondes = ['2026-10-17T10:15:00Z', '2026-10-17T17:01:00Z', '2026-10-18T12:00:00Z', '2026-10-18T17:01:00Z', '2026-10-18T17:06:00Z', '2026-10-19T16:01:00Z', '2026-10-19T17:01:00Z'];
+  const { tellingen } = await herinneringenScenario({
+    aanmelden: async (db) => { await W.meldAan(db, { voornaam: 'Bram', email: 'bram@example.com', telefoon: '+31611112222', bron: 'webinar-v2', nu: ZA }); db.tab.webinar_aanmeldingen[0].aangemeld_op = ZA.toISOString(); reset(); },
+    rondes,
+  });
+  assert.deepEqual(rondes.map((r) => tellingen[r].dag), [0, 0, 0, 1, 0, 0, 0]);
+  assert.equal(tellingen['2026-10-19T16:01:00Z'].uur, 1);
+  assert.equal(tellingen['2026-10-19T17:01:00Z'].live, 1);
+  assert.equal(verzonden.mails[0].subject, 'Morgen om 19:00: het webinar');
+  assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_reminder_dag', 'webinar_reminder_uur', 'webinar_live']);
+});
+
+test('webinar MORGEN (aanmelding zo 12:00 NL): "Morgen" om 19:00 NL, niet bij aanmelding; aanmelding zo 20:00 NL: geen dag-reminder meer', async () => {
+  const ZO_12 = new Date('2026-10-18T10:00:00Z');
+  const { tellingen } = await herinneringenScenario({
+    aanmelden: async (db) => { await W.meldAan(db, { voornaam: 'Cas', email: 'cas@example.com', telefoon: '+31622223333', bron: 'webinar-v1', nu: ZO_12 }); db.tab.webinar_aanmeldingen[0].aangemeld_op = ZO_12.toISOString(); reset(); },
+    rondes: ['2026-10-18T10:15:00Z', '2026-10-18T17:01:00Z'],
+  });
+  assert.equal(tellingen['2026-10-18T10:15:00Z'].dag, 0, 'niet direct bij aanmelding');
+  assert.equal(tellingen['2026-10-18T17:01:00Z'].dag, 1);
+  assert.equal(verzonden.mails[0].subject, 'Morgen om 19:00: het webinar');
+
+  const ZO_20 = new Date('2026-10-18T18:00:00Z');
+  const laat = await herinneringenScenario({
+    aanmelden: async (db) => { await W.meldAan(db, { voornaam: 'Dirk', email: 'dirk@example.com', telefoon: '+31633332222', bron: 'webinar-v1', nu: ZO_20 }); db.tab.webinar_aanmeldingen[0].aangemeld_op = ZO_20.toISOString(); reset(); },
+    rondes: ['2026-10-18T18:15:00Z', '2026-10-18T21:00:00Z', '2026-10-19T16:01:00Z'],
+  });
+  assert.equal(laat.tellingen['2026-10-18T18:15:00Z'].dag + laat.tellingen['2026-10-18T21:00:00Z'].dag, 0);
+  assert.equal(laat.tellingen['2026-10-19T16:01:00Z'].uur, 1);
+});
+
+test('WA dag-template (tekst vast "morgen") gaat nooit uit als de dag niet "morgen" is', async () => {
+  reset();
+  const db = nieuweDb();
+  const ctx = W.bouwContext({ aanmelding: { voornaam: 'Eva' }, sessie: { starts_at: '2026-10-19T17:00:00Z', ends_at: '2026-10-19T18:00:00Z' }, reeks: {}, nu: new Date('2026-10-19T10:15:00Z') });
+  const r = await W.verstuurWa(db, { telefoon: '+31600000001', templateNaam: 'webinar_reminder_dag', ctx, wachtMs: 0 });
+  assert.equal(r.overgeslagen, 'dag_tekst_klopt_niet');
+  assert.equal(verzonden.wa.length, 0);
+});
