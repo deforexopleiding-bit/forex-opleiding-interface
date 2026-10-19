@@ -199,6 +199,11 @@ export async function createAppointmentForLead({
   scheduledAt,             // ISO string (verplicht)
   durationMinutes = 30,
   source = null,           // optionele slug, bv. 'nieuwsbrief' / 'romy' / 'direct'
+  // Titel van de afspraak in GHL (en daarmee in Daves agenda en de Zoom-
+  // uitnodiging). Standaard de naam van de lead; The Lab zet er
+  // 'The Lab · ' voor zodat Dave in één oogopslag ziet waar hij vandaan komt.
+  // Raakt follow_up_appointments.lead_name NIET (daar groeten de mails mee).
+  ghlTitel = null,
 }) {
   if (!lead || !lead.id) {
     const err = new Error('lead vereist');
@@ -252,7 +257,7 @@ export async function createAppointmentForLead({
       assignedUserId: process.env.GHL_DAVE_USER_ID || undefined,
       startTime     : startDate.toISOString(),
       endTime       : endDate.toISOString(),
-      title         : lead.lead_name || 'Zoom-afspraak',
+      title         : ghlTitel || lead.lead_name || 'Zoom-afspraak',
     });
   } catch (ghlErr) {
     const err = new Error('GHL-appointment aanmaken faalde');

@@ -2248,9 +2248,16 @@
       // verder niets: een uitkomst tonen doet uitsluitend de afrondchip
       // hierboven, en die leest alleen wat Dave zelf heeft vastgelegd.
       const label = c.label ? ' <span class="tag t-grey">' + esc(c.label) + '</span>' : '';
+      // WAAR DE BOEKING VANDAAN KOMT — alleen The Lab krijgt een eigen chip:
+      // een strategiesessie na The Lab, met een Lab-dossier achter de klik.
+      const bron = c.bron === 'the-lab'
+        ? ' <span class="tag t-amber" data-bron="the-lab" style="cursor:pointer" role="button" tabindex="0" ' +
+          'onclick="window.__opvLabDossierVanCall(' + i + ')" ' +
+          'title="Strategiesessie geboekt vanuit The Lab — klik voor zijn Lab-antwoorden.">The Lab</span>'
+        : '';
       return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
-        '<div class="who"><div class="nm">' + esc(c.naam) + label + '</div>' +
+        '<div class="who"><div class="nm">' + esc(c.naam) + bron + label + '</div>' +
         '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
           (taak ? ' &middot; staat al in je lijst' : '') + '</div>' +
         spraakRegel(c, dag) +
@@ -4881,6 +4888,13 @@
   };
 
   window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
+  // Chip "The Lab" op een call: het Lab-dossier van die lead
+  // (antwoorden, kwalificatie, gedrag) — op e-mail, zoals Leadsonderhoud › The Lab.
+  window.__opvLabDossierVanCall = (i) => {
+    const c = callOp(i);
+    if (!c || !window.DFOLabDossier) return;
+    window.DFOLabDossier.open({ leadId: null, email: c.email || null, naam: c.naam || null });
+  };
   window.__opvAanmeldZoom = () => {
     const m = _ui.modal; if (!m || _ui.bezig) return;
     // De agenda opnieuw ophalen: dit venster gaat open na een gesprek, en een
