@@ -117,6 +117,12 @@
     'kennismakingscursus-v6':  'Mini v6 (B)',
     'webinar-v1':              'Webinar v1 (A)',
     'webinar-v2':              'Webinar v2 (B)',
+    'kennismakingscursus-v7':  'Mini v7',
+    'kennismakingscursus-v8':  'Mini v8',
+    'the-lab':                 'The Lab (LMS)',
+    'the-lab-v1':              'The Lab v1 (A)',
+    'the-lab-v2':              'The Lab v2 (B)',
+    'strategiescan-v1':        'Strategie-scan v1',
     'funnel':                  'Funnel',
     'meta':                    'Meta',
     'handmatig':               'Handmatig',
@@ -718,6 +724,10 @@
           <option value="kennismakingscursus-v6"  ${fBron === 'kennismakingscursus-v6' ? 'selected' : ''}>kennismakingscursus-v6</option>
           <option value="webinar-v1"              ${fBron === 'webinar-v1' ? 'selected' : ''}>webinar-v1</option>
           <option value="webinar-v2"              ${fBron === 'webinar-v2' ? 'selected' : ''}>webinar-v2</option>
+          <option value="the-lab" ${fBron === 'the-lab' ? 'selected' : ''}>the-lab</option>
+          <option value="the-lab-v1" ${fBron === 'the-lab-v1' ? 'selected' : ''}>the-lab-v1</option>
+          <option value="the-lab-v2" ${fBron === 'the-lab-v2' ? 'selected' : ''}>the-lab-v2</option>
+          <option value="strategiescan-v1" ${fBron === 'strategiescan-v1' ? 'selected' : ''}>strategiescan-v1</option>
           <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
           <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
           <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>

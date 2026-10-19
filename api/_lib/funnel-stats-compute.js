@@ -46,6 +46,11 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   // 2026-10-09: gratis webinar (elke maandag 19:00) — A = formulier in beeld, B = belofte + knop.
   'webinar-v1',
   'webinar-v2',
+  // 2026-10-19: The Lab (gratis tradingsimulator, 7 dagen) en de Strategie-scan —
+  // twee aparte funnels met hun eigen flow (geen quiz, geen A/B/C-boekflow).
+  'the-lab-v1',
+  'the-lab-v2',
+  'strategiescan-v1',
 ]);
 
 export const VARIANT_INFO = Object.freeze({
@@ -65,6 +70,23 @@ export const VARIANT_INFO = Object.freeze({
   '7-daagse-v4':            { label: '7-daagse (v4 · B)', groep: '7-daagse' },
   'webinar-v1':             { label: 'Webinar (v1 · A)', groep: 'webinar' },
   'webinar-v2':             { label: 'Webinar (v2 · B)', groep: 'webinar' },
+  'the-lab-v1':             { label: 'The Lab (v1 · A)', groep: 'the-lab' },
+  'the-lab-v2':             { label: 'The Lab (v2 · B)', groep: 'the-lab' },
+  'strategiescan-v1':       { label: 'Strategie-scan (v1)', groep: 'strategiescan' },
+});
+
+/**
+ * Funnels waarvan de afspraak NIET via een opstartsessie-submission met
+ * booking_source = variant loopt, maar onder een eigen agendabron:
+ *   The Lab        → de strategiesessie met Dave, geboekt in het LMS (bron 'the-lab');
+ *   Strategie-scan → de gratis scan, geboekt op de landingspagina (bron 'strategiescan').
+ * "Geboekt" = leads van de variant (in de periode) met zo'n afspraak, op e-mail.
+ * Bewust twee verschillende bronnen: een Lab-strategiesessie is GEEN strategie-scan.
+ */
+export const BOEK_BRON_PER_VARIANT = Object.freeze({
+  'the-lab-v1': 'the-lab',
+  'the-lab-v2': 'the-lab',
+  'strategiescan-v1': 'strategiescan',
 });
 
 // Vaste fase-volgorde. `match` bepaalt welk event de fase vult.
@@ -211,6 +233,7 @@ export function bouwAfhakenPerVraag(events) {
  *                              (api/_lib/funnel-gedrag-compute.js) — het waarom achter afhaken
  * @param {Array}  p.leads      leads-rijen (id, bron, kwalificatie, email, aangemaakt, afspraak_op)
  * @param {Array}  p.boekingen  opstartsessie_submissions-rijen (booking_source, appointment_id, lead_id, created_at)
+ * @param {Array}  [p.afspraken] follow_up_appointments-rijen (booking_source, lead_email) voor BOEK_BRON_PER_VARIANT
  * @param {Iterable} p.gekoppeldeLeadIds  lead-ids die in funnel_events voorkomen (dekking)
  * @param {string[]} p.varianten  gevraagde varianten (subset van FUNNEL_VARIANTEN)
  * @param {Date}   p.start       UTC-moment = NL 00:00 van `van`
@@ -219,7 +242,7 @@ export function bouwAfhakenPerVraag(events) {
  */
 export function aggregeerFunnelStats({
   events = [], gedragEvents = [], leads = [], boekingen = [], gekoppeldeLeadIds = [],
-  varianten = FUNNEL_VARIANTEN, start, eindExclusief, trackingActief = true,
+  varianten = FUNNEL_VARIANTEN, start, eindExclusief, trackingActief = true, afspraken = [],
 } = {}) {
   const startMs = start instanceof Date ? start.getTime() : tsMs(start);
   const eindMs = eindExclusief instanceof Date ? eindExclusief.getTime() : tsMs(eindExclusief);
@@ -283,15 +306,25 @@ export function aggregeerFunnelStats({
       if (l.afspraak_op) metAfspraak += 1;
       if (l.id && gekoppeld.has(l.id)) metSessie += 1;
     }
-    const vBoek = (boekingen || []).filter((b) => b && b.booking_source === variant && b.appointment_id
-      && inPeriode(b.created_at, startMs, eindMs));
+    const eigenBron = BOEK_BRON_PER_VARIANT[variant];
+    let geboekt;
+    if (eigenBron) {
+      // Afspraken met de eigen agendabron, op e-mail aan de leads van deze variant.
+      const mails = new Set((afspraken || [])
+        .filter((a) => a && a.booking_source === eigenBron && a.lead_email)
+        .map((a) => String(a.lead_email).toLowerCase()));
+      geboekt = vLeads.filter((l) => l.email && mails.has(String(l.email).toLowerCase())).length;
+    } else {
+      geboekt = (boekingen || []).filter((b) => b && b.booking_source === variant && b.appointment_id
+        && inPeriode(b.created_at, startMs, eindMs)).length;
+    }
     r.lead_resultaat = {
       leads: vLeads.length,
       toegang,
       geen_toegang: geenToegang,
       kwalificatie_onbekend: onbekend,
       toegang_pct: pct(toegang, vLeads.length),
-      geboekt: vBoek.length,
+      geboekt,
       leads_met_afspraak: metAfspraak,
       leads_met_sessie: trackingActief ? metSessie : null,
       dekking_pct: trackingActief ? pct(metSessie, vLeads.length) : null,

@@ -3375,7 +3375,7 @@
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
           <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
         </td>
-        <td style="padding:8px 10px">${esc(s.bron_label)}${window.DFOLabIndex ? window.DFOLabIndex.badgeVoorEmail(s.email, s.booking_source === 'the-lab') : ''}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
+        <td style="padding:8px 10px">${_lsBronChip(s.booking_source)}${esc(s.bron_label)}${window.DFOLabIndex ? window.DFOLabIndex.badgeVoorEmail(s.email, s.booking_source === 'the-lab') : ''}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
         <td style="padding:8px 10px">${badge}</td>
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
         <td style="padding:8px 10px">${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</td>
@@ -3728,7 +3728,7 @@
           <div>${badge}</div>
         </div>
         <div style="display:flex;gap:24px;flex-wrap:wrap;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:14px">
-          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div><b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div>${_lsBronChip(s.booking_source)}<b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Score</div><b>${s.score != null ? s.score : '—'}</b><span style="color:var(--text-3)"> / drempel ${s.drempel != null ? s.drempel : '—'}</span></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">€50 akkoord</div><b>${akkoord}</b></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</b></div>
@@ -4469,6 +4469,20 @@
     </div>`;
   }
 
+  // Kleurchip per agendabron in Kennismakingsgesprekken. Een strategiesessie uit
+  // The Lab (bron 'the-lab') en een gratis strategie-scan (bron 'strategiescan')
+  // zijn twee verschillende gesprekken — altijd zichtbaar uit elkaar houden.
+  const _LS_BRON_CHIPS = {
+    'the-lab': { tekst: 'Lab · strategiesessie', bg: '#E8F5EE', fg: '#1F8A5B' },
+    strategiescan: { tekst: 'Strategie-scan', bg: '#F8F1E4', fg: '#8A6A33' },
+    webinar: { tekst: 'Webinar · scan', bg: '#EEF2FB', fg: '#3B5BA9' },
+  };
+  function _lsBronChip(slug) {
+    const c = _LS_BRON_CHIPS[slug];
+    if (!c) return '';
+    return `<span style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:999px;margin-right:6px;background:${c.bg};color:${c.fg}">${esc(c.tekst)}</span>`;
+  }
+
   // ── Funnels-tab ────────────────────────────────────────────────────────────
   // Hardcoded registry (bron van waarheid = dfo-website BRON_TOEGESTAAN + routes).
   // Uitbreiden = hier een regel toevoegen. status: 'actief' | 'geparkeerd'.
@@ -4487,6 +4501,10 @@
     { bron: 'kennismakingscursus-v8', naam: 'Mini-cursus (v8)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v8', status: 'actief' },
     { bron: 'webinar-v1',            naam: 'Webinar (v1 · A)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v1',             status: 'actief' },
     { bron: 'webinar-v2',            naam: 'Webinar (v2 · B)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v2',             status: 'actief' },
+    // 2026-10-19: The Lab (trial + strategiesessie) en de Strategie-scan — eigen flow, apart gehouden.
+    { bron: 'the-lab-v1',            naam: 'The Lab (v1 · A)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v1',             status: 'actief' },
+    { bron: 'the-lab-v2',            naam: 'The Lab (v2 · B)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v2',             status: 'actief' },
+    { bron: 'strategiescan-v1',      naam: 'Strategie-scan (v1)', product: 'strategiescan', route: 'https://deforexopleiding.nl/strategiescan-v1', status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {

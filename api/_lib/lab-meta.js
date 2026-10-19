@@ -82,8 +82,9 @@ async function log(rij) {
  * @param {object} p.userData         uit labUserData
  * @param {string|null} [p.bronUrl]   event_source_url (zonder querystring)
  * @param {number} [p.tijd]           unix seconden
+ * @param {object|null} [p.customData] custom_data (content_category, funnel, ...)
  */
-export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null }) {
+export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null, customData = null }) {
   const cfg = labMetaConfig();
   const basis = { aanmelding_id: aanmeldingId, event_name: eventName, event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!LAB_EVENTS.includes(eventName) || !eventId) return { ok: false, status: 'ongeldig' };
@@ -104,6 +105,7 @@ export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, u
     user_data: userData || {},
   };
   if (bronUrl) event.event_source_url = bronUrl;
+  if (customData && typeof customData === 'object') event.custom_data = customData;
 
   const url = new URL(`https://graph.facebook.com/${META_API_VERSION}/${encodeURIComponent(cfg.pixelId)}/events`);
   url.searchParams.set('access_token', cfg.token);

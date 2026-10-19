@@ -195,12 +195,13 @@
       '</div>';
   }
 
-  // Strategie-scan (2026-10-15): bij een webinar-boeking een link naar de
+  // Strategie-scan (2026-10-15): bij een webinar-boeking (en sinds 2026-10-19
+  // bij een boeking uit de Strategie-scan-funnel, bron 'strategiescan') een link naar de
   // scan-pagina, alleen voor wie de scan mag afnemen (recht scan.use). Opent in
   // een eigen tab: die pagina heeft geen CRM-navigatie en kan gedeeld worden.
   function scanLink(r) {
     const mag = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('scan.use'));
-    if (!mag || r.booking_source !== 'webinar' || !r.appointment_id) return '';
+    if (!mag || !['webinar', 'strategiescan'].includes(r.booking_source) || !r.appointment_id) return '';
     return '<a class="scan" href="/scan?afspraak=' + encodeURIComponent(r.appointment_id) + '" target="_blank" rel="noopener">Strategie-scan &rarr;</a>';
   }
 

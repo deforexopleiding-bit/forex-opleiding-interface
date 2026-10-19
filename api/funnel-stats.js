@@ -37,7 +37,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 import {
-  FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES,
+  FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES, BOEK_BRON_PER_VARIANT,
   aggregeerFunnelStats, bepaalBlindeVlekken,
 } from './_lib/funnel-stats-compute.js';
 import { GEDRAG_LEES_TYPES } from './_lib/funnel-gedrag-compute.js';
@@ -123,6 +123,32 @@ async function leesGekoppeldeLeadIds(db, leadIds) {
   return out;
 }
 
+/**
+ * Afspraken voor de funnels met een eigen agendabron (BOEK_BRON_PER_VARIANT):
+ * follow_up_appointments met die bron en een lead_email uit de leads van die
+ * varianten. Geannuleerde en test-afspraken tellen niet. Fail-soft → [].
+ */
+async function leesEigenBronAfspraken(db, leads, varianten) {
+  const bronnen = [...new Set(varianten.map((v) => BOEK_BRON_PER_VARIANT[v]).filter(Boolean))];
+  if (!bronnen.length) return [];
+  const mails = [...new Set((leads || [])
+    .filter((l) => l && BOEK_BRON_PER_VARIANT[l.bron] && l.email)
+    .map((l) => String(l.email).toLowerCase()))];
+  const uit = [];
+  for (let i = 0; i < mails.length; i += 300) {
+    try {
+      const { data, error } = await db.from('follow_up_appointments')
+        .select('booking_source,lead_email,status,is_test')
+        .in('booking_source', bronnen).in('lead_email', mails.slice(i, i + 300)).limit(5000);
+      if (error) { console.warn('[funnel-stats] eigen-bron-afspraken (soft):', error.message); continue; }
+      for (const a of data || []) if (!a.is_test && a.status !== 'cancelled' && a.status !== 'verwijderd') uit.push(a);
+    } catch (e) {
+      console.warn('[funnel-stats] eigen-bron-afspraken exception (soft):', e?.message || e);
+    }
+  }
+  return uit;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -203,8 +229,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // Afspraken met een eigen agendabron (The Lab / Strategie-scan) — op e-mail
+    // van de leads van die varianten. Fail-soft: zonder blijft "geboekt" 0.
+    const afspraken = await leesEigenBronAfspraken(db, leadsRes.data || [], varianten);
+
     const agg = aggregeerFunnelStats({
-      events, gedragEvents, leads: leadsRes.data || [], boekingen: boekRes.data || [],
+      events, gedragEvents, leads: leadsRes.data || [], boekingen: boekRes.data || [], afspraken,
       gekoppeldeLeadIds: gekoppeld, varianten,
       start: periode.start, eindExclusief: periode.eindExclusief, trackingActief,
     });
@@ -223,7 +253,7 @@ export default async function handler(req, res) {
         afgekapt,
         max_events_per_variant: MAX_EVENTS_PER_VARIANT,
         fase_telling: 'bereik — een sessie telt voor een fase als dat event in de periode voorkomt, ongeacht eerdere fases',
-        geboekt_bron: 'opstartsessie_submissions (booking_source = variant, met appointment_id, created_at in periode)',
+        geboekt_bron: 'opstartsessie_submissions (booking_source = variant, met appointment_id, created_at in periode); The Lab en Strategie-scan: leads van de variant met een afspraak onder bron the-lab / strategiescan',
         blinde_vlekken: bepaalBlindeVlekken({
           tabelBestaat, eersteEventTs, start: periode.start, afgekapt,
           maxEvents: MAX_EVENTS_PER_VARIANT, leesfout,

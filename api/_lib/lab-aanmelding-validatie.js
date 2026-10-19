@@ -4,9 +4,11 @@
 // contract (zie docs/the-lab-aanmelding-api.md) los te testen is.
 
 import { normaliseerNlBe } from './phone-e164.js';
+import { LAB_FUNNEL_VARIANTEN } from './lab-config.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const HOOK_RE = /^[A-Z0-9][A-Z0-9_-]{0,39}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Naam van het honeypot-veld. Moet LEEG blijven; mensen zien het niet. */
 export const HONEYPOT_VELD = 'website';
@@ -109,6 +111,11 @@ export function valideerLabAanmelding(body, { nu = Date.now() } = {}) {
       fbclid: kort(b.fbclid, 250),
       fbc: bepaalFbc({ fbc: b.fbc, fbclid: b.fbclid, nu }),
       fbp: kort(b.fbp, 300),
+      // Funnel op deforexopleiding.nl (the-lab-v1/-v2). Alleen bekende varianten;
+      // al de rest (ook de LMS-landing, die niets meestuurt) → null = 'the-lab'.
+      funnel: LAB_FUNNEL_VARIANTEN.includes(String(b.bron || '')) ? String(b.bron) : null,
+      // Funnel-tracking-sessie van de website → funnel_events.lead_id koppelen.
+      session_id: typeof b.session_id === 'string' && UUID_RE.test(b.session_id) ? b.session_id.toLowerCase() : null,
       // Alleen het eigen testadres van Maxim/het team markeert als test.
       is_test: /\+labtest/i.test(email) || String(hook || '') === 'TEST',
     },

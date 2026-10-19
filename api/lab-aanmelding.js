@@ -61,12 +61,27 @@ async function upsertLead(d) {
   };
   const payload = bestaand
     ? basis
-    : { ...basis, bron: LAB_SLUG, soort: soortUitUtm(d), traject: LAB_SLUG };
+    : { ...basis, bron: d.funnel || LAB_SLUG, soort: soortUitUtm(d), traject: LAB_SLUG };
   const { data, error } = await supabaseAdmin.rpc('upsert_lead', { p: payload });
   if (error) throw new Error('upsert_lead: ' + error.message);
   const rij = Array.isArray(data) ? data[0] : data;
   if (!rij?.id) throw new Error('upsert_lead gaf geen id');
   return { id: rij.id, nieuw: !bestaand };
+}
+
+/**
+ * Funnel-tracking (dfo-website): de events van deze browsersessie aan de lead
+ * hangen, net zoals /api/lead op de website dat doet. Fail-soft.
+ */
+async function koppelFunnelSessie(sessionId, leadId) {
+  if (!sessionId || !leadId) return;
+  try {
+    const { error } = await supabaseAdmin.from('funnel_events')
+      .update({ lead_id: leadId }).eq('session_id', sessionId).is('lead_id', null);
+    if (error) console.warn('[lab-aanmelding] funnel-koppeling (soft):', error.message);
+  } catch (e) {
+    console.warn('[lab-aanmelding] funnel-koppeling exception (soft):', e?.message || e);
+  }
 }
 
 async function bewaarAanmelding(rij) {
@@ -162,6 +177,7 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[lab-aanmelding] lead mislukt:', e?.message || e);
   }
+  await koppelFunnelSessie(d.session_id, leadId);
 
   // 2. De touch zelf, vóór het LMS-werk: mislukt dat, dan staat de aanmelding
   //    er toch en pakt de opvolgcron hem opnieuw op.
@@ -188,8 +204,9 @@ export default async function handler(req, res) {
       externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
     }),
     bronUrl: d.landingspagina,
+    customData: { content_name: 'The Lab', content_category: LAB_SLUG, funnel: d.funnel || LAB_SLUG },
   });
 
-  console.log('[lab-aanmelding]', { aanmelding: aanmeldingId, lead: leadId, resultaat: uitkomst.resultaat, mail: uitkomst.mail_status, wa: uitkomst.wa_status, hook: d.hook, test: d.is_test });
+  console.log('[lab-aanmelding]', { aanmelding: aanmeldingId, lead: leadId, funnel: d.funnel, resultaat: uitkomst.resultaat, mail: uitkomst.mail_status, wa: uitkomst.wa_status, hook: d.hook, test: d.is_test });
   return res.status(200).json({ ok: true, event_id: eventId, bericht: uitkomst.resultaat === 'lms_fout' ? BERICHT_LATER : BERICHT_OK });
 }

@@ -10,6 +10,8 @@
 // Zelfde regel als de funnel: een lead telt bij de hook van zijn EERSTE
 // aanmelding, testaanmeldingen tellen niet.
 
+import { labSleutel } from './lab-config.js';
+
 export const UITNODIGING_SOORTEN = Object.freeze([
   'uitnodiging_getoond', 'uitnodiging_gesloten', 'uitnodiging_niet_nu', 'uitnodiging_geboekt', 'balk_geklikt',
 ]);
@@ -25,7 +27,7 @@ export const AANLEIDING_LABELS = Object.freeze({
 
 /** E-mail → sleutel van de eerste (niet-test) aanmelding. PURE. */
 export function eersteSleutelPerEmail(aanmeldingen, per = 'hook') {
-  const sleutelVan = (a) => (per === 'campagne' ? (a.utm_campaign || '(geen campagne)') : (a.hook || '(geen hook)'));
+  const sleutelVan = (a) => labSleutel(a, per);
   const eerste = new Map();
   const gesorteerd = [...(aanmeldingen || [])].sort((x, y) => String(x.aangemaakt).localeCompare(String(y.aangemaakt)));
   for (const a of gesorteerd) {

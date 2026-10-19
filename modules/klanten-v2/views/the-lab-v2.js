@@ -74,7 +74,7 @@
       if (!l) return '';
       laadIndex();
       const hit = (l.id && idx.leads[l.id]) || (l.email && idx.emails[String(l.email).toLowerCase()]);
-      if (!hit && l.bron !== 'the-lab') return '';
+      if (!hit && !/^the-lab(-v\d+)?$/.test(String(l.bron || ''))) return '';
       return badgeHtml(hit && hit.hook, 'onclick="event.stopPropagation();window.DFOLabDossier.open({leadId:' + (l.id ? "'" + esc(l.id) + "'" : 'null') + ',email:' + (l.email ? "'" + esc(String(l.email).toLowerCase()) + "'" : 'null') + '})"');
     },
     /** Badge op basis van alleen een e-mail (kennismakingsgesprekken met bron the-lab). */
@@ -222,7 +222,7 @@
     if (!l || !l.id) return '';
     laadIndex();
     const hit = idx.leads[l.id] || (l.email && idx.emails[String(l.email).toLowerCase()]);
-    if (!hit && l.bron !== 'the-lab') return '';
+    if (!hit && !/^the-lab(-v\d+)?$/.test(String(l.bron || ''))) return '';
     let c = kaartCache.get(l.id);
     if (!c) {
       c = { laden: true, fout: null, d: null };
@@ -352,7 +352,7 @@
       '</tr></thead><tbody>' + leads.map((l) =>
         '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="window.DFOLabDossier.open({leadId:' + (l.lead_id ? "'" + esc(l.lead_id) + "'" : 'null') + ',email:\'' + esc(l.email) + '\',naam:\'' + esc(l.voornaam || '') + '\'})">' +
           '<td style="padding:8px 10px"><b>' + esc(l.voornaam || '—') + '</b><div style="font-size:11.5px;color:var(--text-3)">' + esc(l.email) + (l.is_test ? ' · TEST' : '') + '</div></td>' +
-          '<td style="padding:8px 10px">' + esc(l.hook || '—') + '<div style="font-size:11.5px;color:var(--text-3)">' + esc(l.campagne || '') + '</div></td>' +
+          '<td style="padding:8px 10px">' + esc(l.hook || '—') + '<div style="font-size:11.5px;color:var(--text-3)">' + esc([l.campagne, l.landing].filter(Boolean).join(' · ')) + '</div></td>' +
           '<td style="padding:8px 10px;white-space:nowrap">' + esc(datum(l.aangemeld)) + '</td>' +
           '<td style="padding:8px 10px">' + statusPil(l.status) + '</td></tr>').join('') +
       '</tbody></table></div>';
@@ -377,7 +377,7 @@
       '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">' +
         '<div style="font-weight:700;font-size:15px;margin-right:auto">The Lab · per ' + (st.per === 'campagne' ? 'campagne' : 'hook') + '</div>' +
         '<div style="display:flex;gap:4px">' + knoppen('preset', [['vandaag', 'Vandaag'], ['7d', '7 dagen'], ['30d', '30 dagen'], ['90d', '90 dagen']]) + '</div>' +
-        '<div style="display:flex;gap:4px">' + knoppen('per', [['hook', 'Per hook'], ['campagne', 'Per campagne']]) + '</div>' +
+        '<div style="display:flex;gap:4px">' + knoppen('per', [['hook', 'Per hook'], ['campagne', 'Per campagne'], ['landing', 'Per landing']]) + '</div>' +
       '</div>' + inhoud + '</div>';
   }
 
