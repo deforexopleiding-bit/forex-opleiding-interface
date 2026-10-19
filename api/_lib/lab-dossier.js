@@ -158,8 +158,23 @@ export async function leesLmsStand({ authIds = null, sinds = null } = {}) {
  * hlms_lab_lead_gebeurtenis.sql (of een leesfout) geeft een lege kaart — de
  * motor gedraagt zich dan zoals vóór Jouw route.
  *
- * @returns {Promise<Map<string, { route: string|null, routeOp: number|null, videoOp: number|null }>>}
+ * `videoTijden` = per uitgekeken video (één keer per video) het moment, oplopend —
+ * zo kan de motor "de eerste 5 van het leerpad" zien (zie `videosKlaarOp`).
+ *
+ * @returns {Promise<Map<string, { route: string|null, routeOp: number|null, videoOp: number|null, videoTijden: number[] }>>}
  */
+/**
+ * Wanneer stap 1 van Jouw route ("de video's") af was, of `null`. Zelfde regel
+ * als het LMS (`videosAf` in jouw-route-regels.ts): route `kort` na de eerste
+ * video, anders na de eerste 5 van het leerpad. PURE.
+ */
+export const LEERPAD_LAB_NA = 5;
+export function videosKlaarOp(gedrag) {
+  const tijden = gedrag?.videoTijden || [];
+  const nodig = gedrag?.route === 'kort' ? 1 : LEERPAD_LAB_NA;
+  return tijden.length >= nodig ? tijden[nodig - 1] : null;
+}
+
 export async function leesLabGedrag(leadIds) {
   const uit = new Map();
   const lms = getDfoLmsClient();
@@ -170,17 +185,24 @@ export async function leesLabGedrag(leadIds) {
       const deel = ids.slice(i, i + 200);
       const [rt, gb] = await Promise.all([
         lms.from('hlms_lab_lead').select('id, route, route_gekozen_op').in('id', deel),
-        lms.from('hlms_lab_lead_gebeurtenis').select('lead_id, soort, op').in('lead_id', deel).eq('soort', 'video_voltooid'),
+        lms.from('hlms_lab_lead_gebeurtenis').select('lead_id, soort, sleutel, op').in('lead_id', deel).eq('soort', 'video_voltooid'),
       ]);
       for (const r of rt.error ? [] : rt.data || []) {
-        uit.set(r.id, { route: r.route || null, routeOp: r.route_gekozen_op ? Date.parse(r.route_gekozen_op) : null, videoOp: null });
+        uit.set(r.id, { route: r.route || null, routeOp: r.route_gekozen_op ? Date.parse(r.route_gekozen_op) : null, videoOp: null, videoTijden: [] });
       }
+      const eerstePerVideo = new Map(); // lead_id → Map(sleutel → vroegste ms)
       for (const g of gb.error ? [] : gb.data || []) {
-        const x = uit.get(g.lead_id) || { route: null, routeOp: null, videoOp: null };
+        const x = uit.get(g.lead_id) || { route: null, routeOp: null, videoOp: null, videoTijden: [] };
         const t = Date.parse(g.op);
         if (Number.isFinite(t) && (x.videoOp == null || t < x.videoOp)) x.videoOp = t;
         uit.set(g.lead_id, x);
+        if (!Number.isFinite(t)) continue;
+        const per = eerstePerVideo.get(g.lead_id) || new Map();
+        const k = g.sleutel || `#${per.size}`;
+        if (!per.has(k) || t < per.get(k)) per.set(k, t);
+        eerstePerVideo.set(g.lead_id, per);
       }
+      for (const [id, per] of eerstePerVideo) uit.get(id).videoTijden = [...per.values()].sort((a, b) => a - b);
     }
   } catch (e) {
     console.warn('[lab-dossier] leesLabGedrag (soft):', e?.message || e);

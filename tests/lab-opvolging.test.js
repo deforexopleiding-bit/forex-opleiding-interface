@@ -112,7 +112,11 @@ test('JOUW ROUTE: video gezien → na een dag "video-geen-lab"; nooit na boeking
   assert.equal(linkDoel('bezig-24u'), 'lab');
   assert.equal(linkDoel('afgewerkt-d1'), 'sessie');
   const m = standaardMail('video-geen-lab', { voornaam: 'Lien', link: 'https://x', knop: (u, t) => `<a href="${u}">${t}</a>` });
-  assert.match(m.html, /startvideo/);
-  assert.match(m.html, /30 minuten met Dave/);
+  assert.match(m.html, /video's van je leerpad/);
+  assert.match(m.html, /strategiesessie met Dave: 30 minuten, gratis/);
+  assert.doesNotMatch(m.html, /startvideo|strategiescan/);
+  const n = standaardMail('niet-gestart-24u', { voornaam: 'Lien', link: 'https://x', knop: (u, t) => `<a href="${u}">${t}</a>` });
+  assert.match(n.html, /strategiesessie met Dave/);
+  assert.doesNotMatch(n.html, /startvideo|6 minuten/);
   assert.ok(STAPPEN.includes('video-geen-lab'));
 });

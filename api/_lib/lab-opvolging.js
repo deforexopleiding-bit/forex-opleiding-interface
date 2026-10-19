@@ -40,7 +40,7 @@ const DAG = 24 * UUR;
  * @param {number|null} s.laatsteActiviteit ms — bijgewerkt_op van de sessie
  * @param {Set<string>} s.gehad          stappen die al verstuurd zijn (of overgeslagen)
  * @param {number|null} s.laatsteBericht ms — laatste opvolgbericht (elk kanaal)
- * @param {boolean} [s.videoBekeken]    de startvideo uitgekeken (Jouw route, LMS)
+ * @param {boolean} [s.videoBekeken]    stap 1 van Jouw route af: de video's van het leerpad (LMS)
  * @param {number|null} [s.videoOp]     ms — wanneer
  * @param {number} nu
  */
@@ -66,8 +66,9 @@ export function volgendeStap(s, nu) {
     if (s.laatsteActiviteit && nu - s.laatsteActiviteit >= DAG && nog('bezig-24u')) return 'bezig-24u';
     return null;
   }
-  // Jouw route (okt 2026): de startvideo komt vóór The Lab. Wie hem keek en
-  // daarna een dag niets deed, krijgt "nu The Lab — of meteen Dave".
+  // Jouw route (okt 2026): eerst de video's, dan The Lab, dan de strategiesessie.
+  // Wie de video's keek en daarna een dag geen Lab startte, krijgt "nu The Lab —
+  // of meteen je strategiesessie".
   if (s.videoBekeken) {
     const sinds = s.videoOp ?? s.aangemeldOp;
     if (nu - sinds >= DAG && nog('video-geen-lab')) return 'video-geen-lab';
@@ -96,10 +97,10 @@ export function standaardMail(stap, { voornaam, link, stap: labStap, stappen, kn
   switch (stap) {
     case 'niet-gestart-24u':
       return { onderwerp: 'Geen 20 minuten? Dan 5.', html:
-        `<p>Hey ${v},</p><p>Je account staat klaar. Geen 20 minuten voor The Lab? Kijk dan de korte startvideo — 6 minuten — en plan meteen 30 minuten met Dave. Gratis, en je ziet of trading bij je past.</p>${k(link, 'Naar mijn actieplan')}` };
+        `<p>Hey ${v},</p><p>Je account staat klaar. Geen 20 minuten voor The Lab? Kijk dan de eerste video van je leerpad en plan meteen je strategiesessie met Dave: 30 minuten, gratis. Je ziet of trading bij je past.</p>${k(link, 'Naar mijn actieplan')}` };
     case 'video-geen-lab':
-      return { onderwerp: 'Je zag de startvideo. Nu de praktijk.', html:
-        `<p>Hey ${v},</p><p>Je keek de startvideo — dan begrijp je wat The Lab van je vraagt. Neem 20 minuten aan je laptop en plaats je eerste trade. Liever eerst praten? Plan meteen 30 minuten met Dave.</p>${k(link, 'Naar mijn actieplan')}` };
+      return { onderwerp: 'De concepten zitten erin. Nu de praktijk.', html:
+        `<p>Hey ${v},</p><p>Je keek de video's van je leerpad — dan begrijp je wat The Lab van je vraagt. Neem 20 minuten aan je laptop en plaats je eerste trade. Liever eerst praten? Plan je strategiesessie met Dave: 30 minuten, gratis.</p>${k(link, 'Naar mijn actieplan')}` };
     case 'bezig-24u':
       return { onderwerp: 'Je bent er bijna', html:
         `<p>Hey ${v},</p><p>Je zit in The Lab op stap ${esc(labStap)}${stappen ? ` van ${esc(stappen)}` : ''}. Je gaat verder waar je was. Het beste deel komt op het einde: daar zie je wat 20.244 echte trades van onze studenten laten zien.</p>${k(link, 'Verder met The Lab')}` };

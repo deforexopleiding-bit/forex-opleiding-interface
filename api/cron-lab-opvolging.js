@@ -16,7 +16,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
-import { leesLmsStand, leesLabGedrag, isAfgerond, isGestart } from './_lib/lab-dossier.js';
+import { leesLmsStand, leesLabGedrag, isAfgerond, isGestart, videosKlaarOp } from './_lib/lab-dossier.js';
 import { maakLoginSleutel } from './_lib/dfo-lms-lab-account.js';
 import { stuurLabMail, stuurLabWhatsApp, knop } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
@@ -105,7 +105,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: false, fout: 'LMS onbereikbaar', ...verslag });
   }
   const leadPerAuth = new Map(lms.leads.map((l) => [l.auth_id, l]));
-  // Jouw route: gekozen ingang + startvideo uitgekeken (fail-soft).
+  // Jouw route: gekozen ingang + de video's van het leerpad (fail-soft).
   const gedrag = await leesLabGedrag(lms.leads.map((l) => l.id));
 
   const eersteIds = [...perEmail.values()].map((p) => p.eerste.id);
@@ -158,8 +158,9 @@ export default async function handler(req, res) {
       laatsteActiviteit: sessie?.bijgewerkt_op ? Date.parse(sessie.bijgewerkt_op) : null,
       gehad: g.stappen,
       laatsteBericht: g.laatste,
-      videoBekeken: gedrag.get(labLead.id)?.videoOp != null,
-      videoOp: gedrag.get(labLead.id)?.videoOp ?? null,
+      // Jouw route: stap 1 (de video's) af — zelfde regel als het LMS.
+      videoBekeken: videosKlaarOp(gedrag.get(labLead.id)) != null,
+      videoOp: videosKlaarOp(gedrag.get(labLead.id)),
     }, nu);
     if (!stap) continue;
 
