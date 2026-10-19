@@ -55,7 +55,8 @@ process.env.GHL_DAVE_USER_ID = 'ghl-dave';
 
 const DAVE = { id: 'prof-dave', email: 'dave@deforexopleiding.nl', full_name: 'Dave Heylen', avatar_url: null, is_active: true, role: 'sales' };
 const TOEKOMST = new Date(Date.now() + 5 * 86400000).toISOString();
-const ECHT = { id: 'll-echt', auth_id: 'auth-echt', email: 'lien@voorbeeld.be', voornaam: 'Lien', achternaam: 'Peeters', telefoon: '+32470000000', crm_lead_id: null, is_test: false, toegang_tot: TOEKOMST, sessie_moment: null };
+const ECHT = { id: 'll-echt', auth_id: 'auth-echt', email: 'lien@voorbeeld.be', voornaam: 'Lien', achternaam: 'Peeters', telefoon: '+32470000000', crm_lead_id: null, is_test: false, toegang_tot: TOEKOMST, sessie_moment: null,
+  kwalificatie: { doel: 'vermogen', tijd: '3_6u', investeren: 'ja' } };
 const TEST = { id: 'll-test', auth_id: 'auth-test', email: 'admin+lablead@voorbeeld.be', voornaam: 'Test', is_test: true, beheerd_door_auth_id: 'auth-admin', toegang_tot: TOEKOMST, sessie_moment: null };
 
 beforeEach(() => {
@@ -91,6 +92,25 @@ test('ECHT PAD: in Daves agenda, Dave eigenaar, bron the-lab, alle verplichte ko
   assert.ok(ghlVerkeer.some((v) => v.url.endsWith('/tags') && v.body.tags.includes('bron-the-lab')), 'tag bron-the-lab');
   // En het LMS weet het.
   assert.equal(lms.tabellen.hlms_lab_lead.find((l) => l.id === 'll-echt').sessie_afspraak_id, rij.id);
+  // DAVE ZIET HET: herkenbare titel in zijn agenda (de lead_name blijft de naam: daar groeten de mails mee).
+  assert.equal(ghlAfspraken[0].title, 'The Lab · strategiescan · Lien Peeters');
+  assert.equal(rij.lead_name, 'Lien Peeters');
+  // STRATEGIESCAN: concept, gekoppeld aan lead + afspraak, Dave als assessor, doel uit The Lab.
+  assert.equal(crm.tabellen.scans.length, 1);
+  const scan = crm.tabellen.scans[0];
+  assert.equal(r.body.scan_id, scan.id);
+  assert.equal(scan.status, 'concept');
+  assert.equal(scan.afspraak_id, rij.id);
+  assert.equal(scan.lead_id, crm.tabellen.leads[0].id);
+  assert.equal(scan.assessor_id, 'prof-dave');
+  assert.equal(scan.deelnemer_naam, 'Lien Peeters');
+  assert.equal(scan.deelnemer_email, 'lien@voorbeeld.be');
+  assert.equal(scan.doel, 'Vermogen opbouwen voor later');
+  assert.deepEqual(scan.antwoorden, { motivatie_0: 2 });
+  assert.equal(scan.dave_notitie, 'Uit The Lab: tijd per week: 3 tot 6 uur · bereid te investeren in begeleiding: ja.');
+  // Geen berekende score op een lege scan: die rekent scan.js uit bij opslaan.
+  assert.equal(scan.readiness_score, undefined);
+  assert.equal(scan.categorie, undefined);
 });
 
 test('TEST-PAD: alle verplichte kolommen (de 500 van 19 okt), en GHL wordt niet aangeraakt', async () => {
@@ -105,6 +125,21 @@ test('TEST-PAD: alle verplichte kolommen (de 500 van 19 okt), en GHL wordt niet 
   assert.equal(rij.is_test, true);
   assert.equal(ghlAfspraken.length, 0);
   assert.equal(ghlVerkeer.length, 0);
+  // Ook een test-boeking zet een scan klaar — herkenbaar als TEST, zonder lead.
+  const scan = crm.tabellen.scans[0];
+  assert.equal(scan.deelnemer_naam, 'TEST · Test');
+  assert.equal(scan.afspraak_id, rij.id);
+  assert.equal(scan.lead_id, null);
+  assert.equal(scan.assessor_id, 'prof-dave');
+});
+
+test('STRATEGIESCAN mislukt (bv. tabel weg): de boeking gaat gewoon door', async () => {
+  crm = maakFakeDb({ leads: [], profiles: [{ ...DAVE }], app_settings: [{ key: 'lab_gastheer', value: { profiel_id: 'prof-dave' } }], follow_up_appointments: [] }, { rpc: { upsert_lead: upsertLeadRpc }, ontbrekend: ['scans'] });
+  const moment = (await vraag('GET', 'echt')).body.momenten[0];
+  const r = await vraag('POST', 'echt', { moment });
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.body.scan_id, null);
+  assert.equal(crm.tabellen.follow_up_appointments.length, 1);
 });
 
 test('de nep-databank weigert nu wat productie weigert: geen GHL-contact = 23502', async () => {

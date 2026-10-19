@@ -70,6 +70,11 @@ beforeEach(() => {
       { id: 'a-echt', is_test: false, booking_source: 'the-lab', lead_email: ECHT.email, status: 'scheduled' },
     ],
     leads: [{ id: 'lead-1', voornaam: 'Lien', email: ECHT.email }],
+    scans: [
+      { id: 's-test-concept', afspraak_id: 'a-test', status: 'concept', deelnemer_naam: 'TEST · Test' },
+      { id: 's-test-afgerond', afspraak_id: 'a-test', status: 'afgerond', deelnemer_naam: 'TEST · Test' },
+      { id: 's-echt', afspraak_id: 'a-echt-zelfde-adres', status: 'concept', deelnemer_naam: 'Lien' },
+    ],
     profiles: [], app_settings: [],
   }, {
     rpc: { upsert_lead: upsertLeadRpc },
@@ -122,7 +127,9 @@ test('RESET 401/403: geen sessie, echte lead, gewone testlead, zaalaccount — e
 test('RESET: enkel de test-taken en de test-afspraak van DIT account', async () => {
   const r = await vraag(reset, 'POST', 'test', {});
   assert.equal(r.statusCode, 200);
-  assert.deepEqual(r.body, { ok: true, taken_gearchiveerd: 2, afspraken_geannuleerd: 1 });
+  assert.deepEqual(r.body, { ok: true, taken_gearchiveerd: 2, afspraken_geannuleerd: 1, scans_gewist: 1 });
+  // Alleen het TEST-concept van de test-afspraak; wat Dave afrondde en echte scans blijven.
+  assert.deepEqual(crm.tabellen.scans.map((s) => s.id).sort(), ['s-echt', 's-test-afgerond']);
 
   const open = rij('opvolging_taken', 't-test-open');
   assert.equal(open.status, 'gearchiveerd');
@@ -152,7 +159,7 @@ test('RESET: daarna kan dezelfde test-belmelding opnieuw ontstaan (de unieke ind
 test('RESET is herhaalbaar: een tweede keer raakt niets meer', async () => {
   await vraag(reset, 'POST', 'test', {});
   const r = await vraag(reset, 'POST', 'test', {});
-  assert.deepEqual(r.body, { ok: true, taken_gearchiveerd: 0, afspraken_geannuleerd: 0 });
+  assert.deepEqual(r.body, { ok: true, taken_gearchiveerd: 0, afspraken_geannuleerd: 0, scans_gewist: 0 });
 });
 
 test('TEST-BOEKING: geen GHL, geen CRM-lead, geen Meta-event — wel een is_test-afspraak en het vinkje in het LMS', async () => {
