@@ -14,11 +14,17 @@
 // Berichten:
 //   bevestiging — direct bij aanmelding (endpoint) of, als dat niet lukte /
 //                 na doorschuiven, door de cron (bevestiging_op IS NULL).
-//   dag         — de dag ervoor: vanaf 24u vóór de start (tot 3u vóór).
+//   dag         — de dag ervoor: vanaf 24u vóór de start, en ALLEEN op de
+//                 NL-kalenderdag vóór het webinar (de WA-template zegt vast
+//                 "morgen"). Wie zich op de dag zelf aanmeldt krijgt hem dus nooit.
 //   uur         — vanaf 1u vóór de start (tot 5 min vóór).
 //   live        — vanaf de start (tot 20 min erna): "we zijn live".
-// Een reminder gaat alleen naar wie zich VÓÓR dat moment aanmeldde (anders
-// krijgt een late aanmelder direct na zijn bevestiging nog een reminder).
+// Een reminder gaat alleen naar wie VÓÓR dat moment op deze sessie stond, met
+// minstens REMINDER_MIN_NA_AANMELDING ertussen (anders landt hij tegelijk met
+// de bevestiging). "Op deze sessie sinds" = aangemeld_op, of — na verplaatsen
+// door een nieuwe datumkeuze — het moment van verplaatsen (opSessieSinds).
+// Fix 2026-10-19: daarvoor telde de oude aangemeld_op, waardoor wie van een
+// latere datum naar "vandaag" wisselde direct een "Morgen is het zover" kreeg.
 // Claimen = de _op-kolom zetten WHERE hij nog NULL is → nooit dubbel.
 //
 // WhatsApp: lead-lijn (whatsapp_module_config module 'events'), alleen als de
@@ -112,13 +118,43 @@ export const MOMENTEN = Object.freeze([
   Object.freeze({ key: 'live', kolom: 'live_op',         template: 'webinar_live',         van: 0,         tot: 20 * MIN }),
 ]);
 export const BEVESTIGING = Object.freeze({ key: 'bevestiging', kolom: 'bevestiging_op', template: 'webinar_bevestiging' });
+/** Minimale tijd tussen aanmelden (= bevestiging) en een reminder. */
+export const REMINDER_MIN_NA_AANMELDING = 10 * MIN;
+
+/**
+ * Sinds wanneer staat deze aanmelding op haar huidige sessie? aangemeld_op,
+ * of later: het moment dat ze door een nieuwe datumkeuze verplaatst werd
+ * (berichten.verplaatst_door_keuze.op, gezet door meldAan).
+ */
+export function opSessieSinds(aanmelding) {
+  const kandidaten = [aanmelding?.aangemeld_op, aanmelding?.berichten?.verplaatst_door_keuze?.op]
+    .map((v) => (v ? new Date(v).getTime() : NaN)).filter((n) => Number.isFinite(n));
+  return kandidaten.length ? new Date(Math.max(...kandidaten)).toISOString() : null;
+}
+
+/**
+ * Relatieve dag van het webinar t.o.v. het verzendmoment (NL-kalender):
+ * zelfde dag → 'vanavond' (vanaf 18:00) of 'vandaag'; volgende dag → 'morgen';
+ * anders 'op maandag 26 oktober'.
+ */
+export function dagWoord(startsAt, nu = new Date()) {
+  const dag = nlDatum(new Date(startsAt));
+  const vandaag = nlDatum(nu);
+  if (dag === vandaag) return Number(tijdNL(startsAt).slice(0, 2)) >= 18 ? 'vanavond' : 'vandaag';
+  if (dag === plusDagen(vandaag, 1)) return 'morgen';
+  return 'op ' + datumLang(startsAt);
+}
 
 /** Is dit reminder-moment nú aan de beurt voor deze aanmelding? */
 export function momentIsAanDeBeurt(moment, { startsAt, aangemeldOp, nu = new Date() }) {
   const start = new Date(startsAt).getTime();
   const t = nu.getTime() - start;
   if (t < moment.van || t >= moment.tot) return false;
-  return new Date(aangemeldOp).getTime() < start + moment.van;
+  // "dag" alleen op de kalenderdag ervóór: de tekst (mail én WA-template) is "morgen".
+  if (moment.key === 'dag' && dagWoord(startsAt, nu) !== 'morgen') return false;
+  const sinds = new Date(aangemeldOp).getTime();
+  if (!Number.isFinite(sinds)) return false;
+  return sinds < start + moment.van && sinds <= nu.getTime() - REMINDER_MIN_NA_AANMELDING;
 }
 
 export function zoomVoor(sessie, reeks) {
@@ -126,9 +162,10 @@ export function zoomVoor(sessie, reeks) {
 }
 
 /** Context voor tekst + template-parameters. */
-export function bouwContext({ aanmelding, sessie, reeks }) {
+export function bouwContext({ aanmelding, sessie, reeks, nu = new Date() }) {
   const zoom = zoomVoor(sessie, reeks);
   return {
+    dagWoord: dagWoord(sessie.starts_at, nu),
     voornaam: String(aanmelding?.voornaam || '').trim() || 'daar',
     datum: datumLang(sessie.starts_at),
     tijd: tijdNL(sessie.starts_at),
@@ -139,6 +176,8 @@ export function bouwContext({ aanmelding, sessie, reeks }) {
     titel: reeks?.titel || 'Webinar De Forex Opleiding',
   };
 }
+
+const hoofdletter = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
 
 /** De mail per moment. */
 export function bouwMail(momentKey, c) {
@@ -155,10 +194,11 @@ export function bouwMail(momentKey, c) {
       voetnoot: 'Bewaar deze mail, dan heb je de Zoom-link straks bij de hand. Je krijgt de dag ervoor en een uur vooraf nog een herinnering.',
     },
     dag: {
-      subject: `Morgen om ${c.tijd}: het webinar`,
-      titel: 'Morgen is het zover',
-      inleiding: `Hoi ${c.voornaam}, een herinnering: morgen om ${c.tijd} begint het webinar van De Forex Opleiding.`,
-      voetnoot: 'Zet het alvast in je agenda. Tot morgen!',
+      // Dag-tekst berekend t.o.v. het verzendmoment (normaal 'morgen').
+      subject: `${hoofdletter(c.dagWoord)} om ${c.tijd}: het webinar`,
+      titel: `${hoofdletter(c.dagWoord)} is het zover`,
+      inleiding: `Hoi ${c.voornaam}, een herinnering: ${c.dagWoord} om ${c.tijd} begint het webinar van De Forex Opleiding.`,
+      voetnoot: c.dagWoord === 'morgen' ? 'Zet het alvast in je agenda. Tot morgen!' : 'Zet het alvast in je agenda. Tot dan!',
     },
     uur: {
       subject: `Over een uur begint het webinar (${c.tijd})`,
@@ -270,6 +310,10 @@ export async function verstuurWa(sb, { telefoon, templateNaam, ctx, wachtMs = 70
   if (!pnId) return { ok: false, overgeslagen: 'geen_wa_lijn' };
   const status = await templateStatusOpLijn(pnId, templateNaam);
   if (status !== 'APPROVED') return { ok: false, overgeslagen: 'template_' + String(status || 'onbekend').toLowerCase() };
+  // De dag-template zegt vast "morgen": nooit versturen als dat niet klopt.
+  if (templateNaam === 'webinar_reminder_dag' && ctx?.dagWoord && ctx.dagWoord !== 'morgen') {
+    return { ok: false, overgeslagen: 'dag_tekst_klopt_niet' };
+  }
   const variables = templateVariabelen(templateNaam, ctx);
   let laatste = null;
   for (let poging = 1; poging <= 2; poging++) {
@@ -301,7 +345,7 @@ async function verstuurMail(aanmelding, momentKey, ctx) {
  * (kolom := now() WHERE kolom IS NULL); lukt de claim niet, dan deed een
  * ander proces het al → { overgeslagen: 'al_geclaimd' }.
  */
-export async function verstuurMoment(sb, { aanmelding, sessie, reeks, moment, wachtMs }) {
+export async function verstuurMoment(sb, { aanmelding, sessie, reeks, moment, wachtMs, nu: verzendNu = new Date() }) {
   const nu = new Date().toISOString();
   const { data: claim, error: cErr } = await sb.from('webinar_aanmeldingen')
     .update({ [moment.kolom]: nu, updated_at: nu })
@@ -310,7 +354,7 @@ export async function verstuurMoment(sb, { aanmelding, sessie, reeks, moment, wa
   if (cErr) throw new Error(`claim ${moment.key}: ${cErr.message}`);
   if (!claim || !claim.length) return { overgeslagen: 'al_geclaimd' };
 
-  const ctx = bouwContext({ aanmelding, sessie, reeks });
+  const ctx = bouwContext({ aanmelding, sessie, reeks, nu: verzendNu });
   const alsFout = (e) => ({ ok: false, fout: String(e?.message || e).slice(0, 300) });
   // Mail en WhatsApp tegelijk: scheelt per aanmelder een paar seconden.
   const [mail, wa] = await Promise.all([
@@ -402,7 +446,9 @@ export async function meldAan(sb, { voornaam, email, telefoon, bron, leadId = nu
   if (eerder.length) {
     // Andere datum gekozen → de (vroegste) bestaande aanmelding verplaatsen.
     const oud = eerder[0];
-    const t = new Date().toISOString();
+    // nu (niet een losse new Date()): dit moment telt als "op deze sessie sinds"
+    // voor de reminders (opSessieSinds).
+    const t = nu.toISOString();
     const reset = { sessie_id: sessie.id, verplaatst_van_sessie_id: null, bevestiging_op: null, reminder_dag_op: null, reminder_uur_op: null, live_op: null, updated_at: t };
     for (const k of ['opvolging_1_op', 'opvolging_2_op']) if (k in oud) reset[k] = null;
     reset.berichten = { ...(oud.berichten || {}), verplaatst_door_keuze: { op: t, van_sessie_id: oud.sessie_id } };
@@ -543,9 +589,9 @@ export async function cronRonde(sb, { nu = new Date(), wachtMs, budgetMs = 45 * 
         for (const m of actief) {
           if (a[m.kolom]) continue;
           if (tijdOp()) return uit;
-          if (!momentIsAanDeBeurt(m, { startsAt: sessie.starts_at, aangemeldOp: a.aangemeld_op, nu })) continue;
+          if (!momentIsAanDeBeurt(m, { startsAt: sessie.starts_at, aangemeldOp: opSessieSinds(a), nu })) continue;
           try {
-            const r = await verstuurMoment(sb, { aanmelding: a, sessie, reeks, moment: m, wachtMs });
+            const r = await verstuurMoment(sb, { aanmelding: a, sessie, reeks, moment: m, wachtMs, nu });
             if (!r.overgeslagen) uit[m.key]++;
           } catch (e) { fout(`${m.key} ${a.id}`, e); }
         }
