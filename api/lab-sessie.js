@@ -100,12 +100,23 @@ export async function geboektMetVerzet(geboekt, afspraakId) {
  * De TEST-afspraak van een testlead: alleen een rij in follow_up_appointments
  * met is_test = true (uit Daves agenda- en opvolgweergaven gefilterd). Geen
  * CRM-lead, geen GHL, geen Zoom.
+ *
+ * `lead_ghl_contact_id` is in de databank VERPLICHT (NOT NULL, geen default) —
+ * zonder die kolom gaf elke test-boeking een 500 (19 okt). Een testlead heeft
+ * geen GHL-contact, dus staat er een herkenbare plaatshouder
+ * `test-lab:<lab-lead-id>`: hij lijkt op geen enkel GHL-id (20 tekens,
+ * alfanumeriek) en matcht dus nooit een echt contact.
  */
+export function testContactId(labLeadId) {
+  return `test-lab:${labLeadId}`;
+}
+
 export async function boekTestAfspraak({ lab, iso, eigenaarId }) {
   const { data, error } = await supabaseAdmin.from('follow_up_appointments').insert({
     lead_name: `TEST · ${lab.voornaam || 'lab-lead'}`,
     lead_email: lab.email,
     lead_phone: null,
+    lead_ghl_contact_id: testContactId(lab.id),
     scheduled_at: iso,
     duration_minutes: DUUR_MIN,
     status: 'scheduled',
