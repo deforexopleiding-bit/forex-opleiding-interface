@@ -153,6 +153,7 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
       geplandPerDag.get(plek.dag).push({
         tijd          : plek.tijd,
         naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+        bron          : a.booking_source || null,
         status        : String(a.status || 'scheduled').toLowerCase(),
         // Het agendafeit, en niets anders. Geen label uit een status: wat er
         // voor Dave waar is staat in `afrond` hieronder.
@@ -199,6 +200,7 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
       perTijd.set(tijd, {
         tijd,
         naam  : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+        bron  : a.booking_source || null,
         status: status || 'scheduled',
         // Fase 3a — het blok 'Calls van vandaag' leest dezelfde bezette
         // momenten als Daves callrij, en heeft daarvoor meer nodig dan een
@@ -246,6 +248,7 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
     afgerondPerDag.get(dag).push({
       tijd,
       naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+      bron          : a.booking_source || null,
       status        : String(a.status || '').toLowerCase(),
       appointment_id: a.id || null,
       telefoon      : a.lead_phone || null,

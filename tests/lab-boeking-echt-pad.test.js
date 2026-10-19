@@ -55,7 +55,8 @@ process.env.GHL_DAVE_USER_ID = 'ghl-dave';
 
 const DAVE = { id: 'prof-dave', email: 'dave@deforexopleiding.nl', full_name: 'Dave Heylen', avatar_url: null, is_active: true, role: 'sales' };
 const TOEKOMST = new Date(Date.now() + 5 * 86400000).toISOString();
-const ECHT = { id: 'll-echt', auth_id: 'auth-echt', email: 'lien@voorbeeld.be', voornaam: 'Lien', achternaam: 'Peeters', telefoon: '+32470000000', crm_lead_id: null, is_test: false, toegang_tot: TOEKOMST, sessie_moment: null };
+const ECHT = { id: 'll-echt', auth_id: 'auth-echt', email: 'lien@voorbeeld.be', voornaam: 'Lien', achternaam: 'Peeters', telefoon: '+32470000000', crm_lead_id: null, is_test: false, toegang_tot: TOEKOMST, sessie_moment: null,
+  kwalificatie: { doel: 'vermogen', tijd: '3_6u', investeren: 'ja' } };
 const TEST = { id: 'll-test', auth_id: 'auth-test', email: 'admin+lablead@voorbeeld.be', voornaam: 'Test', is_test: true, beheerd_door_auth_id: 'auth-admin', toegang_tot: TOEKOMST, sessie_moment: null };
 
 beforeEach(() => {
@@ -91,6 +92,11 @@ test('ECHT PAD: in Daves agenda, Dave eigenaar, bron the-lab, alle verplichte ko
   assert.ok(ghlVerkeer.some((v) => v.url.endsWith('/tags') && v.body.tags.includes('bron-the-lab')), 'tag bron-the-lab');
   // En het LMS weet het.
   assert.equal(lms.tabellen.hlms_lab_lead.find((l) => l.id === 'll-echt').sessie_afspraak_id, rij.id);
+  // DAVE ZIET HET: herkenbare titel in zijn agenda (de lead_name blijft de naam: daar groeten de mails mee).
+  assert.equal(ghlAfspraken[0].title, 'The Lab · strategiesessie · Lien Peeters');
+  assert.equal(rij.lead_name, 'Lien Peeters');
+  // Lab en strategiescan zijn twee aparte stromen: een Lab-boeking maakt GEEN scan.
+  assert.equal((crm.tabellen.scans || []).length, 0);
 });
 
 test('TEST-PAD: alle verplichte kolommen (de 500 van 19 okt), en GHL wordt niet aangeraakt', async () => {
@@ -105,6 +111,10 @@ test('TEST-PAD: alle verplichte kolommen (de 500 van 19 okt), en GHL wordt niet 
   assert.equal(rij.is_test, true);
   assert.equal(ghlAfspraken.length, 0);
   assert.equal(ghlVerkeer.length, 0);
+  // GEEN GHL-afspraak en GEEN scan (19 okt live nagemeten op afspraak c889d17c:
+  // ghl_appointment_id leeg, 0 scans).
+  assert.equal((crm.tabellen.scans || []).length, 0);
+  assert.equal(rij.ghl_appointment_id, undefined);
 });
 
 test('de nep-databank weigert nu wat productie weigert: geen GHL-contact = 23502', async () => {

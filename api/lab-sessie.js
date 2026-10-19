@@ -242,6 +242,8 @@ export default async function handler(req, res) {
         owner_id: gastheer?.id || null,
       },
       scheduledAt: iso, durationMinutes: DUUR_MIN, source: LAB_SLUG,
+      // In Daves agenda (GHL/Google) meteen herkenbaar.
+      ghlTitel: `The Lab · strategiesessie · ${[lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lab.voornaam || 'lead'}`,
     });
   } catch (e) {
     console.error('[lab-sessie] boeken mislukt', { code: e?.code, fout: e?.message });

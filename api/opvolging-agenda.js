@@ -206,7 +206,7 @@ async function lees(req, res, supabase) {
     // op de kolomnaam in de foutmelding: zonder dat zou het ontbreken van
     // `uitkomst` ook `eerst_gepland_op` uitzetten, en dan verdwijnen de
     // verzette afspraken om een reden die er niets mee te maken heeft.
-    const OPTIONEEL = ['uitkomst', 'uitkomst_op', 'eerst_gepland_op', 'is_test'];
+    const OPTIONEEL = ['uitkomst', 'uitkomst_op', 'eerst_gepland_op', 'is_test', 'booking_source'];
     let beschikbaar = [...OPTIONEEL];
     let data = null;
     let error = null;
