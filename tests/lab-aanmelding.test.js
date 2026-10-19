@@ -230,3 +230,42 @@ test('CORS: een vreemd origin wordt niet gereflecteerd', async () => {
   const r2 = await post(GELDIG, { origin: 'https://www.deforexopleiding.nl' });
   assert.equal(r2.headers['access-control-allow-origin'], 'https://www.deforexopleiding.nl');
 });
+
+// ── Lab-funnels op deforexopleiding.nl (2026-10-19) ─────────────────────────
+const SESSIE = '0b9c1f8e-1d2a-4c3b-9e8f-7a6b5c4d3e2f';
+const FUNNEL = {
+  ...GELDIG, hook: undefined, utm_content: 'h09', bron: 'the-lab-v1', session_id: SESSIE,
+  landingspagina: 'https://www.deforexopleiding.nl/the-lab-v1?utm_content=h09',
+};
+
+test('funnel the-lab-v1: nieuwe lead krijgt bron = variant, traject the-lab; hook uit utm_content', async () => {
+  crm = nieuweCrm([], { funnel_events: [
+    { session_id: SESSIE, variant: 'the-lab-v1', event_type: 'landing', lead_id: null },
+    { session_id: 'andere-sessie', variant: 'the-lab-v1', event_type: 'landing', lead_id: null },
+  ] });
+  const r = await post(FUNNEL, { origin: 'https://www.deforexopleiding.nl' });
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.headers['access-control-allow-origin'], 'https://www.deforexopleiding.nl');
+  const lead = crm.tabellen.leads[0];
+  assert.equal(lead.bron, 'the-lab-v1');
+  assert.equal(lead.traject, 'the-lab');
+  const a = crm.tabellen.lab_aanmeldingen[0];
+  assert.equal(a.hook, 'H09');
+  assert.equal(a.utm_content, 'h09');
+  assert.equal(a.landingspagina, 'https://www.deforexopleiding.nl/the-lab-v1');
+  // Funnel-sessie gekoppeld aan de lead, andere sessies niet.
+  assert.equal(crm.tabellen.funnel_events[0].lead_id, lead.id);
+  assert.equal(crm.tabellen.funnel_events[1].lead_id, null);
+});
+
+test('funnel: onbekende bron telt als de LMS-landing (the-lab); ongeldige sessie wordt genegeerd', async () => {
+  const r = await post({ ...FUNNEL, bron: 'kennismakingscursus-v2', session_id: 'geen-uuid' });
+  assert.equal(r.statusCode, 200);
+  assert.equal(crm.tabellen.leads[0].bron, 'the-lab');
+});
+
+test('funnel: bestaande lead behoudt zijn bron, ook vanaf een funnel', async () => {
+  crm = nieuweCrm([{ id: 'lead-k', email: GELDIG.email, bron: 'kennismakingscursus-v2', soort: 'facebook', traject: 'minicursus', verwijderd_op: null }]);
+  await post({ ...FUNNEL, bron: 'the-lab-v2' });
+  assert.equal(crm.tabellen.leads[0].bron, 'kennismakingscursus-v2');
+});

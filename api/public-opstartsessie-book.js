@@ -41,6 +41,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { telefoonNlBe } from './_lib/phone-e164.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
+import { isScanBron, scanGhlTitel, leesScanAssessor, maakScanConcept } from './_lib/strategiescan-boeking.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE  = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -183,12 +184,28 @@ export default async function handler(req, res) {
     lead_phone : telefoon,
   };
 
+  // Strategie-scan-funnel (bron 'strategiescan'): Dave is eigenaar + titel
+  // 'Strategie-scan · …' in zijn agenda. Zie _lib/strategiescan-boeking.js.
+  const isScan = isScanBron(source);
+  const scanAssessor = isScan ? await leesScanAssessor() : null;
+  if (scanAssessor?.id) leadRow.owner_id = scanAssessor.id;
+
   // 3) Afspraak aanmaken (GHL contact-upsert + appointment + follow_up-row +
   //    booking_source + fail-soft GHL-tag).
   try {
     const result = await createAppointmentForLead({
       lead: leadRow, scheduledAt, durationMinutes, source,
+      ...(isScan ? { ghlTitel: scanGhlTitel(leadRow.lead_name) } : {}),
     });
+
+    // Strategie-scan: meteen een scan-rij in concept (fail-soft).
+    if (isScan && result?.appointment_id) {
+      const scan = await maakScanConcept({
+        leadId, afspraakId: result.appointment_id, assessorId: scanAssessor?.id || null,
+        naam: leadRow.lead_name, email, telefoon: telefoonE164(telefoon) || telefoon,
+      });
+      if (!scan.ok) console.error('[public-opstartsessie-book] scan-concept niet gezet', { appointment: result.appointment_id, fout: scan.fout });
+    }
 
     // DEEL 3: link naar de submission-rij (fail-soft). Zet noshow_akkoord=
     // true (impliciet — de client heeft 'em al gevalideerd) + appointment_id +

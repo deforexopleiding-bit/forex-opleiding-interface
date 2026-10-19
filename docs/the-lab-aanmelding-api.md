@@ -38,6 +38,8 @@ behalve het opslaan van de variabele (Vercel herstart de functies).
 | `fbclid` | nee | uit de URL |
 | `fbp`, `fbc` | nee | de cookies `_fbp` / `_fbc` als de pixel draait |
 | `website` | — | **honeypot**: een verborgen veld dat LEEG moet blijven |
+| `bron` | nee | funnel op deforexopleiding.nl: `the-lab-v1` of `the-lab-v2`. Een NIEUWE lead krijgt dan `leads.bron` = die variant (Leadsonderhoud > Funnels), traject blijft `the-lab`. Al de rest (of niets) = `the-lab`. Een bestaande lead houdt zijn bron. |
+| `session_id` | nee | funnel-tracking-sessie (uuid) van de website: het CRM hangt de `funnel_events` van die sessie aan de lead (zoals `/api/lead` op de website doet) |
 
 ## Antwoord
 
