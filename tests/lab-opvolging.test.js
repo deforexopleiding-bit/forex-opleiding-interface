@@ -76,7 +76,8 @@ test('elke stap heeft een tekst met één knop, en de juiste bestemming', () => 
     const m = standaardMail(s, { voornaam: 'Lien', link: 'L', stap: 5, stappen: 25, knop });
     assert.ok(m.onderwerp && m.html.includes('Lien') && (m.html.match(/\]\(L\)/g) || []).length === 1, s);
   }
-  assert.equal(linkDoel('niet-gestart-24u'), 'lab');
+  // Jouw route (okt 2026): niet gestart → het actieplan, niet rechtstreeks The Lab.
+  assert.equal(linkDoel('niet-gestart-24u'), 'start');
   assert.equal(linkDoel('bezig-24u'), 'lab');
   assert.equal(linkDoel('afgewerkt-d1'), 'sessie');
   assert.equal(linkDoel('dag8'), 'sessie');
@@ -97,4 +98,25 @@ test('bedrading: cron elk kwartier, live-schakelaar standaard uit, noodstop', ()
   assert.match(src, /'lab_opvolging_live'/);
   assert.match(src, /LEADSONDERHOUD_UIT/);
   assert.match(src, /if \(!verslag\.live\) \{ verslag\.droog\.push/);
+});
+
+test('JOUW ROUTE: video gezien → na een dag "video-geen-lab"; nooit na boeking; link naar het actieplan', () => {
+  const s = basis({ videoBekeken: true, videoOp: T0 + 2 * UUR });
+  assert.equal(volgendeStap(s, T0 + 25 * UUR), null, 'nog geen dag na de video');
+  assert.equal(volgendeStap(s, T0 + 27 * UUR), 'video-geen-lab');
+  assert.equal(volgendeStap({ ...s, gehad: new Set(['video-geen-lab']) }, T0 + 30 * UUR), null);
+  assert.equal(volgendeStap({ ...s, geboekt: true }, T0 + 27 * UUR), null);
+  assert.equal(volgendeStap({ ...s, gestart: true, laatsteActiviteit: T0 + 3 * UUR }, T0 + 28 * UUR), 'bezig-24u');
+  assert.equal(linkDoel('niet-gestart-24u'), 'start');
+  assert.equal(linkDoel('video-geen-lab'), 'start');
+  assert.equal(linkDoel('bezig-24u'), 'lab');
+  assert.equal(linkDoel('afgewerkt-d1'), 'sessie');
+  const m = standaardMail('video-geen-lab', { voornaam: 'Lien', link: 'https://x', knop: (u, t) => `<a href="${u}">${t}</a>` });
+  assert.match(m.html, /video's van je leerpad/);
+  assert.match(m.html, /strategiesessie met Dave: 30 minuten, gratis/);
+  assert.doesNotMatch(m.html, /startvideo|strategiescan/);
+  const n = standaardMail('niet-gestart-24u', { voornaam: 'Lien', link: 'https://x', knop: (u, t) => `<a href="${u}">${t}</a>` });
+  assert.match(n.html, /strategiesessie met Dave/);
+  assert.doesNotMatch(n.html, /startvideo|6 minuten/);
+  assert.ok(STAPPEN.includes('video-geen-lab'));
 });

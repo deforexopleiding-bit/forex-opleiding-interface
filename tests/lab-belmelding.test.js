@@ -226,3 +226,20 @@ test('schoneVraag: één regel, max 300', () => {
   assert.equal(schoneVraag(''), null);
   assert.equal(schoneVraag('x'.repeat(400)).length, 300);
 });
+
+test('MEETEN PRATEN: koos "praten", 10 minuten later niet geboekt → bellen; eerder niet; nooit na boeking', () => {
+  const st = (minGeleden, extra = {}) => leadStand({ labLead: LEAD({ route: 'praten', route_gekozen_op: iso(NU - minGeleden * MIN), ...extra }), sessie: null });
+  assert.deepEqual(geldendeRedenen(st(9), NU), []);
+  assert.deepEqual(geldendeRedenen(st(10), NU), ['lab_praten']);
+  assert.deepEqual(geldendeRedenen(st(30, { sessie_geboekt_op: iso(NU) }), NU), []);
+  // Via het gedrag uit het LMS (leesLabGedrag), ook als de rij het veld niet draagt.
+  const viaGedrag = leadStand({ labLead: LEAD(), sessie: null, gedrag: { route: 'praten', routeOp: NU - 15 * MIN } });
+  assert.deepEqual(geldendeRedenen(viaGedrag, NU), ['lab_praten']);
+});
+
+test('CRON: route uit het LMS → lab_praten-kaart', async () => {
+  opzet({ lead: LEAD({ route: 'praten', route_gekozen_op: iso(NU - 12 * MIN) }), sessie: null });
+  await draaiBelmelding(NU);
+  assert.equal(taken()[0].reden_code, 'lab_praten');
+  assert.match(taken()[0].notitie, /meteen praten/);
+});

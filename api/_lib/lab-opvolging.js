@@ -21,7 +21,7 @@
 //   - elke stap één keer (unique in lab_opvolging).
 
 export const STAPPEN = Object.freeze([
-  'niet-gestart-24u', 'bezig-24u', 'afgewerkt-d1', 'afgewerkt-d3', 'dag6', 'dag8',
+  'niet-gestart-24u', 'video-geen-lab', 'bezig-24u', 'afgewerkt-d1', 'afgewerkt-d3', 'dag6', 'dag8',
 ]);
 
 const UUR = 3600 * 1000;
@@ -40,6 +40,8 @@ const DAG = 24 * UUR;
  * @param {number|null} s.laatsteActiviteit ms — bijgewerkt_op van de sessie
  * @param {Set<string>} s.gehad          stappen die al verstuurd zijn (of overgeslagen)
  * @param {number|null} s.laatsteBericht ms — laatste opvolgbericht (elk kanaal)
+ * @param {boolean} [s.videoBekeken]    stap 1 van Jouw route af: de video's van het leerpad (LMS)
+ * @param {number|null} [s.videoOp]     ms — wanneer
  * @param {number} nu
  */
 export function volgendeStap(s, nu) {
@@ -64,6 +66,14 @@ export function volgendeStap(s, nu) {
     if (s.laatsteActiviteit && nu - s.laatsteActiviteit >= DAG && nog('bezig-24u')) return 'bezig-24u';
     return null;
   }
+  // Jouw route (okt 2026): eerst de video's, dan The Lab, dan de strategiesessie.
+  // Wie de video's keek en daarna een dag geen Lab startte, krijgt "nu The Lab —
+  // of meteen je strategiesessie".
+  if (s.videoBekeken) {
+    const sinds = s.videoOp ?? s.aangemeldOp;
+    if (nu - sinds >= DAG && nog('video-geen-lab')) return 'video-geen-lab';
+    return null;
+  }
   if (nu - s.aangemeldOp >= DAG && nog('niet-gestart-24u')) return 'niet-gestart-24u';
   return null;
 }
@@ -86,8 +96,11 @@ export function standaardMail(stap, { voornaam, link, stap: labStap, stappen, kn
   const k = knop;
   switch (stap) {
     case 'niet-gestart-24u':
-      return { onderwerp: 'Je eerste trade wacht op je', html:
-        `<p>Hey ${v},</p><p>Je account voor The Lab staat klaar, maar je bent nog niet gestart. Het kost je twintig minuten: één echte chart, één trade, met onze strategie — stap voor stap uitgelegd.</p>${k(link, 'Start The Lab')}` };
+      return { onderwerp: 'Geen 20 minuten? Dan 5.', html:
+        `<p>Hey ${v},</p><p>Je account staat klaar. Geen 20 minuten voor The Lab? Kijk dan de eerste video van je leerpad en plan meteen je strategiesessie met Dave: 30 minuten, gratis. Je ziet of trading bij je past.</p>${k(link, 'Naar mijn actieplan')}` };
+    case 'video-geen-lab':
+      return { onderwerp: 'De concepten zitten erin. Nu de praktijk.', html:
+        `<p>Hey ${v},</p><p>Je keek de video's van je leerpad — dan begrijp je wat The Lab van je vraagt. Neem 20 minuten aan je laptop en plaats je eerste trade. Liever eerst praten? Plan je strategiesessie met Dave: 30 minuten, gratis.</p>${k(link, 'Naar mijn actieplan')}` };
     case 'bezig-24u':
       return { onderwerp: 'Je bent er bijna', html:
         `<p>Hey ${v},</p><p>Je zit in The Lab op stap ${esc(labStap)}${stappen ? ` van ${esc(stappen)}` : ''}. Je gaat verder waar je was. Het beste deel komt op het einde: daar zie je wat 20.244 echte trades van onze studenten laten zien.</p>${k(link, 'Verder met The Lab')}` };
@@ -110,7 +123,10 @@ export function standaardMail(stap, { voornaam, link, stap: labStap, stappen, kn
 
 /** Waar de knop heen moet: verder in The Lab, of naar de boeking. PURE. */
 export function linkDoel(stap) {
-  return stap === 'niet-gestart-24u' || stap === 'bezig-24u' ? 'lab' : 'sessie';
+  // Niet gestart of alleen de video gezien: naar het actieplan (video, Lab of
+  // Dave — hij kiest). Bezig: verder in The Lab. Daarna: de boeking.
+  if (stap === 'niet-gestart-24u' || stap === 'video-geen-lab') return 'start';
+  return stap === 'bezig-24u' ? 'lab' : 'sessie';
 }
 
 /** Een sjabloon uit onderhoud_sjablonen invullen ({voornaam}, {loginlink}, {stap}, {stappen}). PURE. */

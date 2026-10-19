@@ -29,7 +29,7 @@ mock.module(url('api/_lib/lab-opvolging.js'), { namedExports: { ...(await import
 const { default: cron } = await import(url('api/cron-lab-opvolging.js'));
 
 const twee = new Date(Date.now() - 2 * 86400000).toISOString();
-function opzet({ live, geboekt = false, agenda = false } = {}) {
+function opzet({ live, geboekt = false, agenda = false, video = 0, route = 'lab' } = {}) {
   crm = maakFakeDb({
     app_settings: live ? [{ key: 'lab_opvolging_live', value: 'true' }] : [],
     lab_aanmeldingen: [{ id: 'a1', aangemaakt: twee, lead_id: 'l1', email: 'lien@x.be', voornaam: 'Lien', telefoon_e164: '+32472223752', toestemming: true, lms_auth_id: 'auth-1', resultaat: 'nieuw_account' }],
@@ -38,8 +38,11 @@ function opzet({ live, geboekt = false, agenda = false } = {}) {
     onderhoud_sjablonen: [],
   }, { rpc: { upsert_lead: upsertLeadRpc } });
   lms = maakFakeDb({
-    hlms_lab_lead: [{ id: 'll1', auth_id: 'auth-1', email: 'lien@x.be', voornaam: 'Lien', toegang_tot: new Date(Date.now() + 5 * 86400000).toISOString(), sessie_geboekt_op: geboekt ? twee : null, aangemaakt_op: twee }],
+    hlms_lab_lead: [{ id: 'll1', auth_id: 'auth-1', email: 'lien@x.be', voornaam: 'Lien', toegang_tot: new Date(Date.now() + 5 * 86400000).toISOString(), sessie_geboekt_op: geboekt ? twee : null, aangemaakt_op: twee, route }],
     hlms_lab_sessie: [],
+    // `video` = hoeveel verschillende video's hij uitkeek (en de eerste nog eens, dubbel telt niet).
+    hlms_lab_lead_gebeurtenis: Array.from({ length: video }, (_, i) => ({ lead_id: 'll1', soort: 'video_voltooid', sleutel: `mat-${i + 1}`, op: twee }))
+      .concat(video ? [{ lead_id: 'll1', soort: 'video_voltooid', sleutel: 'mat-1', op: twee }] : []),
   });
 }
 beforeEach(() => { mails = []; });
@@ -63,8 +66,10 @@ test('live aan: de nudge gaat één keer uit, met een loginlink naar The Lab', a
   const b = await run();
   assert.equal(b.verstuurd.length, 1);
   assert.equal(mails.length, 1);
-  assert.equal(mails[0].subject, 'Je eerste trade wacht op je');
-  assert.match(mails[0].html, /\/the-lab\/start\/\?s=[^"&]+&amp;naar=lab|\/the-lab\/start\/\?s=[^"]+naar=lab/);
+  // Jouw route: niet gestart → het actieplan (video's, Lab of meteen de strategiesessie).
+  assert.equal(mails[0].subject, 'Geen 20 minuten? Dan 5.');
+  assert.match(mails[0].html, /\/the-lab\/start\/\?s=[^"]+"/);
+  assert.doesNotMatch(mails[0].html, /naar=lab/);
   assert.deepEqual(crm.tabellen.lab_opvolging.map((o) => [o.stap, o.kanaal, o.status]).sort(), [['niet-gestart-24u', 'mail', 'verstuurd'], ['niet-gestart-24u', 'whatsapp', 'overgeslagen']]);
   await run();
   assert.equal(mails.length, 1, 'niet nog eens');
@@ -76,4 +81,22 @@ test('geboekt in het LMS of via de agenda: niets meer', async () => {
   opzet({ live: true, agenda: true });
   await run();
   assert.equal(mails.length, 0);
+});
+
+test('JOUW ROUTE: de 5 video\'s van het leerpad uitgekeken, geen Lab na een dag → "nu de praktijk", niet de niet-gestart-nudge', async () => {
+  opzet({ live: false, video: 5 });
+  const b = await run();
+  assert.deepEqual(b.droog, [{ email: 'lien@x.be', stap: 'video-geen-lab' }]);
+});
+
+test('JOUW ROUTE: route lab met pas 4 video\'s (en één dubbel) → nog niet "nu de praktijk"', async () => {
+  opzet({ live: false, video: 4 });
+  const b = await run();
+  assert.deepEqual(b.droog, [{ email: 'lien@x.be', stap: 'niet-gestart-24u' }]);
+});
+
+test('JOUW ROUTE: route kort — één video volstaat', async () => {
+  opzet({ live: false, video: 1, route: 'kort' });
+  const b = await run();
+  assert.deepEqual(b.droog, [{ email: 'lien@x.be', stap: 'video-geen-lab' }]);
 });

@@ -297,16 +297,31 @@
   }
 
   function funnelTabel(d) {
-    const kop = ['', 'Touches', 'Leads', 'Ingelogd', 'Lab gestart', 'Afgewerkt', 'Sessie geboekt', 'Klant'];
+    const kop = ['', 'Touches', 'Leads', 'Route 20 · 5 · praten', 'Ingelogd', 'Lab gestart', 'Afgewerkt', 'Sessie geboekt', 'Klant'];
     const cel = (n, van) => '<td style="padding:8px 10px;text-align:right;white-space:nowrap"><b>' + n + '</b>' + (van != null ? '<div style="font-size:11px;color:var(--text-3)">' + pct(n, van) + '</div>' : '') + '</td>';
     const rij = (r, vet) => '<tr style="border-top:1px solid var(--border)' + (vet ? ';background:var(--surface-2,rgba(0,0,0,.02))' : '') + '">' +
       '<td style="padding:8px 10px;font-weight:' + (vet ? 700 : 600) + '">' + esc(r.sleutel) + '</td>' +
       '<td style="padding:8px 10px;text-align:right;color:var(--text-3)">' + r.touches + '</td>' +
-      cel(r.leads, null) + cel(r.ingelogd, r.leads) + cel(r.gestart, r.ingelogd) + cel(r.afgewerkt, r.gestart) + cel(r.geboekt, r.leads) + cel(r.klant, r.geboekt) + '</tr>';
+      cel(r.leads, null) +
+      '<td style="padding:8px 10px;text-align:right;white-space:nowrap;color:var(--text-2)">' + (r.route ? (r.route.lab + ' · ' + r.route.kort + ' · ' + r.route.praten) : '—') + '</td>' +
+      cel(r.ingelogd, r.leads) + cel(r.gestart, r.ingelogd) + cel(r.afgewerkt, r.gestart) + cel(r.geboekt, r.leads) + cel(r.klant, r.geboekt) + '</tr>';
     return '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">' +
       '<thead><tr>' + kop.map((k, i) => '<th style="padding:8px 10px;text-align:' + (i ? 'right' : 'left') + ';font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">' + k + '</th>').join('') + '</tr></thead>' +
       '<tbody>' + d.rijen.map((r) => rij(r, false)).join('') + (d.totaal ? rij(d.totaal, true) : '') + '</tbody></table></div>' +
-      '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Percentages: ingelogd/gestart/afgewerkt t.o.v. de stap ervoor; <b>sessie geboekt t.o.v. leads</b> (de KPI); klant t.o.v. geboekt. Testaanmeldingen tellen niet mee.</div>';
+      '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Percentages: ingelogd/gestart/afgewerkt t.o.v. de stap ervoor; <b>sessie geboekt t.o.v. leads</b> (de KPI); klant t.o.v. geboekt. Testaanmeldingen tellen niet mee.</div>' +
+      routeBlok(d.per_route);
+  }
+
+  /** Geboekt per gekozen ingang van Jouw route (20 min / 5 min / meteen praten). */
+  function routeBlok(pr) {
+    if (!pr) return '';
+    const naam = { lab: 'Ik heb 20 minuten (The Lab)', kort: 'Ik heb 5 minuten', praten: 'Ik wil meteen praten', geen: 'Nog geen keuze' };
+    const rijen = ['lab', 'kort', 'praten', 'geen'].map((k) => '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px">' + esc(naam[k]) + '</td>' +
+      '<td style="padding:6px 10px;text-align:right"><b>' + pr[k].leads + '</b></td>' +
+      '<td style="padding:6px 10px;text-align:right"><b>' + pr[k].geboekt + '</b> <span style="font-size:11px;color:var(--text-3)">' + pct(pr[k].geboekt, pr[k].leads) + '</span></td></tr>').join('');
+    return '<div style="margin-top:16px;font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Per gekozen route</div>' +
+      '<table data-lab-per-route style="width:100%;border-collapse:collapse;font-size:13px;margin-top:4px"><thead><tr>' +
+      '<th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--text-3)">Ingang</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-3)">Leads</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-3)">Geboekt</th></tr></thead><tbody>' + rijen + '</tbody></table>';
   }
 
   // "Plan je sessie met Dave" in het LMS: uitnodiging en vaste balk → boeking.

@@ -8,6 +8,7 @@
 // redenen geldt — in deze volgorde van voorrang:
 //
 //   lab_vraag            de lead vroeg zelf "bel me" (einde van The Lab)
+//   lab_praten           koos "Ik wil meteen praten" en boekte 10 minuten later niet
 //   lab_af_niet_geboekt  The Lab afgewerkt en 5 minuten later nog niet geboekt
 //   lab_investeren       kwalificatie "investeren in begeleiding" = ja/misschien
 //   lab_stil_24u         stap ≥ 5 gehaald, niet afgewerkt, en 24 uur stil
@@ -25,9 +26,10 @@
 // Alles hier is PUUR; het lezen en schrijven doet de cron.
 
 export const LAB_BEL_REDEN = 'lab_bellen';
-export const BEL_REDENEN = Object.freeze(['lab_vraag', 'lab_af_niet_geboekt', 'lab_investeren', 'lab_stil_24u']);
+export const BEL_REDENEN = Object.freeze(['lab_vraag', 'lab_praten', 'lab_af_niet_geboekt', 'lab_investeren', 'lab_stil_24u']);
 export const BEL_LABEL = Object.freeze({
   lab_vraag: 'Vroeg zelf om te bellen',
+  lab_praten: 'Koos "meteen praten", boekte niet',
   lab_af_niet_geboekt: 'Lab afgewerkt, nog niet geboekt',
   lab_investeren: 'Wil investeren in begeleiding',
   lab_stil_24u: '24u stil in The Lab',
@@ -38,6 +40,7 @@ export const UUR = 60 * MIN;
 export const WACHT_NA_AFGEROND = 5 * MIN;
 export const STIL_NA = 24 * UUR;
 export const STIL_VANAF_STAP = 5;
+export const WACHT_NA_PRATEN = 10 * MIN;
 
 const TZ = 'Europe/Brussels';
 
@@ -77,7 +80,7 @@ const ms = (v) => {
  * @param {boolean} p.geboektInCrm  er staat een (geplande/gehouden) afspraak in het CRM
  * @param {string[]} [p.vragen]  ISO-tijdstippen waarop de lead "bel me" vroeg
  */
-export function leadStand({ labLead, sessie, geboektInCrm = false, vragen = [] }) {
+export function leadStand({ labLead, sessie, geboektInCrm = false, vragen = [], gedrag = null }) {
   const afgerond = !!sessie && (sessie.afgerond === true || sessie.afgerond === 'true' || Number(sessie.voortgang || 0) >= 100);
   const afgerondOp = afgerond ? (ms(sessie.afgerond_op) ?? ms(sessie.bijgewerkt_op)) : null;
   const activiteit = [ms(sessie?.bijgewerkt_op), ms(labLead?.laatste_login_op), ms(labLead?.eerste_login_op)].filter((x) => x != null);
@@ -89,6 +92,8 @@ export function leadStand({ labLead, sessie, geboektInCrm = false, vragen = [] }
     laatsteActiviteit: activiteit.length ? Math.max(...activiteit) : null,
     investeren: labLead?.kwalificatie?.investeren || null,
     vroegBellen: (vragen || []).some((v) => ms(v) != null),
+    route: gedrag?.route ?? labLead?.route ?? null,
+    routeOp: ms(gedrag?.routeOp ?? labLead?.route_gekozen_op),
   };
 }
 
@@ -97,6 +102,7 @@ export function geldendeRedenen(s, nu) {
   if (!s || s.geboekt) return [];
   const uit = [];
   if (s.vroegBellen) uit.push('lab_vraag');
+  if (s.route === 'praten' && s.routeOp != null && nu - s.routeOp >= WACHT_NA_PRATEN) uit.push('lab_praten');
   if (s.afgerond && s.afgerondOp != null && nu - s.afgerondOp >= WACHT_NA_AFGEROND) uit.push('lab_af_niet_geboekt');
   if (s.investeren === 'ja' || s.investeren === 'misschien') uit.push('lab_investeren');
   if (!s.afgerond && s.stap >= STIL_VANAF_STAP && s.laatsteActiviteit != null && nu - s.laatsteActiviteit >= STIL_NA) uit.push('lab_stil_24u');
