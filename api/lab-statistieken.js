@@ -21,7 +21,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodeUitQuery } from './funnel-stats.js';
 import { aggregeerFunnel, labStatus, leesLmsStand } from './_lib/lab-dossier.js';
-import { LAB_SLUG } from './_lib/lab-config.js';
+import { LAB_SLUG, labLandingLabel } from './_lib/lab-config.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { uitnodigingPerSleutel, leesUitnodigingGebeurtenissen } from './_lib/lab-uitnodiging.js';
 
@@ -38,10 +38,10 @@ export default async function handler(req, res) {
   const q = req.query || {};
   const periode = periodeUitQuery(q);
   if (periode.fout) return res.status(400).json({ error: periode.fout });
-  const per = q.per === 'campagne' ? 'campagne' : 'hook';
+  const per = ['campagne', 'landing'].includes(q.per) ? q.per : 'hook';
 
   const { data: aanm, error: ae } = await supabaseAdmin.from('lab_aanmeldingen')
-    .select('id, aangemaakt, lead_id, email, voornaam, hook, utm_campaign, lms_auth_id, resultaat, is_test')
+    .select('id, aangemaakt, lead_id, email, voornaam, hook, utm_campaign, landingspagina, lms_auth_id, resultaat, is_test')
     .gte('aangemaakt', periode.start.toISOString()).lt('aangemaakt', periode.eindExclusief.toISOString())
     .order('aangemaakt', { ascending: false }).limit(10000);
   if (ae) {
@@ -105,7 +105,7 @@ export default async function handler(req, res) {
       ? { code: 'geboekt', label: 'Sessie geboekt' }
       : labStatus({ labLead: l.labLead || null, sessie: l.sessie || null });
     leads.push({
-      lead_id: a.lead_id, email: em, voornaam: a.voornaam, hook: a.hook, campagne: a.utm_campaign,
+      lead_id: a.lead_id, email: em, voornaam: a.voornaam, hook: a.hook, campagne: a.utm_campaign, landing: labLandingLabel(a.landingspagina),
       aangemeld: a.aangemaakt, status, is_test: a.is_test,
       stap: l.sessie?.stap ?? null, stappen: l.sessie?.stappen ?? null,
     });

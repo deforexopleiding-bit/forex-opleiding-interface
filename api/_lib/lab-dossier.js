@@ -13,7 +13,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { AANLEIDING_LABELS } from './lab-uitnodiging.js';
-import { LAB_SLUG } from './lab-config.js';
+import { LAB_SLUG, labSleutel } from './lab-config.js';
 
 /** De vragen uit de vragenlaag van het LMS (kopie van src/features/lab/lab-vragen.ts). */
 export const LMS_VRAGEN = Object.freeze({
@@ -168,7 +168,7 @@ export async function leesLmsStand({ authIds = null, sinds = null } = {}) {
 export function aggregeerFunnel(aanmeldingen, lmsPerEmail, klanten = new Set(), per = 'hook') {
   const eerste = new Map();
   const touches = new Map();
-  const sleutelVan = (a) => (per === 'campagne' ? (a.utm_campaign || '(geen campagne)') : (a.hook || '(geen hook)'));
+  const sleutelVan = (a) => labSleutel(a, per);
   const gesorteerd = [...(aanmeldingen || [])].sort((x, y) => String(x.aangemaakt).localeCompare(String(y.aangemaakt)));
   for (const a of gesorteerd) {
     if (a.is_test) continue;

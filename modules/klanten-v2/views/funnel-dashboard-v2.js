@@ -19,7 +19,18 @@
     { groep: 'kmc', titel: 'Mini-cursus (kennismakingscursus)' },
     { groep: '7-daagse', titel: '7-daagse' },
     { groep: 'webinar', titel: 'Webinar (maandag 19:00)' },
+    // 2026-10-19: twee aparte funnels. The Lab = tradingsimulator (7 dagen) met
+    // daarna een strategiesessie; Strategie-scan = meteen de gratis scan boeken.
+    { groep: 'the-lab', titel: 'The Lab (tradingsimulator · 7 dagen)' },
+    { groep: 'strategiescan', titel: 'Strategie-scan (gratis scan met Dave)' },
   ];
+
+  // Funnels met een eigen flow (geen quiz, geen A/B/C-boekflow). Wat ze als
+  // "geboekt" tellen, is hun eigen afspraak — houd die twee uit elkaar.
+  const EIGEN_FLOW = {
+    'the-lab': { flow: 'Lab-aanmelding → trial 7 dagen + loginmail', geboekt: 'Strategiesessie' },
+    strategiescan: { flow: 'Formulier → meteen de strategie-scan boeken', geboekt: 'Scan geboekt' },
+  };
 
   const PRESETS = [
     ['vandaag', 'Vandaag'],
@@ -273,15 +284,16 @@
     </div>`;
   }
 
-  function leadHtml(lr, trackingActief) {
+  function leadHtml(lr, trackingActief, groep) {
     if (!lr) return '';
+    const eigen = EIGEN_FLOW[groep];
     const cel = (label, waarde, sub) => `<div style="min-width:0"><div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">${esc(label)}</div>
       <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">${esc(waarde)}${sub ? `<span style="font-size:10.5px;font-weight:400;color:var(--text-3)"> ${esc(sub)}</span>` : ''}</div></div>`;
     return `<div class="fd-leads" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)">
       ${cel('Leads', num(lr.leads))}
-      ${cel('Toegang', num(lr.toegang), lr.toegang_pct == null ? '' : fmtPct(lr.toegang_pct))}
-      ${cel('Geen toegang', num(lr.geen_toegang))}
-      ${cel('Geboekt', num(lr.geboekt))}
+      ${eigen ? '' : cel('Toegang', num(lr.toegang), lr.toegang_pct == null ? '' : fmtPct(lr.toegang_pct))}
+      ${eigen ? '' : cel('Geen toegang', num(lr.geen_toegang))}
+      ${cel(eigen ? eigen.geboekt : 'Geboekt', num(lr.geboekt))}
       ${cel('Met sessie', trackingActief ? num(lr.leads_met_sessie) : '—', trackingActief && lr.dekking_pct != null ? fmtPct(lr.dekking_pct) : '')}
     </div>`;
   }
@@ -300,7 +312,7 @@
         <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-shrink:0">${sessies}${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand,#0A7490);font-size:11.5px">Open ↗</a>` : ''}</span>
       </div>
       ${funnelHtml(v.funnel)}
-      ${leadHtml(v.lead_resultaat, trackingActief)}
+      ${leadHtml(v.lead_resultaat, trackingActief, v.groep)}
       ${trackingActief ? `<div>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 8px" onclick="window.__fdToggle('${esc(v.variant)}')">${open ? '▾' : '▸'} Afhaken per vraag</button>
         ${open ? `<div class="fd-afhaken">${afhakenHtml(v.afhaken_per_vraag)}${gedragHtml(v.gedrag)}</div>` : ''}
@@ -325,6 +337,15 @@
       <summary style="cursor:pointer;color:var(--text-3)">Blinde vlekken (${vlekken.length})</summary>
       <ul style="margin:6px 0 0 18px;padding:0">${vlekken.map((b) => `<li>${esc(b)}</li>`).join('')}</ul>
     </details>`;
+  }
+
+  // Funnels met een eigen flow staan ook in het paneel, maar zonder schakelaar:
+  // A/B/C is daar niet van toepassing.
+  function eigenFlowRows(registry) {
+    return (registry || []).filter((r) => r && EIGEN_FLOW[r.product]).map((r) => `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.naam)} <span style="color:var(--text-3);font-family:var(--mono,monospace);font-size:10px">${esc(r.bron)}</span></span>
+        <span style="font-size:11px;color:var(--text-3);text-align:right">eigen flow · ${esc(EIGEN_FLOW[r.product].flow)}</span>
+      </div>`).join('');
   }
 
   function flowPanelHtml(registry) {
@@ -355,6 +376,7 @@
           ${st.flowErr ? `<span style="color:var(--amber);font-size:11px;margin-left:auto">${esc(st.flowErr)}</span>` : ''}
         </div>
         ${rows}
+        ${eigenFlowRows(registry)}
         <div style="font-size:10.5px;color:var(--text-3);margin-top:8px">Wijziging is binnen ~1 minuut live op de funnels. A blijft altijd de veilige fallback.</div>
       </div>
     </details>`;

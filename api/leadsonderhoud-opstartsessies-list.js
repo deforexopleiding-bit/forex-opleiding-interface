@@ -452,7 +452,10 @@ export default async function handler(req, res) {
           // De bron van een directe boeking (bv. 'the-lab' vanuit het LMS) —
           // zo herkent de lijst een Lab-gesprek ook zonder submission.
           booking_source  : c.booking_source || null,
-          bron_label      : c.booking_source === 'the-lab' ? 'The Lab' : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda'),
+          // Elke bekende agendabron (the-lab, strategiescan, webinar …) krijgt
+          // het label uit booking_sources; anders de GHL-agendanaam.
+          bron_label      : (c.booking_source && labelBySlug.get(c.booking_source))
+            || (c.booking_source === 'the-lab' ? 'The Lab' : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda')),
           naam            : c.lead_name,
           email           : c.lead_email,
           telefoon        : c.lead_phone,

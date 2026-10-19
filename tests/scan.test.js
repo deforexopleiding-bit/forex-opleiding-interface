@@ -290,8 +290,8 @@ test('bedrading: recht scan.use in registry + SQL (RLS, REVOKE, Dave + admins, s
 test('bedrading: call-rapport toont "Strategie-scan" bij webinar-calls voor wie scan.use heeft', () => {
   const v = lees('modules/klanten-v2/views/call-rapport-v2.js');
   assert.match(v, /window\.RBAC\.canSync\('scan\.use'\)/);
-  assert.match(v, /r\.booking_source !== 'webinar'/);
+  assert.match(v, /\['webinar', 'strategiescan'\]\.includes\(r\.booking_source\)/);
   assert.match(v, /href="\/scan\?afspraak=' \+ encodeURIComponent\(r\.appointment_id\)/);
   assert.match(lees('api/call-rapport.js'), /booking_source: a\.booking_source \|\| null,/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/call-rapport-v2\.js\?v=2/);
+  assert.match(lees('modules/klanten-v2/index.html'), /views\/call-rapport-v2\.js\?v=3/);
 });
