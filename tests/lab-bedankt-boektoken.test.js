@@ -148,3 +148,49 @@ test('bedrading: /api/lab-aanmelding geeft elk bewaard adres een boektoken (geen
   assert.match(src, /boek_token: boekToken \}\);/);
   assert.match(src, /if \(v\.bot\) return res\.status\(200\)\.json\(\{ ok: true, event_id: null, bericht: BERICHT_OK, boek_token: null \}\);/);
 });
+
+// ── Weekquotum (2026-10-20): max. 3 Lab-sessies per kalenderweek via de bedankpagina ──
+const Q = await import(url('api/_lib/lab-weekquotum.js'));
+
+test('weekquotum: week van het moment (ma-zo, Brussel), telling van echte the-lab-sessies', () => {
+  assert.equal(Q.LAB_WEEKQUOTUM, 3);
+  assert.equal(Q.weekVan(Date.parse('2026-10-21T09:00:00Z')), '2026-10-19');   // woensdag
+  assert.equal(Q.weekVan(Date.parse('2026-10-25T22:30:00Z')), '2026-10-19');   // zo 23:30 Brussel (wintertijd sinds 25/10)
+  assert.equal(Q.weekVan(Date.parse('2026-10-25T23:30:00Z')), '2026-10-26');   // ma 00:30 Brussel
+  const per = Q.telPerWeek([
+    { booking_source: 'the-lab', scheduled_at: '2026-10-21T09:00:00Z', status: 'scheduled' },
+    { booking_source: 'the-lab', scheduled_at: '2026-10-22T09:00:00Z', status: 'scheduled' },
+    { booking_source: 'the-lab', scheduled_at: '2026-10-22T10:00:00Z', status: 'cancelled' },
+    { booking_source: 'the-lab', scheduled_at: '2026-10-23T10:00:00Z', status: 'scheduled', is_test: true },
+    { booking_source: 'strategiescan', scheduled_at: '2026-10-23T10:00:00Z', status: 'scheduled' },
+    { booking_source: 'the-lab', scheduled_at: '2026-10-28T10:00:00Z', status: 'scheduled' },
+  ]);
+  assert.equal(per.get('2026-10-19'), 2, 'geannuleerd, test en scan tellen niet');
+  assert.equal(per.get('2026-10-26'), 1);
+});
+
+test('weekquotum: volle week valt weg uit de momenten; stand per week', () => {
+  const nu = Date.parse('2026-10-21T08:00:00Z');
+  const momenten = ['2026-10-22T08:00:00.000Z', '2026-10-23T08:00:00.000Z', '2026-10-27T08:00:00.000Z'];
+  const vol = Q.pasQuotumToe(momenten, new Map([['2026-10-19', 3], ['2026-10-26', 1]]), nu);
+  assert.deepEqual(vol.momenten, ['2026-10-27T08:00:00.000Z']);
+  assert.deepEqual(vol.quotum, { per_week: 3, deze_week: { geboekt: 3, vrij: 0 }, volgende_week: { geboekt: 1, vrij: 2 } });
+  const leeg = Q.pasQuotumToe(momenten, new Map(), nu);
+  assert.equal(leeg.momenten.length, 3);
+  assert.deepEqual(leeg.quotum.deze_week, { geboekt: 0, vrij: 3 });
+});
+
+test('weekquotum via de bedankpagina: GET geeft het quotum, POST in een volle week → 409 week_vol; LMS-pad niet beperkt', async () => {
+  const t = maakBoektoken({ aanmeldingId: AID });
+  const g = await vraag('GET', t);
+  const doel = g.body.momenten[0];
+  assert.deepEqual(g.body.quotum.deze_week.vrij + g.body.quotum.deze_week.geboekt, 3);
+  // Drie echte Lab-sessies in de week van het eerste moment.
+  for (let i = 0; i < 3; i++) crm.tabellen.follow_up_appointments.push({ id: 'x' + i, booking_source: 'the-lab', lead_email: `x${i}@v.nl`, scheduled_at: new Date(Date.parse(doel) + (i + 1) * 3600 * 1000).toISOString(), status: 'scheduled' });
+  const g2 = await vraag('GET', t);
+  assert.ok(!g2.body.momenten.includes(doel), 'volle week niet meer aangeboden');
+  const r = await vraag('POST', t, { moment: doel });
+  assert.equal(r.statusCode, 409);
+  assert.equal(r.body.code, 'week_vol');
+  assert.equal(geboekt.length, 0);
+});
