@@ -79,7 +79,7 @@ export function valideerLabAanmelding(body, { nu = Date.now() } = {}) {
   const land = ['BE', 'NL'].includes(String(b.land || '').toUpperCase()) ? String(b.land).toUpperCase() : null;
   const tel = normaliseerNlBe(ruwTel, { land });
   if (!tel.e164) {
-    return { ok: false, veld: 'gsm', fout: 'Dat gsm-nummer herkennen we niet. Probeer het met landcode, bv. +32 4… of +31 6….' };
+    return { ok: false, veld: 'gsm', fout: 'Dat gsm-nummer herkennen we niet. Typ het bv. als 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).' };
   }
 
   // Toestemming: verplicht voor WhatsApp en opvolging, NIET voor de loginmail
