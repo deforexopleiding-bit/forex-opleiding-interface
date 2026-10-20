@@ -43,6 +43,8 @@ import { LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { selfServiceUrl } from './_lib/afspraak-berichten.js';
+import { normaliseerNlBe } from './_lib/phone-e164.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 
 const VENSTER_DAGEN = 14;
 const DUUR_MIN = 30;
@@ -193,6 +195,68 @@ async function geboektInCrm(email) {
   return a ? { moment: new Date(a.scheduled_at).toISOString(), afspraak_id: a.id } : null;
 }
 
+/**
+ * Met welke gegevens we boeken — wat de lead al gaf bij zijn aanmelding. Het
+ * boekscherm toont dit als "Boeken als …" zodat hij niets opnieuw typt. PURE.
+ */
+export function contactVan(lab) {
+  return {
+    voornaam: (lab?.voornaam || '').trim() || null,
+    email: (lab?.email || '').trim() || null,
+    telefoon: (lab?.telefoon || '').trim() || null,
+  };
+}
+
+/**
+ * Een gewijzigde voornaam of gsm uit het boekscherm ("wijzig", of een veld dat
+ * ontbrak). Alleen deze twee: het e-mailadres is de login en verandert hier niet.
+ * Het nummer volgt dezelfde regel als de aanmelding (NL/BE → E.164). PURE.
+ */
+export function leesContactWijziging(body) {
+  const c = body && typeof body.contact === 'object' && body.contact ? body.contact : null;
+  if (!c) return { ok: true, contact: {} };
+  const uit = {};
+  if (c.voornaam != null) {
+    const v = String(c.voornaam).trim().slice(0, 60);
+    if (!v) return { ok: false, code: 'voornaam_leeg', veld: 'voornaam' };
+    uit.voornaam = v;
+  }
+  if (c.telefoon != null) {
+    const tel = normaliseerNlBe(String(c.telefoon).slice(0, 40));
+    if (!tel.e164) return { ok: false, code: 'telefoon_ongeldig', veld: 'telefoon' };
+    uit.telefoon = tel.e164;
+  }
+  return { ok: true, contact: uit };
+}
+
+/** De gewijzigde gegevens ook bewaren, zodat ze de volgende keer kloppen. Fail-soft. */
+async function bewaarContact(lab, lead, wijz) {
+  if (!wijz.voornaam && !wijz.telefoon) return;
+  if (lab?.id) {
+    try {
+      const lms = getDfoLmsClient();
+      const patch = {};
+      if (wijz.voornaam && wijz.voornaam !== lab.voornaam) patch.voornaam = wijz.voornaam;
+      if (wijz.telefoon && wijz.telefoon !== lab.telefoon) patch.telefoon = wijz.telefoon;
+      if (lms && Object.keys(patch).length) {
+        const { error } = await lms.from('hlms_lab_lead').update(patch).eq('id', lab.id);
+        if (error) console.warn('[lab-sessie] contact in LMS bewaren (soft):', error.message);
+      }
+    } catch (e) {
+      console.warn('[lab-sessie] contact in LMS bewaren (soft):', e?.message || e);
+    }
+  }
+  if (lead?.id) {
+    const patch = {};
+    if (wijz.voornaam && wijz.voornaam !== lead.voornaam) patch.voornaam = wijz.voornaam;
+    if (wijz.telefoon && wijz.telefoon !== (lead.telefoon_e164 || lead.telefoon)) { patch.telefoon = wijz.telefoon; patch.telefoon_e164 = wijz.telefoon; }
+    if (Object.keys(patch).length) {
+      const { error } = await supabaseAdmin.from('leads').update(patch).eq('id', lead.id);
+      if (error) console.warn('[lab-sessie] contact op de lead bewaren (soft):', error.message);
+    }
+  }
+}
+
 export default async function handler(req, res) {
   applyLabCors(req, res, 'GET, POST, OPTIONS');
   if (labPreflight(req, res, ['GET', 'POST'])) return;
@@ -245,15 +309,15 @@ export default async function handler(req, res) {
       // Een TEST-afspraak heeft geen GHL-afspraak achter zich: de verzetpagina
       // zou die proberen te verzetten. Daarom geen verzetlink voor testleads.
       const g = lab.is_test === true ? geboekt : await geboektMetVerzet(geboekt, lab.sessie_afspraak_id);
-      return res.status(200).json({ ok: true, geboekt: g, verzet_url: g.verzet_url || null, momenten: [], deze_week: null, gastheer: zichtbaar });
+      return res.status(200).json({ ok: true, geboekt: g, verzet_url: g.verzet_url || null, momenten: [], deze_week: null, gastheer: zichtbaar, ik: contactVan(lab) });
     }
     try {
       const v = await vrijeMomenten();
-      if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar });
-      return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten), gastheer: zichtbaar });
+      if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar, ik: contactVan(lab) });
+      return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten), gastheer: zichtbaar, ik: contactVan(lab) });
     } catch (e) {
       console.error('[lab-sessie] slots ophalen:', e?.message || e);
-      return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar });
+      return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar, ik: contactVan(lab) });
     }
   }
 
@@ -262,6 +326,11 @@ export default async function handler(req, res) {
   const moment = String(req.body?.moment || '');
   const ms = Date.parse(moment);
   if (!Number.isFinite(ms)) return res.status(400).json({ ok: false, code: 'ongeldig_moment' });
+  const wijz = leesContactWijziging(req.body);
+  if (!wijz.ok) return res.status(400).json({ ok: false, code: wijz.code, veld: wijz.veld });
+  // Met de gewijzigde gegevens boeken (voornaam/gsm), de rest zoals bekend.
+  const labOud = lab;
+  lab = { ...lab, ...wijz.contact };
 
   // Het moment moet NU nog vrij zijn, in dezelfde agenda.
   let vrij;
@@ -286,6 +355,7 @@ export default async function handler(req, res) {
         console.error('[lab-sessie] test-boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
       }
     }
+    await bewaarContact(labOud, null, wijz.contact);
     return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: test.appointment_id, zoom_join_url: null, gastheer: zichtbaar, test: true });
   }
 
@@ -295,6 +365,9 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, code: 'lead_fout' });
   }
   if (!lead?.id) return res.status(500).json({ ok: false, code: 'lead_fout' });
+  const leadOud = lead;
+  if (wijz.contact.voornaam) lead = { ...lead, voornaam: wijz.contact.voornaam };
+  if (wijz.contact.telefoon) lead = { ...lead, telefoon: wijz.contact.telefoon, telefoon_e164: wijz.contact.telefoon };
 
   let afspraak;
   try {
@@ -324,6 +397,8 @@ export default async function handler(req, res) {
       console.error('[lab-sessie] boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
     }
   }
+
+  await bewaarContact(labOud, leadOud, wijz.contact);
 
   await stuurLabEvent({
     eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
