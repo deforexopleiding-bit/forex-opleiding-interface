@@ -33,6 +33,7 @@ import { zorgVoorLabAccount, maakLoginSleutel, LabAccountFout } from './_lib/dfo
 import { mailWelkom, mailNieuweLink, mailAlToegang, stuurLabMail, stuurLabWhatsApp } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+import { maakBoektoken } from './_lib/lab-boektoken.js';
 
 export const BERICHT_OK = 'Gelukt! Check je mailbox: je link naar The Lab is onderweg.';
 // Het LMS-deel mislukte: de opvolgcron probeert het opnieuw. Dan beloven we geen
@@ -163,7 +164,7 @@ export default async function handler(req, res) {
 
   const v = valideerLabAanmelding(req.body);
   if (!v.ok) return res.status(400).json({ ok: false, code: 'ongeldig', veld: v.veld, fout: v.fout });
-  if (v.bot) return res.status(200).json({ ok: true, event_id: null, bericht: BERICHT_OK });
+  if (v.bot) return res.status(200).json({ ok: true, event_id: null, bericht: BERICHT_OK, boek_token: null });
   const d = v.data;
 
   const aanmeldingId = crypto.randomUUID();
@@ -208,5 +209,9 @@ export default async function handler(req, res) {
   });
 
   console.log('[lab-aanmelding]', { aanmelding: aanmeldingId, lead: leadId, funnel: d.funnel, resultaat: uitkomst.resultaat, mail: uitkomst.mail_status, wa: uitkomst.wa_status, hook: d.hook, test: d.is_test });
-  return res.status(200).json({ ok: true, event_id: eventId, bericht: uitkomst.resultaat === 'lms_fout' ? BERICHT_LATER : BERICHT_OK });
+  // Boektoken voor de bedankpagina van de funnels (meteen de sessie plannen).
+  // Elke bewaarde aanmelding krijgt er één — ook een bestaande student — zodat
+  // het antwoord voor elk adres dezelfde vorm heeft (geen orakel).
+  const boekToken = bewaard ? maakBoektoken({ aanmeldingId, funnel: d.funnel }) : null;
+  return res.status(200).json({ ok: true, event_id: eventId, bericht: uitkomst.resultaat === 'lms_fout' ? BERICHT_LATER : BERICHT_OK, boek_token: boekToken });
 }

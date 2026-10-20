@@ -44,7 +44,7 @@ behalve het opslaan van de variabele (Vercel herstart de functies).
 ## Antwoord
 
 ```json
-200 { "ok": true, "event_id": "lab_lead_<uuid>", "bericht": "Gelukt! Check je mailbox: je link naar The Lab is onderweg." }
+200 { "ok": true, "event_id": "lab_lead_<uuid>", "bericht": "Gelukt! Check je mailbox: je link naar The Lab is onderweg.", "boek_token": "lb1.…" }
 400 { "ok": false, "code": "ongeldig", "veld": "email", "fout": "Vul een geldig e-mailadres in." }
 429 { "ok": false, "code": "te_veel", "fout": "Even geduld — probeer het over een paar minuten opnieuw." }
 ```
@@ -58,6 +58,12 @@ behalve het opslaan van de variabele (Vercel herstart de functies).
   geteld in de statistieken.
 - `event_id`: geef die mee aan de pixel (`fbq('track','Lead',{}, {eventID})`),
   dan telt Meta browser en server samen één keer.
+- `boek_token` (sinds 2026-10-20, of `null`): kortlevend (48 u), ondertekend
+  token voor de bedankpagina — daarmee kan de lead meteen zijn strategiesessie
+  boeken zonder in te loggen: `GET`/`POST /api/lab-sessie` met de header
+  `Authorization: LabBoek <token>` (zelfde antwoorden als via het LMS). Elk
+  bewaard adres krijgt er één, ook een bestaande student (geen orakel). Bewaar
+  het alleen in `sessionStorage`, nooit in een URL. Zie `api/_lib/lab-boektoken.js`.
 
 ## Fragment om te plakken
 

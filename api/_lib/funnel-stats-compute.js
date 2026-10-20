@@ -103,7 +103,9 @@ export const FUNNEL_FASES = Object.freeze([
   { fase: 'lead_ingediend',  label: 'Lead ingediend',       match: (e) => e.event_type === 'lead_ingediend' },
   { fase: 'toegang',         label: 'Toegang',              match: (e) => e.event_type === 'toegang' },
   { fase: 'slot_gekozen',    label: 'Tijdslot gekozen',     match: (e) => e.event_type === 'slot_gekozen' },
-  { fase: 'geboekt',         label: 'Geboekt',              match: (e) => e.event_type === 'geboekt' },
+  // 'sessie_geboekt' = de Lab-strategiesessie geboekt op de bedankpagina van de
+  // Lab-funnels (2026-10-20); telt als dezelfde fase.
+  { fase: 'geboekt',         label: 'Geboekt',              match: (e) => e.event_type === 'geboekt' || e.event_type === 'sessie_geboekt' },
 ]);
 
 // Alle event-types uit het contract. Alleen deze worden meegeteld; de rest
@@ -113,13 +115,15 @@ export const BEKENDE_EVENT_TYPES = Object.freeze([
   'vraag_beantwoord', 'terug', 'modal_dicht', 'lead_ingediend', 'toegang',
   'geen_toegang', 'video_gestart', 'drie_ja', 'slot_gekozen', 'akkoord',
   'geboekt', 'overgeslagen',
+  // Bedankpagina van de Lab-funnels (2026-10-20).
+  'bedankt_bekeken', 'sessie_geboekt',
 ]);
 
 // De event-types die de endpoint daadwerkelijk ophaalt (de rest is voor deze
 // aggregatie niet nodig — scheelt rijen en dus tijd).
 export const BENODIGDE_EVENT_TYPES = Object.freeze([
   'landing', 'formulier_start', 'gegevens_ok', 'vraag_getoond',
-  'lead_ingediend', 'toegang', 'slot_gekozen', 'geboekt',
+  'lead_ingediend', 'toegang', 'slot_gekozen', 'geboekt', 'sessie_geboekt',
 ]);
 
 const VARIANT_SET = new Set(FUNNEL_VARIANTEN);
