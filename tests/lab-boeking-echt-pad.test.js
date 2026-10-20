@@ -121,3 +121,45 @@ test('de nep-databank weigert nu wat productie weigert: geen GHL-contact = 23502
   const { error } = await crm.from('follow_up_appointments').insert({ lead_name: 'x', scheduled_at: TOEKOMST });
   assert.equal(error?.code, '23502');
 });
+
+// ── BOEKEN ZONDER OPNIEUW TE TYPEN (okt 2026) ───────────────────────────────
+// Het boekscherm toont "Boeken als {voornaam} · {e-mail} · {gsm}" uit `ik`, en
+// stuurt alleen wat de lead wijzigde (of wat ontbrak) mee als `contact`.
+
+test('GET geeft `ik`: de gegevens waarmee we boeken, uit de aanmelding', async () => {
+  const r = await vraag('GET', 'echt');
+  assert.deepEqual(r.body.ik, { voornaam: 'Lien', email: 'lien@voorbeeld.be', telefoon: '+32470000000' });
+});
+
+test('POST met een gewijzigde gsm en voornaam: de afspraak, de lead én de lab-lead krijgen ze', async () => {
+  const moment = (await vraag('GET', 'echt')).body.momenten[0];
+  const r = await vraag('POST', 'echt', { moment, contact: { voornaam: 'Lientje', telefoon: '0471 23 45 67' } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  const rij = crm.tabellen.follow_up_appointments[0];
+  assert.equal(rij.lead_phone, '+32471234567');
+  assert.equal(rij.lead_name, 'Lientje Peeters');
+  assert.equal(ghlAfspraken[0].title, 'The Lab · strategiesessie · Lientje Peeters');
+  const lead = crm.tabellen.leads.find((l) => l.email === 'lien@voorbeeld.be');
+  assert.equal(lead.telefoon_e164, '+32471234567');
+  const ll = lms.tabellen.hlms_lab_lead.find((l) => l.id === 'll-echt');
+  assert.equal(ll.telefoon, '+32471234567');
+  assert.equal(ll.voornaam, 'Lientje');
+  assert.equal(ll.email, 'lien@voorbeeld.be', 'het e-mailadres (de login) blijft');
+});
+
+test('POST met een gsm die we niet herkennen: 400, en er wordt niets geboekt', async () => {
+  const moment = (await vraag('GET', 'echt')).body.momenten[0];
+  const r = await vraag('POST', 'echt', { moment, contact: { telefoon: '12' } });
+  assert.equal(r.statusCode, 400);
+  assert.deepEqual([r.body.code, r.body.veld], ['telefoon_ongeldig', 'telefoon']);
+  assert.equal(crm.tabellen.follow_up_appointments.length, 0);
+  assert.equal(ghlAfspraken.length, 0);
+});
+
+test('TEST-PAD met een gewijzigde voornaam: TEST-afspraak met die naam, nog steeds geen GHL', async () => {
+  const moment = (await vraag('GET', 'test')).body.momenten[0];
+  const r = await vraag('POST', 'test', { moment, contact: { voornaam: 'Proef' } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal(crm.tabellen.follow_up_appointments[0].lead_name, 'TEST · Proef');
+  assert.equal(ghlVerkeer.length, 0);
+});

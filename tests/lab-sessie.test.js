@@ -185,3 +185,13 @@ test('GEBOEKT: de verzetlink en het actuele moment uit de afspraak in het CRM (v
   assert.equal(r3.body.verzet_url, null);
   assert.equal(r3.body.geboekt.moment, oud);
 });
+
+test('contactVan en leesContactWijziging: alleen voornaam en gsm, gsm naar E.164, lege of foute waarden geweigerd', async () => {
+  const { contactVan, leesContactWijziging } = await import(url('api/lab-sessie.js'));
+  assert.deepEqual(contactVan({ voornaam: ' An ', email: 'an@x.be', telefoon: null }), { voornaam: 'An', email: 'an@x.be', telefoon: null });
+  assert.deepEqual(leesContactWijziging({}), { ok: true, contact: {} });
+  assert.deepEqual(leesContactWijziging({ contact: { telefoon: '06 12 34 56 78' } }), { ok: true, contact: { telefoon: '+31612345678' } });
+  assert.deepEqual(leesContactWijziging({ contact: { voornaam: '   ' } }), { ok: false, code: 'voornaam_leeg', veld: 'voornaam' });
+  assert.equal(leesContactWijziging({ contact: { telefoon: 'abc' } }).code, 'telefoon_ongeldig');
+  assert.deepEqual(leesContactWijziging({ contact: { email: 'ander@x.be' } }), { ok: true, contact: {} }, 'het e-mailadres wijzigt hier nooit');
+});
