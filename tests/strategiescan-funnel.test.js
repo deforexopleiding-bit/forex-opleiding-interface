@@ -92,6 +92,12 @@ test('labLandingLabel + labSleutel', () => {
   assert.equal(L.labLandingLabel('https://www.deforexopleiding.nl/the-lab-v1'), 'Funnel v1 · A');
   assert.equal(L.labLandingLabel('https://www.deforexopleiding.nl/the-lab-v2/'), 'Funnel v2 · B');
   assert.equal(L.labLandingLabel('https://lms.deforexopleiding.nl/the-lab/'), 'LMS-landing');
+  // 2026-10-20: de sitepagina heet ook /the-lab, maar op www — het verschil zit in de host
+  assert.equal(L.labLandingLabel('https://www.deforexopleiding.nl/the-lab'), 'Website (/the-lab)');
+  assert.equal(L.labLandingLabel('https://deforexopleiding.nl/the-lab/'), 'Website (/the-lab)');
+  assert.equal(L.labLandingLabel('https://lms.deforexopleiding.nl/the-lab'), 'LMS-landing');
+  assert.ok(L.isLabBron('the-lab-site'));
+  assert.ok(!L.isLabBron('strategiescan-site'));
   assert.equal(L.labLandingLabel(null), '(onbekend)');
   assert.equal(L.labSleutel({ hook: 'H09', utm_campaign: 'c', landingspagina: 'https://www.deforexopleiding.nl/the-lab-v2' }, 'landing'), 'Funnel v2 · B');
   assert.equal(L.labSleutel({ hook: 'H09' }, 'hook'), 'H09');
@@ -106,4 +112,14 @@ test('Kennismakingsgesprekken: Lab-strategiesessie en strategie-scan krijgen elk
   assert.match(v, /'the-lab': \{ tekst: 'Lab · strategiesessie'/);
   assert.match(v, /strategiescan: \{ tekst: 'Strategie-scan'/);
   assert.match(lees('api/leadsonderhoud-opstartsessies-list.js'), /labelBySlug\.get\(c\.booking_source\)/);
+});
+
+test('sitepagina the-lab-site (2026-10-20): de Lab-aanmelding neemt de variant over als funnel', async () => {
+  const V = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '../api/_lib/lab-aanmelding-validatie.js')).href);
+  const basis = { voornaam: 'Test', email: 'maxim.delombaerde96+labtest9@gmail.com', gsm: '+31612345678', toestemming: true, website: '' };
+  const site = V.valideerLabAanmelding({ ...basis, bron: 'the-lab-site', landingspagina: 'https://www.deforexopleiding.nl/the-lab' });
+  assert.equal(site.ok, true);
+  assert.equal(site.data.funnel, 'the-lab-site');
+  const onbekend = V.valideerLabAanmelding({ ...basis, bron: 'the-lab-v9' });
+  assert.equal(onbekend.data.funnel, null);
 });

@@ -16,8 +16,10 @@ export const LAB_SLUG = 'the-lab';
  * (Leadsonderhoud > The Lab). De agendabron van de strategiesessie blijft LAB_SLUG.
  * Sync met FUNNEL_VARIANTEN in dfo-website (lib/funnel-events.ts) en
  * api/_lib/funnel-stats-compute.js.
+ * 2026-10-20: 'the-lab-site' = de vaste sitepagina deforexopleiding.nl/the-lab
+ * (in het menu, niet de advertenties), zodat site en ads apart te zien zijn.
  */
-export const LAB_FUNNEL_VARIANTEN = Object.freeze(['the-lab-v1', 'the-lab-v2']);
+export const LAB_FUNNEL_VARIANTEN = Object.freeze(['the-lab-v1', 'the-lab-v2', 'the-lab-site']);
 
 /** Hoort deze leads.bron bij The Lab (LMS-landing of een van de funnels)? PURE. */
 export function isLabBron(bron) {
@@ -53,13 +55,17 @@ export function toegangTotVanaf(van = new Date()) {
 /**
  * Via welke landingspagina kwam een Lab-aanmelding binnen? Op basis van
  * lab_aanmeldingen.landingspagina (origin + pad). PURE.
- *   /the-lab-v1 → 'Funnel v1 · A', /the-lab-v2 → 'Funnel v2 · B', rest → 'LMS-landing'.
+ *   /the-lab-v1 → 'Funnel v1 · A', /the-lab-v2 → 'Funnel v2 · B',
+ *   www.deforexopleiding.nl/the-lab → 'Website (/the-lab)', rest → 'LMS-landing'.
+ * LET OP: de LMS-landing heet óók /the-lab (op lms.deforexopleiding.nl); het
+ * verschil zit in de host.
  */
 export function labLandingLabel(landingspagina) {
-  let pad = '';
-  try { pad = new URL(String(landingspagina || '')).pathname; } catch { pad = String(landingspagina || ''); }
+  let pad = '', host = '';
+  try { const u = new URL(String(landingspagina || '')); pad = u.pathname; host = u.hostname.toLowerCase(); } catch { pad = String(landingspagina || ''); }
   const m = /^\/the-lab-v(\d+)\/?$/.exec(pad);
   if (m && LAB_FUNNEL_VARIANTEN.includes('the-lab-v' + m[1])) return 'Funnel v' + m[1] + ' · ' + String.fromCharCode(64 + Number(m[1]));
+  if (/^\/the-lab\/?$/.test(pad) && /(^|\.)deforexopleiding\.nl$/.test(host) && !host.startsWith('lms.')) return 'Website (/the-lab)';
   return landingspagina ? 'LMS-landing' : '(onbekend)';
 }
 

@@ -123,6 +123,8 @@
     'the-lab-v1':              'The Lab v1 (A)',
     'the-lab-v2':              'The Lab v2 (B)',
     'strategiescan-v1':        'Strategie-scan v1',
+    'the-lab-site':            'The Lab (website)',
+    'strategiescan-site':      'Strategie-scan (website)',
     'funnel':                  'Funnel',
     'meta':                    'Meta',
     'handmatig':               'Handmatig',
@@ -728,6 +730,8 @@
           <option value="the-lab-v1" ${fBron === 'the-lab-v1' ? 'selected' : ''}>the-lab-v1</option>
           <option value="the-lab-v2" ${fBron === 'the-lab-v2' ? 'selected' : ''}>the-lab-v2</option>
           <option value="strategiescan-v1" ${fBron === 'strategiescan-v1' ? 'selected' : ''}>strategiescan-v1</option>
+          <option value="the-lab-site" ${fBron === 'the-lab-site' ? 'selected' : ''}>the-lab-site</option>
+          <option value="strategiescan-site" ${fBron === 'strategiescan-site' ? 'selected' : ''}>strategiescan-site</option>
           <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
           <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
           <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>
