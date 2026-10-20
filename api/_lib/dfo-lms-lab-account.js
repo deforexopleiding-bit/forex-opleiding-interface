@@ -223,6 +223,16 @@ export async function lmsGebruikerUitToken(token) {
   return { authId: data.user.id, email: data.user.email || null, labLead: rij || null };
 }
 
+/** Lab-lead-rij op id (bedankpagina-boektoken). Zelfde kolommen als lmsGebruikerUitToken. Null = geen. */
+export async function leesLabLeadOpId(id) {
+  if (!id) return null;
+  const { data, error } = await lms().from('hlms_lab_lead')
+    .select('id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, sessie_geboekt_op, sessie_moment, sessie_afspraak_id, kwalificatie, is_test, beheerd_door_auth_id')
+    .eq('id', id).maybeSingle();
+  if (error) throw new LabAccountFout('lms_fout', 'hlms_lab_lead lezen: ' + error.message);
+  return data || null;
+}
+
 /** Zet de boeking op de lab-lead-rij (service-role). */
 export async function noteerBoeking(labLeadId, { moment, afspraakId }) {
   const c = lms();

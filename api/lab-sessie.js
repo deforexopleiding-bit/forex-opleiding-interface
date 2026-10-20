@@ -22,12 +22,21 @@
 // vragen een ghl_calendar_id), geen interne melding en geen Meta-event. Zo
 // stoort een test Dave nooit. Zie boekTestAfspraak().
 //
+// BEDANKPAGINA (2026-10-20): de Lab-funnels op deforexopleiding.nl boeken hier
+// ook, zonder LMS-sessie, met het boektoken uit /api/lab-aanmelding
+// (`Authorization: LabBoek <token>`, zie _lib/lab-boektoken.js). Het token wijst
+// naar één aanmelding; heeft die een lab-lead (gewoonlijk), dan is het verder
+// exact dit pad. Zonder lab-lead (bestaande student, of het LMS was even weg)
+// boeken we voor de persoon van de aanmelding, zonder LMS-vinkje.
+//
 // Schaarste wordt NOOIT verzonnen: `deze_week` is het werkelijke aantal vrije
 // momenten tot en met zondag, uit dezelfde agenda waaruit geboekt wordt.
 
 import { supabaseAdmin } from './supabase.js';
 import { applyLabCors, labPreflight } from './_lib/lab-cors.js';
-import { lmsGebruikerUitToken, noteerBoeking, LabAccountFout } from './_lib/dfo-lms-lab-account.js';
+import { lmsGebruikerUitToken, leesLabLeadOpId, noteerBoeking, LabAccountFout } from './_lib/dfo-lms-lab-account.js';
+import { leesBoektoken, boektokenUitHeader } from './_lib/lab-boektoken.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-opstartsessie-free-slots.js';
 import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
@@ -153,23 +162,78 @@ async function crmLead(labLead) {
   return { id: rij?.id, voornaam: labLead.voornaam, achternaam: labLead.achternaam, email: labLead.email, telefoon: labLead.telefoon, customer_id: null, source_ref: null };
 }
 
+/**
+ * De "lab" achter een boektoken van de bedankpagina. Met lab-lead: die rij
+ * (zelfde vorm als via de LMS-sessie). Zonder: een rij uit de aanmelding zelf
+ * (id null → geen LMS-vinkje). Null = token wijst nergens naar.
+ */
+export async function labUitBoektoken(aanmeldingId) {
+  const { data: a, error } = await supabaseAdmin.from('lab_aanmeldingen')
+    .select('id, lead_id, email, voornaam, achternaam, telefoon_e164, lms_lead_id, is_test')
+    .eq('id', aanmeldingId).maybeSingle();
+  if (error) throw new Error('aanmelding lezen: ' + error.message);
+  if (!a) return null;
+  const labLead = a.lms_lead_id ? await leesLabLeadOpId(a.lms_lead_id) : null;
+  if (labLead) return { ...labLead, is_test: labLead.is_test === true || a.is_test === true };
+  return {
+    id: null, aanmelding_id: a.id, email: a.email, voornaam: a.voornaam, achternaam: a.achternaam,
+    telefoon: a.telefoon_e164, crm_lead_id: a.lead_id, is_test: a.is_test === true,
+    sessie_moment: null, sessie_afspraak_id: null,
+  };
+}
+
+/** Een al geboekte Lab-sessie in het CRM (komende, niet geannuleerd) voor dit adres. */
+async function geboektInCrm(email) {
+  if (!email) return null;
+  const { data, error } = await supabaseAdmin.from('follow_up_appointments')
+    .select('id, scheduled_at, status').eq('booking_source', LAB_SLUG).ilike('lead_email', email)
+    .gte('scheduled_at', new Date(Date.now() - 3600 * 1000).toISOString()).order('scheduled_at', { ascending: true }).limit(5);
+  if (error) { console.warn('[lab-sessie] eigen boeking zoeken (soft):', error.message); return null; }
+  const a = (data || []).find((x) => !GEANNULEERD.has(String(x.status || '').toLowerCase()));
+  return a ? { moment: new Date(a.scheduled_at).toISOString(), afspraak_id: a.id } : null;
+}
+
 export default async function handler(req, res) {
   applyLabCors(req, res, 'GET, POST, OPTIONS');
   if (labPreflight(req, res, ['GET', 'POST'])) return;
 
-  let wie;
-  try {
-    wie = await lmsGebruikerUitToken(bearer(req));
-  } catch (e) {
-    console.error('[lab-sessie] LMS-sessie controleren:', e?.message || e);
-    return res.status(503).json({ ok: false, code: 'lms_onbereikbaar' });
+  let lab;
+  let funnel = null;
+  const boektoken = boektokenUitHeader(req);
+  if (boektoken) {
+    // Bedankpagina van de Lab-funnels.
+    const { limited } = await checkRateLimit({ req, bucket: 'lab-sessie-boektoken', maxHits: 30, withinSeconds: 600 });
+    if (limited) return res.status(429).json({ ok: false, code: 'te_veel' });
+    const t = leesBoektoken(boektoken);
+    if (!t.ok) return res.status(401).json({ ok: false, code: 'token_ongeldig' });
+    funnel = t.funnel;
+    try {
+      lab = await labUitBoektoken(t.aanmeldingId);
+    } catch (e) {
+      console.error('[lab-sessie] boektoken → aanmelding:', e?.message || e);
+      return res.status(503).json({ ok: false, code: 'lms_onbereikbaar' });
+    }
+    if (!lab) return res.status(401).json({ ok: false, code: 'token_ongeldig' });
+  } else {
+    let wie;
+    try {
+      wie = await lmsGebruikerUitToken(bearer(req));
+    } catch (e) {
+      console.error('[lab-sessie] LMS-sessie controleren:', e?.message || e);
+      return res.status(503).json({ ok: false, code: 'lms_onbereikbaar' });
+    }
+    if (!wie) return res.status(401).json({ ok: false, code: 'geen_sessie' });
+    if (!wie.labLead) return res.status(403).json({ ok: false, code: 'geen_lab_lead' });
+    lab = wie.labLead;
   }
-  if (!wie) return res.status(401).json({ ok: false, code: 'geen_sessie' });
-  if (!wie.labLead) return res.status(403).json({ ok: false, code: 'geen_lab_lead' });
-  const lab = wie.labLead;
 
-  const geboekt = lab.sessie_moment && Date.parse(lab.sessie_moment) > Date.now() - 3600 * 1000
+  let geboekt = lab.sessie_moment && Date.parse(lab.sessie_moment) > Date.now() - 3600 * 1000
     ? { moment: lab.sessie_moment } : null;
+  // Via de bedankpagina: ook een boeking die (nog) niet in het LMS staat telt.
+  if (!geboekt && boektoken && lab.is_test !== true) {
+    const crm = await geboektInCrm(lab.email);
+    if (crm) geboekt = { moment: crm.moment };
+  }
 
   const gastheer = await leesLabGastheer();
   const zichtbaar = gastheer
@@ -211,14 +275,16 @@ export default async function handler(req, res) {
 
   if (lab.is_test === true) {
     let test;
-    try { test = await boekTestAfspraak({ lab, iso, eigenaarId: gastheer?.id || null }); } catch (e) {
+    try { test = await boekTestAfspraak({ lab: { ...lab, id: lab.id || `a-${lab.aanmelding_id}` }, iso, eigenaarId: gastheer?.id || null }); } catch (e) {
       console.error('[lab-sessie] test-afspraak:', e?.message || e);
       return res.status(500).json({ ok: false, code: 'boeken_mislukt' });
     }
-    try {
-      await noteerBoeking(lab.id, { moment: iso, afspraakId: test.appointment_id });
-    } catch (e) {
-      console.error('[lab-sessie] test-boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+    if (lab.id) {
+      try {
+        await noteerBoeking(lab.id, { moment: iso, afspraakId: test.appointment_id });
+      } catch (e) {
+        console.error('[lab-sessie] test-boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+      }
     }
     return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: test.appointment_id, zoom_join_url: null, gastheer: zichtbaar, test: true });
   }
@@ -250,16 +316,19 @@ export default async function handler(req, res) {
     return res.status(502).json({ ok: false, code: 'boeken_mislukt' });
   }
 
-  try {
-    await noteerBoeking(lab.id, { moment: iso, afspraakId: afspraak.appointment_id });
-  } catch (e) {
-    // De afspraak staat in de agenda; enkel het vinkje in het LMS ontbreekt.
-    console.error('[lab-sessie] boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+  if (lab.id) {
+    try {
+      await noteerBoeking(lab.id, { moment: iso, afspraakId: afspraak.appointment_id });
+    } catch (e) {
+      // De afspraak staat in de agenda; enkel het vinkje in het LMS ontbreekt.
+      console.error('[lab-sessie] boeking noteren in LMS:', e instanceof LabAccountFout ? e.message : e);
+    }
   }
 
   await stuurLabEvent({
     eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
     userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
+    ...(funnel ? { customData: { content_name: 'Lab-strategiesessie', content_category: LAB_SLUG, funnel } } : {}),
   });
 
   return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null, gastheer: zichtbaar });
