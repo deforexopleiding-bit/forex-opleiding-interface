@@ -4506,6 +4506,9 @@
     { bron: 'the-lab-v1',            naam: 'The Lab (v1 · A)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v1',             status: 'actief' },
     { bron: 'the-lab-v2',            naam: 'The Lab (v2 · B)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v2',             status: 'actief' },
     { bron: 'strategiescan-v1',      naam: 'Strategie-scan (v1)', product: 'strategiescan', route: 'https://deforexopleiding.nl/strategiescan-v1', status: 'actief' },
+    // 2026-10-20: dezelfde flows als vaste sitepagina (menu, homepage) — eigen bron, apart van de ads.
+    { bron: 'the-lab-site',          naam: 'The Lab (website)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab',                status: 'actief' },
+    { bron: 'strategiescan-site',    naam: 'Strategie-scan (website)', product: 'strategiescan', route: 'https://deforexopleiding.nl/strategie-scan', status: 'actief' },
     // 2026-10-19: Flow D — draait op /strategiesessie (geen -v1 in de route).
     { bron: 'strategiesessie-v1',    naam: 'Flow D · strategiesessie', product: 'minicursus', route: 'https://deforexopleiding.nl/strategiesessie', status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },

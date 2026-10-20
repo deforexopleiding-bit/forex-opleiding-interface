@@ -51,6 +51,10 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   'the-lab-v1',
   'the-lab-v2',
   'strategiescan-v1',
+  // 2026-10-20: dezelfde twee flows als vaste sitepagina (/the-lab, /strategie-scan),
+  // met een eigen variant zodat site en advertenties apart te zien zijn.
+  'the-lab-site',
+  'strategiescan-site',
   // 2026-10-19: Flow D (/strategiesessie) — opt-in gratis cursus → direct de
   // strategiesessie boeken (opstartsessie-submission met booking_source = variant).
   'strategiesessie-v1',
@@ -76,6 +80,8 @@ export const VARIANT_INFO = Object.freeze({
   'the-lab-v1':             { label: 'The Lab (v1 · A)', groep: 'the-lab' },
   'the-lab-v2':             { label: 'The Lab (v2 · B)', groep: 'the-lab' },
   'strategiescan-v1':       { label: 'Strategie-scan (v1)', groep: 'strategiescan' },
+  'the-lab-site':           { label: 'The Lab (website)', groep: 'the-lab' },
+  'strategiescan-site':     { label: 'Strategie-scan (website)', groep: 'strategiescan' },
   // Flow D: stap 1 is de mini-cursus-opt-in, dus naast Flow A/B/C in de groep kmc.
   'strategiesessie-v1':     { label: 'Mini-cursus (Flow D · strategiesessie)', groep: 'kmc' },
 });
@@ -92,6 +98,8 @@ export const BOEK_BRON_PER_VARIANT = Object.freeze({
   'the-lab-v1': 'the-lab',
   'the-lab-v2': 'the-lab',
   'strategiescan-v1': 'strategiescan',
+  'the-lab-site': 'the-lab',
+  'strategiescan-site': 'strategiescan',
 });
 
 // Vaste fase-volgorde. `match` bepaalt welk event de fase vult.

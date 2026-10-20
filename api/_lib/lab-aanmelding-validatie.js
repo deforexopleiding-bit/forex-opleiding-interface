@@ -111,7 +111,7 @@ export function valideerLabAanmelding(body, { nu = Date.now() } = {}) {
       fbclid: kort(b.fbclid, 250),
       fbc: bepaalFbc({ fbc: b.fbc, fbclid: b.fbclid, nu }),
       fbp: kort(b.fbp, 300),
-      // Funnel op deforexopleiding.nl (the-lab-v1/-v2). Alleen bekende varianten;
+      // Funnel op deforexopleiding.nl (the-lab-v1/-v2, sitepagina the-lab-site). Alleen bekende varianten;
       // al de rest (ook de LMS-landing, die niets meestuurt) → null = 'the-lab'.
       funnel: LAB_FUNNEL_VARIANTEN.includes(String(b.bron || '')) ? String(b.bron) : null,
       // Funnel-tracking-sessie van de website → funnel_events.lead_id koppelen.
