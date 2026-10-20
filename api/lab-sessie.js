@@ -37,6 +37,7 @@ import { applyLabCors, labPreflight } from './_lib/lab-cors.js';
 import { lmsGebruikerUitToken, leesLabLeadOpId, noteerBoeking, LabAccountFout } from './_lib/dfo-lms-lab-account.js';
 import { leesBoektoken, boektokenUitHeader } from './_lib/lab-boektoken.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
+import { LAB_WEEKQUOTUM, telPerWeek, pasQuotumToe, weekVan } from './_lib/lab-weekquotum.js';
 import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-opstartsessie-free-slots.js';
 import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
@@ -184,6 +185,19 @@ export async function labUitBoektoken(aanmeldingId) {
   };
 }
 
+/**
+ * Echte Lab-sessies per week rond deze momenten (voor het weekquotum van de
+ * bedankpagina, _lib/lab-weekquotum.js). Bij een leesfout: null → de aanroeper
+ * weigert liever dan het quotum te negeren.
+ */
+async function labSessiesPerWeek(vanMs, totMs) {
+  const { data, error } = await supabaseAdmin.from('follow_up_appointments')
+    .select('scheduled_at, status, is_test, booking_source').eq('booking_source', LAB_SLUG)
+    .gte('scheduled_at', new Date(vanMs).toISOString()).lt('scheduled_at', new Date(totMs).toISOString()).limit(1000);
+  if (error) { console.error('[lab-sessie] weekquotum lezen:', error.message); return null; }
+  return telPerWeek(data || []);
+}
+
 /** Een al geboekte Lab-sessie in het CRM (komende, niet geannuleerd) voor dit adres. */
 async function geboektInCrm(email) {
   if (!email) return null;
@@ -314,6 +328,14 @@ export default async function handler(req, res) {
     try {
       const v = await vrijeMomenten();
       if (!v.ok) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar, ik: contactVan(lab) });
+      if (boektoken) {
+        // Bedankpagina: weekquotum (max. LAB_WEEKQUOTUM per kalenderweek).
+        const nu = Date.now();
+        const perWeek = await labSessiesPerWeek(nu - 8 * 86400000, nu + 22 * 86400000);
+        if (!perWeek) return res.status(200).json({ ok: true, geboekt: null, momenten: [], deze_week: null, onbeschikbaar: true, gastheer: zichtbaar, ik: contactVan(lab) });
+        const q = pasQuotumToe(v.momenten, perWeek, nu);
+        return res.status(200).json({ ok: true, geboekt: null, momenten: q.momenten, deze_week: aantalDezeWeek(q.momenten), quotum: q.quotum, gastheer: zichtbaar, ik: contactVan(lab) });
+      }
       return res.status(200).json({ ok: true, geboekt: null, momenten: v.momenten, deze_week: aantalDezeWeek(v.momenten), gastheer: zichtbaar, ik: contactVan(lab) });
     } catch (e) {
       console.error('[lab-sessie] slots ophalen:', e?.message || e);
@@ -341,6 +363,14 @@ export default async function handler(req, res) {
   if (!vrij.ok) return res.status(503).json({ ok: false, code: 'agenda_onbereikbaar' });
   const iso = new Date(ms).toISOString();
   if (!vrij.momenten.includes(iso)) return res.status(409).json({ ok: false, code: 'moment_weg' });
+
+  // Bedankpagina: de week van dit moment mag niet vol zijn.
+  if (boektoken) {
+    const w = weekVan(ms);
+    const perWeek = await labSessiesPerWeek(ms - 8 * 86400000, ms + 8 * 86400000);
+    if (!perWeek) return res.status(503).json({ ok: false, code: 'agenda_onbereikbaar' });
+    if ((perWeek.get(w) || 0) >= LAB_WEEKQUOTUM) return res.status(409).json({ ok: false, code: 'week_vol' });
+  }
 
   if (lab.is_test === true) {
     let test;
