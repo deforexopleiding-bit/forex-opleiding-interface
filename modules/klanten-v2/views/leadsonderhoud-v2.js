@@ -4492,6 +4492,8 @@
     { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
     { bron: '7-daagse-v3',            naam: '7-daagse (v3 · A)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v3',            status: 'actief' },
     { bron: '7-daagse-v4',            naam: '7-daagse (v4 · B)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v4',            status: 'actief' },
+    { bron: '7-daagse-v5',            naam: '7-daagse v5 (trade)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v5',            status: 'actief' },
+    { bron: '7-daagse-v6',            naam: '7-daagse v6 (trade)', product: '7-daagse', route: 'https://deforexopleiding.nl/7-daagse-v6',            status: 'actief' },
     { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
     { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
     { bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v3', status: 'actief' },
