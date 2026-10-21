@@ -407,6 +407,19 @@ async function startCloserTopbar(profile) {
   }
 }
 
+// Chatmelding (support-alarm.js): rinkelende balk + belletje op elke pagina,
+// alleen voor wie mag antwoorden (support.reply). Niet awaited in de boot.
+async function startSupportAlarm(profile) {
+  try {
+    if (!window.KVSupportAlarm || !profile || !profile.id) return;
+    if (!window.RBAC || typeof window.RBAC.can !== 'function') return;
+    if (!(await window.RBAC.can('support.reply'))) return;
+    window.KVSupportAlarm.start({ haal: (url, init) => authedFetch(url, init), userId: profile.id, toast });
+  } catch (e) {
+    console.warn('[klanten-v2] support-alarm init failed:', e && e.message);
+  }
+}
+
 async function stopImpersonationV2() {
   const btn = document.getElementById('kv-impersonation-stop');
   if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
@@ -747,6 +760,10 @@ function _kvMapNotifLink(item) {
   if (!url) return url;
   const et = String(item?.entity_type || '').toLowerCase();
   if (KV_NOTIF_V2_BY_ENTITY_TYPE[et]) return KV_NOTIF_V2_BY_ENTITY_TYPE[et];
+  // Supportmeldingen van vóór 2026-10-21 wezen naar ?mod=support — die
+  // parameter kent de shell niet (je landde op het dashboard). Zelfde gesprek,
+  // juiste parameter.
+  if (/\/modules\/klanten-v2\/\?mod=support\b/.test(url)) return url.replace('?mod=support', '?v2preview=support');
   // Pattern-fallback voor legacy notifs zonder entity_type.
   if (/\/mentor-students\.html/.test(url))       return '/modules/klanten-v2/?v2preview=studenten';
   if (/\/leadsonderhoud/.test(url))              return '/modules/klanten-v2/?v2preview=leadsonderhoud';
@@ -1330,6 +1347,9 @@ function wireTopbarActionsToShell() {
   //    endpoint (heeft_afspraken). Zie closer-topbar.js. Niet awaited: de boot
   //    wacht hier niet op, en een fout raakt de rest van de shell niet.
   startCloserTopbar(profile);
+
+  // 9) Chatmelding: iemand zit in de supportchat → balk, belletje, geluid.
+  startSupportAlarm(profile);
 })().catch((e) => {
   console.error('[klanten-v2] boot fatal:', e);
   const view = document.getElementById('content') || document.getElementById('kv-view');

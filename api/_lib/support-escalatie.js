@@ -10,6 +10,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { schrijfBericht } from './support-sessie.js';
 import { beschikbaarheidsTekst } from './support-beschikbaarheid.js';
 import { createNotification, resolveOntvangersVoorRecht } from './notify.js';
+import { crmGesprekPad } from './support-alarm.js';
 
 /**
  * Zet een gesprek in de wachtrij.
@@ -66,7 +67,7 @@ export async function escaleerGesprek({ gesprek, reden, beschikbaarheid, antwoor
         type: 'support.wacht_op_ons',
         title: `Supportvraag ${gesprek.kenmerk}`,
         body: `${gesprek.naam || 'Een bezoeker'} wacht op antwoord (${gesprek.onderwerp}).`,
-        linkUrl: `/modules/klanten-v2/?mod=support&gesprek=${gesprek.id}`,
+        linkUrl: crmGesprekPad(gesprek.id),
         entityType: 'support_gesprek',
         entityId: gesprek.id,
         priority: beschikbaarheid?.live ? 'high' : 'normal',

@@ -786,6 +786,7 @@
     }
     if (_inst.concept.widget) body.widget = _inst.concept.widget;
     if (_inst.concept.bot) body.bot = _inst.concept.bot;
+    if (_inst.concept.alarm) body.alarm = _inst.concept.alarm;
     if (!Object.keys(body).length) { if (window.KV?.toast) window.KV.toast('Er is niets gewijzigd'); return; }
 
     _inst.bezig = true;
@@ -842,6 +843,7 @@
     const uren = { ...(d.kantooruren || { tz: 'Europe/Amsterdam', dagen: [1, 2, 3, 4, 5], start: '09:00', eind: '17:30' }), ...(_inst.concept.kantooruren || {}) };
     const w = { ...(d.widget || {}), ...(_inst.concept.widget || {}) };
     const bot = { ...(d.bot || {}), ...(_inst.concept.bot || {}) };
+    const alarm = { ...(d.alarm || {}), ...(_inst.concept.alarm || {}) };
     const mag = d.mag_wijzigen !== false;
     const ro = mag ? '' : ' disabled';
 
@@ -887,6 +889,36 @@
          </div>
          ${veld('Tijdzone', `<input style="${invoerStijl}" value="${esc(uren.tz || '')}"${ro} oninput="window.__supInst('kantooruren.tz', this.value)">`,
            'Een IANA-zone zoals Europe/Amsterdam, geen +02:00 — dan klopt de zomertijd vanzelf.')}`)}
+
+      ${kaart('Chatmeldingen',
+        `Zit er iemand in de chat, dan verschijnt bovenaan elke CRM-pagina een balk en rinkelt het bij iedereen die mag antwoorden — tot iemand op <b>Beantwoorden</b>, <b>Ik neem het</b> of <b>Stil</b> klikt. Blijft een chat langer onbeantwoord, dan wordt de balk rood en rinkelt het opnieuw. Daarnaast gaat er een mail naar het team.`,
+        `${veld('Geluid',
+           `<label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" ${alarm.geluid !== false ? 'checked' : ''}${ro}
+                onchange="window.__supInst('alarm.geluid', this.checked)">
+              <span>Rinkelen bij een nieuwe chat</span></label>`,
+           'Uit betekent: de balk en de teller blijven, maar zonder belletje. Ieder kan het geluid ook per browser uitzetten via het belletje in de topbalk.')}
+         <div style="display:flex;gap:12px;flex-wrap:wrap">
+           <div style="flex:1;min-width:180px">${veld('Belletje elke … seconden',
+             `<input type="number" min="2" max="30" style="${invoerStijl}" value="${esc(String(alarm.interval_s ?? 4))}"${ro} oninput="window.__supInst('alarm.interval_s', this.value)">`,
+             'Tussen 2 en 30.')}</div>
+           <div style="flex:1;min-width:180px">${veld('Rood na … minuten',
+             `<input type="number" min="1" max="60" style="${invoerStijl}" value="${esc(String(alarm.escalatie_min ?? 5))}"${ro} oninput="window.__supInst('alarm.escalatie_min', this.value)">`,
+             'Zo lang mag een chat onbeantwoord blijven voor de balk rood wordt.')}</div>
+         </div>
+         ${veld('Mail naar het team',
+           `<label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" ${alarm.mail_aan !== false ? 'checked' : ''}${ro}
+                onchange="window.__supInst('alarm.mail_aan', this.checked)">
+              <span>Mail bij elke nieuwe chat</span></label>`)}
+         <div style="display:flex;gap:12px;flex-wrap:wrap">
+           <div style="flex:2;min-width:220px">${veld('Meldadres',
+             `<input style="${invoerStijl}" value="${esc(alarm.mail_naar || '')}"${ro} oninput="window.__supInst('alarm.mail_naar', this.value)">`,
+             'Een @deforexopleiding.nl-adres.')}</div>
+           <div style="flex:1;min-width:180px">${veld('Herhaalmail na … min stilte',
+             `<input type="number" min="5" max="240" style="${invoerStijl}" value="${esc(String(alarm.mail_stilte_min ?? 30))}"${ro} oninput="window.__supInst('alarm.mail_stilte_min', this.value)">`,
+             'Schrijft de klant opnieuw terwijl niemand van ons zo lang reageerde, dan volgt nog een mail. Nooit per bericht.')}</div>
+         </div>`)}
 
       ${kaart('De bot',
         `Sam beantwoordt wat 'ie zeker weet en zet de rest door naar de wachtrij. Welke onderwerpen hij zelf mag doen en bij welk vertrouwen, staat in <code>joost_config.autonomy_config</code> — dat is bewust geen veldje hier.`,

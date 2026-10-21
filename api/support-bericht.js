@@ -23,6 +23,7 @@ import { haalBeschikbaarheid, beschikbaarheidsTekst } from './_lib/support-besch
 import { botAntwoord } from './_lib/support-bot-core.js';
 import { escaleerGesprek } from './_lib/support-escalatie.js';
 import { stuurWachtrijBevestiging } from './_lib/support-mail.js';
+import { meldTeam, inAchtergrond } from './_lib/support-alarm.js';
 
 const MAX_TEKST = 4000;
 
@@ -72,6 +73,10 @@ export default async function handler(req, res) {
   if (!stil) {
     nieuw = await schrijfBericht({ gesprekId: gesprek.id, afzender: 'klant', tekst });
     if (!nieuw) return res.status(500).json({ error: 'Je bericht kon niet opgeslagen worden.' });
+    // Schrijft de klant opnieuw terwijl er al een tijd niemand van ons
+    // reageerde? Dan een mail naar het team — hooguit één per stilteperiode,
+    // nooit per bericht (teamMailReden in _lib/support-alarm.js).
+    inAchtergrond(meldTeam({ gesprekId: gesprek.id }));
   }
 
   const beschikbaarheid = await haalBeschikbaarheid();

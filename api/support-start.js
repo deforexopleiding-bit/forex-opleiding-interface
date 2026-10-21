@@ -17,6 +17,7 @@ import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
 import { maakSessieToken, hashToken, maakKenmerk, schrijfBericht, publiekGesprek } from './_lib/support-sessie.js';
 import { haalBeschikbaarheid, beschikbaarheidsTekst } from './_lib/support-beschikbaarheid.js';
 import { controleerSupportTelefoon } from './_lib/support-telefoon.js';
+import { meldTeam, inAchtergrond } from './_lib/support-alarm.js';
 
 const SOORTEN = ['klant', 'bezoeker'];
 const ONDERWERPEN = ['lms', 'discord', 'traject', 'financieel', 'informatie', 'event', 'inschrijving', 'call', 'overig'];
@@ -98,6 +99,11 @@ export default async function handler(req, res) {
   }
 
   await schrijfBericht({ gesprekId: gesprek.id, afzender: 'klant', tekst: vraag });
+
+  // Mail naar het team (administratie@): er zit iemand in de chat. Na het
+  // antwoord, zodat de bezoeker niet op de SMTP-server wacht. Zie
+  // _lib/support-alarm.js; de rinkelende balk in het CRM leest hetzelfde gesprek.
+  inAchtergrond(meldTeam({ gesprekId: gesprek.id }));
 
   return res.status(201).json({
     token,

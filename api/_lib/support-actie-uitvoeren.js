@@ -36,6 +36,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { stuurLmsUitnodiging } from './dfo-lms-uitnodiging.js';
 import { provisionDfoLmsStudent } from './dfo-lms-student.js';
 import { createNotification } from './notify.js';
+import { crmGesprekPad } from './support-alarm.js';
 
 /** Soorten die deze module zelf kan uitvoeren. De rest blijft mensenwerk. */
 export const UITVOERBAAR = new Set([
@@ -183,7 +184,7 @@ async function mentorContact(actie) {
     type: 'support.mentor_contact',
     title: 'Supportvraag van je student',
     body: String(actie.omschrijving || '').slice(0, 300),
-    linkUrl: `/modules/klanten-v2/?mod=support&gesprek=${actie.gesprek_id}`,
+    linkUrl: crmGesprekPad(actie.gesprek_id),
     entityType: 'support_gesprek',
     entityId: actie.gesprek_id,
     priority: 'high',

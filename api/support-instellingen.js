@@ -1,7 +1,7 @@
 // api/support-instellingen.js
 //
 // GET   — de instellingen van de supportmodule.
-// PATCH — wijzig kantooruren, widgetteksten of de bot.
+// PATCH — wijzig kantooruren, widgetteksten, de bot of de chatmeldingen.
 //
 // Alles wat je hier kunt veranderen zit al in de database (app_settings +
 // de joost_config-rij voor module 'support'); dit endpoint is er zodat dat
@@ -20,6 +20,7 @@ import { staffUit, verkeerdeMethode, basisHeaders } from './_lib/support-staff.j
 import { requirePermission } from './_lib/requirePermission.js';
 import { naarOfficeHoursConfig, leesbareUren } from './_lib/support-beschikbaarheid.js';
 import { parseOfficeHoursConfig, parseHHMM } from './_lib/dunning-office-hours.js';
+import { valideerAlarmWijziging, leesAlarmInstellingen, APP_SETTINGS_KEY as ALARM_KEY } from './_lib/support-alarm.js';
 
 const WIDGET_VELDEN = ['aan', 'titel', 'welkom', 'agenda_url', 'events_url', 'antwoord_mailbox'];
 
@@ -131,17 +132,35 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Chatmeldingen (geluid, interval, escalatie, teammail) ───────────
+    if (req.body?.alarm && !fouten.length) {
+      const { data: huidig } = await supabaseAdmin
+        .from('app_settings').select('value').eq('key', ALARM_KEY).maybeSingle();
+      const { waarde, fouten: f } = valideerAlarmWijziging(huidig?.value, req.body.alarm);
+      fouten.push(...f);
+      if (!fouten.length) {
+        const { error } = await supabaseAdmin.from('app_settings').upsert({
+          key: ALARM_KEY,
+          value: waarde,
+          updated_at: new Date().toISOString(),
+          updated_by_user_id: staff.user.id,
+        }, { onConflict: 'key' });
+        if (error) fouten.push('Chatmeldingen opslaan mislukt: ' + error.message);
+      }
+    }
+
     if (fouten.length) return res.status(400).json({ error: fouten[0], fouten });
   }
 
   // ── Teruglezen (ook na een PATCH, zodat de UI de waarheid toont) ───────
   try {
-    const [{ data: uren }, { data: widget }, { data: bot }] = await Promise.all([
+    const [{ data: uren }, { data: widget }, { data: bot }, { data: alarm }] = await Promise.all([
       supabaseAdmin.from('app_settings').select('value').eq('key', 'support_kantooruren').maybeSingle(),
       supabaseAdmin.from('app_settings').select('value').eq('key', 'support_widget').maybeSingle(),
       supabaseAdmin.from('joost_config')
         .select('persona_name, system_prompt_template, model, temperature, is_enabled, feature_flags, knowledge_base')
         .eq('module', 'support').maybeSingle(),
+      supabaseAdmin.from('app_settings').select('value').eq('key', ALARM_KEY).maybeSingle(),
     ]);
 
     const cfg = parseOfficeHoursConfig(naarOfficeHoursConfig(uren?.value));
@@ -151,6 +170,8 @@ export default async function handler(req, res) {
       kantooruren_label: leesbareUren(cfg),
       widget: widget?.value || null,
       bot: bot || null,
+      // Altijd ingevuld (standaard als er nog niets bewaard is).
+      alarm: leesAlarmInstellingen(alarm?.value),
       // Echt nagevraagd, niet aangenomen: een lezer zonder support.config
       // krijgt hier false en de UI zet de velden op alleen-lezen.
       mag_wijzigen: req.method === 'PATCH' ? true : await requirePermission(req, 'support.config'),

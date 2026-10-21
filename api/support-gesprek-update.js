@@ -62,10 +62,34 @@ export default async function handler(req, res) {
 
   if (Object.keys(patch).length === 0) return res.status(400).json({ error: 'Niets te wijzigen' });
 
+  // `alleen_als_vrij`: "Ik neem het" vanuit de chatmelding. Twee collega's
+  // die tegelijk klikken mogen elkaar het gesprek niet afpakken — de tweede
+  // krijgt een 409 met de naam van wie het al heeft.
+  const alleenAlsVrij = req.body?.alleen_als_vrij === true && patch.toegewezen_aan !== undefined;
+
   try {
-    const { data, error } = await supabaseAdmin
-      .from('support_gesprekken').update(patch).eq('id', id).select().maybeSingle();
+    let q = supabaseAdmin.from('support_gesprekken').update(patch).eq('id', id);
+    if (alleenAlsVrij) q = q.is('toegewezen_aan', null);
+    const { data, error } = await q.select().maybeSingle();
     if (error) throw new Error(error.message);
+    if (!data && alleenAlsVrij) {
+      const { data: bestaand } = await supabaseAdmin
+        .from('support_gesprekken').select('id, toegewezen_aan').eq('id', id).maybeSingle();
+      if (bestaand?.toegewezen_aan) {
+        let naam = null;
+        try {
+          const { data: p } = await supabaseAdmin
+            .from('profiles').select('full_name').eq('id', bestaand.toegewezen_aan).maybeSingle();
+          naam = p?.full_name || null;
+        } catch (_) { /* naam is prettig, niet kritiek */ }
+        return res.status(409).json({
+          error: `${naam || 'Een collega'} heeft dit gesprek al opgepakt.`,
+          code: 'AL_OPGEPAKT',
+          toegewezen_aan: bestaand.toegewezen_aan,
+          toegewezen_naam: naam,
+        });
+      }
+    }
     if (!data) return res.status(404).json({ error: 'Gesprek niet gevonden' });
 
     if (patch.status === 'afgehandeld') {

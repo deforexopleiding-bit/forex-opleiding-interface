@@ -27,6 +27,7 @@ import {
   kiesNieuweMails, isAlVerwerktFout, normaliseerMessageId,
 } from './_lib/support-mailbrug.js';
 import { createNotification, resolveOntvangersVoorRecht } from './_lib/notify.js';
+import { meldTeam, crmGesprekPad } from './_lib/support-alarm.js';
 
 // Hoe ver terug we kijken in de mailbox. Ruim genoeg om een sync-hapering te
 // overleven, kort genoeg om de query klein te houden.
@@ -155,6 +156,8 @@ async function verwerkInkomendeMail(uit) {
         .eq('id', gesprek.id);
 
       await meldWachtrij(gesprek, uit);
+      // Zelfde regel als in de chat: na een stilte van ons ook een teammail.
+      await meldTeam({ gesprekId: gesprek.id });
       uit.binnengekomen++;
     } catch (e) {
       uit.fouten.push('mail verwerken: ' + (e?.message || e));
@@ -201,7 +204,7 @@ async function meldWachtrij(gesprek, uit) {
         type: 'support.mailantwoord',
         title: `Mailantwoord op ${gesprek.kenmerk}`,
         body: `${gesprek.naam || 'Een bezoeker'} heeft per mail geantwoord (${gesprek.onderwerp}).`,
-        linkUrl: `/modules/klanten-v2/?mod=support&gesprek=${gesprek.id}`,
+        linkUrl: crmGesprekPad(gesprek.id),
         entityType: 'support_gesprek',
         entityId: gesprek.id,
         priority: 'normal',
