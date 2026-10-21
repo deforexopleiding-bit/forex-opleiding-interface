@@ -111,6 +111,56 @@
       <span style="width:7px;height:7px;border-radius:50%;background:#A9B4C2"></span>Niet in de chat${g.klant_gezien_op ? ' · ' + geleden(g.klant_gezien_op) + ' geleden' : ''}</span>`;
   }
 
+  // ── TELEFOON + BELLEN (2026-10-21) ─────────────────────────────────────
+  // Sinds de widget een gsm verplicht maakt (E.164, api/_lib/support-telefoon.js)
+  // staat bij elke nieuwe aanvraag een nummer. Leesbaar tonen + een Bel-knop
+  // die de gedeelde softphone opent, zoals Profiel en Opvolging dat doen
+  // (KlxSoftphone.open). Oudere aanvragen zonder nummer: '— geen nummer'.
+  function groepeer(c, patroon) {
+    const d = []; let i = 0;
+    for (const n of patroon) { if (i >= c.length) break; d.push(c.slice(i, i + n)); i += n; }
+    if (i < c.length) d.push(c.slice(i));
+    return d.join(' ');
+  }
+  /** +32472223752 → '+32 472 22 37 52', +31612345678 → '+31 6 12345678'; de rest ongewijzigd. */
+  function toonTel(t) {
+    const v = String(t || '').trim();
+    if (/^\+32\d{8,9}$/.test(v)) {
+      const n = v.slice(3);
+      if (n[0] === '4') return '+32 ' + groepeer(n, [3, 2, 2, 2]);
+      return '+32 ' + groepeer(n, /^[239]/.test(n) ? [1, 3, 2, 2] : [2, 2, 2, 2]);
+    }
+    if (/^\+31\d{9}$/.test(v)) {
+      const n = v.slice(3);
+      return '+31 ' + (n[0] === '6' ? groepeer(n, [1, 8]) : groepeer(n, [2, 3, 4]));
+    }
+    return v;
+  }
+  const _bel = [];
+  window.__supBel = (i) => {
+    const b = _bel[i];
+    if (!b || !b.telefoon) { if (window.KV?.toast) window.KV.toast('Geen telefoonnummer bekend', 'err'); return; }
+    if (!window.KlxSoftphone || typeof window.KlxSoftphone.open !== 'function') {
+      if (window.KV?.toast) window.KV.toast('Softphone niet geladen — probeer een harde refresh.', 'err');
+      return;
+    }
+    try {
+      window.KlxSoftphone.open({ phone: b.telefoon, name: b.naam || b.telefoon, customerId: b.customerId || '', source: 'support' });
+    } catch (e) {
+      console.warn('[support-v2] softphone.open fail:', e?.message || e);
+      if (window.KV?.toast) window.KV.toast('Kon de softphone niet openen: ' + (e?.message || 'onbekend'), 'err');
+    }
+  };
+  /** Nummer + Bel-knop (of '— geen nummer'). `klein` = in de lijst, klik gaat niet door naar de rij. */
+  function telMetBel(g, klein) {
+    if (!g?.telefoon) return '<span style="color:var(--text-3)">— geen nummer</span>';
+    const i = _bel.push({ telefoon: g.telefoon, naam: g.naam, customerId: g.customer_id }) - 1;
+    return `<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-variant-numeric:tabular-nums;font-weight:600;color:var(--text);white-space:nowrap">${esc(toonTel(g.telefoon))}</span>
+      <button class="btn btn-ghost btn-sm" type="button" title="Bellen via de softphone"
+        onclick="${klein ? 'event.stopPropagation();' : ''}window.__supBel(${i})">Bel</button></span>`;
+  }
+
   function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
   function setUrlParam(k, v) {
     try {
@@ -310,8 +360,9 @@
 
     window.__supRij = (i) => { const r = rijen[i]; if (r) setUrlParam('gesprek', r.id); };
 
+    _bel.length = 0;
     const cols = [
-      { l: '' }, { l: 'Wie' }, { l: 'Onderwerp' }, { l: 'Laatste bericht' },
+      { l: '' }, { l: 'Wie' }, { l: 'Telefoon' }, { l: 'Onderwerp' }, { l: 'Laatste bericht' },
       { l: 'Status' }, { l: 'Van ons' }, { l: '' },
     ];
     const data = rijen.map((r) => {
@@ -321,6 +372,7 @@
         ongelezen ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber)"></span>` : '',
         `<div class="cell-main" style="display:flex;align-items:center;gap:7px;${ongelezen ? 'font-weight:650' : ''}">${esc(r.naam || 'Onbekend')}${aanwezigPil(r, true)}</div>
          <div class="cell-sub">${esc(r.email || '')} · ${esc(r.kenmerk)}${r.geverifieerd ? ' · geverifieerd' : ''}</div>`,
+        telMetBel(r, true),
         `${esc(ONDERWERP_LABEL[r.onderwerp] || r.onderwerp)}
          <div class="cell-sub">${r.soort === 'klant' ? 'student' : 'bezoeker'}</div>`,
         `${dtijd(r.laatste_bericht_op)}<div class="cell-sub">${geleden(r.laatste_bericht_op)} geleden</div>`,
@@ -492,6 +544,7 @@
   }
 
   function contextPaneel(g, ctx, acties) {
+    _bel.length = 0;
     const blok = (titel, inhoud) => `<div style="margin-bottom:16px">
       <div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
         color:var(--text-3);margin-bottom:7px">${titel}</div>${inhoud}</div>`;
@@ -526,7 +579,7 @@
     h += blok('Contact', [
       regel('Naam', esc(g.naam || '—')),
       regel('E-mail', esc(g.email || '—')),
-      regel('Telefoon', esc(g.telefoon || '—')),
+      regel('Telefoon', telMetBel(g, false)),
       regel('Kenmerk', esc(g.kenmerk)),
       regel('Geverifieerd', g.geverifieerd ? 'ja' : 'nee', g.geverifieerd ? 'var(--emerald)' : 'var(--amber)'),
     ].join(''));
