@@ -13,6 +13,7 @@ import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 import { listActiveCalendarIds } from './_lib/ghl-calendars.js';
 import { detectEmailTypo } from './_lib/send-error-classify.js';
+import { leadTelefoonUitGhl } from './_lib/ghl-telefoon.js';
 
 const normEmail = (s) => String(s || '').trim().toLowerCase();
 
@@ -237,7 +238,7 @@ export default async function handler(req, res) {
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id')
+        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id, lead_phone')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -281,6 +282,15 @@ export default async function handler(req, res) {
           }
         }
       }
+
+      // Het nummer uit GHL door de NL/BE-regel, met onze eigen data als
+      // bevestiging: GHL maakte van een lokaal Belgisch gsm ooit +31… en geeft
+      // dat bij elke poll terug (zie telefoonUitGhl in _lib/phone-e164.js).
+      // Geeft GHL geen nummer, dan blijft het nummer dat wij al hadden staan.
+      leadPhone = (await leadTelefoonUitGhl({
+        ghlTelefoon: leadPhone, email: leadEmail, bestaand: existing?.lead_phone || null,
+        bron: 'follow-up-ghl-appointment-poll',
+      })) || existing?.lead_phone || null;
 
       // Match Zoom-meeting op start_time-minuut + topic-fallback
       const apptMinute = new Date(event.startTime).toISOString().slice(0, 16);

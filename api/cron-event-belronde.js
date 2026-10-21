@@ -14,6 +14,7 @@
 // terug op 'skip'. Schrijft alleen naar follow_up_leads.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 
 // Europe/Amsterdam is UTC+1 in winter, +2 in zomer. We willen om 12:00
 // LOKALE tijd de eerste poging. Voor betrouwbaarheid berekenen we via
@@ -133,7 +134,7 @@ export default async function handler(req, res) {
           source            : 'event',
           lead_name         : displayName(a),
           lead_email        : a.email || null,
-          lead_phone        : a.phone || null,
+          lead_phone        : telefoonNlBe(a.phone, { bron: 'cron-event-belronde' }) || null,
           lead_status       : 'terugbellen',
           terugbel_datum    : noonIso,
           source_ref        : {

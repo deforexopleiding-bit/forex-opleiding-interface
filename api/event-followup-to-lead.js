@@ -16,6 +16,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -85,7 +86,7 @@ export default async function handler(req, res) {
       source     : 'event',
       lead_name  : displayName(att),
       lead_email : att.email || null,
-      lead_phone : att.phone || null,
+      lead_phone : telefoonNlBe(att.phone, { bron: 'event-followup-to-lead' }) || null,
       lead_status: 'nieuw',
       // Punt B: terugbel_datum = de geplande follow-up-datum uit het
       // event_followups-record. Zonder dit stond de lead altijd 'nu' in

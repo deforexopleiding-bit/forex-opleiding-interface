@@ -18,6 +18,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -61,7 +62,7 @@ export default async function handler(req, res) {
       source             : 'retention',
       lead_name          : leadName,
       lead_email         : cust.email || null,
-      lead_phone         : cust.phone || null,
+      lead_phone         : telefoonNlBe(cust.phone, { bron: 'sales-retention-to-followup' }) || null,
       lead_status        : 'nieuw',
       source_ref         : Object.keys(ctx).length ? ctx : null,
       created_by_user_id : user.id,

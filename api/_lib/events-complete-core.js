@@ -509,7 +509,7 @@ export async function runEventsCompleteCore({ userId, body }) {
           source            : 'event',
           lead_name         : leadName,
           lead_email        : att.email || null,
-          lead_phone        : att.phone || null,
+          lead_phone        : telefoonNlBe(att.phone, { bron: 'events-complete-afspraak' }) || null,
           lead_status       : 'nieuw',
           terugbel_datum    : followDate,
           source_ref        : {
@@ -550,7 +550,7 @@ export async function runEventsCompleteCore({ userId, body }) {
             terugbel_datum: followDate,
             source_ref    : leadRow.source_ref,
             lead_email    : att.email || null,
-            lead_phone    : att.phone || null,
+            lead_phone    : telefoonNlBe(att.phone, { bron: 'events-complete-afspraak' }) || null,
           };
           if (isGesloten(vorigeStatus)) {
             patch.lead_status  = 'terugbellen';
