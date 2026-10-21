@@ -4573,7 +4573,7 @@
       const f = window.DFOFunnelDashboard && typeof window.DFOFunnelDashboard.renderFlow === 'function' ? window.DFOFunnelDashboard.renderFlow(FUNNEL_REGISTRY) : '';
       return `<div>${balk}${f}</div>`;
     }
-    return `<div>${balk}${funnelStatistiekenHtml()}</div>`;
+    return `<div>${balk}<div class="ls-funnelstats" style="padding:clamp(4px,1.2vw,12px) clamp(0px,1.2vw,12px) 0 clamp(0px,2vw,20px)">${funnelStatistiekenHtml()}</div></div>`;
   }
   function funnelStatistiekenHtml() {
     const st = _live.funnels;
