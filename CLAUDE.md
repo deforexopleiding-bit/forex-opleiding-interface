@@ -243,6 +243,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `pending_actions`. Helpers in `api/_lib/email-extractor.js`; gate-check
   + flow-handler in `api/inbox-webhook.js`. Zie
   docs/joost-intake-and-wanbetalers-bulk-and-datum-headers.md.
+- Incasso-opvolging (onboarding) — ÉÉN WAARHEID IN HET LMS (21 okt 2026):
+  `zetNaarIncasso` / `activeerUitIncasso` (`api/_lib/onboarding-incasso.js`) leggen
+  het EERST vast in het LMS via de RPC `hlms_incasso_vanuit_crm` (service_role):
+  incasso-kaart + merkteken `incasso` in `hlms_student_start` + andere open kaarten
+  dicht; terug = kaarten dicht + latere start + merkteken `herstart`. Mislukt het
+  LMS, dan 502 en verandert er in het CRM niets (terug: startdatum wel, incasso
+  blijft). Vóór de LMS-migratie (PGRST202) de oude directe kaart-insert. Zonder
+  het merkteken zette een pauze/herstart de student stil terug in "Klaar voor
+  onboarding" van zijn mentor. Zie docs/incasso-een-waarheid.md in dfo-lms-prototype.
 - F3 escalation — `MANUAL_ESCALATION` action_type op `pending_actions`
   voor escalaties die geen TL-actie en geen verify-payment zijn (boos /
   juridisch / handover naar incasso). Endpoint

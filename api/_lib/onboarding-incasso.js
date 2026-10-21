@@ -16,7 +16,12 @@
 //   - een regel op de tijdlijn;
 //   - een kaart voor de administratie (Dave) in het LMS, soort
 //     `incasso_opvolging` (7 okt 2026, onboarding-incasso-kaart.js); terug
-//     actief sluit die kaart.
+//     actief sluit die kaart;
+//   - ÉÉN WAARHEID (21 okt 2026): het LMS legt het EERST vast (kaart +
+//     merkteken `incasso` in hlms_student_start + de andere open kaarten
+//     dicht). Lukt dat niet, dan verandert er in het CRM NIETS en komt er een
+//     502 met de reden — geen incasso die alleen in het CRM staat. Nog eens
+//     proberen is veilig: beide kanten zijn idempotent.
 // ── WAT HET NIET DOET ────────────────────────────────────────────────────
 //   - NIET annuleren: status, facturen, abonnementen, offertes, Bubble- en
 //     LMS-toegang blijven zoals ze zijn;
@@ -61,7 +66,21 @@ export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = n
     return { status: 409, body: { error: 'Onboarding is gearchiveerd of geannuleerd.', code: 'niet_actief' } };
   }
   await vulIncassoAan(db, ob);
-  if (inIncasso(ob)) return { status: 200, body: { ok: true, al_in_incasso: true } };
+  const al = inIncasso(ob);
+
+  // 1. HET LMS EERST (21 okt 2026) — ook als het CRM hem al in incasso had:
+  //    dan herstelt een tweede poging een LMS-kant die de eerste keer mislukte.
+  const open = kaart?.open || (await import('./onboarding-incasso-kaart.js')).openIncassoKaart;
+  const incasso_kaart = await open({
+    onboardingId, studentId: ob.dfo_lms_student_id || null, naam: ob.customer_name || null, reden: r, door,
+  });
+  if (!incasso_kaart?.ok) {
+    return { status: 502, body: {
+      error: 'Het LMS kon de incasso niet vastleggen (' + (incasso_kaart?.error || 'onbekende fout')
+        + '). Er is niets gewijzigd' + (al ? ' (in het CRM stond hij al in incasso).' : ' in het CRM.'),
+      code: 'lms_incasso_mislukt', incasso_kaart } };
+  }
+  if (al) return { status: 200, body: { ok: true, al_in_incasso: true, incasso_kaart } };
 
   const nu = new Date().toISOString();
   const { error: upErr } = await db.from('onboardings')
@@ -78,11 +97,6 @@ export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = n
     + ' — niet geannuleerd: facturen, toegang en aanmaningen blijven zoals ze zijn.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'naar-incasso');
-  // De kaart voor Dave (bak admin in het LMS), fail-soft.
-  const open = kaart?.open || (await import('./onboarding-incasso-kaart.js')).openIncassoKaart;
-  const incasso_kaart = await open({
-    onboardingId, studentId: ob.dfo_lms_student_id || null, naam: ob.customer_name || null, reden: r, door,
-  });
   return { status: 200, body: { ok: true, incasso_op: nu, incasso_kaart } };
 }
 
@@ -104,6 +118,20 @@ export async function activeerUitIncasso({ onboardingId, startDatum, door, doorU
   const sd = await zet({ onboardingId, startDatum, doorUserId });
   if (!(sd.status >= 200 && sd.status < 300)) return sd;
 
+  // DAN HET LMS (21 okt 2026): kaarten dicht, latere start, herstart. Lukt dat
+  // niet, dan blijft de onboarding in incasso (incasso_terug_op niet gezet) en
+  // zegt het antwoord waarom — anders stond hij in het CRM terug actief terwijl
+  // het LMS hem nog uit "Klaar voor onboarding" hield. Opnieuw proberen is
+  // veilig: de startdatum is dezelfde en het LMS is idempotent.
+  const sluit = kaart?.sluit || (await import('./onboarding-incasso-kaart.js')).sluitIncassoKaart;
+  const incasso_kaart = await sluit({ onboardingId, studentId: ob.dfo_lms_student_id || null, startDatum, door });
+  if (!incasso_kaart?.ok) {
+    return { status: 502, body: {
+      error: 'De startdatum staat in het CRM, maar het LMS kon terug actief niet vastleggen ('
+        + (incasso_kaart?.error || 'onbekende fout') + '). Hij blijft in incasso; probeer opnieuw.',
+      code: 'lms_terug_mislukt', incasso_kaart } };
+  }
+
   const nu = new Date().toISOString();
   const { error: upErr } = await db.from('onboardings')
     .update({ incasso_terug_op: nu, incasso_terug_door: String(door || 'onbekend').slice(0, 200) })
@@ -113,8 +141,5 @@ export async function activeerUitIncasso({ onboardingId, startDatum, door, doorU
     'Terug actief uit incasso-opvolging, gezet door ' + (door || 'onbekend') + '. Nieuwe startdatum: ' + startDatum + '.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'uit-incasso');
-  // Dave's incasso-kaart gaat dicht, fail-soft.
-  const sluit = kaart?.sluit || (await import('./onboarding-incasso-kaart.js')).sluitIncassoKaart;
-  const incasso_kaart = await sluit({ onboardingId, studentId: ob.dfo_lms_student_id || null, startDatum, door });
   return { status: 200, body: { ok: true, start_date: startDatum, incasso_terug_op: nu, incasso_kaart } };
 }
