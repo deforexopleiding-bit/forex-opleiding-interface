@@ -32,7 +32,8 @@ import { valideerLabAanmelding } from './_lib/lab-aanmelding-validatie.js';
 import { zorgVoorLabAccount, maakLoginSleutel, LabAccountFout } from './_lib/dfo-lms-lab-account.js';
 import { mailWelkom, mailNieuweLink, mailAlToegang, stuurLabMail, stuurLabWhatsApp } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
-import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+import { stuurLabEvent, labUserData } from './_lib/lab-meta.js';
+import { beslisMetaLead } from './_lib/meta-lead-poort.js';
 import { maakBoektoken } from './_lib/lab-boektoken.js';
 
 export const BERICHT_OK = 'Gelukt! Check je mailbox: je link naar The Lab is onderweg.';
@@ -196,9 +197,13 @@ export default async function handler(req, res) {
   const uitkomst = await verwerkLmsEnBerichten({ aanmeldingId, leadId, d });
   if (bewaard) await werkAanmeldingBij(aanmeldingId, uitkomst);
 
-  // 5. Meta 'Lead' — zelfde event_id als de browser-pixel.
-  const eventId = labEventId('Lead', aanmeldingId);
-  await stuurLabEvent({
+  // 5. Meta 'Lead' — één keer per CRM-lead (event_id 'lead_<lead_id>', zelfde als de
+  //    website), alleen productie, geen test/bot (api/_lib/meta-lead-poort.js). De
+  //    browser vuurt de pixel alleen met het event_id uit dit antwoord.
+  const metaLead = await beslisMetaLead(supabaseAdmin, { leadId, email: d.email, userAgent, isTest: d.is_test });
+  const eventId = metaLead.eventId;
+  if (!eventId) console.log('[lab-aanmelding] geen Meta-Lead', { aanmelding: aanmeldingId, reden: metaLead.reden });
+  else await stuurLabEvent({
     eventName: 'Lead', eventId, aanmeldingId: bewaard ? aanmeldingId : null,
     userData: labUserData({
       email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam,
