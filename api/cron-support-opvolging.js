@@ -11,6 +11,9 @@
 //   3. Aanwezigheid van mensen met een dode hartslag hard op false zetten.
 //      De beschikbaarheidscheck filtert daar al op, maar zo klopt ook het
 //      lijstje "wie staat er online" in de module.
+//   4. Vangnet voor de teammail "nieuwe chat" (_lib/support-alarm.js): een
+//      gesprek van het afgelopen uur dat nog nooit een teammail kreeg (de
+//      SMTP-server weigerde, of Vercel kapte de functie af) krijgt 'm alsnog.
 //
 // Idempotent: elke stap kijkt naar een tijdstempel die 'ie zelf verzet, dus
 // twee keer draaien binnen een kwartier doet niets dubbel.
@@ -18,15 +21,19 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { createNotification, resolveOntvangersVoorRecht } from './_lib/notify.js';
 import { HARTSLAG_VENSTER_MS } from './_lib/support-beschikbaarheid.js';
+import { meldTeam, crmGesprekPad, haalAlarmInstellingen } from './_lib/support-alarm.js';
 
 const WACHT_HERINNERING_MIN = 45;
 const STIL_AFHANDELEN_DAGEN = 5;
+// Hoe ver het vangnet voor de teammail terugkijkt. Ruim over het cron-interval
+// heen (15 min), kort genoeg om na een storing geen stapel oude mails te sturen.
+const TEAMMAIL_VANGNET_MIN = 60;
 
 export default async function handler(req, res) {
   const auth = checkCronAuth(req);
   if (!auth.ok) return res.status(auth.status).json(auth.body);
 
-  const uit = { herinnerd: 0, afgehandeld: 0, offline_gezet: 0, fouten: [] };
+  const uit = { herinnerd: 0, afgehandeld: 0, offline_gezet: 0, teammail_ingehaald: 0, fouten: [] };
 
   // ── 1. Te lang in de wachtrij ───────────────────────────────────────────
   try {
@@ -47,7 +54,7 @@ export default async function handler(req, res) {
             type: 'support.te_lang_open',
             title: `Supportvraag ${g.kenmerk} wacht al ${WACHT_HERINNERING_MIN}+ minuten`,
             body: `${g.naam || 'Een bezoeker'} — ${g.onderwerp}`,
-            linkUrl: `/modules/klanten-v2/?mod=support&gesprek=${g.id}`,
+            linkUrl: crmGesprekPad(g.id),
             entityType: 'support_gesprek',
             entityId: g.id,
             priority: 'high',
@@ -105,6 +112,32 @@ export default async function handler(req, res) {
     uit.offline_gezet = (data || []).length;
   } catch (e) {
     uit.fouten.push('aanwezigheid: ' + (e?.message || e));
+  }
+
+  // ── 4. Gemiste teammail "nieuwe chat" inhalen ──────────────────────────
+  try {
+    const cfg = await haalAlarmInstellingen();
+    if (cfg.mail_aan) {
+      const grens = new Date(Date.now() - TEAMMAIL_VANGNET_MIN * 60 * 1000).toISOString();
+      // Pas na twee minuten: een gesprek dat net begon, heeft zijn mail
+      // misschien nog onderweg (waitUntil in support-start).
+      const jongerDan = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const { data } = await supabaseAdmin
+        .from('support_gesprekken')
+        .select('id')
+        .is('team_gemaild_op', null)
+        .neq('status', 'afgehandeld')
+        .gte('created_at', grens)
+        .lt('created_at', jongerDan)
+        .limit(20);
+      for (const g of data || []) {
+        const r = await meldTeam({ gesprekId: g.id, cfg, alleenNieuw: true });
+        if (r.verstuurd) uit.teammail_ingehaald++;
+        else if (r.fout) uit.fouten.push(`teammail ${g.id}: ${r.fout}`);
+      }
+    }
+  } catch (e) {
+    uit.fouten.push('teammail: ' + (e?.message || e));
   }
 
   return res.status(200).json(uit);

@@ -88,6 +88,15 @@ function nepAdmin({ mails = [], bekendPerId = [], bekendPerMessage = [], bekendF
 async function draai({ admin, insertFout = null } = {}) {
   const inserts = [];
   const meldingen = [];
+  const teammails = [];
+  // De teammail (support-alarm.js) heeft z'n eigen test; hier alleen: wordt
+  // 'ie per binnengekomen mailantwoord één keer aangevraagd.
+  mock.module(url('api/_lib/support-alarm.js'), {
+    namedExports: {
+      meldTeam: async (o) => { teammails.push(o); return { verstuurd: false, reden: null }; },
+      crmGesprekPad: (id) => `/modules/klanten-v2/?v2preview=support&gesprek=${id}`,
+    },
+  });
   mock.module(url('api/supabase.js'), {
     namedExports: { supabaseAdmin: admin, checkCronAuth: () => ({ ok: true }) },
   });
@@ -115,7 +124,7 @@ async function draai({ admin, insertFout = null } = {}) {
     setHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
   await mod.default({ method: 'GET', headers: {} }, res);
   const statusWissels = admin.updates.filter((u) => u.tabel === 'support_gesprekken');
-  return { uit: res.body, inserts, meldingen, statusWissels };
+  return { uit: res.body, inserts, meldingen, statusWissels, teammails };
 }
 
 const BOTSING = (index) => ({
@@ -127,9 +136,10 @@ const BOTSING = (index) => ({
 
 test('gewone mail: één bericht met bron_email_id én bron_message_id', async (t) => {
   t.after(() => mock.reset());
-  const { uit, inserts, meldingen, statusWissels } = await draai({
+  const { uit, inserts, meldingen, statusWissels, teammails } = await draai({
     admin: nepAdmin({ mails: [MAIL('rij-info', '<abc@gmail.com>')] }),
   });
+  assert.deepEqual(teammails, [{ gesprekId: 'gesprek-1' }]);
   assert.equal(inserts.length, 1);
   assert.deepEqual(inserts[0].meta, { via: 'mail', bron_email_id: 'rij-info', bron_message_id: 'abc@gmail.com' });
   assert.equal(inserts[0].tekst, 'Ja hoor, mijn nummer is 0470 12 34 56.');
