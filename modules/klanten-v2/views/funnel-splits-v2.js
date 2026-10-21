@@ -259,39 +259,46 @@
     return `<div class="fs-root">${kop}${fout}${melding}${st.loading && !st.data ? '<div style="color:var(--text-3);font-size:12px;margin-bottom:10px">Laden…</div>' : ''}${nieuwFormulier(window.__fsRegistry)}${leeg}${lijst}</div>`;
   }
 
-  /** In "Funnelstatistieken": per test de varianten naast elkaar (alleen testverkeer). */
+  /**
+   * In "Funnelstatistieken": klein, los blok bovenaan — per lopende test (link)
+   * de varianten onder elkaar (alleen testverkeer). Groen = hoogste opt-in%.
+   */
   function renderVergelijk(registry) {
     if (Array.isArray(registry)) window.__fsRegistry = registry;
     if (!st.fetched && !st.loading) (typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f))(() => laad(false));
     const splits = ((st.data && st.data.splits) || []).filter((s) => s.varianten.length);
     if (!splits.length) return '';
+    const td = 'padding:6px 10px;border-top:1px solid var(--border);font-variant-numeric:tabular-nums';
     const blokken = splits.map((s) => {
       const beste = Math.max(-1, ...s.varianten.map((v) => (v.stats && v.stats.optin_pct != null ? v.stats.optin_pct : -1)));
-      const kolommen = s.varianten.map((v) => {
+      const rijen = s.varianten.map((v) => {
         const sx = v.stats || {};
-        const top = beste >= 0 && sx.optin_pct === beste;
-        return `<div class="fs-kolom" style="flex:1 1 160px;min-width:0;border:1px solid ${top ? 'var(--emerald)' : 'var(--border)'};border-radius:var(--r-sm);padding:10px;background:var(--surface)">
-          <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(regNaam(v.bron))}">${esc(regNaam(v.bron))}</div>
-          <div style="font-size:10.5px;color:var(--text-3)">${esc(fmtPct(v.verkeer_pct))} verkeer${v.actief ? '' : ' · uit'}</div>
-          <div style="font-size:22px;font-weight:800;margin-top:6px;${top ? 'color:var(--emerald)' : ''}">${esc(fmtPct(sx.optin_pct))}</div>
-          <div style="font-size:10.5px;color:var(--text-3)">opt-in</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:11px;margin-top:6px;font-variant-numeric:tabular-nums">
-            <span style="color:var(--text-3)">Bezoekers</span><b style="text-align:right">${esc(num(sx.bezoekers))}</b>
-            <span style="color:var(--text-3)">Leads</span><b style="text-align:right">${esc(num(sx.leads))} <span style="font-weight:400;color:var(--text-3)">${esc(fmtPct(sx.lead_pct))}</span></b>
-            <span style="color:var(--text-3)">Calls</span><b style="text-align:right">${esc(num(sx.geboekt))} <span style="font-weight:400;color:var(--text-3)">${esc(fmtPct(sx.geboekt_pct))}</span></b>
-          </div>
-        </div>`;
+        const top = beste > 0 && sx.optin_pct === beste;
+        return `<tr class="fs-vrij" data-bron="${esc(v.bron)}">
+          <td style="${td};white-space:nowrap;font-weight:600">${esc(regNaam(v.bron))}${v.actief ? '' : ' <span style="font-weight:400;color:var(--text-3)">· uit</span>'}</td>
+          <td style="${td};text-align:right;color:var(--text-3)">${esc(fmtPct(v.verkeer_pct))}</td>
+          <td style="${td};text-align:right">${esc(num(sx.bezoekers))}</td>
+          <td style="${td};text-align:right"><span style="font-weight:600;${top ? 'color:var(--emerald);background:var(--emerald-soft);border-radius:6px;padding:2px 7px' : 'color:var(--text-2)'}">${esc(fmtPct(sx.optin_pct))}</span></td>
+          <td style="${td};text-align:right">${esc(num(sx.leads))}</td>
+          <td style="${td};text-align:right">${esc(num(sx.geboekt))}</td>
+        </tr>`;
       }).join('');
-      return `<div class="fs-vergelijk" data-slug="${esc(s.slug)}" style="margin-bottom:12px">
-        <div style="font-size:12.5px;font-weight:700;margin-bottom:6px">${esc(s.naam)} <span style="font-weight:400;color:var(--text-3);font-family:var(--mono,monospace);font-size:11px">/go/${esc(s.slug)}</span></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${kolommen}</div>
+      const th = 'padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;white-space:nowrap';
+      return `<div class="fs-vergelijk" data-slug="${esc(s.slug)}" style="flex:1 1 340px;min-width:0;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);overflow:hidden">
+        <div style="padding:8px 10px;font-size:12px;font-weight:700;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap">${esc(s.naam)} <span style="font-weight:400;color:var(--text-3);font-family:var(--mono,monospace);font-size:10.5px">/go/${esc(s.slug)}</span></div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr><th style="${th};text-align:left">Variant</th><th style="${th};text-align:right">Verkeer</th><th style="${th};text-align:right">Bezoekers</th><th style="${th};text-align:right">Opt-in</th><th style="${th};text-align:right">Leads</th><th style="${th};text-align:right">Calls</th></tr></thead>
+          <tbody>${rijen}</tbody>
+        </table></div>
       </div>`;
     }).join('');
-    return `<section style="margin-bottom:22px">
+    return `<section class="fs-tests" style="margin-bottom:22px">
       <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-        <div style="font-size:15px;font-weight:700">Split-tests</div>
-        <div style="font-size:11.5px;color:var(--text-3)">per instaplink · alleen verkeer via de link · laatste ${esc(st.dagen)} dagen · groen = hoogste opt-in</div>
-      </div>${blokken}</section>`;
+        <div style="font-size:13.5px;font-weight:700">Lopende split-tests</div>
+        <div style="font-size:11px;color:var(--text-3)">alleen verkeer via de link · laatste ${esc(st.dagen)} dagen · groen = hoogste opt-in</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${blokken}</div>
+    </section>`;
   }
 
   window.DFOFunnelSplits = { renderKoppelen, renderVergelijk, state: st, laad };

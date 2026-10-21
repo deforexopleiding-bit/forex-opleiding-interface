@@ -46,22 +46,29 @@ function nepDb(onboarding, { kolomOntbreekt = false } = {}) {
   };
 }
 
+// De LMS-stap (21 okt 2026), geslaagd. Zie onboarding-incasso-kaart.test.js
+// voor wat er gebeurt als ze mislukt.
+const LMS_OK = {
+  open: async () => ({ ok: true, signaal_id: 's1' }),
+  sluit: async () => ({ ok: true, gesloten: 1 }),
+};
+
 test('NAAR INCASSO: reden verplicht, zet alleen de incasso-velden — status blijft', async () => {
   const ob = { id: 'o1', status: 'bezig', archived_at: null };
   const db = nepDb(ob);
-  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'kort', door: 'x', db })).status, 400);
-  const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'Bedenktijd voorbij, geen contact', door: 'Maxim', db });
+  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'kort', door: 'x', db, kaart: LMS_OK })).status, 400);
+  const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'Bedenktijd voorbij, geen contact', door: 'Maxim', db, kaart: LMS_OK });
   assert.equal(r.status, 200);
   assert.deepEqual(Object.keys(db.log.updates[0]).sort(), ['incasso_door', 'incasso_op', 'incasso_reden']);
   assert.equal(ob.status, 'bezig');
   assert.match(db.log.inserts[0].v.note, /niet geannuleerd/);
   // Al in incasso: niets opnieuw.
-  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'nog eens erin', door: 'x', db })).body.al_in_incasso, true);
+  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'nog eens erin', door: 'x', db, kaart: LMS_OK })).body.al_in_incasso, true);
 });
 
 test('NAAR INCASSO: geannuleerd mag niet; vóór de migratie een duidelijke 503', async () => {
-  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'geen contact meer', door: 'x', db: nepDb({ id: 'o1', status: 'geannuleerd' }) })).status, 409);
-  const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'geen contact meer', door: 'x', db: nepDb({ id: 'o1', status: 'bezig' }, { kolomOntbreekt: true }) });
+  assert.equal((await zetNaarIncasso({ onboardingId: 'o1', reden: 'geen contact meer', door: 'x', db: nepDb({ id: 'o1', status: 'geannuleerd' }), kaart: LMS_OK })).status, 409);
+  const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'geen contact meer', door: 'x', db: nepDb({ id: 'o1', status: 'bezig' }, { kolomOntbreekt: true }), kaart: LMS_OK });
   assert.equal(r.status, 503);
   assert.equal(r.body.code, 'migratie_ontbreekt');
   assert.equal(isIncassoKolomOntbreekt({ code: '42501', message: 'x' }), false);
@@ -71,12 +78,12 @@ test('TERUG ACTIEF: eerst de startdatum via de bestaande route; weigert die, dan
   const ob = { id: 'o1', status: 'bezig', archived_at: null, incasso_op: '2026-10-06T10:00:00Z' };
   const db = nepDb(ob);
   const teVroeg = async () => ({ status: 400, body: { error: 'start_date te vroeg', code: 'START_DATE_TOO_EARLY' } });
-  const r1 = await activeerUitIncasso({ onboardingId: 'o1', startDatum: '2026-10-07', door: 'x', db, zetStartdatum: teVroeg });
+  const r1 = await activeerUitIncasso({ onboardingId: 'o1', startDatum: '2026-10-07', door: 'x', db, zetStartdatum: teVroeg, kaart: LMS_OK });
   assert.equal(r1.status, 400);
   assert.equal(db.log.updates.length, 0);
   const gezet = [];
   const lukt = async (p) => { gezet.push(p); return { status: 200, body: { ok: true } }; };
-  const r2 = await activeerUitIncasso({ onboardingId: 'o1', startDatum: '2026-11-02', door: 'Maxim', db, zetStartdatum: lukt });
+  const r2 = await activeerUitIncasso({ onboardingId: 'o1', startDatum: '2026-11-02', door: 'Maxim', db, zetStartdatum: lukt, kaart: LMS_OK });
   assert.equal(r2.status, 200);
   assert.equal(gezet[0].startDatum, '2026-11-02');
   assert.ok(db.log.updates[0].incasso_terug_op);

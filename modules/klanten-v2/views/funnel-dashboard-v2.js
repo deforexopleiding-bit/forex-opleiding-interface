@@ -44,6 +44,7 @@
     preset: '7d', customVan: '', customTot: '',
     loading: false, fetched: false, error: null, data: null, _seq: 0, lastKey: null,
     open: {},
+    rij: {},    // uitgeklapte regels in het compacte overzicht (2026-10-21)
     // Boek-flow A/B-schakelaar (app_settings.opstartsessie_flow).
     flowCfg: null, flowFetched: false, flowErr: null, flowSaving: false,
   };
@@ -134,6 +135,14 @@
   window.__fdToggle = function (variant) {
     st.open[variant] = !st.open[variant];
     rerender();
+  };
+  // Regel in het overzicht open/dicht: de volledige trechter + leadblokjes eronder.
+  window.__fdRij = function (variant) {
+    st.rij[variant] = !st.rij[variant];
+    rerender();
+  };
+  window.__fdRijToets = function (e, variant) {
+    if (e && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.__fdRij(variant); }
   };
 
   // ── Boek-flow A/B/C-schakelaar ────────────────────────────────────────────
@@ -298,26 +307,67 @@
     </div>`;
   }
 
-  function kaartHtml(v, reg, trackingActief) {
+  // ── Compact overzicht (2026-10-21): één regel per variant ─────────────────
+  // Alleen presentatie: elke waarde komt uit dezelfde velden als de detailweergave.
+  //   Bezoekers = sessies in fase 'landing'; Opt-in% = 'gegevens_ok' / 'landing';
+  //   Leads / Geboekt = lead_resultaat.leads / .geboekt (de blokjes in het detail).
+  const MINI_FASES = ['landing', 'formulier_start', 'gegevens_ok', 'lead_ingediend', 'geboekt'];
+  const faseSessies = (v, k) => {
+    const f = Array.isArray(v.funnel) ? v.funnel.find((x) => x && x.fase === k) : null;
+    return f ? (f.sessions || 0) : null;
+  };
+  function rijCijfers(v) {
+    const landing = faseSessies(v, 'landing');
+    const opt = faseSessies(v, 'gegevens_ok');
+    const lr = v.lead_resultaat || {};
+    return {
+      bezoekers: landing,
+      optin: landing ? Math.round(((opt || 0) / landing) * 1000) / 10 : null,
+      leads: lr.leads == null ? null : lr.leads,
+      geboekt: lr.geboekt == null ? null : lr.geboekt,
+    };
+  }
+  function miniHtml(v) {
+    const landing = faseSessies(v, 'landing') || 0;
+    const balk = (k) => {
+      const w = landing ? Math.min(100, Math.round(((faseSessies(v, k) || 0) / landing) * 1000) / 10) : 0;
+      return `<span style="display:block;height:4px;background:var(--surface-2);border-radius:3px;overflow:hidden"><span style="display:block;height:100%;width:${w}%;background:var(--brand,#0A7490);border-radius:3px"></span></span>`;
+    };
+    return `<span class="fd-mini" aria-hidden="true" style="display:flex;flex-direction:column;gap:2px;width:140px">${MINI_FASES.map(balk).join('')}</span>`;
+  }
+  function rijHtml(v, reg, trackingActief, besteOptin) {
     const naam = (reg && reg.naam) || v.label || v.variant;
     const route = reg && reg.route;
-    const open = !!st.open[v.variant];
+    const c = rijCijfers(v);
+    const isOpen = !!st.rij[v.variant];
+    const beste = besteOptin != null && c.optin != null && c.optin === besteOptin && c.optin > 0;
+    const td = 'padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:middle';
+    const rij = `<tr class="fd-rij${isOpen ? ' open' : ''}" data-variant="${esc(v.variant)}" role="button" tabindex="0" aria-expanded="${isOpen}"
+        onclick="window.__fdRij('${esc(v.variant)}')" onkeydown="window.__fdRijToets(event,'${esc(v.variant)}')"
+        style="cursor:pointer${isOpen ? ';background:var(--surface-2)' : ''}">
+      <td style="${td};white-space:nowrap;font-weight:600" title="${esc(v.variant)}"><span style="display:inline-block;width:14px;color:var(--text-3);font-size:10px">${isOpen ? '▾' : '▸'}</span>${esc(naam)}</td>
+      <td class="fd-col-trechter" style="${td}">${miniHtml(v)}</td>
+      <td style="${td};text-align:right;font-variant-numeric:tabular-nums">${num(c.bezoekers)}</td>
+      <td style="${td};text-align:right"><span class="fd-optin${beste ? ' beste' : ''}" style="font-variant-numeric:tabular-nums;font-weight:600;${beste ? 'color:var(--emerald);background:var(--emerald-soft);border-radius:6px;padding:3px 8px' : 'color:var(--text-2)'}">${fmtPct(c.optin)}</span></td>
+      <td style="${td};text-align:right;font-variant-numeric:tabular-nums">${num(c.leads)}</td>
+      <td style="${td};text-align:right;font-variant-numeric:tabular-nums">${num(c.geboekt)}</td>
+    </tr>`;
+    if (!isOpen) return rij;
+    const afhakenOpen = !!st.open[v.variant];
     const sessies = v.sessies_totaal == null ? '' : `<span style="font-size:11px;color:var(--text-3)">${esc(v.sessies_totaal)} sessies</span>`;
-    return `<div class="fd-kaart" data-variant="${esc(v.variant)}" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0">
-      <div style="display:flex;align-items:flex-start;gap:8px">
-        <div style="min-width:0">
-          <div style="font-weight:700;font-size:13.5px">${esc(naam)}</div>
-          <div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(v.variant)}</div>
+    return rij + `<tr class="fd-detail" data-variant="${esc(v.variant)}"><td colspan="6" style="padding:8px 14px 18px 34px;background:var(--surface-2);border-bottom:1px solid var(--border)">
+      <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
+        <div style="flex:1 1 300px;min-width:0;max-width:540px">${funnelHtml(v.funnel)}</div>
+        <div style="flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(v.variant)}</span>${sessies}${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--brand,#0A7490);font-size:11.5px">Open ↗</a>` : ''}</div>
+          ${leadHtml(v.lead_resultaat, trackingActief, v.groep)}
         </div>
-        <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-shrink:0">${sessies}${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand,#0A7490);font-size:11.5px">Open ↗</a>` : ''}</span>
       </div>
-      ${funnelHtml(v.funnel)}
-      ${leadHtml(v.lead_resultaat, trackingActief, v.groep)}
-      ${trackingActief ? `<div>
-        <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 8px" onclick="window.__fdToggle('${esc(v.variant)}')">${open ? '▾' : '▸'} Afhaken per vraag</button>
-        ${open ? `<div class="fd-afhaken">${afhakenHtml(v.afhaken_per_vraag)}${gedragHtml(v.gedrag)}</div>` : ''}
+      ${trackingActief ? `<div style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 8px" onclick="event.stopPropagation();window.__fdToggle('${esc(v.variant)}')">${afhakenOpen ? '▾' : '▸'} Afhaken per vraag</button>
+        ${afhakenOpen ? `<div class="fd-afhaken">${afhakenHtml(v.afhaken_per_vraag)}${gedragHtml(v.gedrag)}</div>` : ''}
       </div>` : ''}
-    </div>`;
+    </td></tr>`;
   }
 
   function bannerHtml(meta) {
@@ -409,15 +459,28 @@
     const periodeTxt = data.periode ? (data.periode.van === data.periode.tot ? data.periode.van : data.periode.van + ' t/m ' + data.periode.tot) : '';
 
     const varianten = Array.isArray(data.varianten) ? data.varianten : [];
-    const groepen = GROEPEN.map((g) => {
-      const kaarten = varianten.map((v) => per[v]).filter((v) => v && v.groep === g.groep)
-        .map((v) => kaartHtml(v, regBy[v.variant], trackingActief)).join('');
-      if (!kaarten) return '';
-      return `<section class="fd-groep" data-groep="${esc(g.groep)}" style="margin-bottom:16px">
-        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(g.titel)}</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:10px">${kaarten}</div>
-      </section>`;
+    // Compact overzicht: per funnelgroep een kopregel, daaronder één regel per
+    // variant; hoogste opt-in% per groep groen; klik = volledige trechter eronder.
+    const groepRijen = GROEPEN.map((g) => {
+      const vs = varianten.map((v) => per[v]).filter((v) => v && v.groep === g.groep);
+      if (!vs.length) return '';
+      const optins = vs.map((v) => rijCijfers(v).optin).filter((x) => x != null);
+      const beste = optins.length ? Math.max(...optins) : null;
+      return `<tr class="fd-groep" data-groep="${esc(g.groep)}"><td colspan="6" style="background:var(--surface-2);font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-2);font-weight:700;padding:8px 14px;border-bottom:1px solid var(--border)">${esc(g.titel)}</td></tr>`
+        + vs.map((v) => rijHtml(v, regBy[v.variant], trackingActief, beste)).join('');
     }).join('');
+    const th = 'padding:11px 14px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap';
+    const groepen = groepRijen ? `<style>@media (max-width:600px){.fd-overzicht .fd-col-trechter{display:none}.fd-overzicht table{min-width:0!important}.fd-overzicht td,.fd-overzicht th{padding-left:8px!important;padding-right:8px!important}.fd-overzicht .fd-rij td:first-child{white-space:normal!important}}</style><div class="fd-overzicht" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:10px">
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px">
+        <thead><tr style="text-align:left">
+          <th style="${th}">Funnel · variant</th><th class="fd-col-trechter" style="${th}">Trechter</th>
+          <th style="${th};text-align:right">Bezoekers</th><th style="${th};text-align:right">Opt-in%</th>
+          <th style="${th};text-align:right">Leads</th><th style="${th};text-align:right">Geboekt</th>
+        </tr></thead>
+        <tbody>${groepRijen}</tbody>
+      </table></div>
+    </div>
+    <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Klik op een regel voor de volledige trechter met alle stappen. Hoogste opt-in% per funnel staat groen. Bezoekers = landing-sessies; opt-in% = gegevens ingevuld ÷ landing.</div>` : '';
 
     const leeg = !st.loading && st.fetched && !st.error && !varianten.length
       ? '<div style="padding:22px;text-align:center;color:var(--text-3)">Geen funnelvarianten gevonden.</div>' : '';
