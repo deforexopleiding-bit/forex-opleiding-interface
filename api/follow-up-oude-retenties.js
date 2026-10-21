@@ -24,6 +24,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { telefoonNlBe } from './_lib/phone-e164.js';
 import { chunkedIn, getRetentionGroups, RETENTION_WINDOW_FROM } from './_lib/retention-groups.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -222,7 +223,7 @@ async function handlePickup(req, res) {
       source             : 'retention',
       lead_name          : leadName,
       lead_email         : cust.email || null,
-      lead_phone         : cust.phone || null,
+      lead_phone         : telefoonNlBe(cust.phone, { bron: 'follow-up-oude-retenties' }) || null,
       lead_status        : 'nieuw',
       terugbel_datum     : now,
       source_ref         : ctx,

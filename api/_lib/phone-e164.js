@@ -348,3 +348,52 @@ export function telefoonNlBe(raw, { land = null, bron = 'onbekend' } = {}) {
   }
   return r.telefoon;
 }
+
+// ── NUMMERS DIE UIT GHL TERUGKOMEN (2026-10-21) ─────────────────────────
+//
+// GEMETEN op 21 oktober: 17 opvolgtaken met +314[5-9]… (sinds 14 sep), en 29
+// rijen in follow_up_appointments.lead_phone, allemaal met een GHL-contact.
+// De lead zelf had in 14 van die 17 gevallen hetzelfde nummer correct als +32
+// (bv. Maxims 0472223752: lead +32472223752, afspraak +31472223752). Ook een
+// afspraak die wij zelf met +32 boekten (strategie-scan 20/10) stond na de
+// volgende appointment-poll weer op +31.
+//
+// Oorzaak: GHL heeft het lokale '04…' ooit met zijn standaardland NL aangevuld
+// en houdt dat contactnummer vast. De poll (follow-up-ghl-appointment-poll)
+// schreef dat nummer bij elke ronde ongenormaliseerd terug in lead_phone, en
+// hier won het dan als "landcode aanwezig". Wij sturen GHL sinds de fix van
+// 28 september wél E.164, maar een bestaand contact wordt daar niet mee
+// rechtgezet.
+//
+// Wat we doen, ZONDER te gokken: een GHL-nummer gaat eerst door dezelfde
+// NL/BE-regel (telefoonNlBe). Is de uitkomst +31 4[5-9] met 7 cijfers erna —
+// precies de vorm die GHL van een Belgisch gsm maakt — én zegt ONZE eigen
+// data (de lead, of het nummer dat wij zelf al op de afspraak zetten) voor
+// dezelfde negen cijfers +32, dan nemen we +32. Zonder die bevestiging blijft
+// het +31: in NL zijn 045-049 ook echte netnummers (Heerlen, Roermond, …).
+const GHL_NL_VAN_BE_GSM = /^\+314[5-9]\d{7}$/;
+
+/** Vraagt dit GHL-nummer om een check tegen onze eigen data? PURE. */
+export function isMogelijkBeGsmUitGhl(telefoon) {
+  return typeof telefoon === 'string' && GHL_NL_VAN_BE_GSM.test(telefoon);
+}
+
+/**
+ * Een nummer uit GHL (event.phone / contact.phone) naar wat in lead_phone
+ * hoort. PURE.
+ *
+ * @param {*} ghl          het nummer zoals GHL het geeft
+ * @param {{ onze?: Array<*>, bron?: string }} [opties]
+ *   onze  nummers uit onze eigen data voor dezelfde persoon (leads.telefoon_e164,
+ *         het bestaande lead_phone, …) — alleen gebruikt als bevestiging
+ * @returns {?string}
+ */
+export function telefoonUitGhl(ghl, { onze = [], bron = 'ghl' } = {}) {
+  const kandidaat = telefoonNlBe(ghl, { bron });
+  if (!isMogelijkBeGsmUitGhl(kandidaat)) return kandidaat;
+  const be = '+32' + kandidaat.slice(3);
+  for (const o of [].concat(onze || [])) {
+    if (o != null && normaliseerNlBe(o).e164 === be) return be;
+  }
+  return kandidaat;
+}

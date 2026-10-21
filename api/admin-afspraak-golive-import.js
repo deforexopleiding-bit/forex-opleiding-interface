@@ -20,6 +20,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
+import { leadTelefoonUitGhl } from './_lib/ghl-telefoon.js';
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
 const CAL_VERSION = '2021-07-28';
@@ -151,6 +152,8 @@ export default async function handler(req, res) {
           const c = await fetchGhlContact(ev.contactId);
           if (c) { if (!leadEmail) leadEmail = c.email || null; if (!leadPhone) leadPhone = c.phone || null; }
         }
+        // Zelfde NL/BE-regel + bevestiging met onze leaddata als de poll.
+        leadPhone = await leadTelefoonUitGhl({ ghlTelefoon: leadPhone, email: leadEmail, bron: 'admin-afspraak-golive-import' });
 
         const row = {
           ghl_appointment_id: ev.id,

@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
+import { leadTelefoonUitGhl } from './_lib/ghl-telefoon.js';
 import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 
 const supabaseAdmin = createClient(
@@ -82,7 +83,11 @@ export default async function handler(req, res) {
 
     const update = {};
     if (!appt.lead_email && contact.email) update.lead_email = contact.email;
-    if (!appt.lead_phone && contact.phone) update.lead_phone = contact.phone;
+    if (!appt.lead_phone && contact.phone) {
+      update.lead_phone = await leadTelefoonUitGhl({
+        ghlTelefoon: contact.phone, email: contact.email || appt.lead_email || null, bron: 'follow-up-backfill-contacts',
+      });
+    }
 
     if (Object.keys(update).length === 0) {
       skipped++;
