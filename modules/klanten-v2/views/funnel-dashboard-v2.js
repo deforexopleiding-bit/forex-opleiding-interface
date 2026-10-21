@@ -348,7 +348,7 @@
       </div>`).join('');
   }
 
-  function flowPanelHtml(registry) {
+  function flowPanelHtml(registry, open) {
     const funnels = (registry || []).filter((r) => r && FLOW_PRODUCTS.has(r.product));
     if (!funnels.length) return '';
     const saving = st.flowSaving;
@@ -362,7 +362,7 @@
         <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}${pill(r.bron, 'C', f === 'C')}</span>
       </div>`;
     }).join('');
-    return `<details class="fd-flow" style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
+    return `<details class="fd-flow"${open ? ' open' : ''} style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
       <summary style="cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
         Boek-flow (A/B/C) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = snelle flow, C = korte route (geen quiz) · default ${def}</span>
         ${saving ? '<span style="margin-left:auto;color:var(--text-3);font-size:11px">Opslaan…</span>' : ''}
@@ -382,7 +382,9 @@
     </details>`;
   }
 
-  function render(registry) {
+  // opts.zonderFlow: de boek-flow-schakelaar staat dan in een eigen subtab (renderFlow).
+  function render(registry, opts) {
+    const o = opts || {};
     if (!st.fetched && !st.loading && !st.error) {
       const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
       q(() => fetchStats(false));
@@ -431,7 +433,7 @@
         ${custom}
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : esc(periodeTxt)}</span>
       </div>
-      ${flowPanelHtml(registry)}
+      ${o.zonderFlow ? '' : flowPanelHtml(registry)}
       ${st.error ? `<div class="fd-fout" style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
       ${bannerHtml(meta)}
       ${groepen}
@@ -440,5 +442,14 @@
     </div>`;
   }
 
-  window.DFOFunnelDashboard = { render, state: st, presetRange, nlVandaag, plusDagen, fetchStats };
+  /** Subtab "Boek-flow (A/B/C)": alleen de schakelaar, open. */
+  function renderFlow(registry) {
+    if (!st.flowFetched) {
+      const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
+      q(() => fetchFlow(false).then(() => rerender()));
+    }
+    return '<div class="fd-flow-tab" style="max-width:900px">' + (flowPanelHtml(registry, true) || '<div style="color:var(--text-3)">Geen funnels met een boek-flow.</div>') + '</div>';
+  }
+
+  window.DFOFunnelDashboard = { render, renderFlow, state: st, presetRange, nlVandaag, plusDagen, fetchStats };
 })();

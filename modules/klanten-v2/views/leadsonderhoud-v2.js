@@ -82,7 +82,7 @@
     // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
-    funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
+    funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null, sub: 'statistieken' },
     emails:         { loading: false, fetched: false, error: null, data: null, _seq: 0, filter: 'alle', mailbox: 'alle',
                       // 2026-10-11: lead-mailsjablonen (mailbouwer / Stuur bericht / Massabericht).
                       leadSj: [], leadSjFout: null },
@@ -4550,7 +4550,32 @@
       <td style="padding:8px 10px">${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand)">Open ↗</a>` : '—'}</td>
     </tr>`;
   }
+  // Funnels-tab (2026-10-21) in drie subtabs:
+  //   Funnels koppelen     — vaste instaplinks (/go/<slug>) + varianten/gewichten (funnel-splits-v2.js)
+  //   Funnelstatistieken   — split-test-vergelijking + het funnel-dashboard + leads per bron
+  //   Boek-flow (A/B/C)    — de bestaande A/B/C-schakelaar (funnel-dashboard-v2.js renderFlow)
+  const _LS_FUNNEL_SUBS = [['koppelen', 'Funnels koppelen'], ['statistieken', 'Funnelstatistieken'], ['boekflow', 'Boek-flow (A/B/C)']];
+  window._lsFunnelSub = function (sub) {
+    if (!_LS_FUNNEL_SUBS.some(([k]) => k === sub)) return;
+    _live.funnels.sub = sub;
+    if (window.DFO?.render) window.DFO.render();
+  };
   function funnelsView() {
+    const sub = _live.funnels.sub || 'statistieken';
+    const balk = `<div class="ls-funnel-subs" role="tablist" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--border)">${
+      _LS_FUNNEL_SUBS.map(([k, l]) => `<button role="tab" aria-selected="${k === sub}" class="chip ${k === sub ? 'on' : ''}" style="font-size:12.5px;padding:6px 13px" onclick="window._lsFunnelSub('${k}')">${l}</button>`).join('')
+    }</div>`;
+    if (sub === 'koppelen') {
+      const k = window.DFOFunnelSplits && typeof window.DFOFunnelSplits.renderKoppelen === 'function' ? window.DFOFunnelSplits.renderKoppelen(FUNNEL_REGISTRY) : '';
+      return `<div>${balk}${k}</div>`;
+    }
+    if (sub === 'boekflow') {
+      const f = window.DFOFunnelDashboard && typeof window.DFOFunnelDashboard.renderFlow === 'function' ? window.DFOFunnelDashboard.renderFlow(FUNNEL_REGISTRY) : '';
+      return `<div>${balk}${f}</div>`;
+    }
+    return `<div>${balk}${funnelStatistiekenHtml()}</div>`;
+  }
+  function funnelStatistiekenHtml() {
     const st = _live.funnels;
     if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchFunnels(false));
     const data = st.data || {};
@@ -4568,9 +4593,13 @@
     // Funnel-dashboard (first-party tracking, /api/funnel-stats) bovenaan;
     // de bestaande leadtelling per bron blijft eronder staan.
     const dashboard = (window.DFOFunnelDashboard && typeof window.DFOFunnelDashboard.render === 'function')
-      ? window.DFOFunnelDashboard.render(FUNNEL_REGISTRY)
+      ? window.DFOFunnelDashboard.render(FUNNEL_REGISTRY, { zonderFlow: true })
       : '';
-    return `<div>${dashboard}<div style="max-width:900px">
+    // Split-tests bovenaan: per instaplink de varianten naast elkaar (winnaar aflezen).
+    const vergelijk = (window.DFOFunnelSplits && typeof window.DFOFunnelSplits.renderVergelijk === 'function')
+      ? window.DFOFunnelSplits.renderVergelijk(FUNNEL_REGISTRY)
+      : '';
+    return `<div>${vergelijk}${dashboard}<div style="max-width:900px">
       <div style="font-size:15px;font-weight:700;margin-bottom:8px">Leads per bron</div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
