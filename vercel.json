@@ -29,6 +29,10 @@
       "memory": 1024,
       "includeFiles": "api/_lib/fonts/scan/**"
     },
+    "api/lms-student-annuleren.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024

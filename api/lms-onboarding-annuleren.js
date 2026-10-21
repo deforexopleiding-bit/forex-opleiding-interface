@@ -83,7 +83,7 @@ export default async function handler(req, res) {
       onboardingId,
       reden: reden + ' — via het LMS (' + doorEmail + ')',
       doorUserId: door.id,
-      doorLabel: door.full_name || doorEmail,
+      doorLabel: door.naam || doorEmail,
       discordVerwijderd: body.discord_verwijderd,
       via: 'lms',
     });
