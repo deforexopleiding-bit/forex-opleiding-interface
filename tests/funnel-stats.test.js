@@ -515,21 +515,33 @@ test('scherm: haalt /api/funnel-stats op en tekent 20 kaarten in 5 groepen', asy
   assert.match(stats[0], /^\/api\/funnel-stats\?van=\d{4}-\d{2}-\d{2}&tot=\d{4}-\d{2}-\d{2}$/);
   assert.deepEqual(calls.filter((u) => u === '/api/opstartsessie-flow-get').length, 1,
     'en precies één keer de boek-flow');
-  html = D.render([{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }]);
-  assert.equal((html.match(/class="fd-kaart"/g) || []).length, 22);
+  const reg = [{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }];
+  html = D.render(reg);
+  // Compact overzicht (2026-10-21): één regel per variant, gegroepeerd per funnel.
+  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 22);
   assert.match(html, /data-groep="kmc"/);
   assert.match(html, /data-groep="7-daagse"/);
   assert.match(html, /data-groep="webinar"/);
   assert.match(html, /data-groep="the-lab"/);
   assert.match(html, /data-groep="strategiescan"/);
-  assert.equal((html.match(/class="fd-fase"/g) || []).length, 22 * 8);
-  assert.match(html, /href="https:\/\/deforexopleiding\.nl\/kennismakingscursus-v3"/);
+  assert.equal((html.match(/class="fd-mini"/g) || []).length, 22, 'mini-trechter per regel');
+  assert.equal((html.match(/class="fd-fase"/g) || []).length, 0, 'volledige trechter pas op klik');
   assert.doesNotMatch(html, /fd-inactief/);
   assert.doesNotMatch(html, /fd-afhaken/);
+  // Klik op een regel → de volledige trechter (8 fases) + leadblokjes + Open-link eronder.
+  window.__fdRij('kennismakingscursus-v3');
+  html = D.render(reg);
+  assert.equal((html.match(/class="fd-detail"/g) || []).length, 1);
+  assert.equal((html.match(/class="fd-fase"/g) || []).length, 8);
+  assert.equal((html.match(/class="fd-leads"/g) || []).length, 1);
+  assert.match(html, /href="https:\/\/deforexopleiding\.nl\/kennismakingscursus-v3"/);
+  window.__fdRij('kennismakingscursus-v3');
+  window.__fdRij('7-daagse-v2');
   window.__fdToggle('7-daagse-v2');
   html = D.render([]);
   assert.equal((html.match(/class="fd-afhaken"/g) || []).length, 1);
   assert.match(html, /Quizversie q1/);
+  window.__fdRij('7-daagse-v2');
 });
 
 test('scherm: tracking niet actief → duidelijke banner, lead-resultaat blijft', async () => {
@@ -539,9 +551,46 @@ test('scherm: tracking niet actief → duidelijke banner, lead-resultaat blijft'
   const html = window.DFOFunnelDashboard.render([]);
   assert.match(html, /class="fd-inactief"/);
   assert.match(html, /Tracking nog niet actief \(migratie funnel_events niet gedraaid\)/);
-  assert.match(html, /Nog geen trackingdata/);
-  assert.equal((html.match(/class="fd-leads"/g) || []).length, 22);
-  assert.doesNotMatch(html, /Afhaken per vraag/);
+  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 22, 'regels blijven staan (leads uit lead_resultaat)');
+  window.__fdRij('7-daagse-v2');
+  const open = window.DFOFunnelDashboard.render([]);
+  assert.match(open, /Nog geen trackingdata/);
+  assert.equal((open.match(/class="fd-leads"/g) || []).length, 1);
+  assert.doesNotMatch(open, /Afhaken per vraag/);
+  window.__fdRij('7-daagse-v2');
+});
+
+test('scherm: compacte regel toont exact de bestaande cijfers; hoogste opt-in per funnel groen', () => {
+  const fun = (landing, gegevens) => C.FUNNEL_FASES.map((f) => ({ fase: f.fase, label: f.label,
+    sessions: f.fase === 'landing' ? landing : f.fase === 'gegevens_ok' ? gegevens : f.fase === 'formulier_start' ? gegevens + 5 : 1, conversie_vorige: null }));
+  const v = (variant, landing, gegevens, leads, geboekt) => ({ variant, groep: 'kmc', label: variant, funnel: fun(landing, gegevens),
+    lead_resultaat: { leads, toegang: leads, geen_toegang: 0, geboekt, leads_met_sessie: leads, dekking_pct: 100, toegang_pct: 100 } });
+  const payload = { periode: { van: '2026-10-15', tot: '2026-10-21' }, varianten: ['kennismakingscursus-v5', 'kennismakingscursus-v6'],
+    per_variant: { 'kennismakingscursus-v5': v('kennismakingscursus-v5', 328, 32, 21, 1), 'kennismakingscursus-v6': v('kennismakingscursus-v6', 57, 6, 1, 2) },
+    meta: { tracking_actief: true, tabel_bestaat: true, blinde_vlekken: [] } };
+  const { window } = laadScherm(payload);
+  const D = window.DFOFunnelDashboard;
+  D.state.data = payload; D.state.fetched = true; D.state.flowFetched = true;
+  const html = D.render([]);
+  const rij = (variant) => html.slice(html.indexOf(`data-variant="${variant}"`), html.indexOf('</tr>', html.indexOf(`data-variant="${variant}"`)));
+  const v5 = rij('kennismakingscursus-v5');
+  // Bezoekers = landing (328), opt-in = 32/328 = 9,8%, leads = 21, geboekt = 1.
+  assert.match(v5, />328<\/td>/);
+  assert.match(v5, /class="fd-optin"[^>]*>9,8%</);
+  assert.match(v5, />21<\/td>/);
+  assert.match(v5, />1<\/td>\s*<\/tr>|>1<\/td>\s*$/);
+  // v6: 6/57 = 10,5% → hoogste in de groep → groen.
+  assert.match(rij('kennismakingscursus-v6'), /class="fd-optin beste"[^>]*>10,5%</);
+  assert.doesNotMatch(v5, /fd-optin beste/);
+});
+
+test('scherm: alleen de Funnelstatistieken-subtab krijgt de extra ruimte', () => {
+  const src = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
+  const fv = src.slice(src.indexOf('function funnelsView()'), src.indexOf('function funnelStatistiekenHtml()'));
+  assert.match(fv, /<div class="ls-funnelstats" style="padding:[^"]+">\$\{funnelStatistiekenHtml\(\)\}<\/div>/);
+  // Koppelen en Boek-flow ongewijzigd (geen extra wrapper).
+  assert.match(fv, /return `<div>\$\{balk\}\$\{k\}<\/div>`;/);
+  assert.match(fv, /return `<div>\$\{balk\}\$\{f\}<\/div>`;/);
 });
 
 test('scherm: fout 403 toont rechten-melding', async () => {
@@ -646,6 +695,7 @@ test('gedrag-scherm: tijdkolommen in Afhaken per vraag + blok Waarom afhaken', a
   });
   const D = window.DFOFunnelDashboard;
   D.render([]); await taken[0]();
+  window.__fdRij(V);
   window.__fdToggle(V);
   const html = D.render([]);
   assert.match(html, /Gem\. tijd/);
@@ -661,6 +711,7 @@ test('gedrag-scherm: zonder gedragsdata een rustige melding, geen lege blokken',
   const { window, taken } = laadScherm(nepPayload({ actief: true }));
   const D = window.DFOFunnelDashboard;
   D.render([]); await taken[0]();
+  window.__fdRij('kennismakingscursus-v1');
   window.__fdToggle('kennismakingscursus-v1');
   const html = D.render([]);
   assert.match(html, /nog geen gedragssignalen/);
@@ -724,6 +775,8 @@ test('the-lab/strategiescan: registry-producten + schakelpaneel toont ze zonder 
     { bron: 'the-lab-v1', naam: 'The Lab (v1 · A)', product: 'the-lab' },
     { bron: 'strategiescan-v1', naam: 'Strategie-scan (v1)', product: 'strategiescan' },
   ];
+  // Lead-blokjes staan in het uitgeklapte detail van een regel.
+  window.__fdRij('the-lab-v1'); window.__fdRij('strategiescan-v1');
   const html = window.DFOFunnelDashboard.render(reg);
   assert.match(html, /The Lab \(v1 · A\)[\s\S]*eigen flow · Lab-aanmelding/);
   assert.match(html, /Strategie-scan \(v1\)[\s\S]*eigen flow · Formulier → meteen de strategie-scan boeken/);

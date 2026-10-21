@@ -142,7 +142,7 @@ test('endpoint: winnaar = 100/0, verliezer blijft AAN (sticky + meten); gelijk v
 
 test('scherm: Funnels-tab in drie subtabs; Koppelen toont link, kopieerknop en statusregel', () => {
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /views\/funnel-splits-v2\.js\?v=1/);
+  assert.match(html, /views\/funnel-splits-v2\.js\?v=\d+/);
   assert.ok(html.indexOf('funnel-splits-v2.js') < html.indexOf('leadsonderhoud-v2.js'), 'vóór de leadsonderhoud-view geladen');
   const ls = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
   assert.match(ls, /\['koppelen', 'Funnels koppelen'\], \['statistieken', 'Funnelstatistieken'\], \['boekflow', 'Boek-flow \(A\/B\/C\)'\]/);
@@ -170,6 +170,6 @@ test('scherm: Funnels-tab in drie subtabs; Koppelen toont link, kopieerknop en s
   assert.match(k, /gekoppeld · 0% \(blijft meten\) · 0% · 10 bezoekers · opt-in 10% · 1 leads/);
   assert.match(k, /<option value="strategiesessie-v1"/, 'nog niet gekoppelde variant kan erbij (uitdager)');
   const v = F.renderVergelijk();
-  assert.match(v, /Split-tests/);
-  assert.equal((v.match(/class="fs-kolom"/g) || []).length, 2);
+  assert.match(v, /Lopende split-tests/);
+  assert.equal((v.match(/class="fs-vrij"/g) || []).length, 2);
 });
