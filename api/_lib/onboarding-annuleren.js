@@ -921,7 +921,14 @@ async function markeerInLms({ studentId, cancellationId, door, reden, incasso, o
       }
       throw new Error(error.message);
     }
-    return { ok: true, ...(data && typeof data === 'object' ? data : {}) };
+    const uit = data && typeof data === 'object' ? data : {};
+    // De incasso-kern ("incasso: één waarheid", hlms_incasso_een_waarheid.sql)
+    // staat er nog niet: de annulering is in het LMS vastgelegd, het
+    // incasso-merkteken en de kaart niet. Dat hoort zichtbaar te mislukken.
+    if (incasso && uit.merkteken === 'kern_ontbreekt') {
+      return { ok: false, ...uit, error: 'migratie hlms_incasso_een_waarheid.sql nog niet gedraaid in het LMS: geen incasso-merkteken, geen kaart' };
+    }
+    return { ok: true, ...uit };
   } catch (e) {
     console.error('[onboarding-annuleren] LMS-markering ' + studentId + ': ' + (e?.message || e));
     return { ok: false, error: e?.message || String(e) };

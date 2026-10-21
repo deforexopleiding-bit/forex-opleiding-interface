@@ -298,6 +298,14 @@ test('LMS-MIGRATIE NOG NIET GEDRAAID: markering overgeslagen, de rest gaat door;
   assert.equal(body.steps.incasso_pipeline.ok, true);
 });
 
+test('INCASSO-KERN NOG NIET IN HET LMS: de markering staat er, de stap meldt zichtbaar dat het merkteken ontbreekt', async (t) => {
+  t.after(() => mock.reset());
+  const w = await laad(basis(), { rpc: async () => ({ data: { annulering: 'nieuw', incasso: false, merkteken: 'kern_ontbreekt', incasso_kaart: 'kern_ontbreekt' }, error: null }) });
+  const { body } = await w.mod.voerAnnuleringUit({ studentId: STUDENT, opties: { ...ALLES_UIT, incasso: true }, reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(body.steps.lms_markering.ok, false);
+  assert.match(body.steps.lms_markering.error, /hlms_incasso_een_waarheid/);
+});
+
 test('ONBOARDING-NIVEAU (de oude knoppen): het record krijgt de mentormelding ook juist (bug notify_mentor)', async (t) => {
   t.after(() => mock.reset());
   const stand = basis({ metOnboarding: true });
