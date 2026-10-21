@@ -1225,9 +1225,16 @@
   }
 
   // De regel onder het gsm-veld, zoals op de funnels.
+  // Eigen zin voor support (2026-10-21, Maxim): support antwoordt per mail of
+  // belt terug, dus geen "We sturen je WhatsApp" zoals op de funnels. De regel
+  // zelf (welk nummer, E.164) blijft die van de funnels.
+  function telHintTekst(ruw) {
+    var u = TELREGEL.controleer(ruw);
+    return u.ok ? '\u2713 We kunnen je terugbellen op ' + TELREGEL.toon(u.e164) : '';
+  }
   function telHint() {
     var h = root.querySelector('#f-tel-hint');
-    if (h) h.textContent = TELREGEL.hint(veld('f-tel'));
+    if (h) h.textContent = telHintTekst(veld('f-tel'));
   }
   root.addEventListener('input', function (e) {
     if (e.target && e.target.id === 'f-tel') telHint();
