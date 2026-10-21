@@ -10,7 +10,8 @@
 //      aan de server-versie en geeft dezelfde uitkomsten.
 //   3. support-start weigert een aanvraag zonder geldig nummer (klant én
 //      bezoeker) en bewaart het nummer in E.164.
-//   4. De widget: veld voor iedereen, placeholder + hint als de funnels, geen
+//   4. De widget: veld voor iedereen, placeholder als de funnels, eigen hint
+//      ('We kunnen je terugbellen op …'), geen
 //      verzoek zonder geldig nummer, en het nummer gaat in E.164 mee.
 //   5. De supportmodule toont het nummer met een Bel-knop (softphone), en
 //      '— geen nummer' voor oude aanvragen.
@@ -163,7 +164,13 @@ test('4. widget: gsm-veld voor iedereen, placeholder + hint, verplicht en in E.1
   // hint tijdens het typen
   w.invoer('f-tel', '0470 12 34 56');
   w.sr().querySelector('#f-tel').dispatchEvent(new w.window.Event('input', { bubbles: true }));
-  assert.equal(w.sr().querySelector('#f-tel-hint').textContent, '✓ We sturen je WhatsApp naar +32 470 12 34 56');
+  assert.equal(w.sr().querySelector('#f-tel-hint').textContent, '✓ We kunnen je terugbellen op +32 470 12 34 56');
+  // ook een vast nummer: zelfde zin (support belt terug, geen WhatsApp-belofte)
+  w.invoer('f-tel', '020 123 4567');
+  w.sr().querySelector('#f-tel').dispatchEvent(new w.window.Event('input', { bubbles: true }));
+  assert.equal(w.sr().querySelector('#f-tel-hint').textContent, '✓ We kunnen je terugbellen op +31 20 123 4567');
+  assert.doesNotMatch(lees('widget/support.js').slice(lees('widget/support.js').indexOf('function telHintTekst')), /^\s*if \(h\) h\.textContent = TELREGEL\.hint/m, 'de widget gebruikt niet de funnel-hint');
+  w.invoer('f-tel', '0470 12 34 56');
   await w.klik('start');
   const verstuurd = w.log.calls.filter((c) => c.naam === 'support-start');
   assert.equal(verstuurd.length, 1);
