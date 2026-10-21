@@ -157,7 +157,7 @@ test('aggregatie: deling door nul geeft null, nooit NaN/Infinity', () => {
   }
   // Lege dataset: alles 0 / null.
   const leeg = C.aggregeerFunnelStats({ start: START, eindExclusief: EIND });
-  assert.equal(Object.keys(leeg.per_variant).length, 20);
+  assert.equal(Object.keys(leeg.per_variant).length, 22);
   assert.equal(leeg.per_variant['7-daagse-v2'].lead_resultaat.toegang_pct, null);
 });
 
@@ -350,7 +350,7 @@ test('endpoint: fail-soft als funnel_events niet bestaat → 200, tracking_actie
   assert.equal(r.body.meta.tracking_actief, false);
   assert.equal(r.body.meta.tabel_bestaat, false);
   assert.match(r.body.meta.blinde_vlekken.join(' '), /tracking nog niet actief \(migratie funnel_events niet gedraaid\)/i);
-  assert.equal(r.body.varianten.length, 20);
+  assert.equal(r.body.varianten.length, 22);
   const v = r.body.per_variant['kennismakingscursus-v2'];
   assert.equal(v.funnel, null);
   assert.equal(v.lead_resultaat.leads, 1);       // verwijderde lead telt niet
@@ -423,11 +423,12 @@ test('endpoint: bron-code schrijft nooit en gebruikt geen rpc', () => {
 // 3 · REGISTRY
 // ════════════════════════════════════════════════════════════════════════════
 
-test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de twintig varianten', () => {
+test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de tweeentwintig varianten', () => {
   const alle = ['kennismakingscursus-v1', 'kennismakingscursus-v2', 'kennismakingscursus-v3',
     'kennismakingscursus-v4', 'kennismakingscursus-v5', 'kennismakingscursus-v6',
     'kennismakingscursus-v7', 'kennismakingscursus-v8',
     '7-daagse-v1', '7-daagse-v2', '7-daagse-v3', '7-daagse-v4',
+    '7-daagse-v5', '7-daagse-v6',
     'webinar-v1', 'webinar-v2',
     'the-lab-v1', 'the-lab-v2', 'strategiescan-v1', 'strategiesessie-v1',
     'the-lab-site', 'strategiescan-site'];
@@ -515,13 +516,13 @@ test('scherm: haalt /api/funnel-stats op en tekent 20 kaarten in 5 groepen', asy
   assert.deepEqual(calls.filter((u) => u === '/api/opstartsessie-flow-get').length, 1,
     'en precies één keer de boek-flow');
   html = D.render([{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }]);
-  assert.equal((html.match(/class="fd-kaart"/g) || []).length, 20);
+  assert.equal((html.match(/class="fd-kaart"/g) || []).length, 22);
   assert.match(html, /data-groep="kmc"/);
   assert.match(html, /data-groep="7-daagse"/);
   assert.match(html, /data-groep="webinar"/);
   assert.match(html, /data-groep="the-lab"/);
   assert.match(html, /data-groep="strategiescan"/);
-  assert.equal((html.match(/class="fd-fase"/g) || []).length, 20 * 8);
+  assert.equal((html.match(/class="fd-fase"/g) || []).length, 22 * 8);
   assert.match(html, /href="https:\/\/deforexopleiding\.nl\/kennismakingscursus-v3"/);
   assert.doesNotMatch(html, /fd-inactief/);
   assert.doesNotMatch(html, /fd-afhaken/);
@@ -539,7 +540,7 @@ test('scherm: tracking niet actief → duidelijke banner, lead-resultaat blijft'
   assert.match(html, /class="fd-inactief"/);
   assert.match(html, /Tracking nog niet actief \(migratie funnel_events niet gedraaid\)/);
   assert.match(html, /Nog geen trackingdata/);
-  assert.equal((html.match(/class="fd-leads"/g) || []).length, 20);
+  assert.equal((html.match(/class="fd-leads"/g) || []).length, 22);
   assert.doesNotMatch(html, /Afhaken per vraag/);
 });
 
