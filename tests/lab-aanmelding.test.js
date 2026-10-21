@@ -76,7 +76,8 @@ test('nieuwe lead: lead, trial-account met einddatum, rol trial en een loginmail
   const r = await post(GELDIG);
   assert.equal(r.statusCode, 200);
   assert.equal(r.body.ok, true);
-  assert.match(r.body.event_id, /^lab_lead_/);
+  // Testadres (+labtest) en geen productie → geen Meta-Lead (api/_lib/meta-lead-poort.js).
+  assert.equal(r.body.event_id, null);
 
   const lead = crm.tabellen.leads[0];
   assert.equal(lead.bron, 'the-lab');
@@ -104,6 +105,26 @@ test('nieuwe lead: lead, trial-account met einddatum, rol trial en een loginmail
   assert.equal(a.landingspagina, 'https://lms.deforexopleiding.nl/the-lab/', 'querystring weggeknipt');
   assert.match(a.fbc, /^fb\.1\.\d+\.abc123$/);
   assert.equal(a.wa_status, 'geen_template');
+});
+
+test('Meta-Lead: productie + echt adres → lead_<lead_id> één keer; tweede aanmelding geen Lead meer', async () => {
+  const oud = process.env.VERCEL_ENV;
+  process.env.VERCEL_ENV = 'production';
+  try {
+    const echt = { ...GELDIG, email: 'jan.peeters@gmail.com', hook: 'H03' };
+    const ua = { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1' };
+    const r1 = await post(echt, ua);
+    const lead = crm.tabellen.leads[0];
+    assert.equal(r1.body.event_id, 'lead_' + lead.id);
+    assert.ok(lead.meta_lead_op, 'geclaimd op de lead');
+    const r2 = await post(echt, ua);
+    assert.equal(r2.body.ok, true);
+    assert.equal(r2.body.event_id, null, 'zelfde lead → geen tweede Lead');
+    const bot = await post({ ...echt, email: 'iemand.anders@gmail.com' }, { 'user-agent': 'HeadlessChrome/120' });
+    assert.equal(bot.body.event_id, null, 'bot → geen Lead');
+  } finally {
+    if (oud === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = oud;
+  }
 });
 
 test('idempotent: tweede aanmelding = nieuwe link, geen tweede account, touch wel geteld', async () => {
