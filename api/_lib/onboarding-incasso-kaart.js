@@ -8,9 +8,19 @@
 // (soort `incasso_opvolging`). Zet iemand hem terug actief, dan gaat die
 // kaart dicht. Zelfde vorm als de Discord-kaart bij annuleren.
 //
-// Fail-soft: lukt de kaart niet (LMS niet bereikbaar, migratie nog niet
-// gedraaid), dan blijft de incasso-stap gewoon staan; de fout komt in de log
-// en in het antwoord, nooit als een 500. Er gaat NIETS naar de klant.
+// ÉÉN WAARHEID IN HET LMS (Maxim, audit 21 oktober 2026). Sinds de migratie
+// hlms_incasso_een_waarheid.sql in het LMS gaat dit via de LMS-functie
+// `hlms_incasso_vanuit_crm` (alleen service_role): die zet in één transactie
+// de kaart, het merkteken `incasso` in hlms_student_start (anders zette een
+// pauze of herstart de student stil terug in "Klaar voor onboarding" van zijn
+// mentor — gemeten bij twee studenten) en sluit de andere open kaarten
+// van die student. Terug actief: de kaarten dicht, een latere start tot de
+// nieuwe startdatum en het merkteken `herstart`. Staat die functie er nog
+// niet (PGRST202/42883), dan de oude directe weg: alleen de kaart.
+//
+// Deze functies gooien nooit: ze geven { ok:false, error } terug. Of dat de
+// incasso-stap tegenhoudt, beslist de aanroeper (onboarding-incasso.js: ja —
+// liever zichtbaar mislukt dan half gezet). Er gaat NIETS naar de klant.
 
 import { getDfoLmsClient } from './dfo-lms-db.js';
 
@@ -22,6 +32,31 @@ function klantFilter(onboardingId, studentId) {
   return studentId
     ? 'crm_onboarding_id.eq.' + onboardingId + ',student_id.eq.' + studentId
     : 'crm_onboarding_id.eq.' + onboardingId;
+}
+
+/** De LMS-functie bestaat nog niet (migratie niet gedraaid). */
+function functieOntbreekt(error) {
+  return !!error && (error.code === 'PGRST202' || error.code === '42883');
+}
+
+/**
+ * Via de LMS-kern. `null` = de functie bestaat nog niet (val terug op de oude
+ * weg); anders { ok, ... }.
+ */
+async function viaLmsKern(lms, invoer) {
+  if (typeof lms?.rpc !== 'function') return null;
+  const { data, error } = await lms.rpc('hlms_incasso_vanuit_crm', {
+    p_actie: invoer.actie,
+    p_onboarding: invoer.onboardingId,
+    p_student: invoer.studentId || null,
+    p_naam: invoer.naam || null,
+    p_reden: invoer.reden ? String(invoer.reden).slice(0, 1000) : null,
+    p_datum: invoer.startDatum || null,
+    p_door: invoer.door ? String(invoer.door).slice(0, 300) : null,
+  });
+  if (functieOntbreekt(error)) return null;
+  if (error) throw new Error(error.message);
+  return data && typeof data === 'object' ? data : { ok: true };
 }
 
 async function openKaarten(lms, onboardingId, studentId) {
@@ -40,6 +75,8 @@ async function openKaarten(lms, onboardingId, studentId) {
 export async function openIncassoKaart({ onboardingId, studentId = null, naam = null, reden, door, lms = getDfoLmsClient() }) {
   try {
     if (!lms) return { ok: false, error: 'LMS-koppeling niet geconfigureerd' };
+    const kern = await viaLmsKern(lms, { actie: 'naar', onboardingId, studentId, naam, reden, door });
+    if (kern) return { ok: true, signaal_id: kern.signaal_id || null, merkteken: !!studentId, via: 'lms_kern' };
     const al = await openKaarten(lms, onboardingId, studentId);
     if (al.length) return { ok: true, al_open: true, signaal_id: al[0] };
     const nu = new Date().toISOString();
@@ -73,6 +110,8 @@ export async function openIncassoKaart({ onboardingId, studentId = null, naam = 
 export async function sluitIncassoKaart({ onboardingId, studentId = null, startDatum = null, door, lms = getDfoLmsClient() }) {
   try {
     if (!lms) return { ok: false, error: 'LMS-koppeling niet geconfigureerd' };
+    const kern = await viaLmsKern(lms, { actie: 'terug', onboardingId, studentId, startDatum, door });
+    if (kern) return { ok: true, gesloten: Number(kern.gesloten || 0), via: 'lms_kern' };
     const ids = await openKaarten(lms, onboardingId, studentId);
     if (!ids.length) return { ok: true, gesloten: 0 };
     const nu = new Date().toISOString();

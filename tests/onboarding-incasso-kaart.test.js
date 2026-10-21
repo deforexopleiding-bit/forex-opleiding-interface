@@ -104,11 +104,61 @@ test('NAAR INCASSO opent de kaart met student + naam; TERUG ACTIEF sluit hem', a
   assert.equal(t.body.incasso_kaart.gesloten, 1);
 });
 
-test('KAART MISLUKT: de incasso-stap blijft staan (200), de fout staat in het antwoord', async () => {
+test('LMS MISLUKT BIJ NAAR INCASSO (21 okt): 502, en in het CRM is NIETS gewijzigd', async () => {
   const ob = { id: 'o1', status: 'bezig', archived_at: null };
   const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'Bedenktijd voorbij', door: 'x', db: nepDb(ob),
     kaart: { open: async () => ({ ok: false, error: 'LMS-koppeling niet geconfigureerd' }) } });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.incasso_kaart.ok, false);
-  assert.ok(ob.incasso_op);
+  assert.equal(r.status, 502);
+  assert.equal(r.body.code, 'lms_incasso_mislukt');
+  assert.match(r.body.error, /LMS-koppeling niet geconfigureerd.*niets gewijzigd/);
+  assert.equal(ob.incasso_op ?? null, null);
+});
+
+test('AL IN INCASSO, LMS-KANT ONTBRAK: een tweede poging herstelt het LMS, het CRM blijft zoals het is', async () => {
+  const ob = { id: 'o1', status: 'bezig', archived_at: null, incasso_op: '2026-10-07T10:20:14Z', dfo_lms_student_id: 'st1' };
+  const geopend = [];
+  const r = await zetNaarIncasso({ onboardingId: 'o1', reden: 'geen reactie mentor', door: 'Maxim', db: nepDb(ob),
+    kaart: { open: async (p) => { geopend.push(p); return { ok: true, signaal_id: 's1' }; } } });
+  assert.deepEqual([r.status, r.body.al_in_incasso, geopend.length, geopend[0].studentId], [200, true, 1, 'st1']);
+  assert.equal(ob.incasso_op, '2026-10-07T10:20:14Z');
+});
+
+test('LMS MISLUKT BIJ TERUG ACTIEF (21 okt): 502, hij blijft in incasso', async () => {
+  const ob = { id: 'o1', status: 'bezig', archived_at: null, incasso_op: '2026-10-06T10:00:00Z' };
+  const r = await activeerUitIncasso({ onboardingId: 'o1', startDatum: '2026-11-02', door: 'x', db: nepDb(ob),
+    zetStartdatum: async () => ({ status: 200, body: { ok: true } }),
+    kaart: { sluit: async () => ({ ok: false, error: 'time-out' }) } });
+  assert.equal(r.status, 502);
+  assert.equal(r.body.code, 'lms_terug_mislukt');
+  assert.equal(ob.incasso_terug_op ?? null, null);
+});
+
+function nepLmsMetKern({ rpcFout = null, data = { ok: true, signaal_id: 'sig-kern', gesloten: 2 } } = {}) {
+  const lms = nepLms();
+  lms.log.rpc = [];
+  lms.rpc = (naam, args) => { lms.log.rpc.push({ naam, args }); return Promise.resolve(rpcFout ? { data: null, error: rpcFout } : { data, error: null }); };
+  return lms;
+}
+
+test('VIA DE LMS-KERN (21 okt): naar en terug gaan via hlms_incasso_vanuit_crm, niet via losse inserts', async () => {
+  const lms = nepLmsMetKern();
+  const r = await openIncassoKaart({ onboardingId: 'ob1', studentId: 'st1', naam: 'Vera Proef', reden: 'geen reactie', door: 'Maxim via het LMS (m@x.be)', lms });
+  assert.deepEqual([r.ok, r.signaal_id, r.via], [true, 'sig-kern', 'lms_kern']);
+  assert.equal(lms.log.rpc[0].naam, 'hlms_incasso_vanuit_crm');
+  assert.deepEqual([lms.log.rpc[0].args.p_actie, lms.log.rpc[0].args.p_student, lms.log.rpc[0].args.p_onboarding], ['naar', 'st1', 'ob1']);
+  assert.equal(lms.log.inserts.length, 0);
+  const s = await sluitIncassoKaart({ onboardingId: 'ob1', studentId: 'st1', startDatum: '2026-11-02', door: 'Maxim', lms });
+  assert.deepEqual([s.ok, s.gesloten], [true, 2]);
+  assert.deepEqual([lms.log.rpc[1].args.p_actie, lms.log.rpc[1].args.p_datum], ['terug', '2026-11-02']);
+  assert.equal(lms.log.updates.length, 0);
+});
+
+test('VIA DE LMS-KERN: vóór de LMS-migratie (PGRST202) de oude weg; een echte fout is ok:false', async () => {
+  const oud = nepLmsMetKern({ rpcFout: { code: 'PGRST202', message: 'not found' } });
+  const r = await openIncassoKaart({ onboardingId: 'ob1', studentId: 'st1', reden: 'x', door: 'y', lms: oud });
+  assert.deepEqual([r.ok, r.signaal_id], [true, 'sig-nieuw']);
+  assert.ok(oud.log.inserts.find((i) => i.t === 'hlms_signaal'));
+  const stuk = nepLmsMetKern({ rpcFout: { code: '22023', message: 'kies een nieuwe startdatum, minstens drie dagen vooruit' } });
+  const s = await sluitIncassoKaart({ onboardingId: 'ob1', studentId: 'st1', startDatum: '2026-10-22', door: 'y', lms: stuk });
+  assert.deepEqual([s.ok, s.error], [false, 'kies een nieuwe startdatum, minstens drie dagen vooruit']);
 });
