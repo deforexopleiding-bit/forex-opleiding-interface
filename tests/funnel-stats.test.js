@@ -570,10 +570,11 @@ test('scherm: periode-presets in Amsterdam-tijd', () => {
   assert.equal(D.plusDagen('2026-03-01', -1), '2026-02-28');
 });
 
-test('scherm: leadsonderhoud Funnels-tab tekent het dashboard bovenaan', () => {
+test('scherm: leadsonderhoud Funnels-tab tekent het dashboard (subtab Funnelstatistieken, schakelaar apart)', () => {
   const src = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
   const fv = src.slice(src.indexOf('function funnelsView()'), src.indexOf('// ── E-mails-tab'));
-  assert.match(fv, /window\.DFOFunnelDashboard\.render\(FUNNEL_REGISTRY\)/);
+  assert.match(fv, /window\.DFOFunnelDashboard\.render\(FUNNEL_REGISTRY, \{ zonderFlow: true \}\)/);
+  assert.match(fv, /window\.DFOFunnelDashboard\.renderFlow\(FUNNEL_REGISTRY\)/);
   assert.match(fv, /\/api\/leads-per-bron-count|_lsFunnelRowHtml/);   // bestaande telling blijft
   assert.match(src, /window\.DFO\.VIEWS\['leadsonderhoud\/Funnels'\]\s*=\s*funnelsView/);
 });
