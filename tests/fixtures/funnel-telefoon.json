@@ -1,0 +1,358 @@
+{
+ "bron": "dfo-website lib/lab-scan-funnels.ts controleerFunnelTelefoon + funnelTelefoonHint (2026-10-21)",
+ "placeholder": "06 12 34 56 78 of +32 470 12 34 56",
+ "gevallen": [
+  {
+   "in": "06 12345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "06-12345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "0612345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "+31 6 12345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "+31612345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "0031612345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "0031 6 1234 5678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "612345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "06 12 34 56 78",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "020 123 4567",
+   "ok": true,
+   "e164": "+31201234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 20 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "010-1234567",
+   "ok": true,
+   "e164": "+31101234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 10 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "040 123 4567",
+   "ok": true,
+   "e164": "+31401234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 40 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "+31 20 123 4567",
+   "ok": true,
+   "e164": "+31201234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 20 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "0031201234567",
+   "ok": true,
+   "e164": "+31201234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 20 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "0470 12 34 56",
+   "ok": true,
+   "e164": "+32470123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 470 12 34 56"
+  },
+  {
+   "in": "0470123456",
+   "ok": true,
+   "e164": "+32470123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 470 12 34 56"
+  },
+  {
+   "in": "+32 470 12 34 56",
+   "ok": true,
+   "e164": "+32470123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 470 12 34 56"
+  },
+  {
+   "in": "0032470123456",
+   "ok": true,
+   "e164": "+32470123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 470 12 34 56"
+  },
+  {
+   "in": "470123456",
+   "ok": true,
+   "e164": "+32470123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 470 12 34 56"
+  },
+  {
+   "in": "0472 22 37 52",
+   "ok": true,
+   "e164": "+32472223752",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 472 22 37 52"
+  },
+  {
+   "in": "09 123 45 67",
+   "ok": true,
+   "e164": "+3291234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +32 9 123 45 67 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "02 123 45 67",
+   "ok": true,
+   "e164": "+3221234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +32 2 123 45 67 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "+32 9 123 45 67",
+   "ok": true,
+   "e164": "+3291234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +32 9 123 45 67 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "+32 (0)478-12.34.56",
+   "ok": true,
+   "e164": "+32478123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 478 12 34 56"
+  },
+  {
+   "in": "0478/12.34.56",
+   "ok": true,
+   "e164": "+32478123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +32 478 12 34 56"
+  },
+  {
+   "in": "+49 151 12345678",
+   "ok": true,
+   "e164": "+4915112345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +4915112345678"
+  },
+  {
+   "in": "0049 151 12345678",
+   "ok": true,
+   "e164": "+4915112345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +4915112345678"
+  },
+  {
+   "in": "+44 7911 123456",
+   "ok": true,
+   "e164": "+447911123456",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +447911123456"
+  },
+  {
+   "in": "",
+   "ok": false,
+   "melding": "Vul je gsm-nummer in, bv. 06 12 34 56 78.",
+   "hint": ""
+  },
+  {
+   "in": "   ",
+   "ok": false,
+   "melding": "Vul je gsm-nummer in, bv. 06 12 34 56 78.",
+   "hint": ""
+  },
+  {
+   "in": "06 1234567",
+   "ok": false,
+   "melding": "Een Nederlands 06-nummer heeft 10 cijfers, bv. 06 12 34 56 78.",
+   "hint": ""
+  },
+  {
+   "in": "06 1234",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "0612",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "12345",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "abc",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "0000000000",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "+31 6 123",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "+32 470 12 34",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "+31 0 20 123 4567",
+   "ok": true,
+   "e164": "+31201234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 20 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "0201234567",
+   "ok": true,
+   "e164": "+31201234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 20 123 4567 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "091234567",
+   "ok": true,
+   "e164": "+3291234567",
+   "gsm": false,
+   "hint": "✓ We bellen je op +32 9 123 45 67 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "0123",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "00 31 6 12345678",
+   "ok": true,
+   "e164": "+31612345678",
+   "gsm": true,
+   "hint": "✓ We sturen je WhatsApp naar +31 6 12345678"
+  },
+  {
+   "in": "+3161234567",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "+316123456789",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "3161234567",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "06123456789",
+   "ok": false,
+   "melding": "Een Nederlands 06-nummer heeft 10 cijfers, bv. 06 12 34 56 78.",
+   "hint": ""
+  },
+  {
+   "in": "+0031612345678",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "0800 1234",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "0900-1234567",
+   "ok": false,
+   "melding": "Dit nummer herkennen we niet. Typ je gsm-nummer, bv. 06 12 34 56 78 (Nederland) of 0470 12 34 56 (België).",
+   "hint": ""
+  },
+  {
+   "in": "085 130 83 62",
+   "ok": true,
+   "e164": "+31851308362",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 85 130 8362 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "+31 85 130 83 62",
+   "ok": true,
+   "e164": "+31851308362",
+   "gsm": false,
+   "hint": "✓ We bellen je op +31 85 130 8362 (vast nummer: geen WhatsApp)"
+  },
+  {
+   "in": "06 12 34 56 78 9",
+   "ok": false,
+   "melding": "Een Nederlands 06-nummer heeft 10 cijfers, bv. 06 12 34 56 78.",
+   "hint": ""
+  }
+ ]
+}

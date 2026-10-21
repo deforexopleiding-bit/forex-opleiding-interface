@@ -16,6 +16,7 @@ import { checkRateLimit } from './_lib/rate-limit.js';
 import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
 import { maakSessieToken, hashToken, maakKenmerk, schrijfBericht, publiekGesprek } from './_lib/support-sessie.js';
 import { haalBeschikbaarheid, beschikbaarheidsTekst } from './_lib/support-beschikbaarheid.js';
+import { controleerSupportTelefoon } from './_lib/support-telefoon.js';
 
 const SOORTEN = ['klant', 'bezoeker'];
 const ONDERWERPEN = ['lms', 'discord', 'traject', 'financieel', 'informatie', 'event', 'inschrijving', 'call', 'overig'];
@@ -52,17 +53,18 @@ export default async function handler(req, res) {
   const onderwerp = ONDERWERPEN.includes(body.onderwerp) ? body.onderwerp : 'overig';
   const naam = schoon(body.naam, 120);
   const email = schoon(body.email, 200).toLowerCase();
-  const telefoon = schoon(body.telefoon, 40);
   const vraag = schoon(body.vraag, 4000);
 
-  // Een klant geeft naam, mail én telefoon; een bezoeker alleen naam en mail.
-  // Het telefoonnummer is voor een klant geen formaliteit: het is de
+  // Sinds 2026-10-21 geeft IEDEREEN (klant én bezoeker) naam, mail én gsm, zodat
+  // het team kan terugbellen vanuit de supportmodule (softphone). Het nummer
+  // gaat naar E.164 met dezelfde NL/BE-regel als de funnels op de website
+  // (api/_lib/support-telefoon.js). Voor een klant blijft het bovendien de
   // tiebreaker als er meerdere klanten op hetzelfde mailadres staan.
   if (!naam) return res.status(400).json({ error: 'Vul je naam in' });
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Vul een geldig e-mailadres in' });
-  if (soort === 'klant' && telefoon.replace(/\D/g, '').length < 8) {
-    return res.status(400).json({ error: 'Vul je telefoonnummer in' });
-  }
+  const tel = controleerSupportTelefoon(schoon(body.telefoon, 40));
+  if (!tel.ok) return res.status(400).json({ error: tel.melding, veld: 'telefoon' });
+  const telefoon = tel.e164;
   if (!vraag) return res.status(400).json({ error: 'Stel je vraag' });
 
   const token = maakSessieToken();
@@ -79,7 +81,7 @@ export default async function handler(req, res) {
         status: 'bot',
         naam,
         email,
-        telefoon: telefoon || null,
+        telefoon,
         sessie_token_hash: hashToken(token),
         bron_url: schoon(body.bron_url, 500) || null,
         user_agent: schoon(req.headers?.['user-agent'], 300) || null,
