@@ -4502,6 +4502,9 @@
     { bron: 'kennismakingscursus-v6', naam: 'Mini-cursus (v6 · B)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v6', status: 'actief' },
     { bron: 'kennismakingscursus-v7', naam: 'Mini-cursus (v7)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v7', status: 'actief' },
     { bron: 'kennismakingscursus-v8', naam: 'Mini-cursus (v8)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v8', status: 'actief' },
+    // 2026-10-22: A/B via /go/mini-cursus (Funnels koppelen).
+    { bron: 'kennismakingscursus-v9', naam: 'Mini-cursus (v9 · A)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v9', status: 'actief' },
+    { bron: 'kennismakingscursus-v10', naam: 'Mini-cursus (v10 · B)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v10', status: 'actief' },
     { bron: 'webinar-v1',            naam: 'Webinar (v1 · A)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v1',             status: 'actief' },
     { bron: 'webinar-v2',            naam: 'Webinar (v2 · B)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v2',             status: 'actief' },
     // 2026-10-19: The Lab (trial + strategiesessie) en de Strategie-scan — eigen flow, apart gehouden.
