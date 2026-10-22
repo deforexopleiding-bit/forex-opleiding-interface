@@ -14,6 +14,10 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { betaaldBedrag, telAlsBetaald } from './factuur-betaald.js';
+import {
+  loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
+  factuurVanDeal, factuurVanDeals, isSchemaOntbreekt,
+} from './commissie-toewijzing.js';
 
 /**
  * 1e betaalde factuur van een klant → alle openstaande bonus-entries voor
@@ -101,7 +105,7 @@ export async function releaseProportionalForPayment({
   //    die nog niet (volledig) zijn vrijgegeven.
   let q = supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, mentor_user_id, team_member_id, event_id, customer_id, attendee_id, source_invoice_id, source_quote_id, amount, original_amount')
+    .select('id, mentor_user_id, team_member_id, event_id, customer_id, attendee_id, source_invoice_id, source_quote_id, amount, original_amount, idempotency_key')
     .eq('entry_type', 'bonus')
     .eq('customer_id', customerId)
     .in('status', ['pending', 'wachten_op_betaling'])
@@ -155,6 +159,7 @@ export async function releaseProportionalForPayment({
       released_at      : nowIso,
       idempotency_key  : `${parent.id}:pay:${paymentId}`,
     };
+    if (attributionIdOf(parent)) childRow.attribution_id = attributionIdOf(parent);
     const { data: insertedChild, error: cErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .insert(childRow)
@@ -203,6 +208,7 @@ export async function releaseProportionalForPayment({
         released_at      : nowIso,
         idempotency_key  : `${parent.id}:settle:${paymentId}`,
       };
+      if (attributionIdOf(parent)) settleRow.attribution_id = attributionIdOf(parent);
       const { data: settled, error: sErr } = await supabaseAdmin
         .from('mentor_ledger_entries')
         .insert(settleRow)
@@ -242,6 +248,18 @@ export async function cancelForCancelledQuote({ quoteId } = {}) {
     .select('id');
   if (error) throw new Error('cancelForCancelledQuote: ' + error.message);
   const rows = data || [];
+  // Handmatige toewijzing op deze deal mee annuleren (fail-soft: tabel kan
+  // nog ontbreken). Al vrijgegeven/uitbetaald blijft staan (forward-only).
+  try {
+    const { error: aErr } = await supabaseAdmin
+      .from('mentor_sale_attributions')
+      .update({ status: 'geannuleerd', cancelled_at: new Date().toISOString() })
+      .eq('deal_id', quoteId)
+      .eq('status', 'actief');
+    if (aErr && !isSchemaOntbreekt(aErr)) console.warn('[cancelForCancelledQuote] toewijzing:', aErr.message);
+  } catch (e) {
+    console.warn('[cancelForCancelledQuote] toewijzing:', e?.message || e);
+  }
   return { cancelled: rows.length, ids: rows.map((r) => r.id) };
 }
 
@@ -402,10 +420,15 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   }
   paidTotal = _r2(paidTotal);
 
+  // Handmatige toewijzingen (fail-soft): toegewezen parent → alleen de sub van
+  // zijn eigen deal; event-parent → geen fallback op een toegewezen deal.
+  const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
+  const activeAttrDeals = attrs.activeDealIdsByCust.get(customerId) || new Set();
+
   // ── 3) Parents ─────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at')
+    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at, idempotency_key')
     .eq('entry_type', 'bonus')
     .eq('customer_id', customerId)
     .in('status', ['pending', 'wachten_op_betaling'])
@@ -439,11 +462,15 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
     // Vind subscription voor deze parent.
     //   Route 1: source_quote_id (deal.id) → sub op dat deal.
     //   Route 2 (fallback): nieuwste sub op de klant.
+    const attrId = attributionIdOf(parent);
     let sub = null;
     if (parent.source_quote_id) {
       sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
     }
-    if (!sub) sub = subsForCust[0] || null;
+    if (!sub && !attrId) {
+      const excl = uitTeSluitenDeals(activeAttrDeals, parent.source_quote_id);
+      sub = subsForCust.find((s) => !excl.has(s.deal_id)) || null;
+    }
 
     const termCount = sub && Number.isFinite(Number(sub.term_count)) && Number(sub.term_count) > 0
       ? Number(sub.term_count) : null;
@@ -556,6 +583,7 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
         released_at      : releasedAt,
         idempotency_key  : idem,
       };
+      if (attrId) childRow.attribution_id = attrId;
       const { data: inserted, error: cErr } = await supabaseAdmin
         .from('mentor_ledger_entries')
         .insert(childRow)
@@ -671,7 +699,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   // ── 2) Facturen van de klant — paid_total per tl_sub_id + customer-breed ─
   const { data: allInvs } = await supabaseAdmin
     .from('invoices')
-    .select('tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
+    .select('deal_id, tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
     .eq('customer_id', customerId);
   // Volledig gecrediteerd telt als 0 betaald (zie api/_lib/factuur-betaald.js).
   const custPaidTotal   = _r2((allInvs || []).reduce((s, i) => s + betaaldBedrag(i), 0));
@@ -695,16 +723,35 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     }
   }
 
+  // ── 2b) Handmatige toewijzingen (verlenging/upsell) — fail-soft ─────────
+  //   Toegewezen deal → zijn parents tellen ALLEEN de facturen van die deal.
+  //   Event-parent → facturen van (andere) toegewezen deals tellen niet mee in
+  //   de klantbrede som. Zonder toewijzingen: exact het oude gedrag.
+  const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
+  const activeAttrDeals = attrs.activeDealIdsByCust.get(customerId) || new Set();
+
   // ── 3) Parents ───────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at')
+    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at, idempotency_key')
     .eq('entry_type', 'bonus')
     .eq('customer_id', customerId)
     .in('status', ['pending', 'wachten_op_betaling'])
     .is('parent_entry_id', null)
     .order('created_at', { ascending: true });
   if (pErr) throw new Error('releaseProportionalForPaidAmount parents: ' + pErr.message);
+
+  // Betaald + laatste betaaldatum over een deelverzameling facturen.
+  const somBetaald = (invs) => {
+    let paid = 0;
+    let last = null;
+    for (const inv of invs) {
+      const p = betaaldBedrag(inv);
+      paid += p;
+      if (p > 0 && inv.paid_date && (!last || inv.paid_date > last)) last = inv.paid_date;
+    }
+    return { paid: _r2(paid), lastPaidDate: last };
+  };
 
   // Bestaande children per parent — voor reedsReleased-som én dry-run dedup.
   const parentIds = (parents || []).map((p) => p.id);
@@ -725,34 +772,53 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   const releasedIds = [];
 
   for (const parent of parents || []) {
-    // Bepaal sub voor deze parent → tl_sub_id → totaalBetaald voor deze sale.
-    let sub = null;
-    if (parent.source_quote_id) {
-      sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
-    }
-    if (!sub) sub = subsForCust[0] || null;
-    const tlSubId = sub?.teamleader_subscription_id || null;
+    const attrId = attributionIdOf(parent);
+    let saleTotaalBetaald;
+    let saleLastPaidDate;
+    if (attrId) {
+      // Toegewezen sale: alleen de facturen van de eigen deal, nooit klantbreed.
+      const dealId = parent.source_quote_id || null;
+      const tlSet  = tlSubIdsVanDeal(dealId, subsForCust);
+      const acc    = dealId
+        ? somBetaald((allInvs || []).filter((inv) => factuurVanDeal(inv, dealId, tlSet)))
+        : { paid: 0, lastPaidDate: null };
+      saleTotaalBetaald = acc.paid;
+      saleLastPaidDate  = acc.lastPaidDate;
+    } else {
+      const excl = uitTeSluitenDeals(activeAttrDeals, parent.source_quote_id);
+      // Bepaal sub voor deze parent → tl_sub_id → totaalBetaald voor deze sale.
+      let sub = null;
+      if (parent.source_quote_id) {
+        sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
+      }
+      if (!sub) sub = subsForCust.find((s) => !excl.has(s.deal_id)) || null;
+      const tlSubId = sub?.teamleader_subscription_id || null;
 
-    // Sale-scope totaalBetaald: MAX van sub-route en customer-route.
-    // Waarom max en niet else-if: bij klanten met deels ongekoppelde
-    // facturen (tl_subscription_id=NULL op sommige betalingen) is de
-    // sub-route incompleet. Customer-route bevat álle klant-facturen (incl.
-    // de gekoppelde) en is dus altijd >= sub-route.
-    // Randgeval multi-sale klant: bij >1 sale per customer kan custPaidTotal
-    // facturen van andere sales bevatten — bekende beperking (idem in
-    // mentor-bonus-overview). De cap op (origAmount - reedsReleased) verderop
-    // voorkomt dat er ooit meer dan de volledige bonus vrijkomt. Exactheid
-    // verbetert zodra facturen consequent aan de sub gekoppeld zijn.
-    const subAcc  = (tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null;
-    const subPaid  = subAcc ? _r2(subAcc.paid) : 0;
-    const custPaid = _r2(custPaidTotal);
-    const saleTotaalBetaald = Math.max(subPaid, custPaid);
-    // last paid_date volgt de route met het hoogste bedrag (typisch = recentste
-    // betaling); fallback op de andere route zodat we nooit null returnen als
-    // er wél betaald is.
-    const saleLastPaidDate =
-      (custPaid >= subPaid ? custLastPaidDate : (subAcc?.lastPaidDate || null))
-      || custLastPaidDate || subAcc?.lastPaidDate || null;
+      // Sale-scope totaalBetaald: MAX van sub-route en customer-route.
+      // Waarom max en niet else-if: bij klanten met deels ongekoppelde
+      // facturen (tl_subscription_id=NULL op sommige betalingen) is de
+      // sub-route incompleet. Customer-route bevat álle klant-facturen (incl.
+      // de gekoppelde) en is dus altijd >= sub-route.
+      // Randgeval multi-sale klant: bij >1 sale per customer kan custPaidTotal
+      // facturen van andere sales bevatten — bekende beperking (idem in
+      // mentor-bonus-overview). De cap op (origAmount - reedsReleased) verderop
+      // voorkomt dat er ooit meer dan de volledige bonus vrijkomt. Exactheid
+      // verbetert zodra facturen consequent aan de sub gekoppeld zijn.
+      // Toegewezen deals (verlenging) tellen niet mee voor een event-bonus.
+      const custAcc = excl.size
+        ? somBetaald((allInvs || []).filter((inv) => !factuurVanDeals(inv, excl, subsForCust)))
+        : { paid: custPaidTotal, lastPaidDate: custLastPaidDate };
+      const subAcc  = (tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null;
+      const subPaid  = subAcc ? _r2(subAcc.paid) : 0;
+      const custPaid = _r2(custAcc.paid);
+      saleTotaalBetaald = Math.max(subPaid, custPaid);
+      // last paid_date volgt de route met het hoogste bedrag (typisch = recentste
+      // betaling); fallback op de andere route zodat we nooit null returnen als
+      // er wél betaald is.
+      saleLastPaidDate =
+        (custPaid >= subPaid ? custAcc.lastPaidDate : (subAcc?.lastPaidDate || null))
+        || custAcc.lastPaidDate || subAcc?.lastPaidDate || null;
+    }
 
     const parentBasis = Number(parent.basis) || 0;
     const kids        = kidsByParent.get(parent.id) || [];
@@ -875,6 +941,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       released_at      : releasedAt,
       idempotency_key  : idem,
     };
+    if (attrId) childRow.attribution_id = attrId;
     const { data: inserted, error: cErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
       .insert(childRow)

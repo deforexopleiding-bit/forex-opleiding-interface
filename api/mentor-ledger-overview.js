@@ -31,6 +31,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { attributionIdOf } from './_lib/commissie-toewijzing.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MANAGER_ROLES = new Set(['super_admin', 'admin', 'manager']);
@@ -90,7 +91,7 @@ export default async function handler(req, res) {
     // ── Laad ledger-entries ────────────────────────────────────────────────
     let q = supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, mentor_user_id, event_id, entry_type, basis, amount, status, attendee_id, customer_id')
+      .select('id, mentor_user_id, event_id, entry_type, basis, amount, status, attendee_id, customer_id, idempotency_key')
       .limit(5000);
     if (qEventId)         q = q.eq('event_id', qEventId);
     if (effectiveMentorId) q = q.eq('mentor_user_id', effectiveMentorId);
@@ -128,16 +129,20 @@ export default async function handler(req, res) {
     const evAgg = new Map();
     for (const r of rows) {
       const eId = r.event_id;
-      if (!evAgg.has(eId)) {
-        evAgg.set(eId, {
-          event_id   : eId,
-          event_title: eventMap.get(eId)?.title || null,
+      // Handmatige toewijzing (geen event): één groep "Handmatig toegewezen".
+      const handmatig = !eId && !!attributionIdOf(r);
+      const groepKey = handmatig ? 'handmatig' : eId;
+      if (!evAgg.has(groepKey)) {
+        evAgg.set(groepKey, {
+          event_id   : eId || null,
+          event_title: handmatig ? 'Handmatig toegewezen' : (eventMap.get(eId)?.title || null),
+          is_handmatig: handmatig,
           starts_at  : eventMap.get(eId)?.starts_at || null,
           omzet      : 0, bonuspot: 0, uitgaven: 0, netto: 0,
           per_status : emptyStatus(),
         });
       }
-      const cell = evAgg.get(eId);
+      const cell = evAgg.get(groepKey);
       const amount = Number(r.amount) || 0;
       if (STATUSES.includes(r.status)) cell.per_status[r.status] += amount;
       if (r.entry_type === 'bonus') {

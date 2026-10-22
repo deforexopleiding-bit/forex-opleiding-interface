@@ -46,6 +46,10 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from './_lib/factuur-betaald.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
+import {
+  loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
+  factuurVanDeal, factuurVanDeals, REDEN_LABEL,
+} from './_lib/commissie-toewijzing.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -175,7 +179,13 @@ export async function computeBonusOverview(effectiveUserId) {
     const customerById = new Map();
     const dealsByCust  = new Map(); // customer_id → [deals]
     const subByDeal    = new Map(); // deal_id → subscription (latest by start_date)
+    const allSubs      = [];        // alle subs van deze klanten (scope-filter toewijzingen)
     const invoiceById  = new Map();
+
+    // Handmatige toewijzingen (verlenging/upsell) — fail-soft. Zonder
+    // toewijzingen of zonder migratie: exact het oude gedrag.
+    const attrIdsInRows = [...new Set(rows.map((r) => attributionIdOf(r)).filter(Boolean))];
+    const attrs = await loadAttributions(supabaseAdmin, { customerIds, ids: attrIdsInRows });
 
     if (eventIds.length) {
       const { data: evs } = await supabaseAdmin
@@ -210,6 +220,7 @@ export async function computeBonusOverview(effectiveUserId) {
           .order('start_date', { ascending: false });
         // Latest sub per deal wint.
         for (const s of subs || []) {
+          allSubs.push(s);
           if (!subByDeal.has(s.deal_id)) subByDeal.set(s.deal_id, s);
         }
       }
@@ -278,7 +289,7 @@ export async function computeBonusOverview(effectiveUserId) {
     if (customerIds.length) {
       const { data: custInvs, error: custInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('id, customer_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date')
+        .select('id, customer_id, deal_id, tl_subscription_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date')
         .in('customer_id', customerIds);
       if (!custInvErr) {
         for (const inv of (custInvs || [])) {
@@ -318,6 +329,36 @@ export async function computeBonusOverview(effectiveUserId) {
           });
         }
       }
+    }
+
+    // Klant-route afgebakend op een toewijzing: een toegewezen sale ziet alleen
+    // de facturen van zijn eigen deal; een event-sale ziet de facturen van
+    // (andere) toegewezen deals niet. Zelfde regel als de vrijgave-engine.
+    // Returnt null = geen afbakening (oude klantbrede maps gebruiken).
+    const scopedCustCache = new Map();
+    function scopedCust(customerId, { dealId = null, excl = null } = {}) {
+      if (!customerId) return null;
+      if (!dealId && !(excl && excl.size)) return null;
+      const key = customerId + '|' + (dealId ? 'd:' + dealId : 'x:' + [...excl].sort().join(','));
+      if (scopedCustCache.has(key)) return scopedCustCache.get(key);
+      const tlSet = dealId ? tlSubIdsVanDeal(dealId, allSubs) : null;
+      const list = (invoicesByCust.get(customerId) || []).filter((inv) => (dealId
+        ? factuurVanDeal(inv, dealId, tlSet)
+        : !factuurVanDeals(inv, excl, allSubs)));
+      const acc = { paid_total: 0, last_paid_date: null, list, overdue: { count: 0, amount: 0 } };
+      for (const inv of list) {
+        acc.paid_total += betaaldBedrag(inv);
+        if (inv.paid_date && (!acc.last_paid_date || inv.paid_date > acc.last_paid_date)) {
+          acc.last_paid_date = inv.paid_date;
+        }
+        const open = openBedrag(inv);
+        if (inv.due_date && inv.due_date < todayISO && open > 0.005) {
+          acc.overdue.count += 1;
+          acc.overdue.amount += open;
+        }
+      }
+      scopedCustCache.set(key, acc);
+      return acc;
     }
 
     // 3) Per bonus-entry de termijnen projecteren.
@@ -585,7 +626,16 @@ export async function computeBonusOverview(effectiveUserId) {
       // route (nbPaid) facturen van meerdere sales bevatten; de basis-marge
       // hier voorkomt dat de subs samensmelten. Exactheid verbetert zodra de
       // wizard-flow alles onder één deal zet.
-      const customerDeals = dealsByCust.get(r.customer_id) || [];
+      // Toewijzing: alleen de eigen deal. Event-sale: zonder toegewezen deals.
+      const attrId   = attributionIdOf(r);
+      const attr     = attrId ? (attrs.byId.get(attrId) || null) : null;
+      const eigenDeal = r.source_quote_id || null;
+      const excl     = attrId ? null : uitTeSluitenDeals(attrs.activeDealIdsByCust.get(r.customer_id), eigenDeal);
+      const scope    = attrId ? scopedCust(r.customer_id, { dealId: eigenDeal || '00000000-0000-0000-0000-000000000000' })
+        : scopedCust(r.customer_id, { excl });
+      let customerDeals = dealsByCust.get(r.customer_id) || [];
+      if (attrId)            customerDeals = customerDeals.filter((d) => d.id === eigenDeal);
+      else if (excl.size)    customerDeals = customerDeals.filter((d) => !excl.has(d.id));
       const allCustSubs = [];
       for (const d of customerDeals) {
         const s = subByDeal.get(d.id);
@@ -697,7 +747,7 @@ export async function computeBonusOverview(effectiveUserId) {
       {
         const subKey  = sub?.teamleader_subscription_id || null;
         const subAcc  = subKey ? subPaidMap.get(subKey) : null;
-        const custAcc = r.customer_id ? custPaidMap.get(r.customer_id) : null;
+        const custAcc = scope || (r.customer_id ? custPaidMap.get(r.customer_id) : null);
         const subPaid  = (subAcc  && subAcc.paid_total  > 0) ? subAcc.paid_total  : 0;
         const custPaid = (custAcc && custAcc.paid_total > 0) ? custAcc.paid_total : 0;
         paidTotalFromInvs = Math.max(subPaid, custPaid);
@@ -727,7 +777,7 @@ export async function computeBonusOverview(effectiveUserId) {
       // consequent aan de sub gekoppeld zijn (wizard-flow).
       const subKeyForTerm = sub?.teamleader_subscription_id || null;
       const invListSub    = subKeyForTerm ? (invoicesBySub.get(subKeyForTerm) || null) : null;
-      const invListCust   = r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null;
+      const invListCust   = scope ? scope.list : (r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null);
       const subLen        = invListSub  ? invListSub.length  : 0;
       const custLen       = invListCust ? invListCust.length : 0;
       const invList       = (custLen > subLen) ? invListCust : (invListSub || invListCust);
@@ -870,24 +920,28 @@ export async function computeBonusOverview(effectiveUserId) {
       // Overdue (betalingsachterstand). Klant-breed omdat de mentor elke
       // openstaande factuur op de klant wil zien, niet alleen degene die
       // aan deze sale gekoppeld is.
-      const overdueAcc = r.customer_id ? custOverdueMap.get(r.customer_id) : null;
+      const overdueAcc = scope ? scope.overdue : (r.customer_id ? custOverdueMap.get(r.customer_id) : null);
       const overdueCount  = overdueAcc?.count  || 0;
       const overdueAmount = round2(overdueAcc?.amount || 0);
       const hasOverdue    = overdueCount > 0;
 
-      // Groeperen onder event → sale (customer_id).
-      const evKey = r.event_id || 'no-event';
+      // Groeperen onder event → sale (customer_id). Toewijzingen hebben geen
+      // event: groep "Handmatig toegewezen" per reden, één sale per toewijzing.
+      const reden = attrId ? (attr?.reden || 'handmatig') : null;
+      const evKey = attrId ? ('handmatig:' + reden) : (r.event_id || 'no-event');
       if (!perEventMap.has(evKey)) {
-        const ev = eventById.get(r.event_id) || null;
+        const ev = attrId ? null : (eventById.get(r.event_id) || null);
         perEventMap.set(evKey, {
-          event_id    : r.event_id || null,
-          event_title : ev?.title     || null,
+          event_id    : attrId ? null : (r.event_id || null),
+          event_title : attrId ? ('Handmatig toegewezen · ' + (REDEN_LABEL[reden] || reden)) : (ev?.title || null),
           starts_at   : ev?.starts_at || null,
+          is_handmatig: !!attrId,
+          reden,
           _sales      : new Map(),
         });
       }
       const evNode = perEventMap.get(evKey);
-      const saleKey = r.customer_id || ('att:' + (r.attendee_id || r.id));
+      const saleKey = attrId ? ('attr:' + attrId) : (r.customer_id || ('att:' + (r.attendee_id || r.id)));
       if (!evNode._sales.has(saleKey)) {
         const cust = customerById.get(r.customer_id) || null;
         evNode._sales.set(saleKey, {
@@ -909,6 +963,11 @@ export async function computeBonusOverview(effectiveUserId) {
           has_overdue        : hasOverdue,
           overdue_count      : overdueCount,
           overdue_amount     : overdueAmount,
+          bron               : attrId ? 'handmatig' : 'event',
+          reden,
+          attribution_id     : attrId || null,
+          deal_id            : eigenDeal,
+          created_at         : attr?.created_at || r.created_at || null,
           termijnen,
         });
       } else {
@@ -930,6 +989,8 @@ export async function computeBonusOverview(effectiveUserId) {
         event_id    : n.event_id,
         event_title : n.event_title,
         starts_at   : n.starts_at,
+        is_handmatig: !!n.is_handmatig,
+        reden       : n.reden || null,
         sales       : Array.from(n._sales.values()),
       }))
       .sort((a, b) => (b.starts_at || '').localeCompare(a.starts_at || ''));
