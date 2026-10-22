@@ -121,3 +121,12 @@ test('zijpaneel en toewijzingsvenster: sluiten alleen via kruisje/annuleren', as
   html = view();
   assert.match(html, /Typ <code[^>]*>ANNULEER<\/code>/);
 });
+
+test('Mijn verdiensten: tab heet Sales, oude Events-route blijft werken', () => {
+  const shell = lees('modules/shared/design-system/app-shell.js');
+  assert.match(shell, /id: 'verdiensten',[^\n]*tabs: \['Overzicht', 'Coaching', 'Sales', 'Uitbetalingen'/);
+  const v = lees('modules/klanten-v2/views/verdiensten-v2.js');
+  assert.match(v, /VIEWS\['verdiensten\/Sales'\]\s*=\s*eventsView/);
+  assert.match(v, /VIEWS\['verdiensten\/Events'\]\s*=\s*eventsView/);
+  assert.match(v, /gedeeld met \$\{Number\(s\.mentor_count\) - 1\}/);
+});
