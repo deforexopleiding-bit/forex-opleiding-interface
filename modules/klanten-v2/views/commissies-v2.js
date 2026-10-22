@@ -79,6 +79,9 @@
     wiz: null,
     annuleer: null,
     inhaal: null,
+    incasso: null,      // venster: { customer_id, deal_id, klant, sinds, reden, scope, bron, bezig, fout }
+    opheffen: null,     // venster: { id, klant, reden, bezig, fout }
+    koppelKeuze: {},    // invoice_id → gekozen deal_id ('' = geen sale)
   };
   const STATUS = {
     wacht:         { c: 'neutral', l: 'Wacht op betaling' },
@@ -86,6 +89,7 @@
     volledig:      { c: 'ok',      l: 'Volledig vrijgegeven' },
     achterstallig: { c: 'danger',  l: 'Achterstallig' },
     geannuleerd:   { c: 'neutral', l: 'Geannuleerd' },
+    incasso:       { c: 'danger',  l: 'Incasso' },
   };
   const statusPill = (s) => { const m = STATUS[s] || STATUS.wacht; return H.pill(m.c, m.l); };
 
@@ -301,6 +305,15 @@
     }).join('');
   }
 
+  /* ── Incasso / regeling ─────────────────────────────────────────────── */
+  const incassoPill = (inc) => inc
+    ? `<span title="Wat vanaf deze datum betaald wordt, telt niet meer voor de mentor">${H.pill('danger', `Incasso — geen commissie meer sinds ${esc(fmtDate(inc.sinds))}`)}</span>` : '';
+  // Actieve markering voor deze sale (specifiek) of de hele klant.
+  const markeringVoor = (customerId, dealId) => {
+    const lijst = asArr(_st.data?.incasso_markeringen).filter((m) => m.customer_id === customerId);
+    return lijst.find((m) => dealId && m.deal_id === dealId) || lijst.find((m) => !m.deal_id) || null;
+  };
+
   /* ── Weergave: per sale ──────────────────────────────────────────────── */
   function salesTabel(sales, opts) {
     const o = opts || {};
@@ -322,7 +335,7 @@
           <td class="num mono">${eur(s.dealwaarde)}${s.pct != null ? `<div style="font-size:10.5px;color:var(--text-3)">${esc(s.pct)}%</div>` : ''}</td>
           <td><div style="display:flex;gap:4px;flex-wrap:wrap">${s.mentoren.map((m) => mentorChip(m.user_id, m.naam, m.aandeel, m.geannuleerd ? ' (geannuleerd)' : '')).join('')}</div></td>
           <td>${tc ? voortgang(fr) + `<div style="font-size:11px;color:var(--text-3);margin-top:3px">${s.betaalde_termijnen}/${tc} termijnen${s.schema_onbekend ? ' · geen abonnement' : ''}</div>` : '<span style="font-size:11.5px;color:var(--text-3)">—</span>'}</td>
-          <td>${statusPill(s.status)}</td>
+          <td>${s.incasso ? incassoPill(s.incasso) : statusPill(s.status)}</td>
           <td style="font-size:12px">${s.volgende_termijn ? `${esc(fmtDate(s.volgende_termijn.due_date))}<div class="mono" style="font-size:11px;color:var(--text-3)">${eur(s.volgende_termijn.aandeel)}</div>` : '—'}</td>
           ${o.compact ? '' : `<td class="num mono">${eur(s.share)}<div style="font-size:10.5px;color:var(--emerald)">${eur(s.vrijgegeven)} vrij</div></td>`}
           <td style="color:var(--text-3)">${open ? '▾' : '▸'}</td>
@@ -334,12 +347,17 @@
 
   function saleDetail(s) {
     const termijnen = asArr(s.termijnen);
-    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'] };
+    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'], incasso: ['danger', 'Incasso — vervalt'] };
     const tabel = termijnen.length ? `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vervaldatum</th><th>Status</th><th class="num">Commissie (alle mentoren)</th></tr></thead><tbody>
-      ${termijnen.map((t) => { const m = TS[t.status] || TS.open; return `<tr><td class="mono">${t.index}</td><td>${esc(fmtDate(t.due_date))}</td><td>${H.pill(m[0], m[1])}</td><td class="num mono">${eur(t.aandeel)}</td></tr>`; }).join('')}
+      ${termijnen.map((t) => { const m = TS[t.status] || TS.open; return `<tr><td class="mono">${t.index}</td><td>${esc(fmtDate(t.due_date))}</td><td>${H.pill(m[0], m[1])}${t.vervangen ? ' <span style="font-size:11px;color:var(--text-3)">→ vervangen door regeling</span>' : ''}</td><td class="num mono">${eur(t.aandeel)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div style="font-size:12.5px;color:var(--text-3)">Geen termijnschema bekend.</div>';
     const annuleer = s.bron === 'handmatig' && s.attribution_id && !s.geannuleerd && isAdmin()
       ? `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="event.stopPropagation();window.__commAnnuleerOpen('${esc(s.attribution_id)}')">Toewijzing annuleren</button>` : '';
+    const mark = s.customer_id ? markeringVoor(s.customer_id, s.deal_id) : null;
+    const incassoKnop = !isAdmin() || !s.customer_id || s.bron === 'traject' ? ''
+      : mark
+        ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.__commOpheffenOpen('${esc(mark.id)}')">Incasso opheffen</button>`
+        : `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="event.stopPropagation();window.__commIncassoOpen('${esc(s.customer_id)}','${esc(s.deal_id || '')}')">Incasso…</button>`;
     return `<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
       <div style="flex:2;min-width:260px">${tabel}</div>
       <div style="flex:1;min-width:200px;font-size:12.5px;line-height:1.7">
@@ -348,7 +366,9 @@
         <div><span style="color:var(--text-3)">Commissie:</span> <span class="mono">${eur(s.share)}</span> · vrij <span class="mono" style="color:var(--emerald)">${eur(s.vrijgegeven)}</span> · open <span class="mono">${eur(s.open)}</span></div>
         ${s.achterstallig ? `<div style="color:var(--rose)">Achterstand klant: <span class="mono">${eur(s.achterstand_bedrag)}</span></div>` : ''}
         ${s.risico_redenen.length ? `<div style="color:var(--rose)">Risico: ${esc(s.risico_redenen.join(', '))}</div>` : ''}
-        <div style="margin-top:8px">${annuleer}</div>
+        ${s.incasso ? `<div style="color:var(--rose)">Incasso sinds ${esc(fmtDate(s.incasso.sinds))} · vervalt <span class="mono">${eur(s.incasso.vervallen)}</span>${mark ? ` · ${esc(mark.reden)}` : ''}</div>` : ''}
+        ${s.niet_gedekt > 0 ? `<div style="color:var(--text-3)">Regeling dekt <span class="mono">${eur(s.niet_gedekt)}</span> niet (gecrediteerd zonder vervangende factuur)</div>` : ''}
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${annuleer}${incassoKnop}</div>
       </div></div>`;
   }
 
@@ -376,8 +396,10 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
           <div style="flex:1">${tc ? voortgang(s.betaalde_termijnen / tc) : ''}</div>
-          <span style="font-size:11px;color:var(--text-3)">${tc ? `${s.betaalde_termijnen}/${tc}` : ''}</span>${statusPill(s.status)}
-        </div></div>`;
+          <span style="font-size:11px;color:var(--text-3)">${tc ? `${s.betaalde_termijnen}/${tc}` : ''}</span>${s.incasso ? incassoPill(s.incasso) : statusPill(s.status)}
+        </div>
+        ${isAdmin() && s.customer_id && s.bron !== 'traject' && !s.incasso ? `<div style="margin-top:4px;text-align:right"><button class="btn btn-ghost btn-sm" style="color:var(--rose);font-size:11.5px" onclick="window.__commIncassoOpen('${esc(s.customer_id)}','${esc(s.deal_id || '')}')">Incasso…</button></div>` : ''}
+        </div>`;
     };
     return `<div style="position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--surface);color:var(--text);box-shadow:-12px 0 40px rgba(0,0,0,.22);z-index:1900;display:flex;flex-direction:column">
       <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
@@ -720,6 +742,155 @@
     return modal('Inhaalcommissie', body, 'window.__commInhaalSluit()', 520);
   }
 
+  /* ── Wanbetaling: mogelijk incasso, markeringen, niet-gekoppelde betalingen ─ */
+  function wanbetalingBlok() {
+    const d = _st.data || {};
+    const mog = asArr(d.mogelijk_incasso);
+    const mark = asArr(d.incasso_markeringen);
+    const los = asArr(d.niet_gekoppeld);
+    const gek = asArr(d.koppelingen);
+    if (!mog.length && !mark.length && !los.length && !gek.length) return '';
+    const sectie = (titel, uitleg, inhoud) => `<div style="margin-bottom:14px"><div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${titel}</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">${uitleg}</div>${inhoud}</div>`;
+    const tbl = (koppen, rijen) => `<div class="tbl-wrap"><table><thead><tr>${koppen.map((k) => `<th>${k}</th>`).join('')}</tr></thead><tbody>${rijen.join('')}</tbody></table></div>`;
+    let html = '';
+    if (!d.incasso_ok || !d.koppel_ok) {
+      html += `<div style="padding:9px 12px;border:1px solid var(--amber-line);background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:12px">
+        Incasso markeren en betalingen koppelen kan zodra de database-migratie (2026-10-22-commissie-incasso-en-koppeling.sql) gedraaid is.</div>`;
+    }
+    if (mog.length) {
+      html += sectie('Mogelijk incasso', 'Signaal uit het incassodossier, de wanbetalers-pipeline of de onboarding. Niets is automatisch gezet — jij beslist.',
+        tbl(['Klant', 'Signaal', 'Voorstel sinds', ''], mog.map((m, i) => `<tr><td><b>${esc(m.klant)}</b></td>
+          <td style="font-size:12px">${m.signalen.map((x) => esc(x.bron) + (x.sinds ? ' · ' + esc(fmtDate(x.sinds)) : '')).join('<br>')}</td>
+          <td>${esc(fmtDate(m.voorstel_sinds))}</td>
+          <td>${isAdmin() ? `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__commIncassoVoorstel(${i})">Markeer als incasso</button>` : ''}</td></tr>`)));
+    }
+    if (mark.length) {
+      html += sectie('Incasso — geen commissie meer', 'Betalingen vanaf de datum tellen niet meer. Al vrijgegeven commissie blijft van de mentor.',
+        tbl(['Klant', 'Geldt voor', 'Sinds', 'Reden', ''], mark.map((m) => `<tr><td><b>${esc(m.klant)}</b></td><td style="font-size:12px">${esc(m.sale)}</td>
+          <td>${esc(fmtDate(m.sinds))}</td><td style="font-size:12px">${esc(m.reden)}</td>
+          <td>${isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="window.__commOpheffenOpen('${esc(m.id)}')">Opheffen</button>` : ''}</td></tr>`)));
+    }
+    if (los.length) {
+      html += sectie('Niet gekoppelde betaling', 'Factuur na creditering zonder offerte/abonnement bij een klant met meerdere sales. Kies bij welke sale ze hoort — anders telt ze niet voor een toegewezen sale.',
+        tbl(['Klant', 'Factuur', 'Bedrag', 'Vervaldag', 'Hoort bij', ''], los.map((f) => {
+          const gekozen = _st.koppelKeuze[f.invoice_id] ?? '';
+          return `<tr><td><b>${esc(f.klant)}</b></td><td class="mono">${esc(f.invoice_number || '—')}</td><td class="num mono">${eur(f.bedrag)}</td>
+          <td>${esc(fmtDate(f.due_date))}</td>
+          <td><select style="${selectStijl}" onchange="window.__commKoppelKies('${esc(f.invoice_id)}', this.value)">
+            <option value="">— kies sale —</option>
+            ${f.opties.map((o) => `<option value="${esc(o.deal_id)}" ${gekozen === o.deal_id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+            <option value="geen" ${gekozen === 'geen' ? 'selected' : ''}>Hoort bij geen sale</option>
+          </select></td>
+          <td>${isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="window.__commKoppel('${esc(f.invoice_id)}')">Koppel</button>` : ''}</td></tr>`;
+        })));
+    }
+    if (gek.length) {
+      html += sectie('Gekoppelde regelingsfacturen', 'Automatisch (klant met één sale) of door jou gekozen.',
+        tbl(['Klant', 'Factuur', 'Bedrag', 'Hoort bij', 'Hoe', ''], gek.map((f) => `<tr><td><b>${esc(f.klant)}</b></td><td class="mono">${esc(f.invoice_number || '—')}</td>
+          <td class="num mono">${eur(f.bedrag)}</td><td style="font-size:12px">${esc(f.sale)}</td><td>${f.bron === 'auto' ? H.pill('neutral', 'Automatisch', true) : H.pill('violet', 'Handmatig', true)}</td>
+          <td>${isAdmin() && f.bron === 'handmatig' ? `<button class="btn btn-ghost btn-sm" onclick="window.__commKoppelWis('${esc(f.invoice_id)}')">Keuze wissen</button>` : ''}</td></tr>`)));
+    }
+    return card('Wanbetaling: incasso & regelingen', 'rose', html);
+  }
+
+  window.__commKoppelKies = (inv, v) => { _st.koppelKeuze[inv] = v; };
+  window.__commKoppel = async (inv) => {
+    const v = _st.koppelKeuze[inv];
+    if (!v) { toast('Kies eerst bij welke sale de factuur hoort.'); return; }
+    const j = await post('/api/commissie-factuur-koppelen', { invoice_id: inv, deal_id: v === 'geen' ? null : v });
+    if (j?.__error) { toast(j.__error); return; }
+    toast('Factuur gekoppeld.');
+    _st.data = null; queueMicrotask(laad); render();
+  };
+  window.__commKoppelWis = async (inv) => {
+    const j = await post('/api/commissie-factuur-koppelen', { invoice_id: inv, actie: 'wissen' });
+    if (j?.__error) { toast(j.__error); return; }
+    toast('Keuze gewist.');
+    _st.data = null; queueMicrotask(laad); render();
+  };
+
+  const vandaagIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  window.__commIncassoOpen = (customerId, dealId) => {
+    const sale = asArr(_st.data?.sales).find((x) => x.customer_id === customerId && (!dealId || x.deal_id === dealId));
+    _st.incasso = { customer_id: customerId, deal_id: dealId || null, klant: sale?.klant || '', sinds: vandaagIso(), reden: '', scope: 'klant', bron: 'handmatig', bezig: false, fout: null };
+    render();
+  };
+  window.__commIncassoVoorstel = (i) => {
+    const m = asArr(_st.data?.mogelijk_incasso)[i];
+    if (!m) return;
+    _st.incasso = { customer_id: m.customer_id, deal_id: null, klant: m.klant, sinds: m.voorstel_sinds || vandaagIso(),
+      reden: m.signalen.map((x) => x.bron).join(', '), scope: 'klant', bron: 'voorstel', bezig: false, fout: null };
+    render();
+  };
+  window.__commIncassoVeld = (k, v) => { if (_st.incasso) _st.incasso[k] = v; };
+  window.__commIncassoScope = (v) => { if (_st.incasso) { _st.incasso.scope = v; render(); } };
+  window.__commIncassoSluit = () => { _st.incasso = null; render(); };
+  window.__commIncassoOk = async () => {
+    const x = _st.incasso;
+    if (!x || x.bezig) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(x.sinds))) { x.fout = 'Kies een datum.'; render(); return; }
+    if (String(x.reden || '').trim().length < 3) { x.fout = 'Geef een korte reden.'; render(); return; }
+    x.bezig = true; x.fout = null; render();
+    const j = await post('/api/commissie-incasso', {
+      actie: 'markeren', customer_id: x.customer_id, deal_id: x.scope === 'sale' ? x.deal_id : null,
+      sinds: x.sinds, reden: x.reden, bron: x.bron,
+    });
+    if (!_st.incasso) return;
+    if (j?.__error) { x.bezig = false; x.fout = j.__error; render(); return; }
+    _st.incasso = null;
+    toast(`Incasso gemarkeerd — vanaf ${fmtDate(x.sinds)} geen commissie meer.`);
+    _st.data = null; queueMicrotask(laad); render();
+  };
+  function incassoModal() {
+    const x = _st.incasso;
+    if (!x) return '';
+    const body = `<div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">Klant <b>${esc(x.klant)}</b> naar incasso: vanaf de datum telt geen enkele betaling nog voor de mentor — ook niet als het bureau later geld binnenhaalt. Wat al vrijgegeven of uitbetaald is, blijft van de mentor.</div>
+      ${x.deal_id ? `<div style="display:flex;gap:14px;margin-bottom:12px;font-size:13px">
+        <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="comm-inc-scope" ${x.scope === 'klant' ? 'checked' : ''} onchange="window.__commIncassoScope('klant')"> Alle sales van deze klant</label>
+        <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="comm-inc-scope" ${x.scope === 'sale' ? 'checked' : ''} onchange="window.__commIncassoScope('sale')"> Alleen deze sale</label></div>` : ''}
+      <label style="display:block;margin-bottom:10px">${lbl('Sinds')}<input type="date" value="${esc(x.sinds)}" oninput="window.__commIncassoVeld('sinds', this.value)" style="${inputStijl}" /></label>
+      <label style="display:block;margin-bottom:10px">${lbl('Reden (alleen intern zichtbaar)')}<input type="text" value="${esc(x.reden)}" oninput="window.__commIncassoVeld('reden', this.value)" placeholder="bv. dossier naar incassobureau" style="${inputStijl}" /></label>
+      ${x.fout ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:10px">${esc(x.fout)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__commIncassoSluit()">Annuleren</button>
+        <button class="btn btn-danger" ${x.bezig ? 'disabled' : ''} onclick="window.__commIncassoOk()">${x.bezig ? 'Bezig…' : 'Markeer als incasso'}</button>
+      </div>`;
+    return modal('Incasso — geen commissie meer', body, 'window.__commIncassoSluit()', 520);
+  }
+
+  window.__commOpheffenOpen = (id) => {
+    const m = asArr(_st.data?.incasso_markeringen).find((x) => x.id === id);
+    if (!m) return;
+    _st.opheffen = { id, klant: m.klant, sinds: m.sinds, reden: '', bezig: false, fout: null };
+    render();
+  };
+  window.__commOpheffenVeld = (v) => { if (_st.opheffen) _st.opheffen.reden = v; };
+  window.__commOpheffenSluit = () => { _st.opheffen = null; render(); };
+  window.__commOpheffenOk = async () => {
+    const x = _st.opheffen;
+    if (!x || x.bezig) return;
+    x.bezig = true; x.fout = null; render();
+    const j = await post('/api/commissie-incasso', { actie: 'opheffen', id: x.id, reden: x.reden || null });
+    if (!_st.opheffen) return;
+    if (j?.__error) { x.bezig = false; x.fout = j.__error; render(); return; }
+    _st.opheffen = null;
+    toast('Incasso opgeheven — betalingen tellen weer mee.');
+    _st.data = null; queueMicrotask(laad); render();
+  };
+  function opheffenModal() {
+    const x = _st.opheffen;
+    if (!x) return '';
+    const body = `<div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">Incasso voor <b>${esc(x.klant)}</b> (sinds ${esc(fmtDate(x.sinds))}) opheffen? Vanaf nu tellen alle betalingen weer mee voor de mentor; wat sindsdien betaald werd, valt bij de volgende vrijgave alsnog vrij.</div>
+      <label style="display:block;margin-bottom:10px">${lbl('Reden (optioneel)')}<input type="text" value="${esc(x.reden)}" oninput="window.__commOpheffenVeld(this.value)" placeholder="bv. vergissing" style="${inputStijl}" /></label>
+      ${x.fout ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:10px">${esc(x.fout)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__commOpheffenSluit()">Annuleren</button>
+        <button class="btn btn-primary" ${x.bezig ? 'disabled' : ''} onclick="window.__commOpheffenOk()">${x.bezig ? 'Bezig…' : 'Opheffen'}</button>
+      </div>`;
+    return modal('Incasso opheffen', body, 'window.__commOpheffenSluit()', 480);
+  }
+
   /* ── Hoofdview ───────────────────────────────────────────────────────── */
   function commissiesView() {
     if (!isAdmin()) {
@@ -734,7 +905,7 @@
       </select>
       <button class="btn btn-primary btn-sm" onclick="window.__commWizOpen()">${svg(I.plus, 'width:14px;height:14px')} Sale toewijzen</button>
     </div>`;
-    const modals = `${wizard()}${annuleerModal()}${inhaalModal()}${zijpaneel()}`;
+    const modals = `${wizard()}${annuleerModal()}${inhaalModal()}${incassoModal()}${opheffenModal()}${zijpaneel()}`;
     if (_st.error && !_st.data) return kop + errBlk(_st.error) + modals;
     if (!_st.data) return kop + skel() + modals;
 
@@ -751,6 +922,7 @@
       { c: 'teal', icon: I.cal, label: 'Verwacht deze maand', val: eur(k.deze_maand_verwacht), sub: `volgende maand ${eur(k.volgende_maand_verwacht)}` },
       { c: 'amber', icon: I.clock, label: 'Achterstallig', val: eur(k.achterstallig), sub: `schuift mee · ${k.achterstallig_aantal || 0} termijn${k.achterstallig_aantal === 1 ? '' : 'en'}`, hi: (k.achterstallig || 0) > 0 },
       { c: 'rose', icon: I.alert, label: 'Risico', val: eur(k.risico), sub: `${k.risico_aantal || 0} sale${k.risico_aantal === 1 ? '' : 's'} · vervallen / wanbetaler / geannuleerd`, hi: (k.risico || 0) > 0 },
+      ...((k.vervallen_incasso || 0) > 0 ? [{ c: 'rose', icon: I.alert, label: 'Vervallen door incasso', val: eur(k.vervallen_incasso), sub: `${k.vervallen_incasso_aantal || 0} sale${k.vervallen_incasso_aantal === 1 ? '' : 's'} · niet meer voor de mentor` }] : []),
     ]);
     const seg = [['mentor', 'Per mentor'], ['event', 'Per event'], ['sale', 'Per sale']].map(([v, l]) =>
       `<button class="chip ${_st.weergave === v ? 'on' : ''}" onclick="window.__commWeergave('${v}')">${l}</button>`).join('');
@@ -765,6 +937,7 @@
         ${card('Commissie per maand', 'violet', grafiek(), '<span style="font-size:11.5px;color:var(--text-3)">verleden = vrijgegeven · toekomst = verwacht</span>')}
         ${card('Overzicht', 'blue', inhoud, `<div style="display:flex;gap:6px">${seg}</div>`)}
         ${verschovenBlok()}
+        ${wanbetalingBlok()}
       </div>
       ${modals}`;
   }
