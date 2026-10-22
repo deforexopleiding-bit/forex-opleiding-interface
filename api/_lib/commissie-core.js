@@ -1,0 +1,729 @@
+// api/_lib/commissie-core.js
+//
+// Kern van de commissie-cockpit (Mentoren → Commissies) en de handmatige
+// sale-toewijzing. De HTTP-endpoints (api/commissie-*.js) doen alleen auth +
+// statuscodes; alle logica staat hier zodat ze testbaar is.
+//
+//   zoekOffertes        — getekende deals zoeken + bestaande commissie tonen
+//   previewToewijzing   — aandeel per mentor + termijnprojectie, schrijft niets
+//   opslaanToewijzing   — attribution + 1 parent per mentor + meteen vrijgave
+//   annuleerToewijzing  — open parents geannuleerd; vrijgegeven blijft staan
+//   commissieOverzicht  — platformbreed: KPI's, per mentor/event/sale, 12 mnd
+//
+// DE REGEL blijft die van de event-bonus: de mentor verdient pas wanneer de
+// factuur van DEZE deal effectief betaald is (vrijgave-engine, zie
+// api/_lib/commissie-toewijzing.js voor de scope op de eigen deal).
+
+import { supabaseAdmin } from '../supabase.js';
+import { computeDealTotals } from './deal-total.js';
+import { betaaldBedrag, telAlsBetaald, isVolledigGecrediteerd } from './factuur-betaald.js';
+import { customerDisplayName } from './customer-name.js';
+import { releaseProportionalForPaidAmount } from './mentor-ledger-engine.js';
+import { createNotification } from './notify.js';
+import { computeBonusOverview, inclPerTerm, billingCycleMonths } from '../mentor-bonus-overview.js';
+import {
+  REDENEN, REDEN_LABEL, DEFAULT_PCT, aandeelPerMentor, attrIdempotencyKey, attributionIdOf,
+  isSchemaOntbreekt, loadAttributions, tlSubIdsVanDeal, factuurVanDeal,
+} from './commissie-toewijzing.js';
+
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ACCEPTED = new Set(['accepted', 'signed']);
+const OPEN_STATUSSEN = ['pending', 'wachten_op_betaling'];
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+export class CommissieFout extends Error {
+  constructor(status, code, message, extra = {}) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.extra = extra;
+  }
+}
+
+const isGetekend = (d) => !!d && (ACCEPTED.has(String(d.tl_quotation_status || '').toLowerCase()) || !!d.tl_quotation_accepted_at);
+const vandaag = () => new Date().toISOString().slice(0, 10);
+const ym = (iso) => String(iso || '').slice(0, 7);
+
+function addMonthsIso(isoDate, n) {
+  const d = new Date(String(isoDate).slice(0, 10) + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return null;
+  const dag = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  const laatste = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(dag, laatste));
+  return d.toISOString().slice(0, 10);
+}
+
+async function alle(q, wat) {
+  const { data, error } = await q;
+  if (error) throw new Error(`${wat}: ${error.message}`);
+  return data || [];
+}
+
+// ── Deal-context in één keer (geen N+1) ───────────────────────────────────────
+// Voor een set deals: klanten, regels (basis), subs, facturen, bestaande
+// event-bonussen en toewijzingen.
+async function dealContext(deals) {
+  const dealIds = [...new Set(deals.map((d) => d.id))];
+  const custIds = [...new Set(deals.map((d) => d.customer_id).filter(Boolean))];
+  if (!dealIds.length) return null;
+  const [lines, subs, invoices, customers, ledger, attrs] = await Promise.all([
+    alle(supabaseAdmin.from('deal_line_items').select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat').in('deal_id', dealIds), 'deal_line_items'),
+    alle(supabaseAdmin.from('subscriptions').select('id, deal_id, amount, vat_percentage, line_items, term_count, billing_cycle, start_date, status, teamleader_subscription_id').in('deal_id', dealIds), 'subscriptions'),
+    custIds.length
+      ? alle(supabaseAdmin.from('invoices').select('id, customer_id, deal_id, tl_subscription_id, invoice_number, amount_total, amount_paid, credited_amount, status, due_date, paid_date').in('customer_id', custIds), 'invoices')
+      : [],
+    custIds.length
+      ? alle(supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name, email').in('id', custIds), 'customers')
+      : [],
+    alle(supabaseAdmin.from('mentor_ledger_entries')
+      .select('id, mentor_user_id, event_id, customer_id, source_quote_id, amount, original_amount, status, idempotency_key')
+      .eq('entry_type', 'bonus').is('parent_entry_id', null).in('source_quote_id', dealIds), 'ledger'),
+    loadAttributions(supabaseAdmin, { customerIds: custIds }),
+  ]);
+  const linesByDeal = new Map();
+  for (const l of lines) {
+    if (!linesByDeal.has(l.deal_id)) linesByDeal.set(l.deal_id, []);
+    linesByDeal.get(l.deal_id).push(l);
+  }
+  return {
+    linesByDeal, subs, invoices, ledger, attrs,
+    customerById: new Map(customers.map((c) => [c.id, c])),
+  };
+}
+
+// Dealwaarde exact zoals events-complete-core (computeDealTotals op de regels).
+function dealBasis(deal, ctx) {
+  return computeDealTotals(deal, ctx.linesByDeal.get(deal.id) || []);
+}
+
+function factuurenVanDeal(dealId, ctx) {
+  const tl = tlSubIdsVanDeal(dealId, ctx.subs);
+  return ctx.invoices.filter((inv) => factuurVanDeal(inv, dealId, tl));
+}
+
+/**
+ * Termijnschema van één deal met het mentor-aandeel per termijn.
+ * Bron: de subs van de deal (aanbetaling + termijnen), echte facturen voor
+ * vervaldatum + betaalstatus. Zonder sub: de facturen van de deal zelf; zonder
+ * facturen: één termijn "bij betaling".
+ */
+export function termijnSchema({ subs, facturen, basis, aandeel, startFallback = null }) {
+  const vandaagIso = vandaag();
+  const actief = (subs || []).filter((s) => String(s.status || '').toLowerCase() !== 'cancelled');
+  const pool = (actief.length ? actief : (subs || [])).slice()
+    .sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
+  const termijnen = [];
+  const status = (inv, due) => {
+    if (inv && isVolledigGecrediteerd(inv)) return 'gecrediteerd';
+    if (inv && (Number(inv.amount_total) || 0) > 0 && telAlsBetaald(inv)) return 'betaald';
+    return due && due < vandaagIso ? 'achterstallig' : 'open';
+  };
+  const subWaarde = pool.reduce((s, x) => s + inclPerTerm(x) * (Number(x.term_count) || 0), 0);
+  if (pool.length && subWaarde > 0) {
+    for (const s of pool) {
+      const n = Number(s.term_count) || 0;
+      const per = inclPerTerm(s);
+      const invs = (facturen || []).filter((i) => i.tl_subscription_id && i.tl_subscription_id === s.teamleader_subscription_id)
+        .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
+      const cyc = billingCycleMonths(s.billing_cycle);
+      for (let i = 0; i < n; i++) {
+        const inv = invs[i] || null;
+        const due = inv?.due_date || (s.start_date ? addMonthsIso(s.start_date, i * cyc) : null);
+        termijnen.push({ due_date: due, bedrag_klant: round2(per), aandeel: aandeel * per / subWaarde, status: status(inv, due) });
+      }
+    }
+  } else if ((facturen || []).length) {
+    const tot = facturen.reduce((s, i) => s + (Number(i.amount_total) || 0), 0) || basis || 1;
+    for (const inv of facturen.slice().sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))) {
+      termijnen.push({ due_date: inv.due_date || null, bedrag_klant: round2(inv.amount_total), aandeel: aandeel * (Number(inv.amount_total) || 0) / tot, status: status(inv, inv.due_date) });
+    }
+  } else {
+    termijnen.push({ due_date: startFallback, bedrag_klant: round2(basis), aandeel, status: 'open', schema_onbekend: true });
+  }
+  termijnen.sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
+  // Afronding: centen, rest op de laatste termijn zodat de som exact klopt.
+  let som = 0;
+  termijnen.forEach((t, i) => {
+    t.index = i + 1;
+    t.aandeel = i === termijnen.length - 1 ? round2(aandeel - som) : round2(t.aandeel);
+    som = round2(som + t.aandeel);
+  });
+  return termijnen;
+}
+
+/** Maand-aggregaat van termijnen: [{ month, betaald, verwacht }]. */
+export function perMaand(termijnen) {
+  const m = new Map();
+  for (const t of termijnen || []) {
+    if (!t.due_date || t.status === 'gecrediteerd') continue;
+    const k = ym(t.due_date);
+    const cel = m.get(k) || { month: k, betaald: 0, verwacht: 0 };
+    if (t.status === 'betaald') cel.betaald = round2(cel.betaald + t.aandeel);
+    else cel.verwacht = round2(cel.verwacht + t.aandeel);
+    m.set(k, cel);
+  }
+  return [...m.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
+// Bestaande commissie op een deal: event-bonus en/of actieve toewijzing.
+function bestaandeCommissie(dealId, ctx, eventTitles = new Map()) {
+  const parents = ctx.ledger.filter((e) => e.source_quote_id === dealId && e.status !== 'geannuleerd');
+  const eventBonus = parents.filter((e) => !attributionIdOf(e));
+  const toewijzing = ctx.attrs.list.find((a) => a.deal_id === dealId && a.status === 'actief') || null;
+  const eventIds = [...new Set(eventBonus.map((e) => e.event_id).filter(Boolean))];
+  return {
+    event_bonus: eventBonus.length ? {
+      aantal_mentoren: new Set(eventBonus.map((e) => e.mentor_user_id)).size,
+      bedrag: round2(eventBonus.reduce((s, e) => s + Number(e.original_amount ?? e.amount ?? 0), 0)),
+      events: eventIds.map((id) => ({ event_id: id, title: eventTitles.get(id) || null })),
+    } : null,
+    toewijzing: toewijzing ? {
+      id: toewijzing.id, reden: toewijzing.reden, pct: Number(toewijzing.pct),
+      aantal_mentoren: new Set(parents.filter((e) => attributionIdOf(e) === toewijzing.id).map((e) => e.mentor_user_id)).size,
+    } : null,
+  };
+}
+
+// ── Zoeken ────────────────────────────────────────────────────────────────────
+export async function zoekOffertes({ q, limit = 15 } = {}) {
+  const s = String(q || '').trim().replace(/[%,()]/g, ' ').trim();
+  if (s.length < 2) return { ok: true, resultaten: [] };
+  const kolommen = 'id, customer_id, total_amount, discount_percentage, sale_type, quote_reference, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at';
+  let deals = [];
+  if (UUID_RE.test(s)) {
+    deals = await alle(supabaseAdmin.from('deals').select(kolommen).eq('id', s), 'deals (id)');
+  } else {
+    const custs = await alle(supabaseAdmin.from('customers').select('id')
+      .or(`first_name.ilike.%${s}%,last_name.ilike.%${s}%,company_name.ilike.%${s}%,email.ilike.%${s}%`).limit(200), 'customers');
+    const custIds = custs.map((c) => c.id);
+    const [viaKlant, viaNummer] = await Promise.all([
+      custIds.length ? alle(supabaseAdmin.from('deals').select(kolommen).in('customer_id', custIds).is('archived_at', null).limit(500), 'deals (klant)') : [],
+      alle(supabaseAdmin.from('deals').select(kolommen).ilike('quote_reference', `%${s}%`).is('archived_at', null).limit(50), 'deals (nummer)'),
+    ]);
+    const map = new Map();
+    for (const d of [...viaKlant, ...viaNummer]) map.set(d.id, d);
+    deals = [...map.values()];
+  }
+  deals = deals.filter((d) => !d.archived_at && isGetekend(d))
+    .sort((a, b) => String(b.tl_quotation_accepted_at || b.created_at || '').localeCompare(String(a.tl_quotation_accepted_at || a.created_at || '')))
+    .slice(0, Math.max(1, Math.min(50, limit)));
+  if (!deals.length) return { ok: true, resultaten: [] };
+
+  const ctx = await dealContext(deals);
+  const eventIds = [...new Set(ctx.ledger.map((e) => e.event_id).filter(Boolean))];
+  const evs = eventIds.length ? await alle(supabaseAdmin.from('events').select('id, title').in('id', eventIds), 'events') : [];
+  const eventTitles = new Map(evs.map((e) => [e.id, e.title]));
+
+  const resultaten = deals.map((d) => {
+    const c = ctx.customerById.get(d.customer_id) || null;
+    const b = dealBasis(d, ctx);
+    const subs = ctx.subs.filter((x) => x.deal_id === d.id)
+      .sort((x, y) => String(x.start_date || '').localeCompare(String(y.start_date || '')));
+    const facturen = factuurenVanDeal(d.id, ctx);
+    const bestaand = bestaandeCommissie(d.id, ctx, eventTitles);
+    const waarschuwingen = [];
+    if (bestaand.event_bonus) waarschuwingen.push('Deze offerte heeft al een event-bonus.');
+    if (bestaand.toewijzing) waarschuwingen.push('Deze offerte is al toegewezen.');
+    return {
+      deal_id: d.id,
+      offertenummer: d.quote_reference || null,
+      klant: { id: d.customer_id, naam: customerDisplayName(c, '(klant)'), email: c?.email || null },
+      getekend_op: d.tl_quotation_accepted_at || null,
+      basis_incl: b.incl,
+      basis_excl: b.excl,
+      abonnementen: subs.map((x) => ({
+        term_count: Number(x.term_count) || null,
+        per_termijn_incl: round2(inclPerTerm(x)),
+        billing_cycle: x.billing_cycle || null,
+        start_date: x.start_date || null,
+        status: x.status || null,
+      })),
+      gefactureerd: round2(facturen.reduce((s, i) => s + (Number(i.amount_total) || 0), 0)),
+      betaald: round2(facturen.reduce((s, i) => s + betaaldBedrag(i), 0)),
+      andere_getekende_deals: 0,
+      bestaand,
+      waarschuwingen,
+    };
+  });
+  // Klanten met meerdere getekende deals: handig om een verlenging te herkennen.
+  const perKlant = new Map();
+  for (const r of resultaten) perKlant.set(r.klant.id, (perKlant.get(r.klant.id) || 0) + 1);
+  for (const r of resultaten) r.andere_getekende_deals = (perKlant.get(r.klant.id) || 1) - 1;
+  return { ok: true, resultaten, migratie_ok: ctx.attrs.ok };
+}
+
+// ── Validatie + preview ───────────────────────────────────────────────────────
+function valideerInvoer(body) {
+  const dealId = String(body?.deal_id || '').trim();
+  if (!UUID_RE.test(dealId)) throw new CommissieFout(400, 'DEAL_ONGELDIG', 'deal_id (uuid) vereist');
+  const mentoren = [...new Set((Array.isArray(body?.mentor_user_ids) ? body.mentor_user_ids : []).map((x) => String(x || '').trim()))];
+  if (!mentoren.length) throw new CommissieFout(400, 'GEEN_MENTOR', 'Kies minstens één mentor');
+  if (mentoren.some((m) => !UUID_RE.test(m))) throw new CommissieFout(400, 'MENTOR_ONGELDIG', 'mentor_user_ids ongeldig');
+  if (mentoren.length > 10) throw new CommissieFout(400, 'TE_VEEL_MENTOREN', 'Maximaal 10 mentoren');
+  const pct = body?.pct == null || body.pct === '' ? DEFAULT_PCT : Number(body.pct);
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 100) throw new CommissieFout(400, 'PCT_ONGELDIG', 'Percentage moet tussen 0 en 100 liggen');
+  const reden = body?.reden ? String(body.reden) : 'verlenging';
+  if (!REDENEN.includes(reden)) throw new CommissieFout(400, 'REDEN_ONGELDIG', `reden moet ${REDENEN.join('/')} zijn`);
+  const basisInclBtw = body?.basis_incl_btw === false ? false : true;
+  const note = body?.note ? String(body.note).slice(0, 1000) : null;
+  const force = body?.toch_toevoegen === true;
+  const forceReden = body?.toch_reden ? String(body.toch_reden).trim().slice(0, 500) : '';
+  return { dealId, mentoren, pct: round2(pct), reden, basisInclBtw, note, force, forceReden };
+}
+
+async function mentorInfo(userIds) {
+  const [tms, profs] = await Promise.all([
+    alle(supabaseAdmin.from('team_members').select('id, name, user_id, is_active').in('user_id', userIds), 'team_members'),
+    alle(supabaseAdmin.from('profiles').select('id, full_name, email').in('id', userIds), 'profiles'),
+  ]);
+  const out = new Map();
+  for (const uid of userIds) {
+    const tm = tms.filter((t) => t.user_id === uid).sort((a, b) => Number(!!b.is_active) - Number(!!a.is_active))[0] || null;
+    const p = profs.find((x) => x.id === uid) || null;
+    if (!tm && !p) continue;
+    out.set(uid, { user_id: uid, team_member_id: tm?.id || null, naam: tm?.name || p?.full_name || p?.email || '(mentor)' });
+  }
+  return out;
+}
+
+async function bereken(body) {
+  const inv = valideerInvoer(body);
+  const deals = await alle(supabaseAdmin.from('deals')
+    .select('id, customer_id, total_amount, discount_percentage, sale_type, quote_reference, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at')
+    .eq('id', inv.dealId), 'deal');
+  const deal = deals[0];
+  if (!deal) throw new CommissieFout(404, 'DEAL_NIET_GEVONDEN', 'Offerte niet gevonden');
+  if (deal.archived_at) throw new CommissieFout(409, 'DEAL_GEARCHIVEERD', 'Deze offerte is verwijderd');
+  if (!isGetekend(deal)) throw new CommissieFout(409, 'NIET_GETEKEND', 'Alleen getekende offertes kunnen toegewezen worden');
+  if (!deal.customer_id) throw new CommissieFout(409, 'GEEN_KLANT', 'Offerte zonder klant');
+
+  const ctx = await dealContext([deal]);
+  const mentors = await mentorInfo(inv.mentoren);
+  const onbekend = inv.mentoren.filter((m) => !mentors.has(m));
+  if (onbekend.length) throw new CommissieFout(400, 'MENTOR_ONBEKEND', 'Onbekende mentor(en)', { onbekend });
+
+  const b = dealBasis(deal, ctx);
+  const basis = inv.basisInclBtw ? b.incl : b.excl;
+  if (!(basis > 0)) throw new CommissieFout(409, 'DEAL_ZONDER_WAARDE', 'Offerte heeft geen waarde');
+  const n = inv.mentoren.length;
+  const perMentor = aandeelPerMentor(basis, inv.pct, n);
+  if (!(perMentor > 0)) throw new CommissieFout(409, 'NUL_COMMISSIE', 'Commissie rondt af naar € 0');
+
+  const subs = ctx.subs.filter((x) => x.deal_id === deal.id);
+  const facturen = factuurenVanDeal(deal.id, ctx);
+  const termijnen = termijnSchema({ subs, facturen, basis, aandeel: perMentor, startFallback: vandaag() });
+  const bestaand = bestaandeCommissie(deal.id, ctx);
+  const betaald = round2(facturen.reduce((s, i) => s + betaaldBedrag(i), 0));
+  return {
+    inv, deal, ctx, basis, b, perMentor, termijnen, bestaand, betaald, facturen,
+    mentoren: inv.mentoren.map((uid) => ({ ...mentors.get(uid), aandeel: perMentor })),
+    klant: ctx.customerById.get(deal.customer_id) || null,
+  };
+}
+
+export async function previewToewijzing(body) {
+  const r = await bereken(body);
+  const verwachtNu = round2(Math.min(1, r.betaald / r.basis) * r.perMentor);
+  return {
+    ok: true,
+    migratie_ok: r.ctx.attrs.ok,
+    deal: { id: r.deal.id, offertenummer: r.deal.quote_reference || null, klant: customerDisplayName(r.klant, '(klant)') },
+    basis: r.basis, basis_incl_btw: r.inv.basisInclBtw, pct: r.inv.pct, reden: r.inv.reden,
+    totaal_commissie: round2(r.perMentor * r.mentoren.length),
+    mentoren: r.mentoren,
+    betaald_op_deal: r.betaald,
+    valt_meteen_vrij_per_mentor: verwachtNu,
+    termijnen: r.termijnen,
+    per_maand: perMaand(r.termijnen),
+    bestaand: r.bestaand,
+    blokkeert: !!(r.bestaand.event_bonus || r.bestaand.toewijzing),
+  };
+}
+
+// ── Opslaan ───────────────────────────────────────────────────────────────────
+export async function opslaanToewijzing(body, { actorId }) {
+  const r = await bereken(body);
+  if (!r.ctx.attrs.ok) {
+    throw new CommissieFout(503, 'MIGRATIE_ONTBREEKT', 'De database-migratie voor toewijzingen is nog niet gedraaid.');
+  }
+  if (r.bestaand.toewijzing) {
+    throw new CommissieFout(409, 'AL_TOEGEWEZEN', 'Deze offerte is al toegewezen. Annuleer eerst de bestaande toewijzing.');
+  }
+  if (r.bestaand.event_bonus && !(r.inv.force && r.inv.forceReden.length >= 5)) {
+    throw new CommissieFout(409, 'AL_EVENT_BONUS',
+      'Op deze offerte staat al een event-bonus. Kies "toch toevoegen" met een reden als dat echt de bedoeling is.',
+      { bestaand: r.bestaand });
+  }
+
+  const noteDelen = [
+    `${REDEN_LABEL[r.inv.reden]} — ${r.inv.pct}% van EUR ${r.basis.toFixed(2)} ${r.inv.basisInclBtw ? 'incl' : 'excl'} BTW / ${r.mentoren.length} mentor(en)`,
+  ];
+  if (r.bestaand.event_bonus) noteDelen.push(`Toch toegevoegd naast event-bonus: ${r.inv.forceReden}`);
+  if (r.inv.note) noteDelen.push(r.inv.note);
+
+  const { data: attr, error: aErr } = await supabaseAdmin.from('mentor_sale_attributions').insert({
+    deal_id: r.deal.id,
+    customer_id: r.deal.customer_id,
+    reden: r.inv.reden,
+    pct: r.inv.pct,
+    basis: r.basis,
+    basis_incl_btw: r.inv.basisInclBtw,
+    status: 'actief',
+    note: noteDelen.slice(1).join(' · ') || null,
+    created_by: actorId || null,
+  }).select('id, created_at').single();
+  if (aErr) {
+    if (isSchemaOntbreekt(aErr)) throw new CommissieFout(503, 'MIGRATIE_ONTBREEKT', 'De database-migratie voor toewijzingen is nog niet gedraaid.');
+    if (aErr.code === '23505') throw new CommissieFout(409, 'AL_TOEGEWEZEN', 'Deze offerte is net al toegewezen.');
+    throw new Error('attribution insert: ' + aErr.message);
+  }
+
+  const parentIds = [];
+  try {
+    for (const m of r.mentoren) {
+      const { data: row, error } = await supabaseAdmin.from('mentor_ledger_entries').insert({
+        mentor_user_id: m.user_id,
+        team_member_id: m.team_member_id,
+        event_id: null,
+        attribution_id: attr.id,
+        entry_type: 'bonus',
+        customer_id: r.deal.customer_id,
+        basis: r.basis,
+        basis_incl_btw: r.inv.basisInclBtw,
+        pct: r.inv.pct,
+        amount: r.perMentor,
+        status: 'pending',
+        source_quote_id: r.deal.id,
+        idempotency_key: attrIdempotencyKey(attr.id, m.user_id),
+        note: noteDelen.join(' · ').slice(0, 1000),
+      }).select('id').single();
+      if (error) throw new Error(`ledger insert (${m.naam}): ${error.message}`);
+      parentIds.push(row.id);
+    }
+  } catch (e) {
+    // Alles of niets: opgeruimd achterlaten zodat opnieuw proberen kan.
+    console.error('[commissie-toewijzing] opslaan mislukt, terugdraaien:', e.message);
+    if (parentIds.length) {
+      const { error: dErr } = await supabaseAdmin.from('mentor_ledger_entries').delete().in('id', parentIds);
+      if (dErr) console.error('[commissie-toewijzing] rollback ledger:', dErr.message);
+    }
+    const { error: d2 } = await supabaseAdmin.from('mentor_sale_attributions').delete().eq('id', attr.id);
+    if (d2) {
+      console.error('[commissie-toewijzing] rollback attribution:', d2.message);
+      await supabaseAdmin.from('mentor_sale_attributions')
+        .update({ status: 'geannuleerd', cancelled_at: new Date().toISOString(), cancelled_by: actorId || null })
+        .eq('id', attr.id);
+    }
+    throw e;
+  }
+
+  // Al betaalde termijnen van DEZE deal meteen vrijgeven. Faalt dit, dan staat
+  // de toewijzing er wel; de volgende factuursync haalt het in.
+  let vrijgave = null;
+  try {
+    const rel = await releaseProportionalForPaidAmount({ customerId: r.deal.customer_id });
+    const mijn = (rel.simulations || []).filter((s) => parentIds.includes(s.parent_id) && s.would_release);
+    vrijgave = { vrijgegeven: round2(mijn.reduce((s, x) => s + Number(x.te_releasen || 0), 0)), regels: mijn.length };
+  } catch (e) {
+    console.error('[commissie-toewijzing] vrijgave na opslaan:', e.message);
+    vrijgave = { fout: e.message };
+  }
+
+  return {
+    ok: true,
+    attribution_id: attr.id,
+    parent_ids: parentIds,
+    totaal_commissie: round2(r.perMentor * r.mentoren.length),
+    per_mentor: r.perMentor,
+    vrijgave,
+  };
+}
+
+// ── Annuleren ─────────────────────────────────────────────────────────────────
+export async function annuleerToewijzing(body, { actorId }) {
+  const id = String(body?.attribution_id || '').trim();
+  if (!UUID_RE.test(id)) throw new CommissieFout(400, 'ID_ONGELDIG', 'attribution_id (uuid) vereist');
+  if (String(body?.bevestiging || '') !== 'ANNULEER') {
+    throw new CommissieFout(400, 'BEVESTIGING', 'Typ ANNULEER om te bevestigen');
+  }
+  const reden = body?.reden ? String(body.reden).slice(0, 500) : null;
+  const { data: attr, error } = await supabaseAdmin.from('mentor_sale_attributions')
+    .select('id, deal_id, customer_id, status, note').eq('id', id).maybeSingle();
+  if (error) {
+    if (isSchemaOntbreekt(error)) throw new CommissieFout(503, 'MIGRATIE_ONTBREEKT', 'De database-migratie voor toewijzingen is nog niet gedraaid.');
+    throw new Error('attribution fetch: ' + error.message);
+  }
+  if (!attr) throw new CommissieFout(404, 'NIET_GEVONDEN', 'Toewijzing niet gevonden');
+  if (attr.status !== 'actief') throw new CommissieFout(409, 'AL_GEANNULEERD', 'Deze toewijzing is al geannuleerd');
+
+  const parents = await alle(supabaseAdmin.from('mentor_ledger_entries')
+    .select('id, mentor_user_id, status, amount, original_amount, note')
+    .eq('attribution_id', id).is('parent_entry_id', null), 'parents');
+  const parentIds = parents.map((p) => p.id);
+  const kids = parentIds.length
+    ? await alle(supabaseAdmin.from('mentor_ledger_entries').select('id, parent_entry_id, amount, status')
+      .in('parent_entry_id', parentIds), 'children')
+    : [];
+  const vrijgegeven = round2(kids.filter((k) => k.status === 'vrijgegeven' || k.status === 'uitbetaald').reduce((s, k) => s + Number(k.amount || 0), 0));
+  const uitbetaald = round2(kids.filter((k) => k.status === 'uitbetaald').reduce((s, k) => s + Number(k.amount || 0), 0));
+
+  const stempel = `[${new Date().toISOString().slice(0, 10)}] Toewijzing geannuleerd${reden ? ': ' + reden : ''}`;
+  let geannuleerd = 0;
+  for (const p of parents.filter((x) => OPEN_STATUSSEN.includes(x.status))) {
+    const { data, error: uErr } = await supabaseAdmin.from('mentor_ledger_entries')
+      .update({ status: 'geannuleerd', note: [p.note, stempel].filter(Boolean).join(' · ').slice(0, 1000) })
+      .eq('id', p.id).in('status', OPEN_STATUSSEN).select('id');
+    if (uErr) throw new Error('parent annuleren: ' + uErr.message);
+    geannuleerd += (data || []).length;
+  }
+  const { error: aErr } = await supabaseAdmin.from('mentor_sale_attributions').update({
+    status: 'geannuleerd',
+    cancelled_at: new Date().toISOString(),
+    cancelled_by: actorId || null,
+    note: [attr.note, stempel].filter(Boolean).join(' · ').slice(0, 1000),
+  }).eq('id', id).eq('status', 'actief');
+  if (aErr) throw new Error('attribution annuleren: ' + aErr.message);
+
+  if (uitbetaald > 0) {
+    // Zelfde lijn als de sales-bonus: geen stille terugdraai, wel een signaal.
+    createNotification({
+      toRole: ['manager', 'super_admin'],
+      type: 'finance.mentor_commissie_clawback',
+      title: 'Mentorcommissie al uitbetaald',
+      body: `Geannuleerde toewijzing had al EUR ${uitbetaald.toFixed(2)} uitbetaald — verrekenen met een volgende uitbetaling (handmatige post).`,
+      linkUrl: '/modules/klanten-v2/?v2preview=mentoren',
+      entityType: 'mentor_sale_attribution',
+      entityId: id,
+    }).catch(() => {});
+  }
+  return { ok: true, attribution_id: id, geannuleerd_regels: geannuleerd, al_vrijgegeven: vrijgegeven, al_uitbetaald: uitbetaald, clawback_melding: uitbetaald > 0 };
+}
+
+// ── Platformbreed overzicht ───────────────────────────────────────────────────
+function saleStatus(cel) {
+  const share = Number(cel.share) || 0;
+  const rel = Number(cel.vrijgegeven) || 0;
+  if (cel.geannuleerd) return 'geannuleerd';
+  if (share > 0 && rel >= share - 0.01) return 'volledig';
+  if (cel.achterstallig) return 'achterstallig';
+  if (rel > 0.004) return 'deels';
+  return 'wacht';
+}
+
+function periodeStart(periode) {
+  const nu = new Date();
+  if (periode === 'dit_jaar') return `${nu.getUTCFullYear()}-01-01`;
+  if (periode === '12m') { const d = new Date(nu); d.setUTCMonth(d.getUTCMonth() - 12); return d.toISOString().slice(0, 10); }
+  if (periode === '90d') { const d = new Date(nu); d.setUTCDate(d.getUTCDate() - 90); return d.toISOString().slice(0, 10); }
+  return null;
+}
+
+/**
+ * Bouw het overzicht uit de per-mentor bonus-overzichten (dezelfde bron als
+ * het mentorzicht en het payout-rapport) — zo kloppen cockpit, mentor en
+ * uitbetaling altijd met elkaar.
+ */
+export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), periode = 'alles' }) {
+  const vanaf = periodeStart(periode);
+  const nu = new Date();
+  const dezeMaand = nu.toISOString().slice(0, 7);
+  const volgende = new Date(Date.UTC(nu.getUTCFullYear(), nu.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
+
+  const sales = new Map(); // key → sale
+  const maanden = new Map(); // month → { month, per_mentor: {uid: {betaald, verwacht}} }
+
+  for (const m of mentoren) {
+    const ov = overzichten.get(m.user_id);
+    if (!ov) continue;
+    for (const p of ov.projection_12m || []) {
+      if (!maanden.has(p.month)) maanden.set(p.month, { month: p.month, per_mentor: {} });
+      maanden.get(p.month).per_mentor[m.user_id] = { betaald: round2(p.paid), verwacht: round2(p.expected) };
+    }
+    for (const ev of ov.per_event || []) {
+      for (const s of ev.sales || []) {
+        const handmatig = s.bron === 'handmatig';
+        const traject = !!s.is_cash_traject;
+        const key = handmatig ? `attr:${s.attribution_id}`
+          : traject ? `traject:${ev.event_id}:${s.customer_label}`
+            : `ev:${ev.event_id || '-'}:${s.customer_id || s.customer_label}`;
+        const datum = handmatig ? (s.created_at || null) : (ev.starts_at || null);
+        if (!sales.has(key)) {
+          sales.set(key, {
+            key,
+            bron: handmatig ? 'handmatig' : (traject ? 'traject' : 'event'),
+            reden: s.reden || null,
+            bron_label: handmatig ? (REDEN_LABEL[s.reden] || 'Handmatig') : (ev.event_title || (traject ? 'Handmatig traject' : 'Event')),
+            event_id: ev.event_id || null,
+            event_title: ev.event_title || null,
+            datum,
+            attribution_id: s.attribution_id || null,
+            deal_id: s.deal_id || null,
+            customer_id: s.customer_id || null,
+            klant: s.customer_label || '—',
+            dealwaarde: round2(s.basis || s.sale_total_incl || s.traject_total_incl || 0),
+            pct: s.pct != null ? Number(s.pct) : null,
+            term_count: s.term_count || 0,
+            betaalde_termijnen: s.paid_term_count || 0,
+            schema_onbekend: !!s.schema_unknown,
+            achterstallig: !!s.has_overdue,
+            achterstand_bedrag: round2(s.overdue_amount || 0),
+            wanbetaler: !!(s.customer_id && wanbetalers.has(s.customer_id)),
+            sub_geannuleerd: false,
+            geannuleerd: true, // wordt false zodra één mentor een niet-geannuleerd aandeel heeft
+            share: 0,
+            vrijgegeven: 0,
+            mentoren: [],
+            termijnen: (s.termijnen || []).map((t) => ({ index: t.index, due_date: t.due_date, status: t.status, aandeel: 0 })),
+          });
+        }
+        const cel = sales.get(key);
+        const share = round2(s.mentor_share_total || 0);
+        const rel = round2(traject ? share : (s.released_share || 0));
+        // Een sale met aandeel 0 is een geannuleerde grootboekregel.
+        const mentorGeannuleerd = share <= 0 && s.status === 'geannuleerd';
+        if (!mentorGeannuleerd) cel.geannuleerd = false;
+        if (s.status === 'geannuleerd' && share > 0) cel.sub_geannuleerd = true;
+        cel.share = round2(cel.share + share);
+        cel.vrijgegeven = round2(cel.vrijgegeven + rel);
+        cel.mentoren.push({ user_id: m.user_id, naam: m.naam, aandeel: share, vrijgegeven: rel, geannuleerd: mentorGeannuleerd });
+        (s.termijnen || []).forEach((t, i) => {
+          if (cel.termijnen[i]) cel.termijnen[i].aandeel = round2(cel.termijnen[i].aandeel + (Number(t.amount) || 0));
+        });
+      }
+    }
+  }
+
+  let lijst = [...sales.values()];
+  if (vanaf) lijst = lijst.filter((s) => !s.datum || String(s.datum).slice(0, 10) >= vanaf);
+  for (const s of lijst) {
+    s.open = round2(Math.max(0, s.share - s.vrijgegeven));
+    s.status = saleStatus(s);
+    const volg = s.termijnen.find((t) => t.status === 'open' || t.status === 'achterstallig');
+    s.volgende_termijn = volg ? { due_date: volg.due_date, aandeel: volg.aandeel, status: volg.status } : null;
+    s.risico = s.open > 0 && (s.achterstallig || s.wanbetaler || s.sub_geannuleerd);
+    s.risico_redenen = [
+      s.achterstallig ? 'vervallen facturen' : null,
+      s.wanbetaler ? 'wanbetaler' : null,
+      s.sub_geannuleerd ? 'abonnement geannuleerd' : null,
+    ].filter(Boolean);
+  }
+  lijst.sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')));
+
+  const actief = lijst.filter((s) => !s.geannuleerd);
+  const som = (arr, f) => round2(arr.reduce((t, x) => t + (Number(f(x)) || 0), 0));
+  const verwachtIn = (maand, uids = null) => {
+    const cel = maanden.get(maand);
+    if (!cel) return 0;
+    return round2(Object.entries(cel.per_mentor)
+      .filter(([uid]) => !uids || uids.has(uid))
+      .reduce((t, [, v]) => t + (Number(v.verwacht) || 0), 0));
+  };
+
+  const kpis = {
+    geboekt: som(actief, (s) => s.share),
+    vrijgegeven: som(actief, (s) => s.vrijgegeven),
+    open: som(actief, (s) => s.open),
+    deze_maand_verwacht: verwachtIn(dezeMaand),
+    volgende_maand_verwacht: verwachtIn(volgende),
+    risico: som(actief.filter((s) => s.risico), (s) => s.open),
+    risico_aantal: actief.filter((s) => s.risico).length,
+    aantal_sales: actief.length,
+  };
+
+  const perMentor = mentoren.map((m) => {
+    const mijn = actief.map((s) => ({ s, me: s.mentoren.find((x) => x.user_id === m.user_id && !x.geannuleerd) })).filter((x) => x.me);
+    return {
+      user_id: m.user_id,
+      naam: m.naam,
+      closes: mijn.length,
+      geboekt: som(mijn, (x) => x.me.aandeel),
+      vrijgegeven: som(mijn, (x) => x.me.vrijgegeven),
+      open: som(mijn, (x) => Math.max(0, x.me.aandeel - x.me.vrijgegeven)),
+      verwacht_volgende_maand: verwachtIn(volgende, new Set([m.user_id])),
+      risico: som(mijn.filter((x) => x.s.risico), (x) => Math.max(0, x.me.aandeel - x.me.vrijgegeven)),
+    };
+  }).sort((a, b) => b.geboekt - a.geboekt);
+
+  const evMap = new Map();
+  for (const s of lijst) {
+    const k = s.bron === 'handmatig' ? `handmatig:${s.reden || 'handmatig'}` : (s.event_id || 'zonder');
+    if (!evMap.has(k)) {
+      evMap.set(k, {
+        key: k,
+        event_id: s.bron === 'handmatig' ? null : s.event_id,
+        titel: s.bron === 'handmatig' ? `Handmatig toegewezen · ${s.bron_label}` : (s.event_title || 'Zonder event'),
+        is_handmatig: s.bron === 'handmatig',
+        datum: s.bron === 'handmatig' ? null : s.datum,
+        omzet: 0, sales: 0, pot: 0, vrijgegeven: 0, verdeling: new Map(), sale_keys: [],
+      });
+    }
+    const e = evMap.get(k);
+    e.sale_keys.push(s.key);
+    if (s.geannuleerd) continue;
+    e.omzet = round2(e.omzet + s.dealwaarde);
+    e.sales += 1;
+    e.pot = round2(e.pot + s.share);
+    e.vrijgegeven = round2(e.vrijgegeven + s.vrijgegeven);
+    for (const me of s.mentoren) {
+      if (me.geannuleerd) continue;
+      const v = e.verdeling.get(me.user_id) || { user_id: me.user_id, naam: me.naam, bedrag: 0 };
+      v.bedrag = round2(v.bedrag + me.aandeel);
+      e.verdeling.set(me.user_id, v);
+    }
+  }
+  const perEvent = [...evMap.values()].map((e) => ({ ...e, verdeling: [...e.verdeling.values()].sort((a, b) => b.bedrag - a.bedrag) }))
+    .sort((a, b) => (a.is_handmatig - b.is_handmatig) || String(b.datum || '').localeCompare(String(a.datum || '')));
+
+  const projectie = [...maanden.values()].sort((a, b) => a.month.localeCompare(b.month));
+
+  return {
+    kpis,
+    per_mentor: perMentor,
+    per_event: perEvent,
+    sales: lijst,
+    projectie,
+    risicos: actief.filter((s) => s.risico).sort((a, b) => b.open - a.open)
+      .map((s) => ({ key: s.key, klant: s.klant, bron_label: s.bron_label, open: s.open, redenen: s.risico_redenen })),
+  };
+}
+
+export async function commissieOverzicht({ periode = 'alles' } = {}) {
+  // Mentoren = iedereen met een bonus-regel in het grootboek.
+  const regels = await alle(supabaseAdmin.from('mentor_ledger_entries').select('mentor_user_id')
+    .eq('entry_type', 'bonus').is('parent_entry_id', null).limit(20000), 'mentoren');
+  const uids = [...new Set(regels.map((r) => r.mentor_user_id).filter(Boolean))];
+  const info = uids.length ? await mentorInfo(uids) : new Map();
+  const mentoren = uids.map((u) => info.get(u) || { user_id: u, naam: '(mentor)' })
+    .sort((a, b) => a.naam.localeCompare(b.naam, 'nl'));
+
+  const overzichten = new Map();
+  const fouten = [];
+  for (const m of mentoren) {
+    try {
+      overzichten.set(m.user_id, await computeBonusOverview(m.user_id));
+    } catch (e) {
+      console.error('[commissie-overzicht] mentor', m.user_id, e.message);
+      fouten.push({ user_id: m.user_id, naam: m.naam, fout: e.message });
+    }
+  }
+
+  // Wanbetalers: klanten in een zware incassofase (fail-soft).
+  const wanbetalers = new Set();
+  try {
+    const { data, error } = await supabaseAdmin.from('dunning_pipeline_customers')
+      .select('customer_id, stage_slug').in('stage_slug', ['brief_verstuurd', 'incasso', 'afschrijven']);
+    if (!error) for (const r of data || []) wanbetalers.add(r.customer_id);
+  } catch { /* fail-soft */ }
+
+  const attrs = await loadAttributions(supabaseAdmin, { ids: ['00000000-0000-0000-0000-000000000000'] });
+  return {
+    ok: true,
+    periode,
+    migratie_ok: attrs.ok,
+    mentoren,
+    fouten,
+    ...bouwOverzicht({ mentoren, overzichten, wanbetalers, periode }),
+  };
+}

@@ -56,7 +56,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Bedrag incl. BTW per termijn. Identiek aan helper in sales-subscriptions-list.js.
-function inclPerTerm(sub) {
+export function inclPerTerm(sub) {
   if (!sub) return 0;
   const lines = Array.isArray(sub.line_items) ? sub.line_items : [];
   if (lines.length) {
@@ -66,7 +66,7 @@ function inclPerTerm(sub) {
 }
 
 // Identiek aan helper in finance-dashboard-counts.js.
-function billingCycleMonths(cycle) {
+export function billingCycleMonths(cycle) {
   if (!cycle) return 1;
   const c = String(cycle).toLowerCase();
   if (c === 'per_month')    return 1;
@@ -963,6 +963,8 @@ export async function computeBonusOverview(effectiveUserId) {
           has_overdue        : hasOverdue,
           overdue_count      : overdueCount,
           overdue_amount     : overdueAmount,
+          basis              : round2(basis),
+          pct                : r.pct != null ? Number(r.pct) : null,
           bron               : attrId ? 'handmatig' : 'event',
           reden,
           attribution_id     : attrId || null,
