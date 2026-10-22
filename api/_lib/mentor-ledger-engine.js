@@ -18,6 +18,9 @@ import {
   loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
   factuurVanDeal, factuurVanDeals, isSchemaOntbreekt,
 } from './commissie-toewijzing.js';
+import {
+  loadRegelingContext, koppelDeal, incassoVoor, betaaldVoor, isConcept, heeftKrediet,
+} from './commissie-regeling.js';
 
 /**
  * 1e betaalde factuur van een klant → alle openstaande bonus-entries voor
@@ -382,6 +385,7 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
       .select('tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
       .in('tl_subscription_id', tlSubIds);
     for (const inv of (invs || [])) {
+      if (isConcept(inv)) continue; // conceptfactuur telt nooit
       // Een volledig gecrediteerde factuur is geen betaling en geen termijn
       // (zie api/_lib/factuur-betaald.js) — ook niet als een oude rij nog
       // 'paid' + amount_paid = totaal zegt.
@@ -424,6 +428,8 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
   // zijn eigen deal; event-parent → geen fallback op een toegewezen deal.
   const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
   const activeAttrDeals = attrs.activeDealIdsByCust.get(customerId) || new Set();
+  // Incasso: termijnen die op of na `sinds` betaald werden tellen niet.
+  const regCtx = await loadRegelingContext(supabaseAdmin, [customerId]);
 
   // ── 3) Parents ─────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
@@ -487,7 +493,10 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
       continue;
     }
 
-    const paidTermsForSub = (tlSubId && paidTermsBySub.get(tlSubId)) || [];
+    const incasso = incassoVoor(regCtx.incasso, customerId, parent.source_quote_id);
+    const sindsT = incasso ? String(incasso.sinds).slice(0, 10) : null;
+    const paidTermsForSub = ((tlSubId && paidTermsBySub.get(tlSubId)) || [])
+      .filter((t) => !sindsT || (t.paid_date && String(t.paid_date).slice(0, 10) < sindsT));
     const paidTermCount   = Math.min(termCount, paidTermsForSub.length);
 
     if (paidTermCount === 0) {
@@ -697,10 +706,12 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   }
 
   // ── 2) Facturen van de klant — paid_total per tl_sub_id + customer-breed ─
-  const { data: allInvs } = await supabaseAdmin
+  //    Conceptfacturen tellen nooit (o.a. de incassofactuur voor het bureau).
+  const { data: rawInvs } = await supabaseAdmin
     .from('invoices')
-    .select('deal_id, tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status')
+    .select('id, customer_id, deal_id, tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status, due_date, created_at')
     .eq('customer_id', customerId);
+  const allInvs = (rawInvs || []).filter((inv) => !isConcept(inv));
   // Volledig gecrediteerd telt als 0 betaald (zie api/_lib/factuur-betaald.js).
   const custPaidTotal   = _r2((allInvs || []).reduce((s, i) => s + betaaldBedrag(i), 0));
   let custLastPaidDate  = null;
@@ -730,6 +741,34 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
   const activeAttrDeals = attrs.activeDealIdsByCust.get(customerId) || new Set();
 
+  // ── 2c) Regeling na creditering + incasso (api/_lib/commissie-regeling.js)
+  //   Regelingsfacturen (geen deal, geen abonnement) krijgen hun sale via de
+  //   koppelregel. Incasso: betalingen vanaf `sinds` tellen niet. Zonder
+  //   kredieten, koppelingen of markeringen: exact het oude gedrag.
+  const regCtx = await loadRegelingContext(supabaseAdmin, [customerId]);
+  const salesPerKlant = new Map();
+  if (heeftKrediet(regCtx, customerId) || regCtx.handmatig.size) {
+    const { data: alleParents } = await supabaseAdmin
+      .from('mentor_ledger_entries')
+      .select('source_quote_id, status')
+      .eq('entry_type', 'bonus')
+      .eq('customer_id', customerId)
+      .is('parent_entry_id', null);
+    salesPerKlant.set(customerId, new Set((alleParents || [])
+      .filter((e) => e.status !== 'geannuleerd' && e.source_quote_id).map((e) => e.source_quote_id)));
+  }
+  for (const inv of allInvs) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
+  const betalingenPerFactuur = new Map();
+  if (regCtx.incasso.length && allInvs.length) {
+    const { data: pays } = await supabaseAdmin
+      .from('payments').select('invoice_id, amount, payment_date')
+      .in('invoice_id', allInvs.map((i) => i.id).filter(Boolean));
+    for (const p of pays || []) {
+      if (!betalingenPerFactuur.has(p.invoice_id)) betalingenPerFactuur.set(p.invoice_id, []);
+      betalingenPerFactuur.get(p.invoice_id).push(p);
+    }
+  }
+
   // ── 3) Parents ───────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
@@ -741,14 +780,21 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     .order('created_at', { ascending: true });
   if (pErr) throw new Error('releaseProportionalForPaidAmount parents: ' + pErr.message);
 
-  // Betaald + laatste betaaldatum over een deelverzameling facturen.
-  const somBetaald = (invs) => {
+  // Betaald + laatste betaaldatum over een deelverzameling facturen. Met een
+  // incasso-`sinds`: alleen wat vóór die datum betaald werd.
+  const somBetaald = (invs, sinds = null) => {
     let paid = 0;
     let last = null;
     for (const inv of invs) {
-      const p = betaaldBedrag(inv);
+      const p = sinds ? betaaldVoor(inv, betalingenPerFactuur.get(inv.id), sinds) : betaaldBedrag(inv);
       paid += p;
-      if (p > 0 && inv.paid_date && (!last || inv.paid_date > last)) last = inv.paid_date;
+      if (p <= 0) continue;
+      let d = inv.paid_date || null;
+      if (sinds && (!d || d >= sinds)) {
+        d = (betalingenPerFactuur.get(inv.id) || []).map((x) => String(x.payment_date).slice(0, 10))
+          .filter((x) => x < sinds).sort().pop() || null;
+      }
+      if (d && (!last || d > last)) last = d;
     }
     return { paid: _r2(paid), lastPaidDate: last };
   };
@@ -773,14 +819,17 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
 
   for (const parent of parents || []) {
     const attrId = attributionIdOf(parent);
+    const incasso = incassoVoor(regCtx.incasso, customerId, parent.source_quote_id);
+    const sinds = incasso ? String(incasso.sinds).slice(0, 10) : null;
     let saleTotaalBetaald;
     let saleLastPaidDate;
     if (attrId) {
-      // Toegewezen sale: alleen de facturen van de eigen deal, nooit klantbreed.
+      // Toegewezen sale: alleen de facturen van de eigen deal (incl. de
+      // regelingsfacturen die aan die deal gekoppeld zijn), nooit klantbreed.
       const dealId = parent.source_quote_id || null;
       const tlSet  = tlSubIdsVanDeal(dealId, subsForCust);
       const acc    = dealId
-        ? somBetaald((allInvs || []).filter((inv) => factuurVanDeal(inv, dealId, tlSet)))
+        ? somBetaald(allInvs.filter((inv) => factuurVanDeal(inv, dealId, tlSet) || (inv._k && inv._k.deal === dealId)), sinds)
         : { paid: 0, lastPaidDate: null };
       saleTotaalBetaald = acc.paid;
       saleLastPaidDate  = acc.lastPaidDate;
@@ -804,11 +853,17 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       // mentor-bonus-overview). De cap op (origAmount - reedsReleased) verderop
       // voorkomt dat er ooit meer dan de volledige bonus vrijkomt. Exactheid
       // verbetert zodra facturen consequent aan de sub gekoppeld zijn.
-      // Toegewezen deals (verlenging) tellen niet mee voor een event-bonus.
-      const custAcc = excl.size
-        ? somBetaald((allInvs || []).filter((inv) => !factuurVanDeals(inv, excl, subsForCust)))
+      // Toegewezen deals (verlenging) tellen niet mee voor een event-bonus,
+      // en ook geen regelingsfacturen die aan een ANDERE sale (of bewust aan
+      // geen sale) gekoppeld zijn — anders telt dezelfde betaling dubbel.
+      const elders = (inv) => !!(inv._k && !inv._k.onbekend && inv._k.deal !== (parent.source_quote_id || null));
+      const filteren = excl.size || sinds || allInvs.some(elders);
+      const custAcc = filteren
+        ? somBetaald(allInvs.filter((inv) => !factuurVanDeals(inv, excl, subsForCust) && !elders(inv)), sinds)
         : { paid: custPaidTotal, lastPaidDate: custLastPaidDate };
-      const subAcc  = (tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null;
+      const subAcc  = sinds
+        ? (tlSubId ? somBetaald(allInvs.filter((inv) => inv.tl_subscription_id === tlSubId), sinds) : null)
+        : ((tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null);
       const subPaid  = subAcc ? _r2(subAcc.paid) : 0;
       const custPaid = _r2(custAcc.paid);
       saleTotaalBetaald = Math.max(subPaid, custPaid);
