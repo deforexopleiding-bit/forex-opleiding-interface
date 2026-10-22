@@ -709,13 +709,13 @@
   ];
   function _bonusFilter(rows, tab) {
     switch (tab) {
-      case 'overdue':     return rows.filter((s) => s.has_overdue === true);
+      case 'overdue':     return rows.filter((s) => s.has_overdue === true || !!s.incasso);
       case 'pauze':       return rows.filter((s) => s.status === 'pauze');
       case 'wacht_start': return rows.filter((s) => (s.status === 'geen_abonnement' || s.status === 'wacht_op_start') && s.has_overdue !== true);
       case 'geannuleerd': return rows.filter((s) => s.status === 'geannuleerd');
       case 'alle':        return rows;
       case 'actief':
-      default:            return rows.filter((s) => s.status === 'actief' || s.status === 'voltooid' || s.status === 'wacht_1e_betaling' || s.has_overdue === true);
+      default:            return rows.filter((s) => s.status === 'actief' || s.status === 'voltooid' || s.status === 'wacht_1e_betaling' || s.status === 'incasso' || s.has_overdue === true);
     }
   }
   function _bonusFlatten(perEvent) {
@@ -745,6 +745,7 @@
       case 'pauze':             return H.pill('neutral', 'Pauze');
       case 'geen_abonnement':   return H.pill('neutral', 'Geen abonnement');
       case 'geannuleerd':       return H.pill('danger',  'Geannuleerd');
+      case 'incasso':           return H.pill('danger',  'Incasso');
       default:                  return H.pill('neutral', status || '—');
     }
   }
@@ -752,6 +753,7 @@
     if (status === 'betaald')       return H.pill('ok',     'Betaald');
     if (status === 'gecrediteerd')  return H.pill('neutral', 'Gecrediteerd');
     if (status === 'achterstallig') return H.pill('danger', 'Achterstallig');
+    if (status === 'incasso')       return H.pill('danger', 'Incasso — vervalt');
     return H.pill('warn', 'Open');
   }
   window.__verdBonusSetTab = (t) => {
@@ -864,7 +866,9 @@
       const summaryRow = `<tr onclick="window.__verdBonusToggle('${esc(s._key)}')" style="cursor:pointer;${isOpen ? 'background:var(--surface-2)' : ''}">
         <td><strong>${esc(s.customer_label || '—')}</strong></td>
         <td>${_bronCel(s)}</td>
-        <td>${_bonusStatusPill(s.status, s.start_date)}${overdueBadge}</td>
+        <td>${s.incasso
+          ? `${H.pill('danger', 'Incasso — geen commissie meer sinds ' + fmtDate(s.incasso.sinds))}<div style="font-size:11px;color:var(--rose);margin-top:3px">vervalt: ${eur(s.incasso.vervallen)}</div>`
+          : _bonusStatusPill(s.status, s.start_date) + overdueBadge}</td>
         <td>
           <div style="font-size:12px">${paidCount}/${termCount}</div>
           <div class="progress" style="height:5px;margin-top:3px;max-width:100px"><i style="width:${pct.toFixed(1)}%;background:var(--emerald)"></i></div>
@@ -882,7 +886,7 @@
           <td>${Number(t.index) || 0}</td>
           <td>${fmtDate(t.due_date)}</td>
           <td style="text-align:right"><span class="mono">${eur(t.amount)}</span></td>
-          <td>${_bonusTermStatusPill(t.status)}</td>
+          <td>${_bonusTermStatusPill(t.status)}${t.vervangen ? ' <span style="font-size:11px;color:var(--text-3)">→ vervangen door regeling</span>' : ''}</td>
         </tr>`).join('');
         const schemaLine = s.schema_unknown
           ? `<div style="font-size:12px;color:var(--amber);margin-bottom:8px;padding:8px 10px;background:var(--amber-soft);border-radius:6px">⚠ Er is nog geen abonnement bekend voor deze klant — richt eerst een abonnement in voordat deze bonus meetelt in de KPI's.</div>`
