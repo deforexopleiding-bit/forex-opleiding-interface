@@ -46,6 +46,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from './_lib/factuur-betaald.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
+import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
   loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
   factuurVanDeal, factuurVanDeals, REDEN_LABEL,
@@ -159,7 +160,7 @@ export async function computeBonusOverview(effectiveUserId) {
       const now = new Date();
       const projection_12m = [];
       for (let i = -6; i <= 36; i++) {
-        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0, breakdown: [], rest_count: 0, rest_amount: 0 });
+        projection_12m.push({ month: ymKey(addMonths(now, i)), amount: 0, paid: 0, expected: 0, achterstallig: 0, breakdown: [], rest_count: 0, rest_amount: 0 });
       }
       return {
         ok: true,
@@ -167,6 +168,12 @@ export async function computeBonusOverview(effectiveUserId) {
         totals: { earned_total: 0, betaald_uit: 0, open: 0, deze_maand: 0, volgende_maand: 0, cf_received: 0, cf_this_month: 0, cf_expected: 0 },
         projection_12m,
         per_event: [],
+        verschoven: [],
+        inhaal: [],
+        achterstallig_totaal: 0,
+        inhaal_totaal: 0,
+        laatste_gesloten_maand: null,
+        volgend_rapport: null,
       };
     }
 
@@ -330,6 +337,55 @@ export async function computeBonusOverview(effectiveUserId) {
         }
       }
     }
+
+    // ── Maand van betaling (zie api/_lib/commissie-maand.js) ──────────────
+    // Rapporten van deze mentor → welke maanden zijn al gesloten (cutover).
+    // Betalingsregels → effectieve betaaldatum bij deelbetalingen.
+    // Correcties met [inhaal:…] → inhaalcommissie die al voorgesteld is.
+    // Alles fail-soft: zonder rapporten is niets gesloten, zonder payments
+    // geldt paid_date.
+    let afsluiting = maakAfsluiting([]);
+    const betalingenPerFactuur = new Map(); // invoice_id → [{ amount, payment_date }]
+    const inhaalVoorgesteld = new Map();     // token → { period_month, amount_incl }
+    {
+      const { data: rapporten, error: rapErr } = await supabaseAdmin
+        .from('mentor_payouts')
+        .select('id, period_month, status, generated_at')
+        .eq('mentor_user_id', effectiveUserId);
+      if (!rapErr) afsluiting = maakAfsluiting(rapporten || []);
+      else console.warn('[mentor-bonus-overview] rapporten:', rapErr.message);
+
+      const factuurIds = new Set();
+      for (const arr of invoicesByCust.values()) for (const inv of arr) if (inv.id) factuurIds.add(inv.id);
+      for (const arr of invoicesBySub.values()) for (const inv of arr) if (inv.id) factuurIds.add(inv.id);
+      const ids = [...factuurIds];
+      for (let i = 0; i < ids.length; i += 150) {
+        const { data: pays, error: payErr } = await supabaseAdmin
+          .from('payments')
+          .select('invoice_id, amount, payment_date')
+          .in('invoice_id', ids.slice(i, i + 150));
+        if (payErr) { console.warn('[mentor-bonus-overview] payments:', payErr.message); break; }
+        for (const p of pays || []) {
+          if (!betalingenPerFactuur.has(p.invoice_id)) betalingenPerFactuur.set(p.invoice_id, []);
+          betalingenPerFactuur.get(p.invoice_id).push(p);
+        }
+      }
+
+      const { data: adjs, error: adjErr } = await supabaseAdmin
+        .from('mentor_payout_adjustments')
+        .select('period_month, label, amount_incl')
+        .eq('mentor_user_id', effectiveUserId);
+      if (!adjErr) {
+        for (const a of adjs || []) {
+          const m = /\[inhaal:([^\]]+)\]/.exec(String(a.label || ''));
+          if (m) inhaalVoorgesteld.set(m[1], { period_month: a.period_month, amount_incl: Number(a.amount_incl) || 0 });
+        }
+      }
+    }
+    // Volgend rapport dat nog niet definitief is: daar landt inhaalcommissie.
+    const volgendRapport = afsluiting.laatsteGesloten ? addYm(afsluiting.laatsteGesloten, 2) : null;
+    const verschoven = []; // termijnen buiten hun vervalmaand (betaald later / achterstallig / inhaal)
+    const monthAchterstallig = new Map(); // ym → bedrag (deel van monthOpen)
 
     // Met hoeveel mentoren deelt deze mentor elke sale? Alleen het AANTAL —
     // bedragen van andere mentoren gaan nooit mee naar het mentorzicht.
@@ -853,45 +909,84 @@ export async function computeBonusOverview(effectiveUserId) {
 
         let effectiveYmd;
         let isPaidTerm;
-        let bucketDate;
         let isCreditedTerm = false;
+        let betaaldatum = null;
         if (invForTerm) {
           effectiveYmd = invForTerm.due_date || calcYmd;
           const total  = Number(invForTerm.amount_total) || 0;
           isCreditedTerm = isVolledigGecrediteerd(invForTerm);
           isPaidTerm   = total > 0 && telAlsBetaald(invForTerm);
-          bucketDate   = invForTerm.due_date ? new Date(invForTerm.due_date + 'T00:00:00Z') : calcDate;
+          betaaldatum  = isPaidTerm ? effectieveBetaaldatum(invForTerm, betalingenPerFactuur.get(invForTerm.id)) : null;
         } else {
           effectiveYmd = calcYmd;
           isPaidTerm   = i < nbPaid;
-          bucketDate   = calcDate;
         }
 
-        // Status: 'betaald' | 'achterstallig' (open + due voorbij) | 'open' (toekomst).
-        // 'gecrediteerd': niet betaald, niet achterstallig, geen verwacht geld.
-        let tStatus;
-        if (isCreditedTerm)                tStatus = 'gecrediteerd';
-        else if (isPaidTerm)               tStatus = 'betaald';
-        else if (effectiveYmd < todayISO)  tStatus = 'achterstallig';
-        else                                tStatus = 'open';
+        // Maand waarin deze termijn telt: betaalmaand (betaald), huidige maand
+        // (achterstallig), vervalmaand (open). Al uitbetaald in een definitief
+        // rapport → blijft daar; betaald in een gesloten maand → inhaal.
+        // Status: 'betaald' | 'achterstallig' | 'open' | 'gecrediteerd'.
+        const plaats = plaatsTermijn({
+          dueYmd: effectiveYmd, betaald: isPaidTerm, gecrediteerd: isCreditedTerm,
+          betaaldatum, vandaag: todayISO, afsluiting,
+        });
+        const tStatus = plaats.status;
+        const inhaalToken = invForTerm?.id || `${r.id}:${i + 1}`;
+        const voorgesteld = plaats.inhaal ? (inhaalVoorgesteld.get(inhaalToken) || null) : null;
 
         termijnen.push({
           index   : i + 1,
           due_date: effectiveYmd,
           amount  : tAmount,
           status  : tStatus,
+          betaald_op         : plaats.betaaldatum,
+          maand              : plaats.maand,
+          uitbetaald_in      : plaats.uitbetaald_in,
+          inhaal             : plaats.inhaal,
+          achterstallig_sinds: plaats.achterstallig_sinds,
         });
+        if (!schemaUnknown && tAmount > 0 && !isCancelled && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
+          const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
+          const rapport = afsluiting.rapportVoor(plaats.maand);
+          verschoven.push({
+            klant: customerLabel(custObj),
+            customer_id: r.customer_id || null,
+            bron: attrId ? 'handmatig' : 'event',
+            event_id: attrId ? null : (r.event_id || null),
+            attribution_id: attrId || null,
+            index: i + 1,
+            term_count: termCount,
+            due_date: effectiveYmd,
+            status: tStatus,
+            betaald_op: plaats.betaaldatum,
+            maand: plaats.maand,
+            uitbetaald_in: plaats.uitbetaald_in,
+            rapport_periode: plaats.inhaal ? null : addYm(plaats.maand, 1),
+            rapport_status: plaats.inhaal ? null : (rapport?.status || null),
+            inhaal: plaats.inhaal,
+            inhaal_token: plaats.inhaal ? inhaalToken : null,
+            inhaal_voorstel_periode: plaats.inhaal ? volgendRapport : null,
+            inhaal_voorgesteld: voorgesteld,
+            achterstallig_sinds: plaats.achterstallig_sinds,
+            amount: tAmount,
+          });
+        }
         // Cashflow-projectie: vul zowel monthPaid (betaalde termijnen, historie)
         // als monthOpen (openstaande termijnen, toekomst). open_total blijft
         // ALLEEN open termijnen (KPI ongewijzigd). monthAmount = paid+open per
         // maand (backward-compat). monthBreakdown: per bijdrage (voor tooltip).
-        if (!schemaUnknown && !isCreditedTerm) {
-          const k = ymKey(bucketDate);
+        // Inhaal (betaald in een al gesloten maand) telt in geen enkele maand:
+        // die gaat via een correctie op het volgende rapport.
+        if (!schemaUnknown && plaats.telt) {
+          const k = plaats.maand;
           if (isPaidTerm) {
             if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + tAmount));
           } else {
             open_total += tAmount;
             if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + tAmount));
+            if (tStatus === 'achterstallig' && monthOpen.has(k)) {
+              monthAchterstallig.set(k, round2((monthAchterstallig.get(k) || 0) + tAmount));
+            }
           }
           if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + tAmount));
           if (tAmount > 0 && monthAmount.has(k)) {
@@ -901,7 +996,9 @@ export async function computeBonusOverview(effectiveUserId) {
               label : customerLabel(custObj),
               term  : i + 1,
               amount: round2(tAmount),
-              status: isPaidTerm ? 'betaald' : 'verwacht',
+              status: isPaidTerm ? 'betaald' : (tStatus === 'achterstallig' ? 'achterstallig' : 'verwacht'),
+              ...(tStatus === 'achterstallig' ? { achterstallig_sinds: plaats.achterstallig_sinds } : {}),
+              ...(plaats.verschoven && isPaidTerm ? { vervaldag: effectiveYmd } : {}),
             });
           }
         }
@@ -1048,6 +1145,9 @@ export async function computeBonusOverview(effectiveUserId) {
         amount  : round2((monthPaid.get(k) || 0) + (monthOpen.get(k) || 0)),
         paid    : round2(monthPaid.get(k) || 0),
         expected: round2(monthOpen.get(k) || 0),
+        // Deel van expected dat achterstallig is en naar deze (huidige) maand
+        // meeschuift.
+        achterstallig: round2(monthAchterstallig.get(k) || 0),
         breakdown,
         rest_count,
         rest_amount,
@@ -1094,6 +1194,14 @@ export async function computeBonusOverview(effectiveUserId) {
       },
       projection_12m,
       per_event,
+      // Maand van betaling (2026-10-22): termijnen die niet in hun vervalmaand
+      // tellen + inhaalcommissie (betaald in een al gesloten maand).
+      verschoven: verschoven.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date))),
+      inhaal: verschoven.filter((v) => v.inhaal),
+      achterstallig_totaal: round2(verschoven.filter((v) => v.status === 'achterstallig').reduce((t, v) => t + v.amount, 0)),
+      inhaal_totaal: round2(verschoven.filter((v) => v.inhaal && !v.inhaal_voorgesteld).reduce((t, v) => t + v.amount, 0)),
+      laatste_gesloten_maand: afsluiting.laatsteGesloten,
+      volgend_rapport: volgendRapport,
     };
 }
 

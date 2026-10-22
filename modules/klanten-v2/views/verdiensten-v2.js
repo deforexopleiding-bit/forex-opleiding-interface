@@ -604,25 +604,33 @@
         const paidPx     = paid     > 0 ? Math.max(3, paidH)     : 0;
         const expectedPx = expected > 0 ? Math.max(3, expectedH) : 0;
         const paidSeg     = paid     > 0 ? `<div title="Ontvangen: ${eur(paid)}" style="width:100%;height:${paidPx}px;background:var(--emerald);${expected > 0 ? '' : 'border-radius:3px 3px 0 0'}"></div>` : '';
-        const expectedSeg = expected > 0 ? `<div title="Verwacht: ${eur(expected)}" style="width:100%;height:${expectedPx}px;background:var(--blue);border-radius:3px 3px 0 0"></div>` : '';
+        // Achterstallig (onbetaald, schuift mee naar deze maand) apart: amber
+        // gearceerd bovenop het gewone "verwacht".
+        const achter    = Math.min(expected, Number(m.achterstallig) || 0);
+        const achterPx  = achter > 0 ? Math.max(3, Math.round((achter / mx) * totalHeight)) : 0;
+        const gewoonPx  = Math.max(0, expectedPx - achterPx);
+        const expectedSeg = expected > 0 ? `${achter > 0 ? `<div title="Achterstallig, schuift mee tot de klant betaalt: ${eur(achter)}" style="width:100%;height:${achterPx}px;background:repeating-linear-gradient(135deg,var(--amber) 0 3px,var(--amber-soft) 3px 6px);border-radius:3px 3px 0 0"></div>` : ''}${gewoonPx > 0 ? `<div title="Verwacht: ${eur(expected - achter)}" style="width:100%;height:${gewoonPx}px;background:var(--blue);${achter > 0 ? '' : 'border-radius:3px 3px 0 0'}"></div>` : ''}` : '';
         stack = `<div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;margin-top:auto;overflow:hidden;border-radius:3px 3px 0 0">${expectedSeg}${paidSeg}</div>`;
       }
       const amountLabel = total > 0 ? eur(Math.round(total)).replace('€ ', '€') : '';
-      return `<div style="flex:1;min-width:22px;display:flex;flex-direction:column;align-items:center;height:100%;${isNow ? 'font-weight:600' : ''}">
-        <div style="font-size:9.5px;color:var(--text-3);white-space:nowrap;margin-bottom:3px;min-height:12px">${esc(amountLabel)}</div>
+      return `<div class="verd-cf-bar" style="flex:1;min-width:${slice.length > 15 ? 12 : 22}px;display:flex;flex-direction:column;align-items:center;height:100%;${isNow ? 'font-weight:600' : ''}">
+        <div class="verd-cf-amt" style="font-size:9.5px;color:var(--text-3);white-space:nowrap;margin-bottom:3px;min-height:12px">${esc(amountLabel)}</div>
         <div style="flex:1;width:100%;display:flex;flex-direction:column;justify-content:flex-end">${stack}</div>
-        <div style="font-size:10px;color:${isNow ? 'var(--text)' : 'var(--text-3)'};margin-top:5px">${esc(monShort)}${isNow ? '' : ''}</div>
-        <div style="font-size:9px;color:var(--text-3)">'${esc(yr)}</div>
+        <div class="verd-cf-lbl" style="font-size:10px;color:${isNow ? 'var(--text)' : 'var(--text-3)'};margin-top:5px">${esc(monShort)}${isNow ? '' : ''}</div>
+        <div class="verd-cf-lbl" style="font-size:9px;color:var(--text-3)">'${esc(yr)}</div>
       </div>`;
     }).join('');
 
     const legend = `<div style="display:flex;gap:14px;padding:4px 16px 10px;font-size:11.5px;color:var(--text-3)">
       <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:var(--emerald);border-radius:2px"></span>Ontvangen</span>
       <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:var(--blue);border-radius:2px"></span>Verwacht</span>
+      ${slice.some((m) => Number(m.achterstallig) > 0) ? `<span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:repeating-linear-gradient(135deg,var(--amber) 0 3px,var(--amber-soft) 3px 6px);border-radius:2px"></span>Achterstallig, schuift mee</span>` : ''}
     </div>`;
 
-    return `${header}
-      <div style="display:flex;align-items:stretch;gap:6px;height:${totalHeight + 44}px;padding:8px 16px 8px">${bars}</div>
+    // Smal scherm: geen bedragen boven de balken, om de maand een label.
+    const smal = `<style>@media (max-width:640px){.verd-cf-amt{visibility:hidden}.verd-cf-bar:nth-child(even) .verd-cf-lbl{visibility:hidden}}</style>`;
+    return `${header}${smal}
+      <div style="display:flex;align-items:stretch;gap:${slice.length > 15 ? 3 : 6}px;height:${totalHeight + 44}px;padding:8px 16px 8px">${bars}</div>
       ${legend}`;
   }
 
@@ -775,6 +783,38 @@
     const t = asArr(s.termijnen).find((x) => x.status === 'open' || x.status === 'achterstallig');
     if (!t || s.status === 'geannuleerd') return '';
     return `<div style="font-size:11px;color:${t.status === 'achterstallig' ? 'var(--rose)' : 'var(--text-3)'};margin-top:3px">volgende: ${fmtDate(t.due_date)} · ${eur(t.amount)}</div>`;
+  }
+  // Verschoven commissie (2026-10-22): je commissie telt in de maand waarin de
+  // klant effectief betaalt. Hier zie je per termijn wat niet in zijn
+  // vervalmaand viel en waar het naartoe ging.
+  const MAAND_LANG = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+  const ymLang = (s) => { const [y, m] = String(s || '').split('-'); const i = Number(m) - 1; return i >= 0 ? `${MAAND_LANG[i]} ${y}` : String(s || ''); };
+  function renderVerschoven(ov) {
+    const lijst = asArr(ov?.verschoven);
+    if (!lijst.length) return '';
+    const status = (v) => {
+      if (v.inhaal) return v.inhaal_voorgesteld
+        ? `Betaald op ${fmtDate(v.betaald_op)} → komt als correctie in rapport ${esc(ymLang(String(v.inhaal_voorgesteld.period_month).slice(0, 7)))}`
+        : `Betaald op ${fmtDate(v.betaald_op)} → wordt ingehaald via een correctie (administratie)`;
+      if (v.status === 'achterstallig') return `<span style="color:var(--amber)">Nog niet betaald</span> · schuift mee tot de klant betaalt`;
+      if (v.uitbetaald_in) return `Betaald op ${fmtDate(v.betaald_op)} → uitbetaald in rapport ${esc(ymLang(v.uitbetaald_in))}`;
+      return `Betaald op ${fmtDate(v.betaald_op)} → ${v.rapport_status === 'uitbetaald' ? 'uitbetaald in' : 'komt in'} rapport ${esc(ymLang(v.rapport_periode))}`;
+    };
+    const rows = lijst.map((v) => `<tr>
+      <td style="padding:7px 10px"><strong>${esc(v.klant)}</strong></td>
+      <td style="padding:7px 10px" class="mono">${v.index}/${v.term_count}</td>
+      <td style="padding:7px 10px">${fmtDate(v.due_date)}</td>
+      <td style="padding:7px 10px;font-size:12.5px">${status(v)}</td>
+      <td style="padding:7px 10px;text-align:right"><span class="mono">${eur(v.amount)}</span></td></tr>`).join('');
+    return `<div style="margin-top:14px">${dashCard('Verschoven commissie', 'amber', `
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Je commissie telt in de maand waarin de klant effectief betaalt. Betaalt een klant te laat, dan schuift de termijn mee — je verliest hem niet.</div>
+      <div style="border:1px solid var(--border);border-radius:var(--r);overflow-x:auto">
+        <table style="width:100%;min-width:620px;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">
+            <th style="text-align:left;padding:8px 10px">Klant</th><th style="text-align:left;padding:8px 10px">Termijn</th>
+            <th style="text-align:left;padding:8px 10px">Oorspr. vervaldag</th><th style="text-align:left;padding:8px 10px">Status</th>
+            <th style="text-align:right;padding:8px 10px">Jouw commissie</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>`)}</div>`;
   }
   function renderBonusDrillDown(perEvent) {
     const rowsAll = _bonusFlatten(perEvent);
@@ -1147,7 +1187,8 @@
     // Volgorde (2026-10-22): KPI's → balkgrafiek → Mijn closes → status.
     const salesBlokken = overviewReady ? `
       <div class="pad" style="padding-top:16px">
-        ${projMonths.length ? dashCard('Commissie per maand · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 })) : ''}
+        ${projMonths.length ? dashCard('Commissie per maand · 6 terug, 12 vooruit', 'blue', cashflowChart(projMonths, t, { before: 6, after: 12 })) : ''}
+        ${renderVerschoven(ov)}
         <div style="margin-top:14px">${dashCard('Mijn closes', 'violet', renderBonusDrillDown(perEvent))}</div>
       </div>` : '';
     const hulpregel = `<div class="pad" style="padding-top:14px;padding-bottom:0;font-size:12.5px;color:var(--text-2)">Je commissie valt pas vrij wanneer de klant de factuur effectief betaalt.</div>`;

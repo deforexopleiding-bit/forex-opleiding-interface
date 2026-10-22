@@ -539,7 +539,7 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
     if (!ov) continue;
     for (const p of ov.projection_12m || []) {
       if (!maanden.has(p.month)) maanden.set(p.month, { month: p.month, per_mentor: {} });
-      maanden.get(p.month).per_mentor[m.user_id] = { betaald: round2(p.paid), verwacht: round2(p.expected) };
+      maanden.get(p.month).per_mentor[m.user_id] = { betaald: round2(p.paid), verwacht: round2(p.expected), achterstallig: round2(p.achterstallig || 0) };
     }
     for (const ev of ov.per_event || []) {
       for (const s of ev.sales || []) {
@@ -621,7 +621,21 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
       .reduce((t, [, v]) => t + (Number(v.verwacht) || 0), 0));
   };
 
+  // Verschoven termijnen + inhaalcommissie (maand van betaling, zie
+  // api/_lib/commissie-maand.js), platformbreed met de mentornaam erbij.
+  const verschoven = [];
+  for (const m of mentoren) {
+    const ov = overzichten.get(m.user_id);
+    for (const v of ov?.verschoven || []) verschoven.push({ ...v, mentor_user_id: m.user_id, mentor: m.naam });
+  }
+  verschoven.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+  const achterstallig = verschoven.filter((v) => v.status === 'achterstallig');
+  const inhaal = verschoven.filter((v) => v.inhaal);
+
   const kpis = {
+    achterstallig: som(achterstallig, (v) => v.amount),
+    achterstallig_aantal: achterstallig.length,
+    inhaal_open: som(inhaal.filter((v) => !v.inhaal_voorgesteld), (v) => v.amount),
     geboekt: som(actief, (s) => s.share),
     vrijgegeven: som(actief, (s) => s.vrijgegeven),
     open: som(actief, (s) => s.open),
@@ -684,6 +698,9 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
     per_event: perEvent,
     sales: lijst,
     projectie,
+    verschoven,
+    achterstallig,
+    inhaal,
     risicos: actief.filter((s) => s.risico).sort((a, b) => b.open - a.open)
       .map((s) => ({ key: s.key, klant: s.klant, bron_label: s.bron_label, open: s.open, redenen: s.risico_redenen })),
   };
