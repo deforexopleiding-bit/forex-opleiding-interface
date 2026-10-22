@@ -364,6 +364,7 @@
         <div><span style="color:var(--text-3)">Bron:</span> ${esc(s.bron === 'handmatig' ? 'Handmatig toegewezen · ' + s.bron_label : s.bron_label)}</div>
         ${s.datum ? `<div><span style="color:var(--text-3)">Datum:</span> ${esc(fmtDate(s.datum))}</div>` : ''}
         <div><span style="color:var(--text-3)">Commissie:</span> <span class="mono">${eur(s.share)}</span> · vrij <span class="mono" style="color:var(--emerald)">${eur(s.vrijgegeven)}</span> · open <span class="mono">${eur(s.open)}</span></div>
+        ${Math.abs((Number(s.vrijgegeven_grootboek) || 0) - (Number(s.vrijgegeven) || 0)) > 0.01 ? `<div style="font-size:11.5px;color:var(--text-3)" title="Vrij = betaalde termijnen, zoals in het rapport. Het grootboek is alleen nog audit.">Grootboek (audit): <span class="mono">${eur(s.vrijgegeven_grootboek)}</span></div>` : ''}
         ${s.achterstallig ? `<div style="color:var(--rose)">Achterstand klant: <span class="mono">${eur(s.achterstand_bedrag)}</span></div>` : ''}
         ${s.risico_redenen.length ? `<div style="color:var(--rose)">Risico: ${esc(s.risico_redenen.join(', '))}</div>` : ''}
         ${s.incasso ? `<div style="color:var(--rose)">Incasso sinds ${esc(fmtDate(s.incasso.sinds))} · vervalt <span class="mono">${eur(s.incasso.vervallen)}</span>${mark ? ` · ${esc(mark.reden)}` : ''}</div>` : ''}
@@ -603,14 +604,15 @@
         </div>
         <div style="margin-bottom:12px">${lbl('Per mentor')}
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${asArr(p.mentoren).map((m) => `<span style="padding:5px 10px;border-radius:999px;background:var(--violet-soft);color:var(--violet);font-size:12.5px">${esc(m.naam)} · <b class="mono">${eur(m.aandeel)}</b></span>`).join('')}</div>
-          ${p.valt_meteen_vrij_per_mentor > 0 ? `<div style="font-size:12px;color:var(--emerald);margin-top:6px">Valt meteen vrij (al betaald): ${eur(p.valt_meteen_vrij_per_mentor)} per mentor.</div>` : `<div style="font-size:12px;color:var(--text-3);margin-top:6px">Nog niets betaald op deze offerte — commissie valt vrij per betaalde termijn.</div>`}
+          ${p.valt_meteen_vrij_per_mentor > 0 ? `<div style="font-size:12px;color:var(--emerald);margin-top:6px">Valt meteen vrij (${Number(p.betaalde_termijnen) || 0} betaalde termijn${Number(p.betaalde_termijnen) === 1 ? '' : 'en'}): ${eur(p.valt_meteen_vrij_per_mentor)} per mentor.${p.inhaal_per_mentor > 0 ? ` <span style="color:var(--amber)">Waarvan ${eur(p.inhaal_per_mentor)} betaald in een al afgesloten maand — dat gaat via een correctie op het volgende rapport.</span>` : ''}</div>` : `<div style="font-size:12px;color:var(--text-3);margin-top:6px">Nog niets betaald op deze offerte — commissie valt vrij per betaalde termijn.</div>`}
+          ${p.achterstallig_per_mentor > 0 ? `<div style="font-size:12px;color:var(--rose);margin-top:4px">Achterstallig: ${eur(p.achterstallig_per_mentor)} per mentor — vervallen maar nog niet betaald, staat onder deze maand.</div>` : ''}
         </div>
         <div style="margin-bottom:10px">${lbl('Projectie per maand (per mentor)')}
           <div class="tbl-wrap" style="margin-top:6px;max-height:240px;overflow-y:auto"><table><thead><tr><th>Maand</th><th class="num">Vrijgegeven</th><th class="num">Verwacht</th></tr></thead><tbody>
-            ${maanden.length ? maanden.map((m) => `<tr><td>${esc(fmtYm(m.month, true))}</td><td class="num mono" style="color:var(--emerald)">${m.betaald ? eur(m.betaald) : '—'}</td><td class="num mono" style="color:var(--blue)">${m.verwacht ? eur(m.verwacht) : '—'}</td></tr>`).join('')
+            ${maanden.length ? maanden.map((m) => `<tr><td>${esc(fmtYm(m.month, true))}</td><td class="num mono" style="color:var(--emerald)">${m.betaald ? eur(m.betaald) : '—'}</td><td class="num mono" style="color:var(--blue)">${m.verwacht ? eur(m.verwacht) : '—'}${m.achterstallig ? `<div style="font-size:10.5px;color:var(--rose)">waarvan achterstallig ${eur(m.achterstallig)}</div>` : ''}</td></tr>`).join('')
               : '<tr><td colspan="3" style="color:var(--text-3)">Geen termijnschema bekend — commissie valt vrij zodra de facturen van deze offerte betaald zijn.</td></tr>'}
           </tbody></table></div></div>
-        <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Commissie valt pas vrij wanneer de klant de factuur van déze offerte effectief betaalt. Achteraf annuleerbaar vanuit de sale.</div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Commissie valt pas vrij wanneer de klant de factuur van déze offerte effectief betaalt, en telt in de maand van betaling (niet de vervalmaand). Achteraf annuleerbaar vanuit de sale.</div>
         ${fout}
         <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost" onclick="window.__commWizTerug(2)">‹ Aanpassen</button>

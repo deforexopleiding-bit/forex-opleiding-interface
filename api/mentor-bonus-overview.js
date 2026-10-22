@@ -51,8 +51,8 @@ import {
   loadRegelingContext, koppelDeal, incassoVoor, isConcept, heeftKrediet, regelingTermijnen,
 } from './_lib/commissie-regeling.js';
 import {
-  loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
-  factuurVanDeal, factuurVanDeals, REDEN_LABEL,
+  loadAttributions, attributionIdOf, uitTeSluitenDeals, REDEN_LABEL,
+  maakSaleScope, factuurVanSale, factuurVanSales,
 } from './_lib/commissie-toewijzing.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -190,6 +190,7 @@ export async function computeBonusOverview(effectiveUserId) {
     const dealsByCust  = new Map(); // customer_id → [deals]
     const subByDeal    = new Map(); // deal_id → subscription (latest by start_date)
     const allSubs      = [];        // alle subs van deze klanten (scope-filter toewijzingen)
+    const allDeals     = [];        // alle deals van deze klanten (welke factuur hoort bij welke sale)
     const invoiceById  = new Map();
 
     // Handmatige toewijzingen (verlenging/upsell) — fail-soft. Zonder
@@ -214,10 +215,11 @@ export async function computeBonusOverview(effectiveUserId) {
     if (customerIds.length) {
       const { data: deals } = await supabaseAdmin
         .from('deals')
-        .select('id, customer_id')
+        .select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at')
         .in('customer_id', customerIds)
         .is('archived_at', null);
       for (const d of deals || []) {
+        allDeals.push(d);
         if (!dealsByCust.has(d.customer_id)) dealsByCust.set(d.customer_id, []);
         dealsByCust.get(d.customer_id).push(d);
       }
@@ -448,6 +450,7 @@ export async function computeBonusOverview(effectiveUserId) {
     // de facturen van zijn eigen deal; een event-sale ziet de facturen van
     // (andere) toegewezen deals niet. Zelfde regel als de vrijgave-engine.
     // Returnt null = geen afbakening (oude klantbrede maps gebruiken).
+    const saleScope = maakSaleScope({ deals: allDeals, subs: allSubs });
     const scopedCustCache = new Map();
     function scopedCust(customerId, { dealId = null, excl = null, eigenDeal = null } = {}) {
       if (!customerId) return null;
@@ -456,10 +459,9 @@ export async function computeBonusOverview(effectiveUserId) {
       if (!dealId && !(excl && excl.size) && !metElders) return null;
       const key = customerId + '|' + (dealId ? 'd:' + dealId : 'x:' + [...(excl || [])].sort().join(',') + '|e:' + (metElders ? eigenDeal : ''));
       if (scopedCustCache.has(key)) return scopedCustCache.get(key);
-      const tlSet = dealId ? tlSubIdsVanDeal(dealId, allSubs) : null;
       const list = alle.filter((inv) => (dealId
-        ? (factuurVanDeal(inv, dealId, tlSet) || !!(inv._k && inv._k.deal === dealId))
-        : (!factuurVanDeals(inv, excl || new Set(), allSubs) && !elders(inv, eigenDeal))));
+        ? factuurVanSale(inv, dealId, saleScope, customerId)
+        : (!factuurVanSales(inv, excl || new Set(), saleScope, customerId) && !elders(inv, eigenDeal))));
       const acc = { paid_total: 0, last_paid_date: null, list, overdue: { count: 0, amount: 0 } };
       for (const inv of list) {
         acc.paid_total += betaaldBedrag(inv);
@@ -748,9 +750,17 @@ export async function computeBonusOverview(effectiveUserId) {
       const excl     = attrId ? null : uitTeSluitenDeals(attrs.activeDealIdsByCust.get(r.customer_id), eigenDeal);
       const scope    = attrId ? scopedCust(r.customer_id, { dealId: eigenDeal || '00000000-0000-0000-0000-000000000000' })
         : scopedCust(r.customer_id, { excl, eigenDeal });
+      // Abonnementen van de sale: bij een toewijzing die van de eigen deal plus
+      // de TL-abonnementen op een ghost-deal die bij deze sale horen
+      // (maakSaleScope); bij een event-sale zonder die van toegewezen sales.
       let customerDeals = dealsByCust.get(r.customer_id) || [];
-      if (attrId)            customerDeals = customerDeals.filter((d) => d.id === eigenDeal);
-      else if (excl.size)    customerDeals = customerDeals.filter((d) => !excl.has(d.id));
+      if (attrId) {
+        const ghosts = saleScope.ghostVan(eigenDeal);
+        customerDeals = customerDeals.filter((d) => d.id === eigenDeal || ghosts.has(d.id));
+      } else if (excl.size) {
+        const exclGhosts = new Set([...excl].flatMap((d) => [...saleScope.ghostVan(d)]));
+        customerDeals = customerDeals.filter((d) => !excl.has(d.id) && !exclGhosts.has(d.id));
+      }
       const allCustSubs = [];
       for (const d of customerDeals) {
         const s = subByDeal.get(d.id);
@@ -972,6 +982,9 @@ export async function computeBonusOverview(effectiveUserId) {
       const incasso = incassoVoor(regCtx.incasso, r.customer_id, eigenDeal);
       const sindsI = incasso ? String(incasso.sinds).slice(0, 10) : null;
       let vervallen = 0;
+      // Vrijgegeven zoals het payout-rapport het ziet: betaalde termijnen die
+      // in een maand tellen (projection paid) + inhaal (via correctie).
+      let vrijRapport = 0;
 
       const termijnen = [];
       for (let i = 0; i < termRows.length; i++) {
@@ -1013,6 +1026,9 @@ export async function computeBonusOverview(effectiveUserId) {
           plaats.verschoven = false;
           plaats.inhaal = false;
           vervallen = round2(vervallen + tAmount);
+        }
+        if (!schemaUnknown && isPaidTerm && tStatus !== 'incasso' && (plaats.telt || plaats.inhaal)) {
+          vrijRapport = round2(vrijRapport + tAmount);
         }
         const inhaalToken = invForTerm?.id || `${r.id}:${i + 1}`;
         const voorgesteld = plaats.inhaal ? (inhaalVoorgesteld.get(inhaalToken) || null) : null;
@@ -1168,6 +1184,10 @@ export async function computeBonusOverview(effectiveUserId) {
           sale_total_incl    : round2(saleTotalFromSubs > 0 ? saleTotalFromSubs : (perTermInc * termCount)),
           mentor_share_total : round2(mentorAmount),
           released_share     : round2(entryReleased),
+          // Eén getal "vrijgegeven" = wat in het rapport komt (zie vrijRapport).
+          // released_share blijft het grootboek (audit).
+          // Zonder schema rekent het rapport niets; dan het grootboek.
+          vrijgegeven_rapport: round2(schemaUnknown ? entryReleased : vrijRapport),
           term_count         : termCount,
           per_term_amount    : round2(perTermMentor),
           schema_unknown     : schemaUnknown,
@@ -1202,6 +1222,7 @@ export async function computeBonusOverview(effectiveUserId) {
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
         cell.released_share     = round2((cell.released_share || 0) + entryReleased);
+        cell.vrijgegeven_rapport = round2((cell.vrijgegeven_rapport || 0) + (schemaUnknown ? entryReleased : vrijRapport));
         if (sindsI) {
           cell.incasso = { sinds: sindsI, vervallen: round2((cell.incasso?.vervallen || 0) + vervallen) };
         }

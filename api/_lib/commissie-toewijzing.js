@@ -140,3 +140,99 @@ export function uitTeSluitenDeals(activeDealIds, eigenDealId) {
   if (eigenDealId) out.delete(eigenDealId);
   return out;
 }
+
+// ── Welke facturen horen bij een SALE (getekende deal)? ─────────────────────
+// Eén regel voor de vrijgave-engine (toegewezen sale), het bonus-overzicht en
+// de zoek/preview van "Sale toewijzen" (gemeten 22 okt: facturen uit de
+// TL-sync hebben vaak geen deal_id én geen tl_subscription_id, en
+// TL-geïmporteerde abonnementen hangen aan een 'ghost'-deal zonder offerte):
+//   0. de koppelregel van de regeling na creditering (inv._k, PR6) wint;
+//   1. invoices.deal_id = de deal;
+//   2. tl_subscription_id van een abonnement van de deal — inclusief
+//      abonnementen op een ghost-deal (tl_quotation_status 'no_quotation',
+//      TL-import zonder offerte) die bij deze sale horen: de laatst getekende
+//      deal van de klant die vóór de startdatum (+31 dagen speling) getekend
+//      werd, en hooguit 92 dagen vóór die startdatum. Een abonnement dat later
+//      start is een verlenging en hoort bij geen enkele getekende sale;
+//   3. invoices.deal_id = zo'n ghost-deal;
+//   4. een factuur zonder deal en zonder abonnement (en zonder koppeling)
+//      telt alleen als de klant precies één getekende deal heeft.
+const GETEKEND = new Set(['accepted', 'signed']);
+export const isGetekendDeal = (d) => !!d && (GETEKEND.has(String(d.tl_quotation_status || '').toLowerCase()) || !!d.tl_quotation_accepted_at);
+
+/**
+ * @param {{ deals: Array, subs: Array }} p  alle deals en subs van de klant(en)
+ * @returns {{ subsVan(dealId): Array, dealVanSub(sub): string|null, getekendPerKlant: Map<string, Array>, ghostVan(dealId): Set<string> }}
+ */
+export function maakSaleScope({ deals = [], subs = [] } = {}) {
+  const dealById = new Map(deals.map((d) => [d.id, d]));
+  const getekendPerKlant = new Map();
+  for (const d of deals) {
+    if (!isGetekendDeal(d) || d.archived_at) continue;
+    if (!getekendPerKlant.has(d.customer_id)) getekendPerKlant.set(d.customer_id, []);
+    getekendPerKlant.get(d.customer_id).push(d);
+  }
+  for (const arr of getekendPerKlant.values()) {
+    arr.sort((a, b) => String(a.tl_quotation_accepted_at || a.created_at || '').localeCompare(String(b.tl_quotation_accepted_at || b.created_at || '')));
+  }
+  const plusDagen = (iso, n) => {
+    const d = new Date(String(iso).slice(0, 10) + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const isGhost = (d) => String(d?.tl_quotation_status || '').toLowerCase() === 'no_quotation';
+  const dealVanSub = (s) => {
+    const eigen = dealById.get(s.deal_id);
+    if (!eigen || !isGhost(eigen)) return s.deal_id || null;
+    const kandidaten = getekendPerKlant.get(eigen.customer_id) || [];
+    const start = s.start_date ? String(s.start_date).slice(0, 10) : null;
+    if (!kandidaten.length || !start) return null;
+    let gekozen = null;
+    for (const d of kandidaten) {
+      const getekend = String(d.tl_quotation_accepted_at || d.created_at || '').slice(0, 10);
+      if (getekend && getekend <= plusDagen(start, 31)) gekozen = d;
+    }
+    if (!gekozen) return null;
+    const getekend = String(gekozen.tl_quotation_accepted_at || gekozen.created_at || '').slice(0, 10);
+    return start <= plusDagen(getekend, 92) ? gekozen.id : null;
+  };
+  const subsPerSale = new Map();
+  const ghostPerSale = new Map();
+  for (const s of subs) {
+    const sale = dealVanSub(s);
+    if (!sale) continue;
+    if (!subsPerSale.has(sale)) subsPerSale.set(sale, []);
+    subsPerSale.get(sale).push(s);
+    if (s.deal_id && s.deal_id !== sale) {
+      if (!ghostPerSale.has(sale)) ghostPerSale.set(sale, new Set());
+      ghostPerSale.get(sale).add(s.deal_id);
+    }
+  }
+  return {
+    getekendPerKlant,
+    dealVanSub,
+    subsVan: (dealId) => subsPerSale.get(dealId) || [],
+    ghostVan: (dealId) => ghostPerSale.get(dealId) || new Set(),
+  };
+}
+
+/** Hoort deze factuur bij de sale `dealId` (zie de regel hierboven)? */
+export function factuurVanSale(inv, dealId, scope, customerId) {
+  if (!inv || !dealId) return false;
+  // Koppelregel eerst: een handmatige keuze wint altijd.
+  if (inv._k) return !inv._k.onbekend && inv._k.deal === dealId;
+  if (inv.deal_id === dealId) return true;
+  if (inv.tl_subscription_id && scope.subsVan(dealId).some((s) => s.teamleader_subscription_id === inv.tl_subscription_id)) return true;
+  if (inv.deal_id && scope.ghostVan(dealId).has(inv.deal_id)) return true;
+  if (!inv.deal_id && !inv.tl_subscription_id) {
+    const getekend = scope.getekendPerKlant.get(customerId || inv.customer_id) || [];
+    return getekend.length === 1 && getekend[0].id === dealId;
+  }
+  return false;
+}
+
+/** Hoort deze factuur bij één van deze sales? (uitsluiten bij een event-bonus) */
+export function factuurVanSales(inv, dealIds, scope, customerId) {
+  for (const d of dealIds || []) if (factuurVanSale(inv, d, scope, customerId)) return true;
+  return false;
+}

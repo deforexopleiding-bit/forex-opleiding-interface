@@ -773,6 +773,12 @@
   // Bron van een sale: het event, of een handmatige toewijzing (Verlenging /
   // Upsell / Handmatig) die Maxim aan jou hing.
   const REDEN_LABEL = { verlenging: 'Verlenging', upsell: 'Upsell', handmatig: 'Handmatig' };
+  // Eén getal "vrijgegeven": wat in het uitbetalingsrapport komt (betaalde
+  // termijnen). Het grootboek (released_share) is alleen nog audit.
+  function _vrij(s) {
+    return s.vrijgegeven_rapport != null ? s.vrijgegeven_rapport : (s.released_share != null ? s.released_share : 0);
+  }
+
   function _bronCel(s) {
     if (s.bron === 'handmatig') {
       return `${H.pill('violet', esc(REDEN_LABEL[s.reden] || 'Handmatig'), true)}
@@ -859,7 +865,7 @@
         ? `${eur(s.traject_total_incl != null ? s.traject_total_incl : s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Reeds vrijgevallen" style="margin-left:4px">vrij: ${eur(s.mentor_share_total)}</span>`
         : (s.schema_unknown
             ? `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Nog niet meegeteld in KPI's tot er een abonnement is" style="margin-left:4px">nog niet in KPI</span>`
-            : `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Reeds vrijgevallen (uitbetaald of vrijgegeven)" style="margin-left:4px">vrij: ${eur(s.released_share != null ? s.released_share : 0)}</span>`);
+            : `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Vrijgegeven = de betaalde termijnen, precies zoals ze in je uitbetalingsrapport komen" style="margin-left:4px">vrij: ${eur(_vrij(s))}</span>`);
       const overdueBadge = s.has_overdue
         ? ` <span class="pill pill-danger nodot" title="${Number(s.overdue_count) || 0} factu(u)r(en) te laat — ${eur(Number(s.overdue_amount) || 0)} openstaand" style="margin-left:4px">Achterstand</span>`
         : '';
@@ -896,7 +902,7 @@
              <div><span style="color:var(--text-3)">Reeds vrijgevallen: </span><b>${eur(s.mentor_share_total)}</b></div>`
           : `<div><span style="color:var(--text-3)">Sale-totaal (incl. BTW): </span><b>${eur(s.sale_total_incl)}</b></div>
              <div><span style="color:var(--text-3)">Jouw totaal-aandeel: </span><b>${eur(s.mentor_share_total)}</b></div>
-             <div><span style="color:var(--text-3)">Reeds vrijgevallen: </span><b>${eur(s.released_share != null ? s.released_share : 0)}</b></div>`;
+             <div><span style="color:var(--text-3)">Vrijgegeven (zoals in je rapport): </span><b>${eur(_vrij(s))}</b></div>`;
         detailRow = `<tr><td colspan="8" style="padding:14px 18px;background:var(--surface-2);border-top:1px solid var(--border)">
           ${schemaLine}
           <div style="display:flex;flex-wrap:wrap;gap:20px;font-size:12.5px;color:var(--text-2);margin-bottom:10px">
