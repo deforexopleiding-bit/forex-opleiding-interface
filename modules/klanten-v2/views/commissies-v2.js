@@ -78,6 +78,7 @@
     paneel: null,                  // user_id van het zijpaneel
     wiz: null,
     annuleer: null,
+    inhaal: null,
   };
   const STATUS = {
     wacht:         { c: 'neutral', l: 'Wacht op betaling' },
@@ -160,6 +161,9 @@
   }
 
   /* ── Projectiegrafiek: gestapeld per mentor ──────────────────────────── */
+  // Achterstallig (schuift mee naar deze maand): schuine arcering in de
+  // mentorkleur, zodat het niet verward wordt met gewoon "verwacht".
+  const arcering = (k) => `background:repeating-linear-gradient(135deg,var(--${k}) 0 3px,transparent 3px 6px);box-shadow:inset 0 0 0 1px var(--${k})`;
   function grafiek() {
     const proj = asArr(_st.data?.projectie);
     const mentoren = asArr(_st.data?.mentoren);
@@ -167,7 +171,8 @@
     const nu = nuYm();
     let nuIdx = proj.findIndex((p) => p.month === nu);
     if (nuIdx < 0) nuIdx = 0;
-    const slice = proj.slice(Math.max(0, nuIdx - 3), Math.min(proj.length, nuIdx + 9));
+    // 6 maanden terug (wat effectief vrijgegeven werd) + 12 vooruit.
+    const slice = proj.slice(Math.max(0, nuIdx - 6), Math.min(proj.length, nuIdx + 13));
     const zichtbaar = mentoren.filter((m) => !_st.verborgen.has(m.user_id));
     const tot = (p) => zichtbaar.reduce((s, m) => { const v = p.per_mentor?.[m.user_id]; return s + (v ? (Number(v.betaald) || 0) + (Number(v.verwacht) || 0) : 0); }, 0);
     const mx = slice.reduce((m, p) => Math.max(m, tot(p)), 0);
@@ -181,9 +186,11 @@
         const k = kleurVan(m.user_id);
         const out = [];
         const b = Number(v.betaald) || 0;
-        const e = Number(v.verwacht) || 0;
+        const a = Math.min(Number(v.achterstallig) || 0, Number(v.verwacht) || 0);
+        const e = (Number(v.verwacht) || 0) - a;
         if (b > 0 && mx > 0) out.push(`<div title="${esc(m.naam)} · vrijgegeven ${eur(b)}" style="width:100%;height:${Math.max(2, Math.round(b / mx * hoogte))}px;background:var(--${k})"></div>`);
         if (e > 0 && mx > 0) out.push(`<div title="${esc(m.naam)} · verwacht ${eur(e)}" style="width:100%;height:${Math.max(2, Math.round(e / mx * hoogte))}px;background:var(--${k});opacity:.42"></div>`);
+        if (a > 0 && mx > 0) out.push(`<div title="${esc(m.naam)} · achterstallig, schuift mee ${eur(a)}" style="width:100%;height:${Math.max(2, Math.round(a / mx * hoogte))}px;${arcering(k)}"></div>`);
         return out.reverse().join('');
       }).reverse().join('');
       return `<div class="comm-bar" style="flex:1;min-width:14px;display:flex;flex-direction:column;align-items:center;height:100%" title="${esc(fmtYm(p.month, true))}: ${eur(t)}">
@@ -204,7 +211,8 @@
     const smal = `<style>@media (max-width:640px){.comm-bar-amt{visibility:hidden}.comm-bar:nth-child(even) .comm-bar-lbl{visibility:hidden}}</style>`;
     return `${smal}<div style="display:flex;align-items:stretch;gap:${slice.length > 10 ? 4 : 6}px;height:${hoogte + 42}px;padding:4px 0 6px">${bars}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">${legende}
-        <span style="font-size:11px;color:var(--text-3);margin-left:auto">Vol = vrijgegeven · licht = verwacht volgens termijnschema</span></div>`;
+        <span style="font-size:11px;color:var(--text-3);margin-left:auto;display:inline-flex;align-items:center;gap:6px">Vol = vrijgegeven · licht = verwacht ·
+          <span style="display:inline-block;width:10px;height:10px;${arcering('text-3')}"></span> achterstallig, schuift mee</span></div>`;
   }
 
   /* ── Filters op sales ────────────────────────────────────────────────── */
@@ -631,6 +639,87 @@
     return modal('Toewijzing annuleren', body, 'window.__commAnnuleerSluit()', 480);
   }
 
+  /* ── Verschoven commissie + inhaal ───────────────────────────────────── */
+  // Commissie telt in de maand waarin de klant effectief betaalt. Hier staat
+  // wat niet in zijn vervalmaand telt: achterstallig (schuift mee), later
+  // betaald (telt in de betaalmaand) en inhaal (betaald in een maand waarvan
+  // het rapport al definitief is → correctie op het volgende rapport).
+  function verschovenTekst(v) {
+    if (v.inhaal) {
+      return v.inhaal_voorgesteld
+        ? `Betaald op ${esc(fmtDate(v.betaald_op))} · correctie voorgesteld voor rapport ${esc(fmtYm(String(v.inhaal_voorgesteld.period_month).slice(0, 7), true))}`
+        : `Betaald op ${esc(fmtDate(v.betaald_op))} — rapport van die maand is al definitief`;
+    }
+    if (v.status === 'achterstallig') return `Nog niet betaald · schuift mee (achterstallig sinds ${esc(fmtDate(v.achterstallig_sinds))})`;
+    if (v.uitbetaald_in) return `Betaald op ${esc(fmtDate(v.betaald_op))} → uitbetaald in rapport ${esc(fmtYm(v.uitbetaald_in, true))}`;
+    const rap = v.rapport_periode ? fmtYm(v.rapport_periode, true) : '';
+    return `Betaald op ${esc(fmtDate(v.betaald_op))} → ${v.rapport_status ? 'rapport' : 'komt in rapport'} ${esc(rap)}${v.rapport_status ? ` (${esc(v.rapport_status)})` : ''}`;
+  }
+  function verschovenBlok() {
+    const lijst = asArr(_st.data?.verschoven);
+    if (!lijst.length) return '';
+    const inhaal = lijst.filter((v) => v.inhaal);
+    const rijen = lijst.slice().sort((a, b) => (Number(b.inhaal) - Number(a.inhaal)) || String(a.mentor).localeCompare(String(b.mentor)) || String(a.due_date).localeCompare(String(b.due_date)));
+    const tabel = `<div class="tbl-wrap"><table><thead><tr><th>Mentor</th><th>Klant</th><th>Termijn</th><th>Oorspr. vervaldag</th><th>Status</th><th class="num">Bedrag</th><th></th></tr></thead><tbody>
+      ${rijen.map((v, i) => `<tr>
+        <td>${mentorChip(v.mentor_user_id, v.mentor)}</td>
+        <td><b>${esc(v.klant)}</b></td>
+        <td class="mono">${v.index}/${v.term_count}</td>
+        <td>${esc(fmtDate(v.due_date))}</td>
+        <td style="font-size:12px">${v.inhaal ? H.pill('violet', 'Inhaal', true) + ' ' : v.status === 'achterstallig' ? H.pill('warn', 'Achterstallig', true) + ' ' : H.pill('ok', 'Later betaald', true) + ' '}${verschovenTekst(v)}</td>
+        <td class="num mono">${eur(v.amount)}</td>
+        <td>${v.inhaal && !v.inhaal_voorgesteld && isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="window.__commInhaalOpen(${rijen.indexOf(v)})">Correctie voorstellen</button>` : ''}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+    _st._verschovenRijen = rijen;
+    const kop = inhaal.length
+      ? `<div style="padding:9px 12px;border:1px solid var(--violet-line);background:var(--violet-soft);color:var(--violet);border-radius:8px;font-size:12.5px;margin-bottom:10px">
+          <b>Inhaalcommissie:</b> ${inhaal.length} termijn${inhaal.length === 1 ? '' : 'en'} werd${inhaal.length === 1 ? '' : 'en'} betaald in een maand waarvan het rapport al definitief was. Niets wordt automatisch uitbetaald — stel per termijn een correctie voor op het volgende rapport en keur dat rapport zoals altijd goed.</div>`
+      : '';
+    return card('Verschoven commissie', 'amber', `<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Commissie telt in de maand waarin de klant effectief betaalt. Een onbetaalde termijn schuift mee naar de huidige maand tot hij betaald is.</div>${kop}${tabel}`);
+  }
+
+  window.__commInhaalOpen = (i) => {
+    const v = asArr(_st._verschovenRijen)[i];
+    if (!v) return;
+    const periode = v.inhaal_voorstel_periode;
+    _st.inhaal = {
+      v, periode, bezig: false, fout: null,
+      label: `Inhaalcommissie ${v.klant} termijn ${v.index}/${v.term_count} (vervaldag ${v.due_date}, betaald ${v.betaald_op}) [inhaal:${v.inhaal_token}]`.slice(0, 200),
+    };
+    render();
+  };
+  window.__commInhaalSluit = () => { _st.inhaal = null; render(); };
+  window.__commInhaalOk = async () => {
+    const x = _st.inhaal;
+    if (!x || x.bezig) return;
+    if (!x.periode) { x.fout = 'Geen volgend rapport bekend.'; render(); return; }
+    x.bezig = true; x.fout = null; render();
+    const j = await post('/api/mentor-payout-adjustment-save', {
+      mentor_user_id: x.v.mentor_user_id, period_month: x.periode, label: x.label, amount_incl: x.v.amount,
+    });
+    if (!_st.inhaal) return;
+    if (j?.__error) { x.bezig = false; x.fout = j.__error; render(); return; }
+    _st.inhaal = null;
+    toast(`Correctie van ${eur(x.v.amount)} voorgesteld op het rapport van ${fmtYm(x.periode, true)} — keur dat rapport goed om uit te betalen.`);
+    _st.data = null; queueMicrotask(laad); render();
+  };
+  function inhaalModal() {
+    const x = _st.inhaal;
+    if (!x) return '';
+    const body = `<div style="font-size:13.5px;line-height:1.6;margin-bottom:12px">
+        Correctie voorstellen voor <b>${esc(x.v.mentor)}</b>: <b class="mono">${eur(x.v.amount)}</b> op het rapport van <b>${esc(x.periode ? fmtYm(x.periode, true) : '—')}</b>.</div>
+      <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:12px">
+        ${esc(x.v.klant)} · termijn ${x.v.index}/${x.v.term_count} · vervaldag ${esc(fmtDate(x.v.due_date))} · betaald op ${esc(fmtDate(x.v.betaald_op))}.<br>
+        Dit voegt een handmatige post toe aan het concept-rapport (bestaat het nog niet, dan wordt het concept aangemaakt). Er wordt niets uitbetaald tot je dat rapport goedkeurt.</div>
+      ${x.fout ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:10px">${esc(x.fout)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__commInhaalSluit()">Annuleren</button>
+        <button class="btn btn-primary" ${x.bezig ? 'disabled' : ''} onclick="window.__commInhaalOk()">${x.bezig ? 'Bezig…' : 'Correctie voorstellen'}</button>
+      </div>`;
+    return modal('Inhaalcommissie', body, 'window.__commInhaalSluit()', 520);
+  }
+
   /* ── Hoofdview ───────────────────────────────────────────────────────── */
   function commissiesView() {
     if (!isAdmin()) {
@@ -645,7 +734,7 @@
       </select>
       <button class="btn btn-primary btn-sm" onclick="window.__commWizOpen()">${svg(I.plus, 'width:14px;height:14px')} Sale toewijzen</button>
     </div>`;
-    const modals = `${wizard()}${annuleerModal()}${zijpaneel()}`;
+    const modals = `${wizard()}${annuleerModal()}${inhaalModal()}${zijpaneel()}`;
     if (_st.error && !_st.data) return kop + errBlk(_st.error) + modals;
     if (!_st.data) return kop + skel() + modals;
 
@@ -660,6 +749,7 @@
       { c: 'emerald', icon: I.tick, label: 'Vrijgegeven', val: eur(k.vrijgegeven), sub: 'klant heeft betaald', hi: true },
       { c: 'blue', icon: I.clock, label: 'Nog binnen te komen', val: eur(k.open), sub: 'wacht op betaling' },
       { c: 'teal', icon: I.cal, label: 'Verwacht deze maand', val: eur(k.deze_maand_verwacht), sub: `volgende maand ${eur(k.volgende_maand_verwacht)}` },
+      { c: 'amber', icon: I.clock, label: 'Achterstallig', val: eur(k.achterstallig), sub: `schuift mee · ${k.achterstallig_aantal || 0} termijn${k.achterstallig_aantal === 1 ? '' : 'en'}`, hi: (k.achterstallig || 0) > 0 },
       { c: 'rose', icon: I.alert, label: 'Risico', val: eur(k.risico), sub: `${k.risico_aantal || 0} sale${k.risico_aantal === 1 ? '' : 's'} · vervallen / wanbetaler / geannuleerd`, hi: (k.risico || 0) > 0 },
     ]);
     const seg = [['mentor', 'Per mentor'], ['event', 'Per event'], ['sale', 'Per sale']].map(([v, l]) =>
@@ -667,11 +757,14 @@
     const inhoud = _st.weergave === 'mentor' ? perMentorView()
       : _st.weergave === 'event' ? filterBalk() + perEventView()
         : filterBalk() + salesTabel(gefilterdeSales());
-    return `${kop}${migratie}${fouten}${kpiStrip}
+    // 6 tegels: iets smaller dan de standaard (200px) zodat ze op één rij passen.
+    const kpiStijl = '<style>.comm-kpis .kpi-grid{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}</style>';
+    return `${kop}${migratie}${fouten}${kpiStijl}<div class="comm-kpis">${kpiStrip}</div>
       <div class="pad" style="padding-top:0">
         <div style="height:14px"></div>
         ${card('Commissie per maand', 'violet', grafiek(), '<span style="font-size:11.5px;color:var(--text-3)">verleden = vrijgegeven · toekomst = verwacht</span>')}
         ${card('Overzicht', 'blue', inhoud, `<div style="display:flex;gap:6px">${seg}</div>`)}
+        ${verschovenBlok()}
       </div>
       ${modals}`;
   }
