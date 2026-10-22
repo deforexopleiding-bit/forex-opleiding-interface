@@ -24,9 +24,10 @@ import { computeBonusOverview, inclPerTerm, billingCycleMonths } from '../mentor
 import {
   loadRegelingContext, koppelDeal, isConcept,
 } from './commissie-regeling.js';
+import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn } from './commissie-maand.js';
 import {
   REDENEN, REDEN_LABEL, DEFAULT_PCT, aandeelPerMentor, attrIdempotencyKey, attributionIdOf,
-  isSchemaOntbreekt, loadAttributions, tlSubIdsVanDeal, factuurVanDeal,
+  isSchemaOntbreekt, loadAttributions, maakSaleScope, factuurVanSale,
 } from './commissie-toewijzing.js';
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,17 +66,21 @@ async function alle(q, wat) {
 }
 
 // ── Deal-context in één keer (geen N+1) ───────────────────────────────────────
-// Voor een set deals: klanten, regels (basis), subs, facturen, bestaande
+// Voor een set deals: klanten, regels (basis), ALLE deals + subs van die
+// klanten (welke factuur hoort bij welke sale — zelfde regel als de
+// vrijgave-engine, zie factuurVanSale), facturen, betalingen, bestaande
 // event-bonussen en toewijzingen.
 async function dealContext(deals) {
   const dealIds = [...new Set(deals.map((d) => d.id))];
   const custIds = [...new Set(deals.map((d) => d.customer_id).filter(Boolean))];
   if (!dealIds.length) return null;
-  const [lines, subs, invoices, customers, ledger, attrs] = await Promise.all([
+  const [lines, klantDeals, invoices, customers, ledger, attrs, regCtx] = await Promise.all([
     alle(supabaseAdmin.from('deal_line_items').select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat').in('deal_id', dealIds), 'deal_line_items'),
-    alle(supabaseAdmin.from('subscriptions').select('id, deal_id, amount, vat_percentage, line_items, term_count, billing_cycle, start_date, status, teamleader_subscription_id').in('deal_id', dealIds), 'subscriptions'),
     custIds.length
-      ? alle(supabaseAdmin.from('invoices').select('id, customer_id, deal_id, tl_subscription_id, invoice_number, amount_total, amount_paid, credited_amount, status, due_date, paid_date').in('customer_id', custIds), 'invoices')
+      ? alle(supabaseAdmin.from('deals').select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at').in('customer_id', custIds), 'deals (klant)')
+      : [],
+    custIds.length
+      ? alle(supabaseAdmin.from('invoices').select('id, customer_id, deal_id, tl_subscription_id, invoice_number, amount_total, amount_paid, credited_amount, status, due_date, paid_date, created_at').in('customer_id', custIds), 'invoices')
       : [],
     custIds.length
       ? alle(supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name, email').in('id', custIds), 'customers')
@@ -84,14 +89,51 @@ async function dealContext(deals) {
       .select('id, mentor_user_id, event_id, customer_id, source_quote_id, amount, original_amount, status, idempotency_key')
       .eq('entry_type', 'bonus').is('parent_entry_id', null).in('source_quote_id', dealIds), 'ledger'),
     loadAttributions(supabaseAdmin, { customerIds: custIds }),
+    loadRegelingContext(supabaseAdmin, custIds),
   ]);
+  const alleDeals = new Map(klantDeals.map((d) => [d.id, d]));
+  for (const d of deals) if (!alleDeals.has(d.id)) alleDeals.set(d.id, d);
+  const alleDealIds = [...alleDeals.keys()];
+  const subs = alleDealIds.length
+    ? await alle(supabaseAdmin.from('subscriptions').select('id, deal_id, amount, vat_percentage, line_items, term_count, billing_cycle, start_date, status, teamleader_subscription_id').in('deal_id', alleDealIds), 'subscriptions')
+    : [];
+  const saleScope = maakSaleScope({ deals: [...alleDeals.values()], subs });
+
+  // Regeling na creditering: aan welke sale hangt een regelingsfactuur?
+  const facturen = invoices.filter((i) => !isConcept(i)); // concept telt nooit
+  if (regCtx.krediet.size || regCtx.handmatig.size) {
+    const parents = await alle(supabaseAdmin.from('mentor_ledger_entries')
+      .select('customer_id, source_quote_id, status')
+      .eq('entry_type', 'bonus').is('parent_entry_id', null).in('customer_id', custIds), 'ledger (klant)');
+    const salesPerKlant = new Map();
+    for (const e of parents) {
+      if (e.status === 'geannuleerd' || !e.source_quote_id || !e.customer_id) continue;
+      if (!salesPerKlant.has(e.customer_id)) salesPerKlant.set(e.customer_id, new Set());
+      salesPerKlant.get(e.customer_id).add(e.source_quote_id);
+    }
+    for (const inv of facturen) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
+  }
+
+  // Betalingsregels (effectieve betaaldatum bij deelbetalingen) — fail-soft.
+  const betalingen = new Map();
+  const ids = facturen.map((i) => i.id).filter(Boolean);
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data: pays, error } = await supabaseAdmin.from('payments')
+      .select('invoice_id, amount, payment_date').in('invoice_id', ids.slice(i, i + 150));
+    if (error) { console.warn('[commissie-core] payments:', error.message); break; }
+    for (const p of pays || []) {
+      if (!betalingen.has(p.invoice_id)) betalingen.set(p.invoice_id, []);
+      betalingen.get(p.invoice_id).push(p);
+    }
+  }
+
   const linesByDeal = new Map();
   for (const l of lines) {
     if (!linesByDeal.has(l.deal_id)) linesByDeal.set(l.deal_id, []);
     linesByDeal.get(l.deal_id).push(l);
   }
   return {
-    linesByDeal, subs, invoices, ledger, attrs,
+    linesByDeal, subs, invoices: facturen, ledger, attrs, saleScope, betalingen,
     customerById: new Map(customers.map((c) => [c.id, c])),
   };
 }
@@ -101,49 +143,72 @@ function dealBasis(deal, ctx) {
   return computeDealTotals(deal, ctx.linesByDeal.get(deal.id) || []);
 }
 
-function factuurenVanDeal(dealId, ctx) {
-  const tl = tlSubIdsVanDeal(dealId, ctx.subs);
-  return ctx.invoices.filter((inv) => factuurVanDeal(inv, dealId, tl));
+// Facturen + abonnementen van een sale: dezelfde regel als de vrijgave-engine.
+function factuurenVanDeal(deal, ctx) {
+  return ctx.invoices.filter((inv) => inv.customer_id === deal.customer_id && factuurVanSale(inv, deal.id, ctx.saleScope, deal.customer_id));
+}
+const subsVanDeal = (dealId, ctx) => ctx.saleScope.subsVan(dealId);
+
+// Rapporten van de gekozen mentoren → welke maanden zijn al gesloten. Fail-soft.
+async function afsluitingVoor(userIds) {
+  if (!userIds?.length) return maakAfsluiting([]);
+  const { data, error } = await supabaseAdmin.from('mentor_payouts')
+    .select('id, period_month, status, generated_at').in('mentor_user_id', userIds);
+  if (error) { console.warn('[commissie-core] rapporten:', error.message); return maakAfsluiting([]); }
+  return maakAfsluiting(data || []);
 }
 
 /**
  * Termijnschema van één deal met het mentor-aandeel per termijn.
- * Bron: de subs van de deal (aanbetaling + termijnen), echte facturen voor
- * vervaldatum + betaalstatus. Zonder sub: de facturen van de deal zelf; zonder
- * facturen: één termijn "bij betaling".
+ * Bron: de subs van de sale (aanbetaling + termijnen, incl. TL-abonnementen op
+ * een ghost-deal), echte facturen voor vervaldatum + betaalstatus. Facturen
+ * zonder abonnementskoppeling vullen de vrije termijnen van het abonnement
+ * met hetzelfde termijnbedrag (anders het enige abonnement). Zonder sub: de
+ * facturen van de sale zelf; zonder facturen: één termijn "bij betaling".
+ *
+ * Maand van betaling (PR5, api/_lib/commissie-maand.js), zoals het rapport:
+ * betaald → betaalmaand; onbetaald + vervallen → huidige maand
+ * (achterstallig); open → vervalmaand; betaald in een al gesloten maand →
+ * inhaal (telt in geen maand, gaat via een correctie).
  */
-export function termijnSchema({ subs, facturen, basis, aandeel, startFallback = null }) {
-  const vandaagIso = vandaag();
+export function termijnSchema({ subs, facturen, basis, aandeel, startFallback = null, betalingen = new Map(), afsluiting = maakAfsluiting([]), vandaagIso = vandaag() }) {
   const actief = (subs || []).filter((s) => String(s.status || '').toLowerCase() !== 'cancelled');
   const pool = (actief.length ? actief : (subs || [])).slice()
     .sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
   const termijnen = [];
-  const status = (inv, due) => {
-    if (inv && isVolledigGecrediteerd(inv)) return 'gecrediteerd';
-    if (inv && (Number(inv.amount_total) || 0) > 0 && telAlsBetaald(inv)) return 'betaald';
-    return due && due < vandaagIso ? 'achterstallig' : 'open';
-  };
+  const lijst = (facturen || []).filter((i) => !isConcept(i));
   const subWaarde = pool.reduce((s, x) => s + inclPerTerm(x) * (Number(x.term_count) || 0), 0);
   if (pool.length && subWaarde > 0) {
+    const tlIds = new Set(pool.map((s) => s.teamleader_subscription_id).filter(Boolean));
+    const perSub = new Map(pool.map((s) => [s, lijst.filter((i) => i.tl_subscription_id && i.tl_subscription_id === s.teamleader_subscription_id)]));
+    // Facturen zonder (bekende) abonnementskoppeling: op vervaldatum verdelen.
+    const los = lijst.filter((i) => !i.tl_subscription_id || !tlIds.has(i.tl_subscription_id))
+      .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
+    for (const inv of los) {
+      const vrij = pool.filter((s) => perSub.get(s).length < (Number(s.term_count) || 0));
+      const bedrag = Number(inv.amount_total) || 0;
+      const past = vrij.find((s) => Math.abs(inclPerTerm(s) - bedrag) <= Math.max(1, inclPerTerm(s) * 0.02))
+        || (vrij.length === 1 ? vrij[0] : null);
+      if (past) perSub.get(past).push(inv);
+    }
     for (const s of pool) {
       const n = Number(s.term_count) || 0;
       const per = inclPerTerm(s);
-      const invs = (facturen || []).filter((i) => i.tl_subscription_id && i.tl_subscription_id === s.teamleader_subscription_id)
-        .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
+      const invs = perSub.get(s).sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
       const cyc = billingCycleMonths(s.billing_cycle);
       for (let i = 0; i < n; i++) {
         const inv = invs[i] || null;
         const due = inv?.due_date || (s.start_date ? addMonthsIso(s.start_date, i * cyc) : null);
-        termijnen.push({ due_date: due, bedrag_klant: round2(per), aandeel: aandeel * per / subWaarde, status: status(inv, due) });
+        termijnen.push({ due_date: due, bedrag_klant: round2(per), aandeel: aandeel * per / subWaarde, inv });
       }
     }
-  } else if ((facturen || []).length) {
-    const tot = facturen.reduce((s, i) => s + (Number(i.amount_total) || 0), 0) || basis || 1;
-    for (const inv of facturen.slice().sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))) {
-      termijnen.push({ due_date: inv.due_date || null, bedrag_klant: round2(inv.amount_total), aandeel: aandeel * (Number(inv.amount_total) || 0) / tot, status: status(inv, inv.due_date) });
+  } else if (lijst.length) {
+    const tot = lijst.reduce((s, i) => s + (Number(i.amount_total) || 0), 0) || basis || 1;
+    for (const inv of lijst.slice().sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))) {
+      termijnen.push({ due_date: inv.due_date || null, bedrag_klant: round2(inv.amount_total), aandeel: aandeel * (Number(inv.amount_total) || 0) / tot, inv });
     }
   } else {
-    termijnen.push({ due_date: startFallback, bedrag_klant: round2(basis), aandeel, status: 'open', schema_onbekend: true });
+    termijnen.push({ due_date: startFallback, bedrag_klant: round2(basis), aandeel, inv: null, schema_onbekend: true });
   }
   termijnen.sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
   // Afronding: centen, rest op de laatste termijn zodat de som exact klopt.
@@ -152,19 +217,40 @@ export function termijnSchema({ subs, facturen, basis, aandeel, startFallback = 
     t.index = i + 1;
     t.aandeel = i === termijnen.length - 1 ? round2(aandeel - som) : round2(t.aandeel);
     som = round2(som + t.aandeel);
+    const inv = t.inv;
+    delete t.inv;
+    const gecrediteerd = !!(inv && isVolledigGecrediteerd(inv));
+    const betaald = !!(inv && !gecrediteerd && (Number(inv.amount_total) || 0) > 0 && telAlsBetaald(inv));
+    const plaats = plaatsTermijn({
+      dueYmd: t.due_date || vandaagIso, betaald, gecrediteerd,
+      betaaldatum: betaald ? effectieveBetaaldatum(inv, betalingen.get(inv.id)) : null,
+      vandaag: vandaagIso, afsluiting,
+    });
+    t.status = plaats.status;
+    t.maand = plaats.maand;
+    t.telt = plaats.telt;
+    t.inhaal = plaats.inhaal;
+    t.betaald_op = plaats.betaaldatum || null;
+    t.achterstallig_sinds = plaats.achterstallig_sinds || null;
   });
   return termijnen;
 }
 
-/** Maand-aggregaat van termijnen: [{ month, betaald, verwacht }]. */
+/**
+ * Maand-aggregaat van termijnen: [{ month, betaald, verwacht, achterstallig }].
+ * Elke termijn telt in zijn maand van betaling (t.maand, zie termijnSchema);
+ * inhaal telt in geen maand.
+ */
 export function perMaand(termijnen) {
   const m = new Map();
   for (const t of termijnen || []) {
-    if (!t.due_date || t.status === 'gecrediteerd') continue;
-    const k = ym(t.due_date);
-    const cel = m.get(k) || { month: k, betaald: 0, verwacht: 0 };
+    if (t.status === 'gecrediteerd' || t.telt === false) continue;
+    const k = t.maand || ym(t.due_date);
+    if (!k) continue;
+    const cel = m.get(k) || { month: k, betaald: 0, verwacht: 0, achterstallig: 0 };
     if (t.status === 'betaald') cel.betaald = round2(cel.betaald + t.aandeel);
     else cel.verwacht = round2(cel.verwacht + t.aandeel);
+    if (t.status === 'achterstallig') cel.achterstallig = round2(cel.achterstallig + t.aandeel);
     m.set(k, cel);
   }
   return [...m.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -222,9 +308,9 @@ export async function zoekOffertes({ q, limit = 15 } = {}) {
   const resultaten = deals.map((d) => {
     const c = ctx.customerById.get(d.customer_id) || null;
     const b = dealBasis(d, ctx);
-    const subs = ctx.subs.filter((x) => x.deal_id === d.id)
+    const subs = subsVanDeal(d.id, ctx).slice()
       .sort((x, y) => String(x.start_date || '').localeCompare(String(y.start_date || '')));
-    const facturen = factuurenVanDeal(d.id, ctx);
+    const facturen = factuurenVanDeal(d, ctx);
     const bestaand = bestaandeCommissie(d.id, ctx, eventTitles);
     const waarschuwingen = [];
     if (bestaand.event_bonus) waarschuwingen.push('Deze offerte heeft al een event-bonus.');
@@ -314,9 +400,13 @@ async function bereken(body) {
   const perMentor = aandeelPerMentor(basis, inv.pct, n);
   if (!(perMentor > 0)) throw new CommissieFout(409, 'NUL_COMMISSIE', 'Commissie rondt af naar € 0');
 
-  const subs = ctx.subs.filter((x) => x.deal_id === deal.id);
-  const facturen = factuurenVanDeal(deal.id, ctx);
-  const termijnen = termijnSchema({ subs, facturen, basis, aandeel: perMentor, startFallback: vandaag() });
+  const subs = subsVanDeal(deal.id, ctx);
+  const facturen = factuurenVanDeal(deal, ctx);
+  const afsluiting = await afsluitingVoor(inv.mentoren);
+  const termijnen = termijnSchema({
+    subs, facturen, basis, aandeel: perMentor, startFallback: vandaag(),
+    betalingen: ctx.betalingen, afsluiting,
+  });
   const bestaand = bestaandeCommissie(deal.id, ctx);
   const betaald = round2(facturen.reduce((s, i) => s + betaaldBedrag(i), 0));
   return {
@@ -328,7 +418,12 @@ async function bereken(body) {
 
 export async function previewToewijzing(body) {
   const r = await bereken(body);
-  const verwachtNu = round2(Math.min(1, r.betaald / r.basis) * r.perMentor);
+  // Wat meteen vrijkomt = de betaalde termijnen (zelfde rekenwijze als het
+  // rapport); betaald in een al afgesloten maand gaat via een correctie.
+  const betaaldeTermijnen = r.termijnen.filter((t) => t.status === 'betaald');
+  const verwachtNu = round2(betaaldeTermijnen.reduce((s, t) => s + t.aandeel, 0));
+  const inhaal = round2(betaaldeTermijnen.filter((t) => t.inhaal).reduce((s, t) => s + t.aandeel, 0));
+  const achterstallig = round2(r.termijnen.filter((t) => t.status === 'achterstallig').reduce((s, t) => s + t.aandeel, 0));
   return {
     ok: true,
     migratie_ok: r.ctx.attrs.ok,
@@ -338,6 +433,9 @@ export async function previewToewijzing(body) {
     mentoren: r.mentoren,
     betaald_op_deal: r.betaald,
     valt_meteen_vrij_per_mentor: verwachtNu,
+    inhaal_per_mentor: inhaal,
+    achterstallig_per_mentor: achterstallig,
+    betaalde_termijnen: betaaldeTermijnen.length,
     termijnen: r.termijnen,
     per_maand: perMaand(r.termijnen),
     bestaand: r.bestaand,
@@ -578,6 +676,7 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
             geannuleerd: true, // wordt false zodra één mentor een niet-geannuleerd aandeel heeft
             share: 0,
             vrijgegeven: 0,
+            vrijgegeven_grootboek: 0,
             mentoren: [],
             termijnen: (s.termijnen || []).map((t) => ({ index: t.index, due_date: t.due_date, status: t.status, aandeel: 0, ...(t.vervangen ? { vervangen: true } : {}) })),
             incasso: null,      // { sinds, vervallen } — samengeteld over de mentoren
@@ -587,13 +686,17 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
         }
         const cel = sales.get(key);
         const share = round2(s.mentor_share_total || 0);
-        const rel = round2(traject ? share : (s.released_share || 0));
+        // Vrijgegeven = wat in het rapport komt (betaalde termijnen); het
+        // grootboek blijft als audit naast staan (vrijgegeven_grootboek).
+        const rel = round2(traject ? share : (s.vrijgegeven_rapport ?? s.released_share ?? 0));
+        const relGb = round2(traject ? share : (s.released_share || 0));
         // Een sale met aandeel 0 is een geannuleerde grootboekregel.
         const mentorGeannuleerd = share <= 0 && s.status === 'geannuleerd';
         if (!mentorGeannuleerd) cel.geannuleerd = false;
         if (s.status === 'geannuleerd' && share > 0) cel.sub_geannuleerd = true;
         cel.share = round2(cel.share + share);
         cel.vrijgegeven = round2(cel.vrijgegeven + rel);
+        cel.vrijgegeven_grootboek = round2(cel.vrijgegeven_grootboek + relGb);
         const verv = round2(s.incasso?.vervallen || 0);
         if (s.incasso) cel.incasso = { sinds: s.incasso.sinds, vervallen: round2((cel.incasso?.vervallen || 0) + verv) };
         cel.vervallen = round2(cel.vervallen + verv);

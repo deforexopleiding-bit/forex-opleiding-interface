@@ -15,8 +15,8 @@
 import { supabaseAdmin } from '../supabase.js';
 import { betaaldBedrag, telAlsBetaald } from './factuur-betaald.js';
 import {
-  loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
-  factuurVanDeal, factuurVanDeals, isSchemaOntbreekt,
+  loadAttributions, attributionIdOf, uitTeSluitenDeals,
+  isSchemaOntbreekt, maakSaleScope, factuurVanSale, factuurVanSales,
 } from './commissie-toewijzing.js';
 import {
   loadRegelingContext, koppelDeal, incassoVoor, betaaldVoor, isConcept, heeftKrediet,
@@ -691,9 +691,10 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
   }
 
-  // ── 1) Subs van deze klant (voor tl_sub_id per deal) ────────────────────
+  // ── 1) Deals + subs van deze klant (tl_sub_id per deal; welke factuur
+  //    bij welke sale hoort — zie factuurVanSale in commissie-toewijzing.js)
   const { data: dealsForCust } = await supabaseAdmin
-    .from('deals').select('id').eq('customer_id', customerId);
+    .from('deals').select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at').eq('customer_id', customerId);
   const dealIds = (dealsForCust || []).map((d) => d.id);
   let subsForCust = [];
   if (dealIds.length) {
@@ -769,6 +770,8 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     }
   }
 
+  const saleScope = maakSaleScope({ deals: dealsForCust || [], subs: subsForCust });
+
   // ── 3) Parents ───────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
@@ -827,9 +830,8 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       // Toegewezen sale: alleen de facturen van de eigen deal (incl. de
       // regelingsfacturen die aan die deal gekoppeld zijn), nooit klantbreed.
       const dealId = parent.source_quote_id || null;
-      const tlSet  = tlSubIdsVanDeal(dealId, subsForCust);
       const acc    = dealId
-        ? somBetaald(allInvs.filter((inv) => factuurVanDeal(inv, dealId, tlSet) || (inv._k && inv._k.deal === dealId)), sinds)
+        ? somBetaald(allInvs.filter((inv) => factuurVanSale(inv, dealId, saleScope, customerId)), sinds)
         : { paid: 0, lastPaidDate: null };
       saleTotaalBetaald = acc.paid;
       saleLastPaidDate  = acc.lastPaidDate;
@@ -840,7 +842,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       if (parent.source_quote_id) {
         sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
       }
-      if (!sub) sub = subsForCust.find((s) => !excl.has(s.deal_id)) || null;
+      if (!sub) sub = subsForCust.find((s) => !excl.has(s.deal_id) && !excl.has(saleScope.dealVanSub(s))) || null;
       const tlSubId = sub?.teamleader_subscription_id || null;
 
       // Sale-scope totaalBetaald: MAX van sub-route en customer-route.
@@ -859,7 +861,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       const elders = (inv) => !!(inv._k && !inv._k.onbekend && inv._k.deal !== (parent.source_quote_id || null));
       const filteren = excl.size || sinds || allInvs.some(elders);
       const custAcc = filteren
-        ? somBetaald(allInvs.filter((inv) => !factuurVanDeals(inv, excl, subsForCust) && !elders(inv)), sinds)
+        ? somBetaald(allInvs.filter((inv) => !factuurVanSales(inv, excl, saleScope, customerId) && !elders(inv)), sinds)
         : { paid: custPaidTotal, lastPaidDate: custLastPaidDate };
       const subAcc  = sinds
         ? (tlSubId ? somBetaald(allInvs.filter((inv) => inv.tl_subscription_id === tlSubId), sinds) : null)
