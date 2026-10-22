@@ -42,6 +42,12 @@ export function maakNepDb() {
         db.log.push({ op: 'update', tabel, ids: hit.map((r) => r.id), patch: st.patch });
         return { data: hit.map((r) => ({ ...r })), error: null };
       }
+      if (st.op === 'delete') {
+        const weg = t.filter(pass);
+        db.tables[tabel] = t.filter((r) => !pass(r));
+        db.log.push({ op: 'delete', tabel, ids: weg.map((r) => r.id) });
+        return { data: weg, error: null };
+      }
       let rows = t.filter(pass).map((r) => ({ ...r }));
       for (const o of [...st.orders].reverse()) {
         rows.sort((a, b) => {
@@ -60,6 +66,7 @@ export function maakNepDb() {
       select() { st.selected = true; return k; },
       insert(v) { st.op = 'insert'; st.rows = Array.isArray(v) ? v : [v]; return k; },
       update(v) { st.op = 'update'; st.patch = v; return k; },
+      delete() { st.op = 'delete'; return k; },
       eq(c, v) { st.filters.push((r) => r[c] === v); return k; },
       neq(c, v) { st.filters.push((r) => r[c] !== v); return k; },
       in(c, vs) { st.filters.push((r) => vs.includes(r[c])); return k; },
