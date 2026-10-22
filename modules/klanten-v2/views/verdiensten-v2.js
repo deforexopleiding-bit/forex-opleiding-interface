@@ -760,10 +760,26 @@
     else _ui.bonus.open.add(key);
     render();
   };
+  // Bron van een sale: het event, of een handmatige toewijzing (Verlenging /
+  // Upsell / Handmatig) die Maxim aan jou hing.
+  const REDEN_LABEL = { verlenging: 'Verlenging', upsell: 'Upsell', handmatig: 'Handmatig' };
+  function _bronCel(s) {
+    if (s.bron === 'handmatig') {
+      return `${H.pill('violet', esc(REDEN_LABEL[s.reden] || 'Handmatig'), true)}
+        <div style="font-size:11px;color:var(--text-3);margin-top:3px">toegewezen ${fmtDate(s.created_at)}</div>`;
+    }
+    return `<div>${esc(s.event_title || '—')}</div>
+          <div style="font-size:11px;color:var(--text-3)">${fmtDate(s.event_starts)}</div>`;
+  }
+  function _volgendeTermijn(s) {
+    const t = asArr(s.termijnen).find((x) => x.status === 'open' || x.status === 'achterstallig');
+    if (!t || s.status === 'geannuleerd') return '';
+    return `<div style="font-size:11px;color:${t.status === 'achterstallig' ? 'var(--rose)' : 'var(--text-3)'};margin-top:3px">volgende: ${fmtDate(t.due_date)} · ${eur(t.amount)}</div>`;
+  }
   function renderBonusDrillDown(perEvent) {
     const rowsAll = _bonusFlatten(perEvent);
     if (rowsAll.length === 0) {
-      return `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Nog geen bonus-rijen voor je events.</div>`;
+      return `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Nog geen sales met commissie.</div>`;
     }
     // Tab-counts vóór filter.
     const counts = {};
@@ -807,18 +823,16 @@
         : '';
       const summaryRow = `<tr onclick="window.__verdBonusToggle('${esc(s._key)}')" style="cursor:pointer;${isOpen ? 'background:var(--surface-2)' : ''}">
         <td><strong>${esc(s.customer_label || '—')}</strong></td>
-        <td>
-          <div>${esc(s.event_title || '—')}</div>
-          <div style="font-size:11px;color:var(--text-3)">${fmtDate(s.event_starts)}</div>
-        </td>
+        <td>${_bronCel(s)}</td>
         <td>${_bonusStatusPill(s.status, s.start_date)}${overdueBadge}</td>
         <td>
           <div style="font-size:12px">${paidCount}/${termCount}</div>
           <div class="progress" style="height:5px;margin-top:3px;max-width:100px"><i style="width:${pct.toFixed(1)}%;background:var(--emerald)"></i></div>
+          ${_volgendeTermijn(s)}
         </td>
         <td style="color:var(--text-3)">${s.last_payment_date ? fmtDate(s.last_payment_date) : '—'}</td>
         <td>${firstBadge}</td>
-        <td style="text-align:right"><span class="money">${shareCell}</span></td>
+        <td style="text-align:right"><span class="money">${shareCell}</span>${Number(s.mentor_count) > 1 ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px">jouw aandeel · gedeeld met ${Number(s.mentor_count) - 1} mentor${Number(s.mentor_count) - 1 === 1 ? '' : 'en'}</div>` : ''}</td>
         <td style="text-align:center;color:var(--text-3);font-size:12px">${isOpen ? '▾' : '▸'}</td>
       </tr>`;
 
@@ -887,12 +901,12 @@
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">
             <th style="text-align:left;padding:8px 10px">Klant</th>
-            <th style="text-align:left;padding:8px 10px">Event</th>
+            <th style="text-align:left;padding:8px 10px">Bron</th>
             <th style="text-align:left;padding:8px 10px">Status</th>
             <th style="text-align:left;padding:8px 10px">Termijnen</th>
             <th style="text-align:left;padding:8px 10px">Laatste betaling</th>
             <th style="text-align:left;padding:8px 10px">1e factuur</th>
-            <th style="text-align:right;padding:8px 10px">Totaal bonus</th>
+            <th style="text-align:right;padding:8px 10px">Jouw commissie</th>
             <th style="padding:8px 10px;width:20px"></th>
           </tr></thead>
           <tbody>${bodyHtml}</tbody>
@@ -1126,13 +1140,21 @@
             + hbar('Volgende maand', volgendeMnd, mxBar, 'amber', eur(volgendeMnd))
             + `<div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Cash-release-schema: bonus wordt vrijgegeven zodra de bijbehorende factuur betaald is (of via cash-traject).</div>`)}
         </div>
-        ${projMonths.length ? `<div style="margin-top:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 }))}</div>` : ''}
-        ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Bonus per klant · uitklapbaar', 'violet', renderBonusDrillDown(perEvent))}</div>` : ''}
       </div>` : (overviewErr
         ? `<div class="pad" style="padding-top:16px">${errBlk('Bonus-detail: ' + overviewErr, 'window.__verdRetryOverview()')}</div>`
         : `<div class="pad" style="padding-top:16px">${skel()}</div>`);
 
-    return `${bonusKpis}
+    // Volgorde (2026-10-22): KPI's → balkgrafiek → Mijn closes → status.
+    const salesBlokken = overviewReady ? `
+      <div class="pad" style="padding-top:16px">
+        ${projMonths.length ? dashCard('Commissie per maand · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 })) : ''}
+        <div style="margin-top:14px">${dashCard('Mijn closes', 'violet', renderBonusDrillDown(perEvent))}</div>
+      </div>` : '';
+    const hulpregel = `<div class="pad" style="padding-top:14px;padding-bottom:0;font-size:12.5px;color:var(--text-2)">Je commissie valt pas vrij wanneer de klant de factuur effectief betaalt.</div>`;
+
+    return `${hulpregel}
+    ${bonusKpis}
+    ${salesBlokken}
     ${bonusStatusCards}
     <div class="pad" style="padding-top:16px">
       ${H.toolbar([
@@ -1508,6 +1530,9 @@
   /* ── Registratie (6 views, mentor-self only) ────────────────────────── */
   window.DFO.VIEWS['verdiensten/Overzicht']     = overzichtView;
   window.DFO.VIEWS['verdiensten/Coaching']      = coachingView;
+  // Tab heet sinds 2026-10-22 "Sales" (closes van events én handmatige
+  // toewijzingen). 'Events' blijft geregistreerd voor oude links.
+  window.DFO.VIEWS['verdiensten/Sales']         = eventsView;
   window.DFO.VIEWS['verdiensten/Events']        = eventsView;
   window.DFO.VIEWS['verdiensten/Uitbetalingen'] = uitbetalingenView;
   window.DFO.VIEWS['verdiensten/Reiskosten']    = reiskostenView;

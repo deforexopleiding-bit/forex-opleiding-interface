@@ -124,7 +124,7 @@
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
-    { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor'],           tabs: ['Overzicht', 'Coaching', 'Events', 'Uitbetalingen', 'Reiskosten', 'Certificaten'] },
+    { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor'],           tabs: ['Overzicht', 'Coaching', 'Sales', 'Uitbetalingen', 'Reiskosten', 'Certificaten'] },
     // BP2 (2026-09-01) setter-commissie module. Roles: super_admin/manager
     // (admin voor overzicht), appointmentsetter (Romy — eigen data via RLS
     // + setter.ledger.view grant). permKey extra vangnet zodat een user met

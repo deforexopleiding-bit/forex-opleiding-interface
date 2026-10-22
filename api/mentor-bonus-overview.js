@@ -331,6 +331,36 @@ export async function computeBonusOverview(effectiveUserId) {
       }
     }
 
+    // Met hoeveel mentoren deelt deze mentor elke sale? Alleen het AANTAL —
+    // bedragen van andere mentoren gaan nooit mee naar het mentorzicht.
+    // Sleutel: toewijzing, anders event + attendee (zoals de idempotency-key
+    // van events-complete-core). Fail-soft: zonder antwoord geen telling.
+    const deelSleutel = (e) => {
+      const a = attributionIdOf(e);
+      if (a) return 'a:' + a;
+      return 'e:' + (e.event_id || '-') + ':' + (e.attendee_id || e.customer_id || e.id);
+    };
+    const mentorsPerSale = new Map(); // sleutel → Set<mentor_user_id>
+    {
+      const dealIdsDeel = [...new Set(rows.map((r) => r.source_quote_id).filter(Boolean))];
+      if (dealIdsDeel.length) {
+        const { data: deel, error: deelErr } = await supabaseAdmin
+          .from('mentor_ledger_entries')
+          .select('id, mentor_user_id, event_id, attendee_id, customer_id, idempotency_key, status')
+          .eq('entry_type', 'bonus')
+          .is('parent_entry_id', null)
+          .in('source_quote_id', dealIdsDeel);
+        if (!deelErr) {
+          for (const e of deel || []) {
+            if (e.status === 'geannuleerd') continue;
+            const k = deelSleutel(e);
+            if (!mentorsPerSale.has(k)) mentorsPerSale.set(k, new Set());
+            mentorsPerSale.get(k).add(e.mentor_user_id);
+          }
+        }
+      }
+    }
+
     // Klant-route afgebakend op een toewijzing: een toegewezen sale ziet alleen
     // de facturen van zijn eigen deal; een event-sale ziet de facturen van
     // (andere) toegewezen deals niet. Zelfde regel als de vrijgave-engine.
@@ -970,6 +1000,7 @@ export async function computeBonusOverview(effectiveUserId) {
           attribution_id     : attrId || null,
           deal_id            : eigenDeal,
           created_at         : attr?.created_at || r.created_at || null,
+          mentor_count       : Math.max(1, mentorsPerSale.get(deelSleutel(r))?.size || 1),
           termijnen,
         });
       } else {
