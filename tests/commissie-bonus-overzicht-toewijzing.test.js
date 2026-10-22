@@ -115,3 +115,19 @@ test('tabel ontbreekt (migratie niet gedraaid): overzicht werkt gewoon', async (
   assert.equal(out.ok, true);
   assert.equal(out.per_event.length, 1);
 });
+
+test('mentor_count: gedeelde event-sale telt mentoren, zonder bedragen van anderen', async () => {
+  zet();
+  const B = 'bbbbbbbb-0000-4000-8000-0000000000bb';
+  db.tables.mentor_ledger_entries.push({ id: 'p-event-b', mentor_user_id: B, event_id: EV, entry_type: 'bonus', customer_id: K,
+    basis: 300, amount: 9, status: 'pending', parent_entry_id: null, source_quote_id: D1, attendee_id: null,
+    idempotency_key: `${EV}:bonus:att:${B}`, created_at: '2025-01-10T00:00:00Z' });
+  // attendee_id gelijk zetten zodat beide regels dezelfde sale zijn.
+  for (const e of db.tables.mentor_ledger_entries) if (e.event_id === EV) e.attendee_id = 'att-1';
+  const out = await computeBonusOverview(A);
+  const ev = out.per_event.find((e) => e.event_id === EV);
+  assert.equal(ev.sales[0].mentor_count, 2);
+  assert.equal(ev.sales[0].mentor_share_total, 9, 'alleen het eigen aandeel');
+  const hm = out.per_event.find((e) => e.is_handmatig);
+  assert.equal(hm.sales[0].mentor_count, 1);
+});

@@ -341,6 +341,22 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   gemaild wordt. Widgettests draaien in jsdom (devDependency) via
   tests/support-widget-harness.js.
   Zie docs/support-module-plan.md §7c, §7d en §7e.
+- Commissie-cockpit (2026-10-22) — Mentoren → tab **Commissies** (eerste tab,
+  `views/commissies-v2.js`) + "Mijn verdiensten" → tab **Sales**. Eén call
+  `GET /api/commissie-overzicht` (per mentor `computeBonusOverview`, dezelfde
+  bron als mentorzicht en payout-rapport). HANDMATIGE TOEWIJZING: tabel
+  `mentor_sale_attributions` (1 actieve per deal) + per mentor een parent in
+  `mentor_ledger_entries` met `event_id` NULL, `attribution_id`, key
+  `attr:<id>:<uid>`. Endpoints `commissie-offertes-zoek` / `-toewijzing-preview`
+  / `-opslaan` / `-annuleren` (recht `mentor.ledger.write`), logica in
+  `api/_lib/commissie-core.js`. REGEL in de vrijgave-engine: een toegewezen sale
+  telt ALLEEN facturen van zijn eigen deal (`invoices.deal_id` of
+  `tl_subscription_id` van de subs van die deal); een event-bonus telt facturen
+  van actief toegewezen deals NIET mee in de klantbrede som
+  (`api/_lib/commissie-toewijzing.js`). Fail-soft zonder migratie
+  `2026-10-22-mentor-sale-attributions.sql`. Forward-only: annuleren laat
+  vrijgegeven/uitbetaald staan; al uitbetaald → melding
+  `finance.mentor_commissie_clawback`.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
