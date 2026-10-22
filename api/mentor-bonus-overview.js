@@ -48,6 +48,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
+  loadRegelingContext, koppelDeal, incassoVoor, isConcept, heeftKrediet, regelingTermijnen,
+} from './_lib/commissie-regeling.js';
+import {
   loadAttributions, attributionIdOf, uitTeSluitenDeals, tlSubIdsVanDeal,
   factuurVanDeal, factuurVanDeals, REDEN_LABEL,
 } from './_lib/commissie-toewijzing.js';
@@ -266,7 +269,7 @@ export async function computeBonusOverview(effectiveUserId) {
         .in('tl_subscription_id', uniqTlSubIds);
       if (!subInvErr) {
         for (const inv of (subInvs || [])) {
-          if (!inv.tl_subscription_id) continue;
+          if (!inv.tl_subscription_id || isConcept(inv)) continue; // concept telt nooit
           if (!subPaidMap.has(inv.tl_subscription_id)) {
             subPaidMap.set(inv.tl_subscription_id, { paid_total: 0, last_paid_date: null });
           }
@@ -296,11 +299,11 @@ export async function computeBonusOverview(effectiveUserId) {
     if (customerIds.length) {
       const { data: custInvs, error: custInvErr } = await supabaseAdmin
         .from('invoices')
-        .select('id, customer_id, deal_id, tl_subscription_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date')
+        .select('id, customer_id, deal_id, tl_subscription_id, amount_total, amount_paid, credited_amount, status, paid_date, due_date, created_at')
         .in('customer_id', customerIds);
       if (!custInvErr) {
         for (const inv of (custInvs || [])) {
-          if (!inv.customer_id) continue;
+          if (!inv.customer_id || isConcept(inv)) continue; // concept telt nooit
           if (!custPaidMap.has(inv.customer_id)) {
             custPaidMap.set(inv.customer_id, { paid_total: 0, last_paid_date: null });
           }
@@ -417,20 +420,46 @@ export async function computeBonusOverview(effectiveUserId) {
       }
     }
 
+    // ── Regeling na creditering + incasso (api/_lib/commissie-regeling.js) ─
+    // Regelingsfacturen (geen deal/abonnement) krijgen hun sale via de
+    // koppelregel (_k); incasso-markeringen stoppen de commissie vanaf `sinds`.
+    const regCtx = await loadRegelingContext(supabaseAdmin, customerIds);
+    const salesPerKlant = new Map();
+    if (regCtx.krediet.size || regCtx.handmatig.size) {
+      const { data: alleParents } = await supabaseAdmin
+        .from('mentor_ledger_entries')
+        .select('customer_id, source_quote_id, status')
+        .eq('entry_type', 'bonus')
+        .is('parent_entry_id', null)
+        .in('customer_id', customerIds);
+      for (const e of alleParents || []) {
+        if (e.status === 'geannuleerd' || !e.source_quote_id || !e.customer_id) continue;
+        if (!salesPerKlant.has(e.customer_id)) salesPerKlant.set(e.customer_id, new Set());
+        salesPerKlant.get(e.customer_id).add(e.source_quote_id);
+      }
+      for (const arr of invoicesByCust.values()) for (const inv of arr) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
+    }
+    // Hoort deze factuur bij een ANDERE sale (of bewust bij geen)? Dan telt ze
+    // niet klantbreed mee voor deze sale — anders telt een betaling dubbel.
+    const elders = (inv, eigenDeal) => !!(inv._k && !inv._k.onbekend && inv._k.deal !== (eigenDeal || null));
+    const addMonthsIso = (iso, n) => addMonths(new Date(String(iso).slice(0, 10) + 'T00:00:00Z'), n).toISOString().slice(0, 10);
+
     // Klant-route afgebakend op een toewijzing: een toegewezen sale ziet alleen
     // de facturen van zijn eigen deal; een event-sale ziet de facturen van
     // (andere) toegewezen deals niet. Zelfde regel als de vrijgave-engine.
     // Returnt null = geen afbakening (oude klantbrede maps gebruiken).
     const scopedCustCache = new Map();
-    function scopedCust(customerId, { dealId = null, excl = null } = {}) {
+    function scopedCust(customerId, { dealId = null, excl = null, eigenDeal = null } = {}) {
       if (!customerId) return null;
-      if (!dealId && !(excl && excl.size)) return null;
-      const key = customerId + '|' + (dealId ? 'd:' + dealId : 'x:' + [...excl].sort().join(','));
+      const alle = invoicesByCust.get(customerId) || [];
+      const metElders = !dealId && alle.some((inv) => elders(inv, eigenDeal));
+      if (!dealId && !(excl && excl.size) && !metElders) return null;
+      const key = customerId + '|' + (dealId ? 'd:' + dealId : 'x:' + [...(excl || [])].sort().join(',') + '|e:' + (metElders ? eigenDeal : ''));
       if (scopedCustCache.has(key)) return scopedCustCache.get(key);
       const tlSet = dealId ? tlSubIdsVanDeal(dealId, allSubs) : null;
-      const list = (invoicesByCust.get(customerId) || []).filter((inv) => (dealId
-        ? factuurVanDeal(inv, dealId, tlSet)
-        : !factuurVanDeals(inv, excl, allSubs)));
+      const list = alle.filter((inv) => (dealId
+        ? (factuurVanDeal(inv, dealId, tlSet) || !!(inv._k && inv._k.deal === dealId))
+        : (!factuurVanDeals(inv, excl || new Set(), allSubs) && !elders(inv, eigenDeal))));
       const acc = { paid_total: 0, last_paid_date: null, list, overdue: { count: 0, amount: 0 } };
       for (const inv of list) {
         acc.paid_total += betaaldBedrag(inv);
@@ -718,7 +747,7 @@ export async function computeBonusOverview(effectiveUserId) {
       const eigenDeal = r.source_quote_id || null;
       const excl     = attrId ? null : uitTeSluitenDeals(attrs.activeDealIdsByCust.get(r.customer_id), eigenDeal);
       const scope    = attrId ? scopedCust(r.customer_id, { dealId: eigenDeal || '00000000-0000-0000-0000-000000000000' })
-        : scopedCust(r.customer_id, { excl });
+        : scopedCust(r.customer_id, { excl, eigenDeal });
       let customerDeals = dealsByCust.get(r.customer_id) || [];
       if (attrId)            customerDeals = customerDeals.filter((d) => d.id === eigenDeal);
       else if (excl.size)    customerDeals = customerDeals.filter((d) => !excl.has(d.id));
@@ -780,7 +809,7 @@ export async function computeBonusOverview(effectiveUserId) {
       const startStr   = sub?.start_date || null;
       let startDate    = startStr ? new Date(startStr) : null;
       if (!startDate || isNaN(startDate.getTime())) startDate = new Date(r.created_at);
-      const schemaUnknown = !sub || !termCount || termCount < 1 || !perTermInc;
+      let schemaUnknown = !sub || !termCount || termCount < 1 || !perTermInc;
 
       if (schemaUnknown) {
         termCount = 1;
@@ -868,13 +897,34 @@ export async function computeBonusOverview(effectiveUserId) {
       const custLen       = invListCust ? invListCust.length : 0;
       const invList       = (custLen > subLen) ? invListCust : (invListSub || invListCust);
 
+      // Regeling na creditering: termijnen = de ECHTE facturen (gecrediteerd →
+      // vervangen; regelingsfacturen met hun eigen bedrag en vervaldag) + de
+      // nog niet gefactureerde termijnen van lopende abonnementen.
+      let regeling = null;
+      if (heeftKrediet(regCtx, r.customer_id)) {
+        const fact = (invListCust && invListCust.length) ? invListCust : (invList || []);
+        regeling = regelingTermijnen({
+          facturen: fact, basis, aandeel: mentorAmount,
+          subs: subsForSale.length ? subsForSale : subsPool,
+          perTermijnIncl: inclPerTerm, cyclusMaanden: billingCycleMonths, addMonthsIso,
+        });
+        if (regeling.termijnen.some((t) => t.aandeel > 0)) {
+          schemaUnknown = false;
+          termCount = regeling.termijnen.length;
+        } else {
+          regeling = null;
+        }
+      }
+
       // nbPaid = aantal VOLLEDIG betaalde facturen (niet bedrag/perTerm).
       // Bij een grote aanbetaling (bv. Cedric: €4000 + €266/mnd) zou de oude
       // bedrag-deling €4266 / €266 ≈ 16 → geklampt op termCount → 12/12 tonen
       // terwijl er echt maar 2 facturen betaald zijn. Factuur-telling voorkomt
       // dat: 1 aanbetaling + 1 termijn = 2 betaalde facturen = 2/N.
       let nbPaid;
-      if (schemaUnknown || perTermInc <= 0) {
+      if (regeling) {
+        nbPaid = regeling.termijnen.filter((t) => t.inv && !t.gecrediteerd && (Number(t.inv.amount_total) || 0) > 0 && telAlsBetaald(t.inv)).length;
+      } else if (schemaUnknown || perTermInc <= 0) {
         // Fallback: gebruik ledger-status — 'uitbetaald'=1, anders 0.
         nbPaid = r.status === 'uitbetaald' ? 1 : 0;
       } else if (invList && invList.length) {
@@ -899,13 +949,37 @@ export async function computeBonusOverview(effectiveUserId) {
       // Bij ontbrekende factuur voor termijn i (toekomstige termijn die nog niet
       // is aangemaakt), fallback op de berekende addMonths-datum + nbPaid-teller.
 
-      const termijnen = [];
-      for (let i = 0; i < termCount; i++) {
-        const calcDate = addMonths(startDate, i * cycleMo);
-        const calcYmd  = calcDate.toISOString().slice(0, 10);
-        const tAmount  = round2(perTermMentor);
+      // Termijnrijen: per index de factuur op positie i (standaard), of het
+      // factuurgedreven regelingsschema (klant met gecrediteerde schuld).
+      const termRows = [];
+      if (regeling) {
+        for (const t of regeling.termijnen) {
+          termRows.push({ calcYmd: t.due_date || todayISO, inv: t.inv, amount: round2(t.aandeel), vervangen: t.vervangen, gepland: t.gepland, zonderFactuurBetaald: false });
+        }
+      } else {
+        for (let i = 0; i < termCount; i++) {
+          const calcDate = addMonths(startDate, i * cycleMo);
+          termRows.push({
+            calcYmd: calcDate.toISOString().slice(0, 10),
+            inv: (invList && i < invList.length) ? invList[i] : null,
+            amount: round2(perTermMentor),
+            vervangen: false, gepland: false,
+            zonderFactuurBetaald: i < nbPaid,
+          });
+        }
+      }
+      // Incasso: vanaf `sinds` geen commissie meer voor deze sale/klant.
+      const incasso = incassoVoor(regCtx.incasso, r.customer_id, eigenDeal);
+      const sindsI = incasso ? String(incasso.sinds).slice(0, 10) : null;
+      let vervallen = 0;
 
-        const invForTerm = (invList && i < invList.length) ? invList[i] : null;
+      const termijnen = [];
+      for (let i = 0; i < termRows.length; i++) {
+        const row = termRows[i];
+        const calcYmd  = row.calcYmd;
+        const tAmount  = row.amount;
+
+        const invForTerm = row.inv;
 
         let effectiveYmd;
         let isPaidTerm;
@@ -919,7 +993,7 @@ export async function computeBonusOverview(effectiveUserId) {
           betaaldatum  = isPaidTerm ? effectieveBetaaldatum(invForTerm, betalingenPerFactuur.get(invForTerm.id)) : null;
         } else {
           effectiveYmd = calcYmd;
-          isPaidTerm   = i < nbPaid;
+          isPaidTerm   = row.zonderFactuurBetaald;
         }
 
         // Maand waarin deze termijn telt: betaalmaand (betaald), huidige maand
@@ -930,7 +1004,16 @@ export async function computeBonusOverview(effectiveUserId) {
           dueYmd: effectiveYmd, betaald: isPaidTerm, gecrediteerd: isCreditedTerm,
           betaaldatum, vandaag: todayISO, afsluiting,
         });
-        const tStatus = plaats.status;
+        let tStatus = plaats.status;
+        // Incasso: alleen wat VÓÓR `sinds` betaald werd telt nog; de rest
+        // vervalt (niet verwacht, niet achterstallig, niet in de projectie).
+        if (sindsI && tStatus !== 'gecrediteerd' && !(isPaidTerm && (betaaldatum || effectiveYmd) < sindsI)) {
+          tStatus = 'incasso';
+          plaats.telt = false;
+          plaats.verschoven = false;
+          plaats.inhaal = false;
+          vervallen = round2(vervallen + tAmount);
+        }
         const inhaalToken = invForTerm?.id || `${r.id}:${i + 1}`;
         const voorgesteld = plaats.inhaal ? (inhaalVoorgesteld.get(inhaalToken) || null) : null;
 
@@ -943,9 +1026,11 @@ export async function computeBonusOverview(effectiveUserId) {
           maand              : plaats.maand,
           uitbetaald_in      : plaats.uitbetaald_in,
           inhaal             : plaats.inhaal,
-          achterstallig_sinds: plaats.achterstallig_sinds,
+          achterstallig_sinds: tStatus === 'incasso' ? null : plaats.achterstallig_sinds,
+          ...(row.vervangen ? { vervangen: true } : {}),
+          ...(row.gepland ? { gepland: true } : {}),
         });
-        if (!schemaUnknown && tAmount > 0 && !isCancelled && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
+        if (!schemaUnknown && tAmount > 0 && !isCancelled && tStatus !== 'incasso' && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
           const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
           const rapport = afsluiting.rapportVoor(plaats.maand);
           verschoven.push({
@@ -1021,7 +1106,12 @@ export async function computeBonusOverview(effectiveUserId) {
       // Alleen 'geannuleerd' als ALLE actieve subs weg zijn (= activeSubs
       // leeg). Zo blijft een sale met 1 cancelled aanbetaling + 1 actieve
       // termijnen-sub gewoon lopend/actief.
-      const subCancelled = activeSubs.length === 0 && allCustSubs.length > 0;
+      // Bij een regeling na creditering is de sale niet geannuleerd zolang er
+      // een (vervangende) factuur loopt, ook al werd het abonnement stopgezet.
+      const regelingLoopt = !!(regeling && regeling.termijnen.some((t) => t.inv && !t.gecrediteerd));
+      const subCancelled = activeSubs.length === 0 && allCustSubs.length > 0 && !regelingLoopt;
+      // Incasso: wat vervalt telt niet als verdiend.
+      if (vervallen > 0 && !schemaUnknown) earned_total = round2(earned_total - vervallen);
       if (schemaUnknown)          saleStatus = 'geen_abonnement';
       else if (subCancelled)      saleStatus = 'geannuleerd';
       else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
@@ -1032,6 +1122,7 @@ export async function computeBonusOverview(effectiveUserId) {
       // sale is zichtbaar in de lijst met de grijze 'Geannuleerd'-badge en
       // telt nergens mee (mentorAmount was al 0).
       if (isCancelled) saleStatus = 'geannuleerd';
+      else if (sindsI)  saleStatus = 'incasso';
 
       // Extra afgeleide velden voor de UI. last_payment_date valt eerst
       // terug op de source_invoice_id.paid_date; als die er niet is,
@@ -1098,6 +1189,11 @@ export async function computeBonusOverview(effectiveUserId) {
           deal_id            : eigenDeal,
           created_at         : attr?.created_at || r.created_at || null,
           mentor_count       : Math.max(1, mentorsPerSale.get(deelSleutel(r))?.size || 1),
+          // Incasso: alleen datum + wat vervalt (geen dossierdetails voor de mentor).
+          incasso            : sindsI ? { sinds: sindsI, vervallen: round2(vervallen) } : null,
+          // Regeling na creditering: deel van de commissie dat door geen
+          // (vervangende) factuur of abonnementstermijn gedekt is.
+          regeling           : regeling ? { niet_gedekt: regeling.niet_gedekt } : null,
           termijnen,
         });
       } else {
@@ -1106,6 +1202,9 @@ export async function computeBonusOverview(effectiveUserId) {
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
         cell.released_share     = round2((cell.released_share || 0) + entryReleased);
+        if (sindsI) {
+          cell.incasso = { sinds: sindsI, vervallen: round2((cell.incasso?.vervallen || 0) + vervallen) };
+        }
         // Als er een nieuwere betaling is (paid_date), bewaar de laatste.
         if (lastPaymentDate && (!cell.last_payment_date || lastPaymentDate > cell.last_payment_date)) {
           cell.last_payment_date = lastPaymentDate;
@@ -1172,6 +1271,8 @@ export async function computeBonusOverview(effectiveUserId) {
     let cf_expected = 0;
     for (const r of rows) {
       const amt = Number(r.amount) || 0;
+      // Incasso: het openstaande deel komt niet meer.
+      if (r.status === 'pending' && incassoVoor(regCtx.incasso, r.customer_id, r.source_quote_id)) continue;
       if (r.status === 'pending' || r.status === 'vrijgegeven') cf_expected += amt;
       else if (r.status === 'uitbetaald')                       cf_expected -= amt;
       // 'geannuleerd' telt niet mee
