@@ -14,6 +14,8 @@
 // POST { actie:'publiceer', id }       → status 'gepubliceerd' (de website toont hem dan)
 // POST { actie:'depubliceer', id }     → terug naar 'goedgekeurd'
 // POST { actie:'versie-terug', id, versie } → de output van een oudere versie wordt de nieuwste
+// POST { actie:'social', id, stijl, bestanden:{naam:{url,breedte,hoogte}} } → lijst van de in
+//      Storage opgeslagen social-beelden in output.social (GEEN nieuwe versie: het zijn afgeleiden)
 // GET  ?id=<uuid>&versie=<n>           → { versie } (output/input van die versie)
 //
 // Alleen service role na poort() (recht content.machine). De website leest
@@ -22,7 +24,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { poort, fout, body } from '../_lib/contentmachine-http.js';
 import {
-  slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo,
+  slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo, SOCIAL_NAAM_RE, socialPad,
 } from '../_lib/contentmachine-core.js';
 import { controleerGrenzen, valideerOutput } from '../_lib/contentmachine-generator.js';
 import { bewaarVersie } from '../_lib/contentmachine-opslag.js';
@@ -202,6 +204,24 @@ export default async function handler(req, res) {
       const { data, error } = await db.from('content_drops').update({ status: 'goedgekeurd', gewijzigd_op: new Date().toISOString() }).eq('id', id).select('*').single();
       if (error) throw error;
       return res.status(200).json({ ok: true, drop: data });
+    }
+
+    if (actie === 'social') {
+      if (!drop.output) return res.status(409).json({ error: 'Deze drop heeft nog geen output.' });
+      const bestanden = {};
+      for (const [naam, v] of Object.entries(b.bestanden && typeof b.bestanden === 'object' ? b.bestanden : {})) {
+        if (!SOCIAL_NAAM_RE.test(naam) || !v || typeof v.url !== 'string') continue;
+        // Enkel onze eigen Storage-URL van precies dit pad.
+        const pad = socialPad(drop.slug, naam);
+        const echt = pad && db.storage.from('content').getPublicUrl(pad).data?.publicUrl;
+        if (!echt || v.url.split('?')[0] !== echt) continue;
+        bestanden[naam] = { url: v.url.slice(0, 600), breedte: Number(v.breedte) || null, hoogte: Number(v.hoogte) || null };
+      }
+      if (!Object.keys(bestanden).length) return res.status(400).json({ error: 'Geen geldige bestanden.' });
+      const social = { stijl: Number.isInteger(b.stijl) ? b.stijl % 3 : 0, bestanden, opgeslagen_op: new Date().toISOString() };
+      const { data, error } = await db.from('content_drops').update({ output: { ...drop.output, social } }).eq('id', id).select('id').single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, social, id: data.id });
     }
 
     if (actie === 'versie-terug') {
