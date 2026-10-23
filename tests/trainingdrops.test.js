@@ -87,7 +87,7 @@ async function call(query = {}, method = 'GET') {
 
 let evId = 0;
 const ev = (session_id, event_type, extra = {}) => ({
-  id: ++evId, session_id, variant: 'training-22-10-26', event_type, ts: '2026-10-23T11:00:00Z', lead_id: null, utm: null, ref: null, ...extra,
+  id: ++evId, session_id, variant: 'training-22-10-26', event_type, ts: '2026-10-23T11:00:00Z', lead_id: null, src: null, utm: null, ...extra,
 });
 const lead = (id, extra = {}) => ({
   id, voornaam: 'Jan', achternaam: 'de Vries', email: id + '@x.nl', telefoon: '+31600000000', bron: 'training-22-10-26',
@@ -168,11 +168,11 @@ test('funnel-stats endpoint: ?variant=training-dd-mm-jj toegestaan, onzin niet',
 
 test('aggregatie: bezoekers, formulier, leads, conversie en kanalen per drop', () => {
   const events = [
-    ev('s1', 'landing', { utm: 'ig-story' }), ev('s1', 'formulier_start', { lead_id: 'L1' }), ev('s1', 'lead_ingediend', { lead_id: 'L1', ts: '2026-10-23T11:05:00Z' }),
-    ev('s1', 'landing', { utm: 'ig-story' }), // dubbel → telt één keer
+    ev('s1', 'landing', { src: 'ig-story', utm: 'facebook' }), ev('s1', 'formulier_start', { lead_id: 'L1' }), ev('s1', 'lead_ingediend', { lead_id: 'L1', ts: '2026-10-23T11:05:00Z' }),
+    ev('s1', 'landing', { src: 'ig-story' }), // dubbel → telt één keer
     ev('s2', 'landing', { utm: 'IG-Story' }), ev('s2', 'formulier_start'),
     ev('s3', 'landing', { utm: 'nieuwsbrief' }), ev('s3', 'lead_ingediend', { lead_id: 'L2' }),
-    ev('s4', 'landing', { ref: 'google.com' }),
+    ev('s4', 'landing', { src: 'TikTok-Bio' }),              // onbekend → zoals het is
     ev('s5', 'landing'),
     ev('s6', 'video_gestart'), // geen fase-type → genegeerd
   ];
@@ -192,11 +192,13 @@ test('aggregatie: bezoekers, formulier, leads, conversie en kanalen per drop', (
   assert.equal(k.onbekend, 1);
   assert.equal(k['ig-bio'], 0);             // vaste kanalen staan er altijd
   const b = Object.fromEntries(d.bezoekers_per_kanaal.map((x) => [x.kanaal, x.n]));
-  assert.deepEqual([b['ig-story'], b.nieuwsbrief, b.referral, b.direct], [2, 1, 1, 1]);
+  assert.deepEqual([b['ig-story'], b.nieuwsbrief, b['TikTok-Bio'], b.direct], [2, 1, 1, 1]);
+  assert.equal(d.bezoekers_per_kanaal.find((x) => x.kanaal === 'TikTok-Bio').label, 'TikTok-Bio');
   assert.deepEqual(d.leads_per_kanaal.slice(0, 6).map((x) => x.kanaal), ['ig-story', 'ig-bio', 'nieuwsbrief', 'whatsapp', 'meta-ad', 'direct']);
   const l1 = d.lead_lijst.find((x) => x.id === 'L1');
   assert.equal(l1.naam, 'Jan de Vries');
-  assert.equal(l1.kanaal_label, 'IG-story');
+  assert.equal(l1.kanaal, 'ig-story');          // src wint van utm_source
+  assert.equal(l1.kanaal_label, 'Instagram story');
   assert.equal(l1.aangemeld_op, '2026-10-23T11:05:00Z');
   assert.equal(totaal.leads, 3);
   assert.equal(totaal.bezoekers, 5);
@@ -243,11 +245,17 @@ test('aggregatie: drop zonder events (alleen leads) en lege invoer', () => {
   assert.equal(leeg.totaal.conversie_pct, null);
 });
 
-test('kanaal: utm_source wint, anders referral of direct', () => {
-  assert.equal(C.bepaalKanaal('Meta-Ad', 'x.nl'), 'meta-ad');
-  assert.equal(C.bepaalKanaal('', 'instagram.com'), 'referral');
+test('kanaal: meta.src, anders meta.utm_source, anders direct; labels', () => {
+  assert.equal(C.bepaalKanaal('ig-bio', 'nieuwsbrief'), 'ig-bio');
+  assert.equal(C.bepaalKanaal(null, 'Meta-Ad'), 'meta-ad');
+  assert.equal(C.bepaalKanaal('  ', 'whatsapp'), 'whatsapp');
   assert.equal(C.bepaalKanaal(null, null), 'direct');
-  assert.equal(C.bepaalKanaal('<script>', null), 'overig');
+  assert.equal(C.bepaalKanaal('', ''), 'direct');
+  assert.equal(C.bepaalKanaal('Podcast Mei', null), 'Podcast Mei');   // onbekend: zoals het is
+  assert.deepEqual(
+    ['ig-story', 'ig-bio', 'nieuwsbrief', 'whatsapp', 'meta-ad', 'direct', 'Podcast Mei'].map(C.kanaalLabel),
+    ['Instagram story', 'Instagram bio', 'Nieuwsbrief', 'WhatsApp', 'Meta-advertentie', 'Direct', 'Podcast Mei'],
+  );
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -291,6 +299,7 @@ test('endpoint: leest training-leads + events (paging), haalt leads met latere b
   assert.equal(evQ.length, 2);
   assert.ok(evQ[1].filters.some(([op, c]) => op === 'gt' && c === 'id'));
   assert.ok(evQ[0].filters.some(([op, c, v]) => op === 'like' && c === 'variant' && v === 'training-%'));
+  assert.match(evQ[0].kol, /src:meta->>src/);
   assert.match(evQ[0].kol, /utm:meta->>utm_source/);
 });
 

@@ -33,7 +33,7 @@ export const MAX_EVENTS = 50000;
 export const TIJDBUDGET_MS = 20000;
 const LEAD_KOLOMMEN = 'id,voornaam,achternaam,email,telefoon,bron,campagne,status,kwalificatie,aangemaakt,laatste_aanmelding';
 // meta->>… als losse kolommen: de hele meta (gedrag) is hier niet nodig.
-const EVENT_KOLOMMEN = 'id,session_id,variant,event_type,ts,lead_id,utm:meta->>utm_source,ref:meta->>referrer_domein';
+const EVENT_KOLOMMEN = 'id,session_id,variant,event_type,ts,lead_id,src:meta->>src,utm:meta->>utm_source';
 
 function isOntbrekendeTabel(err) {
   if (!err) return false;
