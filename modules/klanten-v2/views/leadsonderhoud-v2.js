@@ -4478,8 +4478,12 @@
     webinar: { tekst: 'Webinar · scan', bg: '#EEF2FB', fg: '#3B5BA9' },
     'strategiesessie-v1': { tekst: 'Flow D · strategiesessie', bg: '#FBF3E2', fg: '#9A6B12' },
   };
+  // De gratis strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>'):
+  // patroon, dus geen regel per week.
+  const _LS_TRAINING_RE = /^training-(\d{2})-(\d{2})-(\d{2})$/;
   function _lsBronChip(slug) {
-    const c = _LS_BRON_CHIPS[slug];
+    const t = _LS_TRAINING_RE.exec(String(slug || ''));
+    const c = t ? { tekst: 'Training ' + t[1] + '/' + t[2] + ' · strategiesessie', bg: '#FBF3E2', fg: '#9A6B12' } : _LS_BRON_CHIPS[slug];
     if (!c) return '';
     return `<span style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:999px;margin-right:6px;background:${c.bg};color:${c.fg}">${esc(c.tekst)}</span>`;
   }

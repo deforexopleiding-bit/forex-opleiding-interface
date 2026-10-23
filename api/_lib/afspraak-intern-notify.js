@@ -5,6 +5,7 @@
 // cron-afspraak-reminders.js (de notify-stap).
 
 import { fmtMomentNL } from './afspraak-berichten.js';
+import { trainingLabel } from './training-bron.js';
 
 // NL datum + tijd (Europe/Amsterdam) — fmtMomentNL bevat al beide, bv.
 // "maandag 8 september om 14:00".
@@ -17,7 +18,7 @@ export function wanneerNL(scheduledAt) {
 // naam (calNameMap: Map<calendar_id, name>). Val terug op '—'.
 export function bronVan(appt, calNameMap) {
   const bs = String(appt?.booking_source || '').trim();
-  if (bs) return bs;
+  if (bs) return trainingLabel(bs) || bs;   // training-<dd-mm-jj> → 'Live training dd/mm/jj'
   const cal = appt?.ghl_calendar_id && calNameMap && typeof calNameMap.get === 'function'
     ? (calNameMap.get(appt.ghl_calendar_id) || null) : null;
   return cal || '—';

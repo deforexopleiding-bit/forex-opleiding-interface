@@ -28,6 +28,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getSetterScope } from './_lib/setter-scope.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 import { effectiefMoment, pastBijTijd } from './_lib/opstartsessie-tijd.js';
+import { trainingLabel } from './_lib/training-bron.js';
 
 const PERIODES  = new Set(['week', 'maand', 'alles']);
 const RESULTATEN = new Set(['alle', 'toegelaten', 'afgewezen']);
@@ -348,7 +349,8 @@ export default async function handler(req, res) {
         bron_type       : 'submission',
         created_at      : r.created_at,
         booking_source  : r.booking_source,
-        bron_label      : labelBySlug.get(r.booking_source) || r.booking_source || '—',
+        // training-<dd-mm-jj> staat niet in booking_sources (patroon): 'Live training dd/mm/jj'.
+        bron_label      : labelBySlug.get(r.booking_source) || trainingLabel(r.booking_source) || r.booking_source || '—',
         naam            : r.naam,
         email           : r.email,
         telefoon        : r.telefoon,
@@ -454,7 +456,7 @@ export default async function handler(req, res) {
           booking_source  : c.booking_source || null,
           // Elke bekende agendabron (the-lab, strategiescan, webinar …) krijgt
           // het label uit booking_sources; anders de GHL-agendanaam.
-          bron_label      : (c.booking_source && labelBySlug.get(c.booking_source))
+          bron_label      : (c.booking_source && (labelBySlug.get(c.booking_source) || trainingLabel(c.booking_source)))
             || (c.booking_source === 'the-lab' ? 'The Lab' : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda')),
           naam            : c.lead_name,
           email           : c.lead_email,

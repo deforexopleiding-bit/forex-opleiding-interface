@@ -23,6 +23,17 @@
 // mee in de cijfers en hun sessies ook niet; ze staan wel in de leadlijst,
 // gemarkeerd, zodat je een testaanmelding kunt terugvinden.
 //
+// Cadeau (dfo-website #132): de gratis strategiesessie met Dave.
+//   cadeau_getoond / cadeau_klik = unieke sessies met dat funnel-event;
+//   calls = follow_up_appointments met booking_source = variant, per lead één
+//   call (de laatste geldige; een verzette afspraak telt als dezelfde call).
+//   Lead ↔ call via opstartsessie_submissions.appointment_id → lead_id (ook via
+//   de verzet-keten parent_appointment_id), anders op lead_email. Status:
+//   completed = gehouden, no_show = no-show, cancelled = geannuleerd, de rest
+//   (scheduled / in_progress / wacht_op_reschedule / verplaatst) = gepland.
+//   'verwijderd' en testafspraken (is_test of test-e-mail) tellen niet.
+//   lead_call_pct = leads met een call ÷ leads.
+//
 // Kanaal van de landing-sessie: funnel_events.meta.src (?src=… op de link,
 // door dfo-website meegestuurd), anders meta.utm_source, anders 'direct'.
 // Onbekende waarden blijven zoals ze zijn (label = de waarde zelf).
@@ -43,7 +54,18 @@ export const KANAAL_LABELS = Object.freeze({
 });
 export const KANAAL_UITLEG = 'Kanaal = src van de link (?src=…), anders utm_source, anders Direct.';
 
-export const FASE_TYPES = Object.freeze(['landing', 'formulier_start', 'gegevens_ok', 'lead_ingediend']);
+export const FASE_TYPES = Object.freeze(['landing', 'formulier_start', 'gegevens_ok', 'lead_ingediend', 'cadeau_getoond', 'cadeau_klik']);
+
+/** Afspraakstatus → wat de drop telt. */
+export const CALL_LABELS = Object.freeze({ gepland: 'Gepland', gehouden: 'Gehouden', no_show: 'No-show', geannuleerd: 'Geannuleerd' });
+export function callCategorie(status) {
+  const st = String(status || '').trim().toLowerCase();
+  if (st === 'completed') return 'gehouden';
+  if (st === 'no_show') return 'no_show';
+  if (st === 'cancelled') return 'geannuleerd';
+  if (st === 'verwijderd') return null;
+  return 'gepland';
+}
 
 const MAX_KANAAL = 100;
 
@@ -92,7 +114,7 @@ function naamVan(l) {
  *                          — src = meta->>src, utm = meta->>utm_source
  * @returns {{ drops: Array, totaal: object }}
  */
-export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
+export function bouwTrainingdrops({ leads = [], events = [], afspraken = [], koppelingen = [] } = {}) {
   const leadById = new Map();
   for (const l of leads || []) if (l && l.id) leadById.set(l.id, l);
   const isTestLead = (id) => {
@@ -100,10 +122,12 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
     return !!(l && isTestEmail(l.email));
   };
 
-  // Varianten = alles wat als training herkend wordt, uit leads én events.
+  // Varianten = alles wat als training herkend wordt, uit leads, events en afspraken.
   const varianten = new Set();
   for (const l of leadById.values()) if (isTrainingBron(l.bron)) varianten.add(l.bron);
   for (const e of events || []) if (e && isTrainingBron(e.variant)) varianten.add(e.variant);
+  const callsPerVariant = bouwCalls({ afspraken, koppelingen, leadById });
+  for (const variant of callsPerVariant.keys()) varianten.add(variant);
 
   // Per variant: sessies (met kanaal, lead, eerste ts) en lead-koppelingen.
   const perVariant = new Map();
@@ -137,8 +161,9 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
   const drops = [];
   for (const variant of varianten) {
     const pv = perVariant.get(variant) || { sessies: new Map(), leadTs: new Map() };
-    const fases = { landing: 0, formulier_start: 0, gegevens_ok: 0, lead_ingediend: 0 };
+    const fases = { landing: 0, formulier_start: 0, gegevens_ok: 0, lead_ingediend: 0, cadeau_getoond: 0, cadeau_klik: 0 };
     const bezoekersPerKanaal = {};
+    const kliksPerKanaal = {};
     let testSessies = 0;
     const kanaalPerLead = new Map();
     for (const s of pv.sessies.values()) {
@@ -150,24 +175,36 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
       }
       if (isTestLead(s.leadId)) { testSessies += 1; continue; }
       for (const f of s.fases) fases[f] += 1;
-      if (s.fases.has('landing')) {
-        const k = s.kanaal || 'direct';
-        bezoekersPerKanaal[k] = (bezoekersPerKanaal[k] || 0) + 1;
-      }
+      const k = s.kanaal || 'direct';
+      if (s.fases.has('landing')) bezoekersPerKanaal[k] = (bezoekersPerKanaal[k] || 0) + 1;
+      if (s.fases.has('cadeau_klik')) kliksPerKanaal[k] = (kliksPerKanaal[k] || 0) + 1;
     }
 
-    // Leads van deze drop: bron = variant ∪ gekoppeld via een sessie.
+    // Leads van deze drop: bron = variant ∪ gekoppeld via een sessie ∪ een call uit deze drop.
+    const calls = callsPerVariant.get(variant) || new Map();
     const ids = new Set();
     for (const l of leadById.values()) if (l.bron === variant) ids.add(l.id);
     for (const id of pv.leadTs.keys()) if (leadById.has(id)) ids.add(id);
+    for (const c of calls.values()) if (c.leadId && leadById.has(c.leadId)) ids.add(c.leadId);
 
     const lijst = [];
     const leadsPerKanaal = {};
+    const callsPerKanaal = {};
+    const callTelling = { gepland: 0, gehouden: 0, no_show: 0, geannuleerd: 0 };
     let testLeads = 0;
+    let leadsMetCall = 0;
+    const telCall = (c, kanaal, vanLead) => {
+      callTelling[c.categorie] += 1;
+      const t = callsPerKanaal[kanaal] || (callsPerKanaal[kanaal] = { calls: 0, leads_met_call: 0, gepland: 0, gehouden: 0, no_show: 0, geannuleerd: 0 });
+      t.calls += 1;
+      t[c.categorie] += 1;
+      if (vanLead) t.leads_met_call += 1;
+    };
     for (const id of ids) {
       const l = leadById.get(id);
       const test = isTestEmail(l.email);
       const kanaal = kanaalPerLead.get(id) || 'onbekend';
+      const call = calls.get('lead:' + id) || null;
       const viaSessie = pv.leadTs.get(id);
       const aangemeld = (viaSessie && viaSessie.ts) || l.laatste_aanmelding || l.aangemaakt || null;
       lijst.push({
@@ -183,14 +220,35 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
         kanaal_label: kanaalLabel(kanaal),
         aangemeld_op: aangemeld,
         lead_aangemaakt: l.aangemaakt || null,
+        call: call ? { scheduled_at: call.scheduled_at, status: call.status, categorie: call.categorie, label: CALL_LABELS[call.categorie] } : null,
         test,
       });
       if (test) { testLeads += 1; continue; }
       leadsPerKanaal[kanaal] = (leadsPerKanaal[kanaal] || 0) + 1;
+      if (call) { leadsMetCall += 1; telCall(call, kanaal, true); }
+    }
+    // Calls waarvan de lead niet te vinden is (geen koppeling, onbekend adres): wel tellen, kanaal onbekend.
+    for (const [sleutel, c] of calls) {
+      if (sleutel.startsWith('lead:') && leadById.has(c.leadId)) continue;
+      telCall(c, 'onbekend', false);
     }
     lijst.sort((a, b) => (tsMs(b.aangemeld_op) || 0) - (tsMs(a.aangemeld_op) || 0));
 
     const nLeads = lijst.length - testLeads;
+    const nCalls = callTelling.gepland + callTelling.gehouden + callTelling.no_show + callTelling.geannuleerd;
+    const kanaalKeys = new Set([...KANALEN, ...Object.keys(leadsPerKanaal), ...Object.keys(bezoekersPerKanaal), ...Object.keys(kliksPerKanaal), ...Object.keys(callsPerKanaal)]);
+    const kanalen = kanaalLijst(Object.fromEntries([...kanaalKeys].map((k) => [k, 0]))).map(({ kanaal, label }) => {
+      const c = callsPerKanaal[kanaal] || {};
+      return {
+        kanaal, label,
+        bezoekers: bezoekersPerKanaal[kanaal] || 0,
+        leads: leadsPerKanaal[kanaal] || 0,
+        cadeau_klik: kliksPerKanaal[kanaal] || 0,
+        calls: c.calls || 0,
+        gepland: c.gepland || 0, gehouden: c.gehouden || 0, no_show: c.no_show || 0, geannuleerd: c.geannuleerd || 0,
+        lead_call_pct: pct(c.leads_met_call || 0, leadsPerKanaal[kanaal] || 0),
+      };
+    });
     drops.push({
       variant,
       slug: trainingSlug(variant),
@@ -204,8 +262,18 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
       leads: nLeads,
       conversie_pct: pct(nLeads, fases.landing),
       formulier_pct: pct(fases.formulier_start, fases.landing),
+      cadeau_getoond: fases.cadeau_getoond,
+      cadeau_klik: fases.cadeau_klik,
+      calls: nCalls,
+      calls_gepland: callTelling.gepland,
+      calls_gehouden: callTelling.gehouden,
+      calls_no_show: callTelling.no_show,
+      calls_geannuleerd: callTelling.geannuleerd,
+      leads_met_call: leadsMetCall,
+      lead_call_pct: pct(leadsMetCall, nLeads),
       test_leads: testLeads,
       test_sessies: testSessies,
+      kanalen,
       leads_per_kanaal: kanaalLijst(leadsPerKanaal),
       bezoekers_per_kanaal: kanaalLijst(bezoekersPerKanaal),
       lead_lijst: lijst,
@@ -220,7 +288,62 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
     bezoekers: som('bezoekers'),
     formulier_gestart: som('formulier_gestart'),
     leads: som('leads'),
+    cadeau_klik: som('cadeau_klik'),
+    calls: som('calls'),
+    calls_gehouden: som('calls_gehouden'),
+    leads_met_call: som('leads_met_call'),
   };
   totaal.conversie_pct = pct(totaal.leads, totaal.bezoekers);
+  totaal.lead_call_pct = pct(totaal.leads_met_call, totaal.leads);
   return { drops, totaal };
+}
+
+/**
+ * Calls per drop: Map<variant, Map<sleutel, call>>. Sleutel 'lead:<id>' als de
+ * lead bekend is, anders 'mail:<adres>' of 'afspraak:<id>'. Per sleutel één call:
+ * de laatst aangemaakte afspraak die niet 'verplaatst' is (een verzetting maakt
+ * een nieuwe rij; de oude krijgt 'verplaatst'), anders de laatste.
+ * Test en 'verwijderd' vallen weg.
+ */
+export function bouwCalls({ afspraken = [], koppelingen = [], leadById = new Map() } = {}) {
+  const leadVoorAfspraak = new Map();
+  for (const k of koppelingen || []) if (k && k.appointment_id && k.lead_id) leadVoorAfspraak.set(k.appointment_id, k.lead_id);
+  const leadOpMail = new Map();
+  for (const l of leadById.values()) if (l.email) leadOpMail.set(String(l.email).toLowerCase(), l.id);
+  const afspraakById = new Map((afspraken || []).filter((a) => a && a.id).map((a) => [a.id, a]));
+  const leadVan = (a) => {
+    // Eigen koppeling, anders die van een voorganger in de verzet-keten (max 10 stappen).
+    let cur = a;
+    for (let i = 0; cur && i < 10; i += 1) {
+      if (leadVoorAfspraak.has(cur.id)) return leadVoorAfspraak.get(cur.id);
+      cur = cur.parent_appointment_id ? afspraakById.get(cur.parent_appointment_id) : null;
+    }
+    const mail = a.lead_email ? String(a.lead_email).toLowerCase() : '';
+    return (mail && leadOpMail.get(mail)) || null;
+  };
+
+  const uit = new Map();
+  for (const a of afspraken || []) {
+    if (!a || !a.id || !isTrainingBron(a.booking_source)) continue;
+    const categorie = callCategorie(a.status);
+    if (!categorie || a.is_test === true || isTestEmail(a.lead_email)) continue;
+    const leadId = leadVan(a);
+    if (leadId && leadById.has(leadId) && isTestEmail(leadById.get(leadId).email)) continue;
+    const sleutel = leadId ? 'lead:' + leadId
+      : a.lead_email ? 'mail:' + String(a.lead_email).toLowerCase() : 'afspraak:' + a.id;
+    if (!uit.has(a.booking_source)) uit.set(a.booking_source, new Map());
+    const perDrop = uit.get(a.booking_source);
+    const oud = perDrop.get(sleutel);
+    const verplaatst = String(a.status || '').toLowerCase() === 'verplaatst';
+    const beter = !oud
+      || (oud.verplaatst && !verplaatst)
+      || (oud.verplaatst === verplaatst && (tsMs(a.created_at) || 0) > (tsMs(oud.created_at) || 0));
+    if (beter) {
+      perDrop.set(sleutel, {
+        id: a.id, leadId, scheduled_at: a.scheduled_at || null, status: a.status || null,
+        categorie, created_at: a.created_at || null, verplaatst,
+      });
+    }
+  }
+  return uit;
 }

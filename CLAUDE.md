@@ -162,6 +162,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   funnel_events; rekenkern `api/_lib/trainingdrops-compute.js`). Leads per drop = bron = variant
   plus wie via `funnel_events.lead_id` (upsert_lead overschrijft bron). Kanaal van de sessie =
   `meta.src` (?src= op de link), anders `meta.utm_source`, anders 'direct'; onbekende waarden zoals ze zijn.
+  CADEAU (dfo-website #132): gratis strategiesessie met Dave via public-opstartsessie-book met
+  booking_source `training-<dd-mm-jj>`; Dave = owner_id net als bij strategiescan (`leesScanAssessor`),
+  maar GEEN scan-rij en geen scan-titel. Trainingdrops telt per drop/kanaal cadeau-klikken (funnel_events
+  cadeau_getoond/cadeau_klik) en calls uit follow_up_appointments (lead via opstartsessie_submissions
+  .appointment_id → lead_id, verzet-keten, anders lead_email; één call per lead, verplaatst = zelfde call;
+  verwijderd en test tellen niet). Bronlabel `training-*` = "Live training dd/mm/jj" in opstartsessies-
+  lijst/-detail, interne afspraakmail, TV-feed; chips in Kennismakingsgesprekken + opvolging-agenda.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
