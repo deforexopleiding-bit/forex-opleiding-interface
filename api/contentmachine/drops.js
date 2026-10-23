@@ -8,6 +8,13 @@
 // POST { actie:'bewaar', id, datum?, input }         → invoer bewaren (enkel concept/gegenereerd)
 // POST { actie:'vimeo', url }                        → Vimeo oEmbed: titel, duur, thumbnail
 // POST { actie:'archiveer', id } / { actie:'herstel', id }
+// POST { actie:'bewaar-output', id, versie, output, reden? }  → bewerkte teksten als nieuwe versie
+//      (een goedgekeurde drop gaat terug naar 'gegenereerd': opnieuw goedkeuren)
+// POST { actie:'goedkeuren', id }      → enkel zonder grens-overtredingen (verboden woorden/namen)
+// POST { actie:'publiceer', id }       → status 'gepubliceerd' (de website toont hem dan)
+// POST { actie:'depubliceer', id }     → terug naar 'goedgekeurd'
+// POST { actie:'versie-terug', id, versie } → de output van een oudere versie wordt de nieuwste
+// GET  ?id=<uuid>&versie=<n>           → { versie } (output/input van die versie)
 //
 // Alleen service role na poort() (recht content.machine). De website leest
 // gepubliceerde drops zelf (service-key, status = 'gepubliceerd').
@@ -17,6 +24,16 @@ import { poort, fout, body } from '../_lib/contentmachine-http.js';
 import {
   slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo,
 } from '../_lib/contentmachine-core.js';
+import { controleerGrenzen, valideerOutput } from '../_lib/contentmachine-generator.js';
+import { bewaarVersie } from '../_lib/contentmachine-opslag.js';
+
+/** Grens-overtredingen van een output (met de namenlijst van bij het genereren). */
+export function grensProblemen(output) {
+  if (!output) return [];
+  const namen = (output.meta && Array.isArray(output.meta.verboden_namen)) ? output.meta.verboden_namen : [];
+  const { meta, ...zonderMeta } = output;
+  return controleerGrenzen(zonderMeta, { verbodenNamen: namen });
+}
 
 const LIJST_KOLOMMEN = 'id,slug,datum,soort,status,format_key,versie,aangemaakt_op,gewijzigd_op,gegenereerd_op,goedgekeurd_op,gepubliceerd_op,input,kern:output->>kernidee,titel:output->pagina->>hero_titel';
 const ASSET_KOLOMMEN = 'id,drop_id,soort,storage_path,publieke_url,breedte,hoogte,bijschrift,ai_beschrijving,ai_details,persoon_naam,toestemming_publiek,tags,laatst_gebruikt_op,aangemaakt_op';
@@ -63,6 +80,13 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const id = String(req.query?.id || '');
+      const versieNr = parseInt(req.query?.versie, 10);
+      if (id && Number.isFinite(versieNr)) {
+        const { data, error } = await db.from('content_drop_versies').select('*').eq('drop_id', id).eq('versie', versieNr).maybeSingle();
+        if (error) throw error;
+        if (!data) return res.status(404).json({ error: 'Versie niet gevonden' });
+        return res.status(200).json({ versie: data });
+      }
       if (id) {
         const { data: drop, error } = await db.from('content_drops').select('*').eq('id', id).maybeSingle();
         if (error) throw error;
@@ -105,7 +129,7 @@ export default async function handler(req, res) {
 
     const id = String(b.id || '');
     if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id ontbreekt' });
-    const { data: drop, error: dErr } = await db.from('content_drops').select('id,slug,datum,status,versie,heeft_output:output->>format_key').eq('id', id).maybeSingle();
+    const { data: drop, error: dErr } = await db.from('content_drops').select('*').eq('id', id).maybeSingle();
     if (dErr) throw dErr;
     if (!drop) return res.status(404).json({ error: 'Drop niet gevonden' });
 
@@ -130,15 +154,69 @@ export default async function handler(req, res) {
     }
 
     if (actie === 'archiveer' || actie === 'herstel') {
-      const status = actie === 'archiveer' ? 'gearchiveerd' : (drop.heeft_output ? 'gegenereerd' : 'concept');
+      const status = actie === 'archiveer' ? 'gearchiveerd' : (drop.output ? 'gegenereerd' : 'concept');
       if (actie === 'herstel' && drop.status !== 'gearchiveerd') return res.status(409).json({ error: 'Alleen een gearchiveerde drop kan je herstellen.' });
       const { data, error } = await db.from('content_drops').update({ status, gewijzigd_op: new Date().toISOString() }).eq('id', id).select('*').single();
       if (error) throw error;
       return res.status(200).json({ ok: true, drop: data });
     }
 
+    if (actie === 'bewaar-output') {
+      if (!['gegenereerd', 'goedgekeurd'].includes(drop.status) || !drop.output) return res.status(409).json({ error: 'Er is (nog) geen bewerkbare output.' });
+      if (Number(b.versie) !== drop.versie) return res.status(409).json({ error: 'De drop werd intussen gewijzigd. Herlaad en probeer opnieuw.', code: 'VERSIE_CONFLICT' });
+      const o = b.output;
+      if (!o || typeof o !== 'object' || Array.isArray(o)) return res.status(400).json({ error: 'output ontbreekt' });
+      // Structuur blijft die van de generator; meta en format komen van de server.
+      const output = { ...o, format_key: drop.output.format_key, meta: drop.output.meta || {} };
+      const v = valideerOutput(output, { toegelaten: [output.format_key] });
+      if (!v.ok) return res.status(400).json({ error: 'De output klopt niet meer: ' + v.fouten.slice(0, 3).join('; ') });
+      const grens = grensProblemen(output).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
+      output.meta = { ...output.meta, waarschuwingen: [...(output.meta.waarschuwingen || []).filter((w) => w.soort !== 'grens'), ...grens] };
+      const bijgewerkt = await bewaarVersie({ db, drop, output, reden: String(b.reden || 'Teksten bewerkt'), userId: p.user.id, patch: { status: 'gegenereerd', goedgekeurd_op: null } });
+      return res.status(200).json({ ok: true, drop: bijgewerkt });
+    }
+
+    if (actie === 'goedkeuren') {
+      if (drop.status !== 'gegenereerd' || !drop.output) return res.status(409).json({ error: 'Alleen een gegenereerde drop kan je goedkeuren.' });
+      const problemen = grensProblemen(drop.output);
+      if (problemen.length) return res.status(409).json({ error: 'Eerst deze teksten aanpassen: ' + problemen.slice(0, 3).map((x) => `${x.pad} (${x.regel})`).join('; '), code: 'GRENZEN', problemen });
+      const { data, error } = await db.from('content_drops').update({ status: 'goedgekeurd', goedgekeurd_op: new Date().toISOString(), gewijzigd_op: new Date().toISOString() }).eq('id', id).eq('versie', drop.versie).select('*');
+      if (error) throw error;
+      if (!data || !data.length) return res.status(409).json({ error: 'De drop werd intussen gewijzigd. Herlaad.', code: 'VERSIE_CONFLICT' });
+      return res.status(200).json({ ok: true, drop: data[0] });
+    }
+
+    if (actie === 'publiceer') {
+      if (drop.status !== 'goedgekeurd') return res.status(409).json({ error: 'Keur de drop eerst goed.' });
+      if (grensProblemen(drop.output).length) return res.status(409).json({ error: 'Er staan nog teksten in die niet mogen.', code: 'GRENZEN' });
+      const kanalen = (drop.input && drop.input.kanalen) || [];
+      if (kanalen.length && !kanalen.includes('pagina')) return res.status(409).json({ error: 'Het kanaal Pagina staat uit voor deze drop.' });
+      const nu = new Date().toISOString();
+      const { data, error } = await db.from('content_drops').update({ status: 'gepubliceerd', gepubliceerd_op: nu, gewijzigd_op: nu }).eq('id', id).select('*').single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, drop: data });
+    }
+
+    if (actie === 'depubliceer') {
+      if (drop.status !== 'gepubliceerd') return res.status(409).json({ error: 'Deze drop staat niet online.' });
+      const { data, error } = await db.from('content_drops').update({ status: 'goedgekeurd', gewijzigd_op: new Date().toISOString() }).eq('id', id).select('*').single();
+      if (error) throw error;
+      return res.status(200).json({ ok: true, drop: data });
+    }
+
+    if (actie === 'versie-terug') {
+      if (!['gegenereerd', 'goedgekeurd'].includes(drop.status)) return res.status(409).json({ error: 'Enkel bij een gegenereerde of goedgekeurde drop.' });
+      const nr = parseInt(b.versie, 10);
+      const { data: oud, error: vErr } = await db.from('content_drop_versies').select('versie,output').eq('drop_id', id).eq('versie', nr).maybeSingle();
+      if (vErr) throw vErr;
+      if (!oud || !oud.output) return res.status(404).json({ error: 'Die versie heeft geen output.' });
+      const bijgewerkt = await bewaarVersie({ db, drop, output: oud.output, reden: `Teruggezet naar versie ${nr}`, userId: p.user.id, patch: { status: 'gegenereerd', goedgekeurd_op: null, format_key: oud.output.format_key || drop.format_key } });
+      return res.status(200).json({ ok: true, drop: bijgewerkt });
+    }
+
     return res.status(400).json({ error: 'Onbekende actie' });
   } catch (e) {
+    if (e?.code === 'VERSIE_CONFLICT') return res.status(409).json({ error: e.message, code: e.code });
     return fout(res, 'contentmachine/drops', e);
   }
 }

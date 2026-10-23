@@ -37,6 +37,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/contentmachine/genereer.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "api/contentmachine/assets.js": {
       "maxDuration": 60,
       "memory": 1024,
