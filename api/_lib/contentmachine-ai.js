@@ -26,15 +26,21 @@ export function isModelFout(e) {
   return e.status === 404 || (e.status === 400 && /model/i.test(msg));
 }
 
+// Modellen die deze sleutel niet kent, onthouden we per (warm) serverproces:
+// geen dubbele mislukte aanroep bij de herstelronde of het volgende onderdeel.
+const ONBEKEND = new Set();
+
 /** Roep fn(model) aan met het eerste model dat de sleutel kent. */
 export async function modelKeten(fn, lijst = modellen()) {
   let laatste = null;
-  for (const model of lijst) {
+  const kandidaten = lijst.filter((m) => !ONBEKEND.has(m));
+  for (const model of (kandidaten.length ? kandidaten : lijst)) {
     try {
       return { resultaat: await fn(model), model };
     } catch (e) {
       if (!isModelFout(e)) throw e;
       console.error('[contentmachine-ai] model niet beschikbaar, volgende:', model, e.status);
+      ONBEKEND.add(model);
       laatste = e;
     }
   }

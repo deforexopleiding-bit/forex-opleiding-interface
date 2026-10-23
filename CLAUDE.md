@@ -183,6 +183,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   modelketen in `api/_lib/contentmachine-ai.js`, env `CONTENTMACHINE_MODEL` optioneel). Seed: 19
   masterclass-beelden in `img/contentmachine/bibliotheek-seed/` (includeFiles) → knop in Bibliotheek.
   Migratie `2026-10-23-contentmachine-fase1.sql` (gedraaid 23 okt).
+  GENERATOR (fase 2): `POST /api/contentmachine/genereer` (maxDuration 300) → `api/_lib/contentmachine-generator.js`:
+  8 formats, rotatie (nooit het format van één van de vorige 3 drops), één tool-use-aanroep met
+  OUTPUT_SCHEMA + vision op de beelden, strategiekennis uit `api/_lib/dfo-strategie-kennis.js`
+  (KOPIE van docs/dfo-strategie-kennis.md — docs/ en *.md gaan niet mee in de deploy; test houdt ze
+  gelijk). Valideren + grenzen (verboden woorden, namen zonder toestemming, Dave enkel bij het cadeau)
+  → één herstelronde; daarna uniciteit (trigram-gelijkenis met de vorige 6) → te gelijkend onderdeel
+  één keer opnieuw. Grens-overtredingen blokkeren Goedkeuren (server). Elke bewaring = nieuwe versie
+  (`content_drop_versies`, optimistisch op `versie`). Nieuwsbrief-HTML: `api/_lib/nieuwsbrief-render.js`
+  (puur, één functie per bloktype, utm_source=nieuwsbrief). Werkblad: `views/contentmachine-werkblad-v2.js`.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
