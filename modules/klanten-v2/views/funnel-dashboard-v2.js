@@ -23,6 +23,8 @@
     // daarna een strategiesessie; Strategie-scan = meteen de gratis scan boeken.
     { groep: 'the-lab', titel: 'The Lab (tradingsimulator · 7 dagen)' },
     { groep: 'strategiescan', titel: 'Strategie-scan (gratis scan met Dave)' },
+    // 2026-10-23: de events-funnels (masterclass op locatie, met vragenlijst).
+    { groep: 'events', titel: 'Events (masterclass op locatie)' },
   ];
 
   // Funnels met een eigen flow (geen quiz, geen A/B/C-boekflow). Wat ze als
@@ -30,6 +32,9 @@
   const EIGEN_FLOW = {
     'the-lab': { flow: 'Lab-aanmelding → trial 7 dagen + loginmail', geboekt: 'Strategiesessie' },
     strategiescan: { flow: 'Formulier → meteen de strategie-scan boeken', geboekt: 'Scan geboekt' },
+    // Events: wel een vragenlijst (toegang / geen toegang), geen CRM-lead om aan
+    // een sessie te koppelen. Leads = ingevulde vragenlijsten, geboekt = aangemeld.
+    events: { flow: 'Formulier + datum → vragenlijst → aanmelden voor het event', geboekt: 'Aangemeld', toegang: true, geenSessie: true },
   };
 
   const PRESETS = [
@@ -300,10 +305,10 @@
       <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">${esc(waarde)}${sub ? `<span style="font-size:10.5px;font-weight:400;color:var(--text-3)"> ${esc(sub)}</span>` : ''}</div></div>`;
     return `<div class="fd-leads" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:8px;padding:8px 10px;background:var(--surface-2);border-radius:var(--r-sm)">
       ${cel('Leads', num(lr.leads))}
-      ${eigen ? '' : cel('Toegang', num(lr.toegang), lr.toegang_pct == null ? '' : fmtPct(lr.toegang_pct))}
-      ${eigen ? '' : cel('Geen toegang', num(lr.geen_toegang))}
+      ${eigen && !eigen.toegang ? '' : cel('Toegang', num(lr.toegang), lr.toegang_pct == null ? '' : fmtPct(lr.toegang_pct))}
+      ${eigen && !eigen.toegang ? '' : cel('Geen toegang', num(lr.geen_toegang))}
       ${cel(eigen ? eigen.geboekt : 'Geboekt', num(lr.geboekt))}
-      ${cel('Met sessie', trackingActief ? num(lr.leads_met_sessie) : '—', trackingActief && lr.dekking_pct != null ? fmtPct(lr.dekking_pct) : '')}
+      ${eigen && eigen.geenSessie ? '' : cel('Met sessie', trackingActief ? num(lr.leads_met_sessie) : '—', trackingActief && lr.dekking_pct != null ? fmtPct(lr.dekking_pct) : '')}
     </div>`;
   }
 

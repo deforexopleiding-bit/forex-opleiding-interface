@@ -157,7 +157,7 @@ test('aggregatie: deling door nul geeft null, nooit NaN/Infinity', () => {
   }
   // Lege dataset: alles 0 / null.
   const leeg = C.aggregeerFunnelStats({ start: START, eindExclusief: EIND });
-  assert.equal(Object.keys(leeg.per_variant).length, 24);
+  assert.equal(Object.keys(leeg.per_variant).length, 27);
   assert.equal(leeg.per_variant['7-daagse-v2'].lead_resultaat.toegang_pct, null);
 });
 
@@ -350,7 +350,7 @@ test('endpoint: fail-soft als funnel_events niet bestaat → 200, tracking_actie
   assert.equal(r.body.meta.tracking_actief, false);
   assert.equal(r.body.meta.tabel_bestaat, false);
   assert.match(r.body.meta.blinde_vlekken.join(' '), /tracking nog niet actief \(migratie funnel_events niet gedraaid\)/i);
-  assert.equal(r.body.varianten.length, 24);
+  assert.equal(r.body.varianten.length, 27);
   const v = r.body.per_variant['kennismakingscursus-v2'];
   assert.equal(v.funnel, null);
   assert.equal(v.lead_resultaat.leads, 1);       // verwijderde lead telt niet
@@ -423,7 +423,7 @@ test('endpoint: bron-code schrijft nooit en gebruikt geen rpc', () => {
 // 3 · REGISTRY
 // ════════════════════════════════════════════════════════════════════════════
 
-test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de vierentwintig varianten', () => {
+test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de zevenentwintig varianten', () => {
   const alle = ['kennismakingscursus-v1', 'kennismakingscursus-v2', 'kennismakingscursus-v3',
     'kennismakingscursus-v4', 'kennismakingscursus-v5', 'kennismakingscursus-v6',
     'kennismakingscursus-v7', 'kennismakingscursus-v8',
@@ -432,7 +432,8 @@ test('registry: FUNNEL_REGISTRY en FUNNEL_VARIANTEN bevatten de vierentwintig va
     '7-daagse-v5', '7-daagse-v6',
     'webinar-v1', 'webinar-v2',
     'the-lab-v1', 'the-lab-v2', 'strategiescan-v1', 'strategiesessie-v1',
-    'the-lab-site', 'strategiescan-site'];
+    'the-lab-site', 'strategiescan-site',
+    'event-1', 'event-2', 'event-forex-1'];
   // Flow D draait op /strategiesessie (niet /strategiesessie-v1); de sitepagina's
   // (2026-10-20) op /the-lab en /strategie-scan.
   const PADEN = { 'strategiesessie-v1': 'strategiesessie', 'the-lab-site': 'the-lab', 'strategiescan-site': 'strategie-scan' };
@@ -519,13 +520,14 @@ test('scherm: haalt /api/funnel-stats op en tekent 20 kaarten in 5 groepen', asy
   const reg = [{ bron: 'kennismakingscursus-v3', naam: 'Mini-cursus (v3)', route: 'https://deforexopleiding.nl/kennismakingscursus-v3' }];
   html = D.render(reg);
   // Compact overzicht (2026-10-21): één regel per variant, gegroepeerd per funnel.
-  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 24);
+  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 27);
   assert.match(html, /data-groep="kmc"/);
   assert.match(html, /data-groep="7-daagse"/);
   assert.match(html, /data-groep="webinar"/);
   assert.match(html, /data-groep="the-lab"/);
   assert.match(html, /data-groep="strategiescan"/);
-  assert.equal((html.match(/class="fd-mini"/g) || []).length, 24, 'mini-trechter per regel');
+  assert.match(html, /data-groep="events"/);
+  assert.equal((html.match(/class="fd-mini"/g) || []).length, 27, 'mini-trechter per regel');
   assert.equal((html.match(/class="fd-fase"/g) || []).length, 0, 'volledige trechter pas op klik');
   assert.doesNotMatch(html, /fd-inactief/);
   assert.doesNotMatch(html, /fd-afhaken/);
@@ -552,7 +554,7 @@ test('scherm: tracking niet actief → duidelijke banner, lead-resultaat blijft'
   const html = window.DFOFunnelDashboard.render([]);
   assert.match(html, /class="fd-inactief"/);
   assert.match(html, /Tracking nog niet actief \(migratie funnel_events niet gedraaid\)/);
-  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 24, 'regels blijven staan (leads uit lead_resultaat)');
+  assert.equal((html.match(/class="fd-rij[" ]/g) || []).length, 27, 'regels blijven staan (leads uit lead_resultaat)');
   window.__fdRij('7-daagse-v2');
   const open = window.DFOFunnelDashboard.render([]);
   assert.match(open, /Nog geen trackingdata/);
@@ -787,4 +789,88 @@ test('the-lab/strategiescan: registry-producten + schakelpaneel toont ze zonder 
   // Lead-blok: geen toegang/geen-toegang, wel het eigen "geboekt"-label.
   assert.match(html, /Strategiesessie/);
   assert.match(html, /Scan geboekt/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// EVENTS-FUNNELS (2026-10-23): /event-1, /event-2, /event-forex-1
+// ════════════════════════════════════════════════════════════════════════════
+
+test('events: eigen groep; leads/toegang uit vragenlijsten, geboekt uit aanmeldingen (uniek op e-mail)', () => {
+  assert.deepEqual([...C.EVENT_VARIANTEN], ['event-1', 'event-2', 'event-forex-1']);
+  for (const v of C.EVENT_VARIANTEN) assert.equal(C.VARIANT_INFO[v].groep, 'events');
+  const r = C.aggregeerFunnelStats({
+    events: [ev('s1', 'landing', { variant: 'event-1' }), ev('s1', 'lead_ingediend', { variant: 'event-1' }), ev('s1', 'geboekt', { variant: 'event-1' })],
+    // Een lead met bron event-1 (bestaat niet echt) telt NIET: events tellen uit hun eigen tabellen.
+    leads: [{ id: 'L', bron: 'event-1', kwalificatie: 'toegang', email: 'x@x.nl', aangemaakt: TS }],
+    eventInzendingen: [
+      { bron: 'event-1', resultaat: 'afgewezen', email: 'A@x.nl', created_at: TS },
+      { bron: 'event-1', resultaat: 'toegelaten', email: 'a@x.nl', created_at: TS },   // tweede poging: toegelaten wint
+      { bron: 'event-1', resultaat: 'afgewezen', email: 'b@x.nl', created_at: TS },
+      { bron: 'event-1', resultaat: 'toegelaten', email: 'c@x.nl', created_at: '2026-09-30T10:00:00Z' },   // buiten periode
+      { bron: 'event-1', resultaat: 'toegelaten', email: 'test@example.com', created_at: TS },             // test-adres
+      { bron: 'event-2', resultaat: 'toegelaten', email: 'd@x.nl', created_at: TS },
+    ],
+    eventAanmeldingen: [
+      { source: 'event-1', email: 'a@x.nl', created_at: TS, is_test: false },
+      { source: 'event-1', email: 'A@x.nl', created_at: TS, is_test: false },   // dubbel (verplaatst) → één keer
+      { source: 'event-1', email: 'e@x.nl', created_at: TS, is_test: true },     // test
+      { source: 'website', email: 'f@x.nl', created_at: TS, is_test: false },    // sitepagina, geen funnel
+      { source: 'event-2', email: 'd@x.nl', created_at: TS, is_test: false },
+    ],
+    start: START, eindExclusief: EIND, varianten: ['event-1', 'event-2', 'event-forex-1'], trackingActief: true,
+  });
+  const e1 = r.per_variant['event-1'];
+  assert.equal(e1.groep, 'events');
+  assert.equal(fase(r, 'event-1', 'landing').sessions, 1);
+  assert.deepEqual(e1.lead_resultaat, {
+    leads: 2, toegang: 1, geen_toegang: 1, kwalificatie_onbekend: 0, toegang_pct: 50,
+    geboekt: 1, leads_met_afspraak: 1, leads_met_sessie: null, dekking_pct: null,
+  });
+  assert.equal(r.per_variant['event-2'].lead_resultaat.leads, 1);
+  assert.equal(r.per_variant['event-2'].lead_resultaat.geboekt, 1);
+  assert.equal(r.per_variant['event-forex-1'].lead_resultaat.leads, 0);
+});
+
+test('events-endpoint: leest vragenlijsten op bron en aanmeldingen op source; zonder kolom bron fail-soft', async () => {
+  reset();
+  db.tabellen.funnel_events = [{ session_id: 's1', variant: 'event-forex-1', event_type: 'landing', ts: TS, lead_id: null }];
+  db.tabellen.event_kwalificatie_submissions = [
+    { bron: 'event-forex-1', resultaat: 'toegelaten', email: 'a@x.nl', created_at: TS },
+    { bron: null, resultaat: 'toegelaten', email: 'z@x.nl', created_at: TS },   // sitepagina
+  ];
+  db.tabellen.event_attendees = [{ source: 'event-forex-1', email: 'a@x.nl', created_at: TS, is_test: false }];
+  let r = await call({ van: '2026-10-02', tot: '2026-10-02' });
+  assert.equal(r.statusCode, 200);
+  const lr = r.body.per_variant['event-forex-1'].lead_resultaat;
+  assert.equal(lr.leads, 1);
+  assert.equal(lr.toegang, 1);
+  assert.equal(lr.geboekt, 1);
+  const q = db.log.find((x) => x.tabel === 'event_kwalificatie_submissions');
+  assert.deepEqual(q.filters.find((f) => f[0] === 'in'), ['in', 'bron', ['event-1', 'event-2', 'event-forex-1']]);
+  assert.deepEqual(db.log.find((x) => x.tabel === 'event_attendees').filters.find((f) => f[0] === 'in'), ['in', 'source', ['event-1', 'event-2', 'event-forex-1']]);
+
+  // Alleen een andere variant gevraagd → de event-tabellen worden niet gelezen.
+  reset();
+  r = await call({ van: '2026-10-02', tot: '2026-10-02', variant: 'webinar-v1' });
+  assert.equal(r.statusCode, 200);
+  assert.ok(!db.log.some((x) => x.tabel === 'event_kwalificatie_submissions' || x.tabel === 'event_attendees'));
+
+  // Kolom bron nog niet gemigreerd → 200, leads 0, geen crash.
+  reset();
+  db.fout.event_kwalificatie_submissions = 'column event_kwalificatie_submissions.bron does not exist';
+  r = await call({ van: '2026-10-02', tot: '2026-10-02', variant: 'event-1' });
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.body.per_variant['event-1'].lead_resultaat.leads, 0);
+});
+
+test('events-scherm: groep Events, Toegang zichtbaar, "Aangemeld" i.p.v. Geboekt, geen Met sessie', () => {
+  const src = lees('modules/klanten-v2/views/funnel-dashboard-v2.js');
+  assert.match(src, /\{ groep: 'events', titel: 'Events \(masterclass op locatie\)' \}/);
+  assert.match(src, /events: \{ flow: 'Formulier \+ datum → vragenlijst → aanmelden voor het event', geboekt: 'Aangemeld', toegang: true, geenSessie: true \}/);
+  assert.match(src, /\$\{eigen && !eigen\.toegang \? '' : cel\('Toegang'/);
+  assert.match(src, /\$\{eigen && eigen\.geenSessie \? '' : cel\('Met sessie'/);
+  const reg = lees('modules/klanten-v2/views/leadsonderhoud-v2.js');
+  for (const v of ['event-1', 'event-2', 'event-forex-1']) {
+    assert.match(reg, new RegExp(`bron: '${v}',\\s+naam: '[^']+',\\s+product: 'events', route: 'https://deforexopleiding\\.nl/${v}'`), v);
+  }
 });
