@@ -9,7 +9,10 @@
 //   van, tot   YYYY-MM-DD (Amsterdam-kalenderdagen, tot = inclusief).
 //              Beide weglaten = laatste 7 dagen t/m vandaag. Eén van beide
 //              of een ongeldige datum → 400. Max 366 dagen.
-//   variant    optioneel, één van FUNNEL_VARIANTEN (anders 400). Default alle 6.
+//   variant    optioneel, één van FUNNEL_VARIANTEN of een training-drop
+//              'training-<dd-mm-jj>' (patroon, api/_lib/training-bron.js);
+//              anders 400. Default: alle FUNNEL_VARIANTEN (trainingen niet —
+//              die staan in de module Trainingdrops, /api/trainingdrops).
 //
 // Response 200:
 //   { periode:{van,tot,start,eind_exclusief,tijdzone}, varianten:[...],
@@ -38,7 +41,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 import {
   FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES, BOEK_BRON_PER_VARIANT,
-  aggregeerFunnelStats, bepaalBlindeVlekken,
+  aggregeerFunnelStats, isBekendeVariant, bepaalBlindeVlekken,
 } from './_lib/funnel-stats-compute.js';
 import { GEDRAG_LEES_TYPES } from './_lib/funnel-gedrag-compute.js';
 
@@ -165,7 +168,7 @@ export default async function handler(req, res) {
   const periode = periodeUitQuery(q);
   if (periode.fout) return res.status(400).json({ error: periode.fout });
   const variantRaw = String(q.variant || '').trim();
-  if (variantRaw && !FUNNEL_VARIANTEN.includes(variantRaw)) {
+  if (variantRaw && !isBekendeVariant(variantRaw)) {
     return res.status(400).json({ error: 'Onbekende variant', toegestaan: FUNNEL_VARIANTEN });
   }
   const varianten = variantRaw ? [variantRaw] : [...FUNNEL_VARIANTEN];

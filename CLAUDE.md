@@ -153,6 +153,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   (`api/_lib/scan-klant.js`): automatisch = gewonnen deal (accepted, niet
   archived/declined) via lead / klant van de lead / e-mail; handmatig
   (`scans.klant_status_handmatig`) heeft voorrang, bron wordt getoond.
+- Trainingdrops (2026-10-23) — menu Groei → Trainingdrops (`views/trainingdrops-v2.js`,
+  zelfde rollen als Leads: super_admin/manager/sales/marketing). De wekelijkse
+  training-funnel van dfo-website (training.deforexopleiding.nl/<dd-mm-jj>): bron/variant
+  `training-<dd-mm-jj>` is een PATROON (`api/_lib/training-bron.js`), nooit per week een regel;
+  ook leads-v2 `bronLabel` en funnel-stats (`isBekendeVariant`/`variantInfo`, ?variant=) herkennen
+  het als "Live training dd/mm/jj". `GET /api/trainingdrops` (leads.view, alleen lezen uit leads +
+  funnel_events; rekenkern `api/_lib/trainingdrops-compute.js`). Leads per drop = bron = variant
+  plus wie via `funnel_events.lead_id` (upsert_lead overschrijft bron). Kanaal = `meta.utm_source` van de
+  sessie; `?src=` wordt door dfo-website NIET in funnel_events bewaard (alleen Google Sheet).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
