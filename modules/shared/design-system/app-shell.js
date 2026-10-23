@@ -145,6 +145,13 @@
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Commissies', 'Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
+    // Trainingdrops (2026-10-23): de wekelijkse training-funnel van dfo-website
+    // (bron 'training-<dd-mm-jj>'). Zelfde rollen als Leads (SAMMK + sales) —
+    // dat dekt ook wie de funnel-statistieken ziet (leadsonderhoud/Funnels = SAMS).
+    // Geen permKey: een permKey is additief en zou de module ook tonen aan rollen
+    // met leads.view zonder Leads-module (setter), terwijl de doorklik naar het
+    // leaddossier juist via die module loopt.
+    { g: 'Groei',                  id: 'trainingdrops',    naam: 'Trainingdrops',     icon: I.video,    color: 'amber',   roles: SAMMK.concat('sales'),tabs: [] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
     { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt

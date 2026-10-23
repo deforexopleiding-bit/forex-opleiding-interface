@@ -28,6 +28,7 @@
 
 import { nlDateString } from './nl-period.js';
 import { bouwGedrag, voegTijdToe, GEDRAG_LEES_TYPES } from './funnel-gedrag-compute.js';
+import { isTrainingBron, trainingLabel } from './training-bron.js';
 
 export const FUNNEL_VARIANTEN = Object.freeze([
   'kennismakingscursus-v1',
@@ -145,6 +146,21 @@ export const BENODIGDE_EVENT_TYPES = Object.freeze([
 ]);
 
 const VARIANT_SET = new Set(FUNNEL_VARIANTEN);
+
+// 2026-10-23: de wekelijkse training-drop (variant 'training-<dd-mm-jj>') is een
+// PATROON, geen vaste lijst — elke week komt er één bij (api/_lib/training-bron.js).
+// Telt als bekende variant zodra hij expliciet gevraagd wordt; de vaste lijst
+// hierboven (= de default van /api/funnel-stats) blijft ongewijzigd.
+export function isBekendeVariant(v) {
+  return VARIANT_SET.has(v) || isTrainingBron(v);
+}
+
+/** Label + groep van een variant; training-<dd-mm-jj> → 'Live training dd/mm/jj'. */
+export function variantInfo(v) {
+  if (VARIANT_INFO[v]) return VARIANT_INFO[v];
+  if (isTrainingBron(v)) return { label: trainingLabel(v), groep: 'training' };
+  return null;
+}
 const EVENT_SET = new Set(BEKENDE_EVENT_TYPES);
 const TEST_EMAIL_MARKERS = ['test', 'deforexopleiding'];
 
@@ -173,7 +189,7 @@ function inPeriode(v, startMs, eindMs) {
 }
 
 function leegResultaat(variant) {
-  const info = VARIANT_INFO[variant] || { label: variant, groep: 'overig' };
+  const info = variantInfo(variant) || { label: variant, groep: 'overig' };
   return { variant, label: info.label, groep: info.groep };
 }
 
@@ -273,7 +289,7 @@ export function aggregeerFunnelStats({
 } = {}) {
   const startMs = start instanceof Date ? start.getTime() : tsMs(start);
   const eindMs = eindExclusief instanceof Date ? eindExclusief.getTime() : tsMs(eindExclusief);
-  const gevraagd = (varianten || []).filter((v) => VARIANT_SET.has(v));
+  const gevraagd = (varianten || []).filter(isBekendeVariant);
   const gekoppeld = new Set(gekoppeldeLeadIds || []);
 
   // Events: alleen bekende variant + bekend type + binnen de NL-periode.
