@@ -37,6 +37,11 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/contentmachine/assets.js": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "img/contentmachine/bibliotheek-seed/**"
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024

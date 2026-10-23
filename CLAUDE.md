@@ -169,6 +169,20 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   .appointment_id → lead_id, verzet-keten, anders lead_email; één call per lead, verplaatst = zelfde call;
   verwijderd en test tellen niet). Bronlabel `training-*` = "Live training dd/mm/jj" in opstartsessies-
   lijst/-detail, interne afspraakmail, TV-feed; chips in Kennismakingsgesprekken + opvolging-agenda.
+- Contentmachine (2026-10-23) — menu Groei → Contentmachine (`views/contentmachine-v2.js`,
+  rollen SAMMK + permKey `content.machine` = admin/manager/marketing via role_permissions; NIET
+  leads.view, dat hebben ook mentoren). Elke week één "drop" (webpagina, nieuwsbrief, stories, post,
+  LinkedIn). Bouwopdracht + fasering: docs/contentmachine/BOUWOPDRACHT-contentmachine.md.
+  Tabellen `content_drops` (slug dd-mm-jj[-n], status concept→gegenereerd→goedgekeurd→gepubliceerd),
+  `content_drop_versies`, `content_assets` (drop_id NULL = bibliotheek), `nieuwsbrief_verzendingen`
+  (provider 'ghl'; GEEN eigen abonnees-tabel: GHL is de bron van lijst + uitschrijvingen). RLS aan +
+  REVOKE, geen policies: alleen service role (API na `content.machine`; dfo-website leest gepubliceerde
+  drops server-side). Bucket `content` PUBLIEK lezen; schrijven alleen via de API — beelden gaan via
+  een signed upload-URL rechtstreeks van de browser naar Storage, `registreer` controleert het type
+  aan de bytes. Endpoints `api/contentmachine/drops.js` + `assets.js` (+ AI-beschrijving via vision,
+  modelketen in `api/_lib/contentmachine-ai.js`, env `CONTENTMACHINE_MODEL` optioneel). Seed: 19
+  masterclass-beelden in `img/contentmachine/bibliotheek-seed/` (includeFiles) → knop in Bibliotheek.
+  Migratie `2026-10-23-contentmachine-fase1.sql` (gedraaid 23 okt).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

@@ -17,7 +17,7 @@ Eén module in het CRM waarmee hij elke week met **één druk op de knop** een v
   3. **Instagram-stories** (1080x1920);
   4. een **Instagram-post** (carrousel 1080x1350 + caption) en vierkant 1080x1080;
   5. een **LinkedIn-post** (tekst + beeld).
-- De nieuwsbrief gaat **niet meer via GoHighLevel**. Er is een lijst van ongeveer 6.000 adressen. Maxim kijkt alles na en drukt zelf op versturen. Claude/automatisaties versturen nooit zelf.
+- ~~De nieuwsbrief gaat niet meer via GoHighLevel.~~ **Gewijzigd 23 okt (Maxim): de nieuwsbrief gaat via GoHighLevel**, dat al aan het CRM gekoppeld is. GHL blijft de bron van de lijst (~6.000 adressen) en de uitschrijvingen. Maxim kijkt alles na en drukt zelf op versturen. Claude/automatisaties versturen nooit zelf.
 - Het moet **uniek** zijn elke week: andere invalshoek, ander format, andere hooks, ander beeld.
 
 ## 2. Wat er al staat (niet opnieuw bouwen)
@@ -34,8 +34,9 @@ Nieuwe tabellen, RLS zoals de andere CRM-tabellen (lezen/schrijven voor de rolle
 
 - `content_drops`: `id uuid`, `slug text unique` (`dd-mm-jj`, of `dd-mm-jj-2` bij een tweede drop die dag), `soort text` (`training` | `update`), `status text` (`concept` | `gegenereerd` | `goedgekeurd` | `gepubliceerd` | `gearchiveerd`), `input jsonb` (vimeo_url, vimeo_id, vimeo_hash, start_sec, duur, wat_gebeurde, trade_info, notities, gekozen_asset_ids, kanalen), `output jsonb` (zie 3.3), `format_key text`, `versie int`, `aangemaakt_door`, `aangemaakt_op`, `gegenereerd_op`, `gepubliceerd_op`.
 - `content_assets`: `id`, `drop_id uuid null` (null = bibliotheek), `soort` (`payout` | `trade` | `chart` | `masterclass` | `team` | `community` | `overig`), `storage_path`, `publieke_url`, `breedte`, `hoogte`, `bijschrift`, `ai_beschrijving` (door AI uit het beeld gehaald), `persoon_naam`, `toestemming_publiek bool` (studentresultaten enkel met toestemming; Shani, Leslie, Karl en Luc hebben toestemming), `tags text[]`, `laatst_gebruikt_op`.
-- `nieuwsbrief_abonnees`: `email unique`, `naam`, `bron` (`ghl-import` | `training-<slug>` | …), `status` (`actief` | `uitgeschreven` | `bounce`), `ingeschreven_op`, `uitgeschreven_op`, `ghl_contact_id`, `brevo_id`.
-- `nieuwsbrief_verzendingen`: `id`, `drop_id`, `provider` (`brevo`), `campagne_id`, `onderwerp`, `status` (`concept` | `test_verstuurd` | `ingepland` | `verstuurd`), `test_verstuurd_op`, `verstuurd_op`, `stats jsonb` (ontvangers, opens, kliks, uitschrijvingen, bounces).
+- ~~`nieuwsbrief_abonnees`~~ — **vervallen (23 okt)**: GHL blijft de bron van de lijst en de uitschrijvingen; er komt geen eigen abonnees-tabel.
+- `nieuwsbrief_verzendingen`: `id`, `drop_id`, `provider` (`ghl`), `campagne_id`, `template_id`, `onderwerp`, `status` (`concept` | `test_verstuurd` | `ingepland` | `verstuurd`), `test_verstuurd_op`, `ingepland_op`, `verstuurd_op`, `stats jsonb` (opens, kliks … enkel als de GHL-API ze geeft).
+- (uitvoering) `content_drop_versies`: elke opgeslagen wijziging van een drop (versie, reden, input, output) — de historiek achter "elke wijziging bewaart een nieuwe versie".
 - Supabase Storage-bucket `content` (publiek lezen) voor assets en gerenderde beelden (`drops/<slug>/…`, `bibliotheek/…`).
 
 Migraties: zet ze in `docs/sql-migrations/` en **draai ze zelf** in forex-command-center (Maxim gaf toestemming voor veilige, additieve, backwards-compatibele wijzigingen), met een controle vóór en na. Niets droppen, niets bestaands wijzigen.
@@ -57,7 +58,7 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
 
 **Scherm 3 — Drop-werkblad (na genereren):** tabbladen **Pagina · Nieuwsbrief · Stories · Post · LinkedIn**. Per tabblad: live voorbeeld, elk tekstveld bewerkbaar, knop "Opnieuw genereren" voor alleen dat onderdeel (met optionele instructie, bv. "korter", "meer spanning"), en per beeld "ander beeld kiezen". Bovenaan: **Goedkeuren**, **Publiceer pagina**, **Download alle beelden (zip)**, **Kopieer teksten**. Elke wijziging bewaart een nieuwe `versie`.
 
-**Scherm 4 — Bibliotheek:** beelden opladen, taggen, toestemming beheren. Seed: Claude (Cowork) laadt de masterclass-beelden en payout-screenshots op via dit scherm zodra het live staat.
+**Scherm 4 — Bibliotheek:** beelden opladen, taggen, toestemming beheren. Seed (23 okt): de 19 masterclass-beelden uit `docs/contentmachine/bibliotheek-seed/` staan ook in `img/contentmachine/bibliotheek-seed/` (mee in de deploy) en worden met de knop **"Masterclass-beelden laden"** in de Bibliotheek eenmalig opgeladen naar `content/bibliotheek/seed/` met soort, persoon (uit de bestandsnaam) en toestemming voor Shani, Leslie, Karl, Luc en Maxim. Idempotent. (Rechtstreeks opladen vanuit de bouwcontainer kon niet: daar is geen service-key.)
 
 ### 3.3 De generator (het hart) — server-route `POST /api/contentmachine/genereer`
 - Model: de Anthropic-API die het CRM al gebruikt (Iris / AI Agents); hergebruik dezelfde env-sleutel en client. Gebruik vision voor de beelden (stuur de geüploade beelden mee).
@@ -95,7 +96,7 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
 - **Uniciteit**: naast de rotatie vergelijkt de generator de nieuwe onderwerpregels en hooks met de vorige 6 (eenvoudige tekstgelijkenis) en hergenereert dat onderdeel als het te sterk lijkt.
 
 ### 3.4 Rendering
-- **Nieuwsbrief-HTML** (server, `api/_lib/nieuwsbrief-render.js`): 600px tabel-layout, inline CSS, werkt in Gmail/Outlook/Apple Mail, donker navy (#0B1E2A, #112B3B) met goud (#D0A050), Inter met Arial-fallback — dezelfde look als training.deforexopleiding.nl (zie `docs/training-prototypes/22-10-26/index.html` en `mail/nieuwsbrief-lt-22-10-26.html` als referentie in dfo-website). Elk bloktype is een eigen render-functie. Beelden via de publieke Storage-URL's. Alle links met `utm_source=brevo&utm_medium=email&utm_campaign=drop-<slug>&utm_content=<blok>` en `src=nieuwsbrief`. Uitschrijflink = Brevo-tag. Geanimeerde chart-GIF optioneel (mag later).
+- **Nieuwsbrief-HTML** (server, `api/_lib/nieuwsbrief-render.js`): 600px tabel-layout, inline CSS, werkt in Gmail/Outlook/Apple Mail, donker navy (#0B1E2A, #112B3B) met goud (#D0A050), Inter met Arial-fallback — dezelfde look als training.deforexopleiding.nl (zie `docs/training-prototypes/22-10-26/index.html` en `mail/nieuwsbrief-lt-22-10-26.html` als referentie in dfo-website). Elk bloktype is een eigen render-functie. Beelden via de publieke Storage-URL's. Alle links met `utm_source=nieuwsbrief&utm_medium=email&utm_campaign=drop-<slug>&utm_content=<blok>` en `src=nieuwsbrief` (gewijzigd 23 okt: GHL i.p.v. Brevo). Uitschrijflink = de GHL-uitschrijf-merge-tag. Geanimeerde chart-GIF optioneel (mag later).
 - **Social-beelden** (in de browser van het CRM): HTML-templates per formaat → PNG via html-to-image (of canvas), downloadbaar per stuk en als zip; daarnaast opgeslagen in Storage `drops/<slug>/social/…`. Formaten: stories 1080x1920 (3–5), carrousel 1080x1350 (5–7), vierkant 1080x1080, LinkedIn 1200x1200 (of hergebruik vierkant), OG-beeld 1200x630 voor de pagina. Templates: zelfde huisstijl als de bestaande creatives (Inter 900-koppen, goud accent, grid-achtergrond, chart-illustraties, foto's in een kader met afgeronde hoeken). Minstens 3 varianten per formaat zodat het niet elke week identiek oogt; de generator kiest.
 - Story-linksticker: vak + URL `training.deforexopleiding.nl/<slug>?src=ig-story&utm_source=instagram&utm_medium=story&utm_campaign=drop-<slug>`; zo per kanaal (ig-bio, linkedin, whatsapp, meta-ad).
 
@@ -104,21 +105,21 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
 - Soort `training`: zoals nu (formulier → video ontgrendelt → cadeau).
 - Soort `update` (geen video): zelfde huisstijl; hero + verhaal van de week + beeldengalerij (payouts/trade) + "trade ontleed"-blok + formulier "Ontvang elke week onze marktanalyse" + cadeau. Het formulier maakt een lead met bron `drop-<slug>` en schrijft in op de nieuwsbrief.
 - `funnel_events.variant`: breid het patroon uit naar `^(training|drop)-\d{2}-\d{2}-\d{2}(-\d)?$` (additieve migratie, superset).
-- Elke lead van een drop-pagina wordt ook `nieuwsbrief_abonnees` (status actief, bron = de slug), tenzij hij al uitgeschreven is.
+- ~~Elke lead van een drop-pagina wordt ook `nieuwsbrief_abonnees`~~ — **gewijzigd 23 okt**: elke lead van een drop-pagina gaat als GHL-contact met de nieuwsbrief-tag naar GHL (fase 5).
 
-### 3.6 Versturen — Brevo
-- Env: `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME`, `BREVO_LIST_ID`. Ontbreken ze: alles werkt behalve de verzendknoppen, met de melding "Brevo nog niet gekoppeld — HTML kan je downloaden".
-- Knoppen in het Nieuwsbrief-tabblad: **"Stuur test naar mij"** (naar de ingelogde gebruiker), **"Maak campagne in Brevo"** (concept-campagne met de HTML en de lijst), **"Verstuur nu" / "Plan in"** — enkel zichtbaar voor super_admin, met een bevestigingsstap in de pagina ("Verstuur naar 6.012 abonnees?"). Nooit automatisch versturen.
-- Abonnees-sync: `nieuwsbrief_abonnees` (actief) → Brevo-lijst; uitschrijvingen en bounces terug via Brevo-webhook → status bijwerken.
-- **Eenmalige import uit GHL**: route/knop die de nieuwsbriefcontacten uit GHL leest (bestaande GHL-koppeling) en in `nieuwsbrief_abonnees` zet; contacten met e-mail-DND/uitgeschreven in GHL komen er als `uitgeschreven` in, niet als actief. Toon vooraf een telling (gevonden / actief / overgeslagen) en importeer pas na een klik. Niets wijzigen in GHL.
-- Stats: Brevo-webhook (opened, click, unsubscribed, hard_bounce) → `nieuwsbrief_verzendingen.stats`; tonen in het Contentmachine-overzicht en in Trainingdrops.
+### 3.6 Versturen — GoHighLevel (gewijzigd 23 okt; was Brevo)
+- GEEN Brevo. De nieuwsbrief gaat via de bestaande GHL-koppeling van het CRM. GHL blijft de bron van de lijst en de uitschrijvingen.
+- Route (beste wat de GHL-API toelaat — zie de uitwerking in fase 5): de gegenereerde nieuwsbrief-HTML als e-mailtemplate in GHL zetten en, als de API het toelaat, een bulk-/campagneverzending als **concept** klaarzetten naar de nieuwsbrieflijst/-tag. Kan bulk via de API niet: template in GHL + knop **"Open in GHL"** met een duidelijke stap. Maxim drukt zelf op versturen (in het CRM of in GHL). Nooit automatisch versturen.
+- **Testmail** naar de ingelogde gebruiker via GHL.
+- Nieuwe drop-leads gaan als contact met de nieuwsbrief-tag naar GHL (zelfde manier als de andere funnels, als die dat al doen).
+- Stats (opens/kliks) uit GHL als de API ze geeft, anders weglaten en melden.
 
 ## 4. Fasering (elke fase = eigen PR('s), mergen bij groen, nameten)
 1. **Databank + bibliotheek + invoer**: migraties (zelf draaien), Storage-bucket, module-skelet, scherm Nieuwe drop, upload + AI-beeldbeschrijving, bibliotheek.
 2. **Generator + werkblad**: generator met formats/rotatie/kennis/grenzen, tabbladen met voorbeelden, bewerken, per onderdeel hergenereren, versies. Tests op het JSON-schema en op de verboden woorden.
 3. **Social-rendering**: templates, PNG + zip, opslag in Storage.
 4. **Website leest drops**: dfo-website-PR (aparte repo), soort `update`, patroon-migratie, inschrijving op nieuwsbrief. Bestaande training 22/10/26 blijft werken.
-5. **Brevo + abonnees**: verzendknoppen achter env-sleutels, GHL-import (knop, niet automatisch draaien), webhook + stats.
+5. **Nieuwsbrief via GoHighLevel** (gewijzigd 23 okt, was Brevo + abonnees): template/campagne-concept in GHL, testmail via GHL, "Open in GHL", drop-leads met nieuwsbrief-tag naar GHL, stats als de API ze geeft.
 6. **Eerste echte drop als demo**: maak een concept-drop met slug `22-10-26-demo` uit de bestaande training (Vimeo `https://player.vimeo.com/video/1238714790?h=4822ada5ee`, start 600s) en status `gegenereerd`, niet gepubliceerd, zodat Maxim het resultaat meteen ziet.
 
 ## 5. Randvoorwaarden
