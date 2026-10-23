@@ -103,13 +103,20 @@
     st.form = leegForm(); st.dropAssets = []; st.bezig = [];
     if (window.DFO.goTab) window.DFO.goTab('Nieuwe drop');
   };
-  window.__cmOpen = async (id) => {
+  /** Invoerformulier van een bestaande drop (concept, of "Invoer aanpassen" vanuit het werkblad). */
+  window.__cmOpenInvoer = async (id) => {
     try {
       const j = await api('/api/contentmachine/drops?id=' + encodeURIComponent(id));
       laadInForm(j.drop, j.assets || []);
       if (window.DFO.goTab) window.DFO.goTab('Nieuwe drop');
       try { window.scrollTo(0, 0); } catch (_) {}
     } catch (e) { toast(foutTekst(e, 'Drop openen mislukt.')); }
+  };
+  /** Klik in het overzicht: concept → invoer, anders → werkblad. */
+  window.__cmOpen = (id) => {
+    const d = st.lijst.drops.find((x) => x.id === id);
+    if (d && d.status !== 'concept' && typeof window.__cmWbOpen === 'function') { window.__cmWbOpen(id); return; }
+    window.__cmOpenInvoer(id);
   };
   window.__cmOpenToets = (e, id) => { if (e && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.__cmOpen(id); } };
 
@@ -509,9 +516,10 @@
           ${KANALEN.map(([k, l]) => `<label style="font-size:12.5px;display:inline-flex;gap:6px;align-items:center"><input type="checkbox" ${f.kanalen.includes(k) ? 'checked' : ''} onchange="__cmKanaal('${k}',this.checked)"> ${l}</label>`).join('')}
         </div></div>
         <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-primary" style="font-size:15px;padding:12px 16px;justify-content:center" onclick="__cmGenereer()">✨ Genereer alles</button>
+          <button class="btn btn-primary" style="font-size:15px;padding:12px 16px;justify-content:center" onclick="__cmGenereer()">✨ ${f.status === 'concept' ? 'Genereer alles' : 'Genereer alles opnieuw'}</button>
+          ${f.status !== 'concept' && f.id ? `<button class="btn btn-ghost btn-sm" style="justify-content:center" onclick="__cmWbOpen('${esc(f.id)}');DFO.goTab('Overzicht')">→ Naar het werkblad (zonder opnieuw te genereren)</button>` : ''}
           <button class="btn btn-ghost btn-sm" style="justify-content:center" onclick="__cmBewaar()">Bewaar concept</button>
-          <div style="font-size:11.5px;color:var(--text-3)">Er wordt niets gepubliceerd of verstuurd: je krijgt eerst alles te zien en kan elk onderdeel aanpassen.</div>
+          <div style="font-size:11.5px;color:var(--text-3)">Er wordt niets gepubliceerd of verstuurd: je krijgt eerst alles te zien en kan elk onderdeel aanpassen.${f.status !== 'concept' ? ' Opnieuw genereren maakt een nieuwe versie; de huidige blijft in de historiek.' : ''}</div>
         </div></div>
       </div>
     </div>`;
@@ -634,6 +642,8 @@
   </style>`;
 
   function overzichtView() {
+    const W = window.__cmWerkblad;
+    if (W && W.open && typeof window.__cmWerkbladView === 'function') return `<div class="pad">${CSS}${window.__cmWerkbladView()}</div>`;
     if (!st.lijst.fetched && !st.lijst.loading) queueMicrotask(() => laadLijst(false));
     return `<div class="pad">${CSS}${overzichtHtml()}</div>`;
   }
