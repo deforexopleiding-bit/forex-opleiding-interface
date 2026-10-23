@@ -151,6 +151,11 @@
     // Geen permKey: een permKey is additief en zou de module ook tonen aan rollen
     // met leads.view zonder Leads-module (setter), terwijl de doorklik naar het
     // leaddossier juist via die module loopt.
+    // Contentmachine (2026-10-23): elke week met één knop een drop (pagina,
+    // nieuwsbrief, stories, post, LinkedIn). Rollen SAMMK + permKey
+    // content.machine (admin/manager/marketing via role_permissions). Bewust
+    // NIET leads.view: dat hebben ook mentoren en de appointmentsetter.
+    { g: 'Groei',                  id: 'contentmachine',   naam: 'Contentmachine',    icon: I.sparkle,  color: 'amber',   roles: SAMMK, permKey: 'content.machine', tabs: ['Overzicht', 'Nieuwe drop', 'Bibliotheek'] },
     { g: 'Groei',                  id: 'trainingdrops',    naam: 'Trainingdrops',     icon: I.video,    color: 'amber',   roles: SAMMK.concat('sales'),tabs: [] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
     { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken'] },
