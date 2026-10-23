@@ -65,6 +65,10 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   // 2026-10-19: Flow D (/strategiesessie) — opt-in gratis cursus → direct de
   // strategiesessie boeken (opstartsessie-submission met booking_source = variant).
   'strategiesessie-v1',
+  // 2026-10-23: de events-funnels (/event-1 donker, /event-2 licht, /event-forex-1).
+  'event-1',
+  'event-2',
+  'event-forex-1',
 ]);
 
 export const VARIANT_INFO = Object.freeze({
@@ -95,7 +99,20 @@ export const VARIANT_INFO = Object.freeze({
   'strategiescan-site':     { label: 'Strategie-scan (website)', groep: 'strategiescan' },
   // Flow D: stap 1 is de mini-cursus-opt-in, dus naast Flow A/B/C in de groep kmc.
   'strategiesessie-v1':     { label: 'Mini-cursus (Flow D · strategiesessie)', groep: 'kmc' },
+  'event-1':                { label: 'Event · event-1 (donker)', groep: 'events' },
+  'event-2':                { label: 'Event · event-2 (licht)', groep: 'events' },
+  'event-forex-1':          { label: 'Event · event-forex-1', groep: 'events' },
 });
+
+/**
+ * Events-funnels: geen leads-rij en geen opstartsessie. Daarom tellen ze uit
+ * hun eigen tabellen (zie aggregeerFunnelStats):
+ *   Leads / Toegang = event_kwalificatie_submissions met bron = variant
+ *                     (uniek op e-mail; toegelaten wint van afgewezen);
+ *   Geboekt         = event_attendees met source = variant (uniek op e-mail).
+ */
+export const EVENT_VARIANTEN = Object.freeze(['event-1', 'event-2', 'event-forex-1']);
+const EVENT_FUNNEL_SET = new Set(EVENT_VARIANTEN);
 
 /**
  * Funnels waarvan de afspraak NIET via een opstartsessie-submission met
@@ -279,6 +296,8 @@ export function bouwAfhakenPerVraag(events) {
  * @param {Array}  p.leads      leads-rijen (id, bron, kwalificatie, email, aangemaakt, afspraak_op)
  * @param {Array}  p.boekingen  opstartsessie_submissions-rijen (booking_source, appointment_id, lead_id, created_at)
  * @param {Array}  [p.afspraken] follow_up_appointments-rijen (booking_source, lead_email) voor BOEK_BRON_PER_VARIANT
+ * @param {Array}  [p.eventInzendingen] event_kwalificatie_submissions-rijen (bron, resultaat, email, created_at) voor EVENT_VARIANTEN
+ * @param {Array}  [p.eventAanmeldingen] event_attendees-rijen (source, email, created_at, is_test) voor EVENT_VARIANTEN
  * @param {Iterable} p.gekoppeldeLeadIds  lead-ids die in funnel_events voorkomen (dekking)
  * @param {string[]} p.varianten  gevraagde varianten (subset van FUNNEL_VARIANTEN)
  * @param {Date}   p.start       UTC-moment = NL 00:00 van `van`
@@ -288,6 +307,7 @@ export function bouwAfhakenPerVraag(events) {
 export function aggregeerFunnelStats({
   events = [], gedragEvents = [], leads = [], boekingen = [], gekoppeldeLeadIds = [],
   varianten = FUNNEL_VARIANTEN, start, eindExclusief, trackingActief = true, afspraken = [],
+  eventInzendingen = [], eventAanmeldingen = [],
 } = {}) {
   const startMs = start instanceof Date ? start.getTime() : tsMs(start);
   const eindMs = eindExclusief instanceof Date ? eindExclusief.getTime() : tsMs(eindExclusief);
@@ -339,6 +359,12 @@ export function aggregeerFunnelStats({
       r.gedrag = null;
     }
 
+    if (EVENT_FUNNEL_SET.has(variant)) {
+      r.lead_resultaat = eventLeadResultaat(variant, eventInzendingen, eventAanmeldingen, startMs, eindMs);
+      perVariant[variant] = r;
+      continue;
+    }
+
     // Lead-resultaat: leads met bron = variant, aangemaakt in de NL-periode.
     const vLeads = (leads || []).filter((l) => l && l.bron === variant && !isTestEmail(l.email)
       && inPeriode(l.aangemaakt, startMs, eindMs));
@@ -378,6 +404,42 @@ export function aggregeerFunnelStats({
   }
 
   return { per_variant: perVariant, events_genegeerd: genegeerd };
+}
+
+/**
+ * Lead-resultaat van een events-funnel (zelfde vorm als bij de andere funnels).
+ * Uniek op e-mail: wie de vragenlijst twee keer invult of zich twee keer
+ * aanmeldt, telt één keer. Test-adressen tellen niet. "Met sessie" bestaat hier
+ * niet (er is geen lead_id om aan een funnelsessie te koppelen) → null.
+ */
+function eventLeadResultaat(variant, inzendingen, aanmeldingen, startMs, eindMs) {
+  const mail = (e) => String(e || '').trim().toLowerCase();
+  const uitslag = new Map();   // e-mail → 'toegang' | 'geen_toegang'
+  for (const s of inzendingen || []) {
+    if (!s || s.bron !== variant || !mail(s.email) || isTestEmail(s.email)) continue;
+    if (!inPeriode(s.created_at, startMs, eindMs)) continue;
+    const toe = String(s.resultaat || '').toLowerCase() === 'toegelaten';
+    if (toe || !uitslag.has(mail(s.email))) uitslag.set(mail(s.email), toe ? 'toegang' : 'geen_toegang');
+  }
+  const aangemeld = new Set();
+  for (const a of aanmeldingen || []) {
+    if (!a || a.source !== variant || a.is_test || !mail(a.email) || isTestEmail(a.email)) continue;
+    if (!inPeriode(a.created_at, startMs, eindMs)) continue;
+    aangemeld.add(mail(a.email));
+  }
+  const leads = uitslag.size;
+  const toegang = [...uitslag.values()].filter((u) => u === 'toegang').length;
+  return {
+    leads,
+    toegang,
+    geen_toegang: leads - toegang,
+    kwalificatie_onbekend: 0,
+    toegang_pct: pct(toegang, leads),
+    geboekt: aangemeld.size,
+    leads_met_afspraak: aangemeld.size,
+    leads_met_sessie: null,
+    dekking_pct: null,
+  };
 }
 
 /** Blinde vlekken als leesbare NL-zinnen voor de UI. */

@@ -40,7 +40,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 import {
-  FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES, BOEK_BRON_PER_VARIANT,
+  FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES, BOEK_BRON_PER_VARIANT, EVENT_VARIANTEN,
   aggregeerFunnelStats, isBekendeVariant, bepaalBlindeVlekken,
 } from './_lib/funnel-stats-compute.js';
 import { GEDRAG_LEES_TYPES } from './_lib/funnel-gedrag-compute.js';
@@ -152,6 +152,37 @@ async function leesEigenBronAfspraken(db, leads, varianten) {
   return uit;
 }
 
+/**
+ * Events-funnels (EVENT_VARIANTEN): ingevulde vragenlijsten met bron = variant
+ * (kolom bron, migratie 2026-10-23 in dfo-website) en aanmeldingen met
+ * source = variant. Fail-soft: zonder kolom of bij een leesfout blijft het 0.
+ */
+async function leesEventFunnelRijen(db, varianten, startIso, eindIso) {
+  const ev = varianten.filter((v) => EVENT_VARIANTEN.includes(v));
+  if (!ev.length) return { inzendingen: [], aanmeldingen: [] };
+  const lees = async (label, q) => {
+    try {
+      const { data, error } = await q;
+      if (error) {
+        // 42703/PGRST204 = kolom bron nog niet gemigreerd → stil, de telling mist dan.
+        if (!['42703', 'PGRST204'].includes(error.code)) console.warn('[funnel-stats] ' + label + ' (soft):', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.warn('[funnel-stats] ' + label + ' exception (soft):', e?.message || e);
+      return [];
+    }
+  };
+  const [inzendingen, aanmeldingen] = await Promise.all([
+    lees('event-inzendingen', db.from('event_kwalificatie_submissions').select('bron,resultaat,email,created_at')
+      .in('bron', ev).gte('created_at', startIso).lt('created_at', eindIso).limit(20000)),
+    lees('event-aanmeldingen', db.from('event_attendees').select('source,email,created_at,is_test')
+      .in('source', ev).gte('created_at', startIso).lt('created_at', eindIso).limit(20000)),
+  ]);
+  return { inzendingen, aanmeldingen };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -235,9 +266,13 @@ export default async function handler(req, res) {
     // Afspraken met een eigen agendabron (The Lab / Strategie-scan) — op e-mail
     // van de leads van die varianten. Fail-soft: zonder blijft "geboekt" 0.
     const afspraken = await leesEigenBronAfspraken(db, leadsRes.data || [], varianten);
+    // Events-funnels: vragenlijsten + aanmeldingen per bron. Fail-soft.
+    const { inzendingen: eventInzendingen, aanmeldingen: eventAanmeldingen } =
+      await leesEventFunnelRijen(db, varianten, startIso, eindIso);
 
     const agg = aggregeerFunnelStats({
       events, gedragEvents, leads: leadsRes.data || [], boekingen: boekRes.data || [], afspraken,
+      eventInzendingen, eventAanmeldingen,
       gekoppeldeLeadIds: gekoppeld, varianten,
       start: periode.start, eindExclusief: periode.eindExclusief, trackingActief,
     });
@@ -256,7 +291,7 @@ export default async function handler(req, res) {
         afgekapt,
         max_events_per_variant: MAX_EVENTS_PER_VARIANT,
         fase_telling: 'bereik — een sessie telt voor een fase als dat event in de periode voorkomt, ongeacht eerdere fases',
-        geboekt_bron: 'opstartsessie_submissions (booking_source = variant, met appointment_id, created_at in periode); The Lab en Strategie-scan: leads van de variant met een afspraak onder bron the-lab / strategiescan',
+        geboekt_bron: 'opstartsessie_submissions (booking_source = variant, met appointment_id, created_at in periode); The Lab en Strategie-scan: leads van de variant met een afspraak onder bron the-lab / strategiescan; Events: event_attendees met source = variant (uniek op e-mail)',
         blinde_vlekken: bepaalBlindeVlekken({
           tabelBestaat, eersteEventTs, start: periode.start, afgekapt,
           maxEvents: MAX_EVENTS_PER_VARIANT, leesfout,

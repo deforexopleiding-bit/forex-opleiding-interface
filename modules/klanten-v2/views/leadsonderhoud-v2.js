@@ -4520,6 +4520,10 @@
     { bron: 'strategiescan-site',    naam: 'Strategie-scan (website)', product: 'strategiescan', route: 'https://deforexopleiding.nl/strategie-scan', status: 'actief' },
     // 2026-10-19: Flow D — draait op /strategiesessie (geen -v1 in de route).
     { bron: 'strategiesessie-v1',    naam: 'Flow D · strategiesessie', product: 'minicursus', route: 'https://deforexopleiding.nl/strategiesessie', status: 'actief' },
+    // 2026-10-23: de events-funnels (vragenlijst → aanmelden voor een event-datum).
+    { bron: 'event-1',               naam: 'Event · event-1 (donker)', product: 'events', route: 'https://deforexopleiding.nl/event-1',       status: 'actief' },
+    { bron: 'event-2',               naam: 'Event · event-2 (licht)',  product: 'events', route: 'https://deforexopleiding.nl/event-2',       status: 'actief' },
+    { bron: 'event-forex-1',         naam: 'Event · event-forex-1',    product: 'events', route: 'https://deforexopleiding.nl/event-forex-1', status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {
