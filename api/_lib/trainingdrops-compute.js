@@ -23,10 +23,9 @@
 // mee in de cijfers en hun sessies ook niet; ze staan wel in de leadlijst,
 // gemarkeerd, zodat je een testaanmelding kunt terugvinden.
 //
-// Kanaal: funnel_events.meta.utm_source van de landing-sessie. dfo-website
-// bewaart ?src= NIET in funnel_events (alleen in de Google Sheet), dus een link
-// met alleen ?src=ig-story komt hier als 'direct' (of 'referral') binnen. Zie
-// KANAAL_UITLEG.
+// Kanaal van de landing-sessie: funnel_events.meta.src (?src=… op de link,
+// door dfo-website meegestuurd), anders meta.utm_source, anders 'direct'.
+// Onbekende waarden blijven zoals ze zijn (label = de waarde zelf).
 
 import { isTestEmail } from './funnel-stats-compute.js';
 import { isTrainingBron, trainingSlug, trainingLabel, trainingDatum, trainingLinks } from './training-bron.js';
@@ -34,26 +33,29 @@ import { isTrainingBron, trainingSlug, trainingLabel, trainingDatum, trainingLin
 /** De kanalen uit de bouwopdracht, in vaste volgorde. Andere waarden komen erachter. */
 export const KANALEN = Object.freeze(['ig-story', 'ig-bio', 'nieuwsbrief', 'whatsapp', 'meta-ad', 'direct']);
 export const KANAAL_LABELS = Object.freeze({
-  'ig-story': 'IG-story',
-  'ig-bio': 'IG-bio',
+  'ig-story': 'Instagram story',
+  'ig-bio': 'Instagram bio',
   nieuwsbrief: 'Nieuwsbrief',
   whatsapp: 'WhatsApp',
   'meta-ad': 'Meta-advertentie',
   direct: 'Direct',
-  referral: 'Verwijzing (andere site)',
   onbekend: 'Onbekend (geen sessie)',
 });
-export const KANAAL_UITLEG = 'Kanaal = utm_source van de bezoekerssessie. Een link met alleen ?src=… (zonder utm_source) telt hier als Direct: dfo-website bewaart src niet in de tracking.';
+export const KANAAL_UITLEG = 'Kanaal = src van de link (?src=…), anders utm_source, anders Direct.';
 
 export const FASE_TYPES = Object.freeze(['landing', 'formulier_start', 'gegevens_ok', 'lead_ingediend']);
 
-const KANAAL_RE = /^[a-z0-9][a-z0-9._-]{0,40}$/;
+const MAX_KANAAL = 100;
 
-/** utm_source + verwijzer → kanaal-sleutel. */
-export function bepaalKanaal(utmSource, referrerDomein) {
-  const u = String(utmSource || '').trim().toLowerCase();
-  if (u) return KANAAL_RE.test(u) ? u : 'overig';
-  return referrerDomein ? 'referral' : 'direct';
+/** meta.src → meta.utm_source → 'direct'. Bekende kanalen ongeacht hoofdletters; de rest zoals hij is. */
+export function bepaalKanaal(src, utmSource) {
+  for (const x of [src, utmSource]) {
+    const w = typeof x === 'string' ? x.trim().slice(0, MAX_KANAAL) : '';
+    if (!w) continue;
+    const laag = w.toLowerCase();
+    return KANAAL_LABELS[laag] ? laag : w;
+  }
+  return 'direct';
 }
 
 export function kanaalLabel(k) {
@@ -86,8 +88,8 @@ function naamVan(l) {
  * @param {Array} p.leads   leads-rijen (id, voornaam, achternaam, email, telefoon, bron, campagne, status,
  *                          kwalificatie, aangemaakt, laatste_aanmelding) — bron training-* én de leads
  *                          die via funnel_events.lead_id aan een training-sessie hangen
- * @param {Array} p.events  funnel_events-rijen (session_id, variant, event_type, ts, lead_id, utm, ref)
- *                          — utm = meta->>utm_source, ref = meta->>referrer_domein
+ * @param {Array} p.events  funnel_events-rijen (session_id, variant, event_type, ts, lead_id, src, utm)
+ *                          — src = meta->>src, utm = meta->>utm_source
  * @returns {{ drops: Array, totaal: object }}
  */
 export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
@@ -116,13 +118,13 @@ export function bouwTrainingdrops({ leads = [], events = [] } = {}) {
     if (!s) { s = { fases: new Set(), kanaal: null, leadId: null, landingMs: NaN }; pv.sessies.set(e.session_id, s); }
     s.fases.add(e.event_type);
     if (e.lead_id) s.leadId = e.lead_id;
-    // Kanaal: van het (eerste) landing-event; anders van het eerste event met utm.
+    // Kanaal: van het (eerste) landing-event; anders van het eerste event met src/utm.
     const ms = tsMs(e.ts);
     if (e.event_type === 'landing' && (!Number.isFinite(s.landingMs) || ms < s.landingMs)) {
       s.landingMs = ms;
-      s.kanaal = bepaalKanaal(e.utm, e.ref);
-    } else if (!s.kanaal && e.utm) {
-      s.kanaal = bepaalKanaal(e.utm, e.ref);
+      s.kanaal = bepaalKanaal(e.src, e.utm);
+    } else if (!s.kanaal && (e.src || e.utm)) {
+      s.kanaal = bepaalKanaal(e.src, e.utm);
     }
     // Aanmeldmoment per lead: het lead_ingediend-event, anders het eerste event met die lead.
     if (e.lead_id) {

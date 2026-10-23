@@ -4,7 +4,7 @@
 // dfo-website (training.deforexopleiding.nl/<dd-mm-jj>, bron/variant
 // 'training-<dd-mm-jj>'). Menu: Groei → Trainingdrops.
 //   - Overzicht: per drop datum, bezoekers, formulier gestart, leads,
-//     conversie % en leads per kanaal (utm_source). Nieuwste bovenaan.
+//     conversie % en leads per kanaal (src, anders utm_source). Nieuwste bovenaan.
 //   - Klik op een drop: de leads van die drop met doorklik naar het
 //     leaddossier (Leads → detail), plus links naar de live pagina.
 // Data: GET /api/trainingdrops (recht leads.view). Alleen lezen.

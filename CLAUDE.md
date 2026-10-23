@@ -160,8 +160,8 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   ook leads-v2 `bronLabel` en funnel-stats (`isBekendeVariant`/`variantInfo`, ?variant=) herkennen
   het als "Live training dd/mm/jj". `GET /api/trainingdrops` (leads.view, alleen lezen uit leads +
   funnel_events; rekenkern `api/_lib/trainingdrops-compute.js`). Leads per drop = bron = variant
-  plus wie via `funnel_events.lead_id` (upsert_lead overschrijft bron). Kanaal = `meta.utm_source` van de
-  sessie; `?src=` wordt door dfo-website NIET in funnel_events bewaard (alleen Google Sheet).
+  plus wie via `funnel_events.lead_id` (upsert_lead overschrijft bron). Kanaal van de sessie =
+  `meta.src` (?src= op de link), anders `meta.utm_source`, anders 'direct'; onbekende waarden zoals ze zijn.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
