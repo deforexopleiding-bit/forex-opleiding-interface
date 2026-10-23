@@ -5,8 +5,11 @@
 // 'training-<dd-mm-jj>'). Menu: Groei → Trainingdrops.
 //   - Overzicht: per drop datum, bezoekers, formulier gestart, leads,
 //     conversie % en leads per kanaal (src, anders utm_source). Nieuwste bovenaan.
-//   - Klik op een drop: de leads van die drop met doorklik naar het
-//     leaddossier (Leads → detail), plus links naar de live pagina.
+//   - Cadeau (gratis strategiesessie met Dave, dfo-website #132): per drop en
+//     per kanaal cadeau-klikken, calls ingepland, gehouden / no-show /
+//     geannuleerd en lead → call %.
+//   - Klik op een drop: de leads van die drop (met kolom Call) en doorklik naar
+//     het leaddossier (Leads → detail), plus links naar de live pagina.
 // Data: GET /api/trainingdrops (recht leads.view). Alleen lezen.
 (function () {
   'use strict';
@@ -27,6 +30,15 @@
     try { return new Date(iso).toLocaleString('nl-NL', { timeZone: ZONE, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; }
   };
   const pill = (c, t, titel) => `<span class="pill pill-${c} nodot"${titel ? ` title="${esc(titel)}"` : ''}>${esc(t)}</span>`;
+  const CALL_PILL = { gepland: 'accent', gehouden: 'ok', no_show: 'danger', geannuleerd: 'neutral' };
+  const fmtCall = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('nl-NL', { timeZone: ZONE, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; }
+  };
+  // "12 calls · 5 gehouden · 2 no-show · 1 geannuleerd" (alleen wat er is).
+  const callUitsplitsing = (x) => [
+    [x.calls_gepland, 'gepland'], [x.calls_gehouden, 'gehouden'], [x.calls_no_show, 'no-show'], [x.calls_geannuleerd, 'geannuleerd'],
+  ].filter(([n]) => n).map(([n, l]) => num(n) + ' ' + l).join(' · ');
 
   const st = window.__tdState = window.__tdState || {
     loading: false, fetched: false, error: null, data: null, _seq: 0,
@@ -113,7 +125,9 @@
       tegel('Drops', num(t.drops), 'trainingen met bezoek of leads')
       + tegel('Bezoekers', num(t.bezoekers), 'landing-sessies, alle drops')
       + tegel('Leads', num(t.leads), 'aanmeldingen, zonder testleads')
-      + tegel('Conversie', pctTxt(t.conversie_pct), 'leads ÷ bezoekers'));
+      + tegel('Conversie', pctTxt(t.conversie_pct), 'leads ÷ bezoekers')
+      + tegel('Calls ingepland', num(t.calls), num(t.calls_gehouden) + ' gehouden · ' + num(t.cadeau_klik) + ' cadeau-klikken')
+      + tegel('Lead → call', pctTxt(t.lead_call_pct), 'leads met een strategiesessie'));
 
     const th = 'padding:10px 12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap;text-align:left';
     const td = 'padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle';
@@ -124,37 +138,46 @@
       <td class="td-col-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums">${num(x.formulier_gestart)}</td>
       <td style="${td};text-align:right;font-variant-numeric:tabular-nums"><b>${num(x.leads)}</b>${x.test_leads ? `<div style="color:var(--text-3);font-size:10.5px">+${num(x.test_leads)} test</div>` : ''}</td>
       <td style="${td};text-align:right;font-variant-numeric:tabular-nums">${pctTxt(x.conversie_pct)}</td>
+      <td class="td-col-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums">${num(x.cadeau_klik)}</td>
+      <td style="${td};text-align:right;font-variant-numeric:tabular-nums" title="${esc(callUitsplitsing(x))}"><b>${num(x.calls)}</b>${x.calls ? `<div style="color:var(--text-3);font-size:10.5px">${num(x.calls_gehouden)} gehouden</div>` : ''}</td>
+      <td class="td-col-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums">${pctTxt(x.lead_call_pct)}</td>
       <td class="td-col-kanaal" style="${td};min-width:180px">${kanaalChips(x.leads_per_kanaal, 'nog geen leads')}</td>
       <td class="td-col-mob-weg" style="${td};text-align:right">${linksHtml(x)}</td>
     </tr>`).join('');
 
     return `${kop}${trackingBanner(d.meta)}${kpi}
-      <div class="card td-tabel" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:720px">
+      <div class="card td-tabel" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:960px">
         <thead><tr><th style="${th}">Training</th><th style="${th};text-align:right">Bezoekers</th><th class="td-col-mob-weg" style="${th};text-align:right">Formulier gestart</th>
-          <th style="${th};text-align:right">Leads</th><th style="${th};text-align:right">Conversie</th><th class="td-col-kanaal" style="${th}">Leads per kanaal</th><th class="td-col-mob-weg" style="${th}"></th></tr></thead>
+          <th style="${th};text-align:right">Leads</th><th style="${th};text-align:right">Conversie</th>
+          <th class="td-col-mob-weg" style="${th};text-align:right">Cadeau-klik</th><th style="${th};text-align:right">Calls</th><th class="td-col-mob-weg" style="${th};text-align:right">Lead → call</th>
+          <th class="td-col-kanaal" style="${th}">Leads per kanaal</th><th class="td-col-mob-weg" style="${th}"></th></tr></thead>
         <tbody>${rijen}</tbody></table></div></div>
-      <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop voor de leads. Bezoekers = unieke sessies op de pagina; conversie = leads ÷ bezoekers. Testleads (e-mail met "test") tellen niet mee. ${esc((d.meta && d.meta.kanaal_uitleg) || '')}</div>`;
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop voor de leads. Bezoekers = unieke sessies op de pagina; conversie = leads ÷ bezoekers. Calls = ingeplande strategiesessies met Dave (cadeau); lead → call = leads met een call ÷ leads. Testleads (e-mail met "test") tellen niet mee. ${esc((d.meta && d.meta.kanaal_uitleg) || '')}</div>`;
   }
 
   // ── Detail van één drop ───────────────────────────────────────────────────
   function kanaalTabel(x) {
-    const leads = new Map((x.leads_per_kanaal || []).map((k) => [k.kanaal, k]));
-    const bez = new Map((x.bezoekers_per_kanaal || []).map((k) => [k.kanaal, k]));
-    const keys = [...new Set([...leads.keys(), ...bez.keys()])]
-      .filter((k) => (leads.get(k) || {}).n || (bez.get(k) || {}).n || ['ig-story', 'ig-bio', 'nieuwsbrief', 'whatsapp', 'meta-ad', 'direct'].includes(k));
-    const rij = (k) => {
-      const l = leads.get(k) || {}; const b = bez.get(k) || {};
-      const label = l.label || b.label || k;
-      return `<tr><td style="padding:6px 10px;border-bottom:1px solid var(--border)">${esc(label)}</td>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums">${num(b.n || 0)}</td>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums"><b>${num(l.n || 0)}</b></td>
-        <td style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums">${b.n ? pctTxt(Math.round(((l.n || 0) / b.n) * 1000) / 10) : '—'}</td></tr>`;
-    };
-    return `<div class="card" style="margin-bottom:12px"><div class="card-head"><div class="card-title">Per kanaal</div></div>
+    const VAST = ['ig-story', 'ig-bio', 'nieuwsbrief', 'whatsapp', 'meta-ad', 'direct'];
+    const rijen = (x.kanalen || []).filter((k) => VAST.includes(k.kanaal) || k.bezoekers || k.leads || k.cadeau_klik || k.calls);
+    const td = 'padding:6px 10px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums';
+    const th = 'padding:8px 10px;text-align:right;white-space:nowrap';
+    const rij = (k) => `<tr><td style="padding:6px 10px;border-bottom:1px solid var(--border)" title="${esc(k.kanaal)}">${esc(k.label)}</td>
+        <td style="${td}">${num(k.bezoekers)}</td>
+        <td style="${td}"><b>${num(k.leads)}</b></td>
+        <td class="td-col-mob-weg" style="${td}">${k.bezoekers ? pctTxt(Math.round((k.leads / k.bezoekers) * 1000) / 10) : '—'}</td>
+        <td class="td-col-mob-weg" style="${td}">${num(k.cadeau_klik)}</td>
+        <td style="${td}"><b>${num(k.calls)}</b></td>
+        <td class="td-col-mob-weg" style="${td}">${num(k.gehouden)}</td>
+        <td class="td-col-mob-weg" style="${td}">${num(k.no_show)}</td>
+        <td class="td-col-mob-weg" style="${td}">${num(k.geannuleerd)}</td>
+        <td style="${td}">${pctTxt(k.lead_call_pct)}</td></tr>`;
+    return `<div class="card td-kanaal" style="margin-bottom:12px"><div class="card-head"><div class="card-title">Per kanaal</div></div>
       <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr style="text-align:left;color:var(--text-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em">
-        <th style="padding:8px 10px">Kanaal</th><th style="padding:8px 10px;text-align:right">Bezoekers</th><th style="padding:8px 10px;text-align:right">Leads</th><th style="padding:8px 10px;text-align:right">Conversie</th></tr></thead>
-      <tbody>${keys.map(rij).join('')}</tbody></table></div></div>`;
+        <th style="padding:8px 10px">Kanaal</th><th style="${th}">Bezoekers</th><th style="${th}">Leads</th><th class="td-col-mob-weg" style="${th}">Conversie</th>
+        <th class="td-col-mob-weg" style="${th}">Cadeau-klik</th><th style="${th}">Calls</th><th class="td-col-mob-weg" style="${th}">Gehouden</th>
+        <th class="td-col-mob-weg" style="${th}">No-show</th><th class="td-col-mob-weg" style="${th}">Geannuleerd</th><th style="${th}">Lead → call</th></tr></thead>
+      <tbody>${rijen.map(rij).join('')}</tbody></table></div></div>`;
   }
 
   function leadTabel(x) {
@@ -174,12 +197,13 @@
         <div style="color:var(--text-3);font-size:11.5px">${esc(l.email || '—')}</div></td>
       <td class="td-col-mob-weg" style="${td};white-space:nowrap">${esc(l.telefoon || '—')}</td>
       <td style="${td}">${esc(l.kanaal_label || '—')}${l.campagne ? `<div style="color:var(--text-3);font-size:11px" title="utm_campaign">${esc(l.campagne)}</div>` : ''}</td>
-      <td style="${td};white-space:nowrap">${esc(fmtTijd(l.aangemeld_op))}${l.bron_elders ? `<div style="color:var(--text-3);font-size:11px" title="Huidige bron in de leadlijst">nu: ${esc(l.huidige_bron || '—')}</div>` : ''}</td>
+      <td style="${td};white-space:nowrap">${l.call ? `${esc(fmtCall(l.call.scheduled_at))}<div style="margin-top:2px">${pill(CALL_PILL[l.call.categorie] || 'neutral', l.call.label || l.call.status || '—', l.call.status || '')}</div>` : '<span style="color:var(--text-3)">geen</span>'}</td>
+      <td class="td-col-mob-weg" style="${td};white-space:nowrap">${esc(fmtTijd(l.aangemeld_op))}${l.bron_elders ? `<div style="color:var(--text-3);font-size:11px" title="Huidige bron in de leadlijst">nu: ${esc(l.huidige_bron || '—')}</div>` : ''}</td>
       <td class="td-col-mob-weg" style="${td}">${l.status ? pill('neutral', l.status) : '—'}</td>
     </tr>`).join('');
-    return `<div class="card td-leads">${kop}<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:620px">
+    return `<div class="card td-leads">${kop}<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px">
       <thead><tr style="text-align:left;color:var(--text-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em">
-        <th style="padding:8px 12px">Lead</th><th class="td-col-mob-weg" style="padding:8px 12px">Telefoon</th><th style="padding:8px 12px">Kanaal</th><th style="padding:8px 12px">Aangemeld</th><th class="td-col-mob-weg" style="padding:8px 12px">Status</th></tr></thead>
+        <th style="padding:8px 12px">Lead</th><th class="td-col-mob-weg" style="padding:8px 12px">Telefoon</th><th style="padding:8px 12px">Kanaal</th><th style="padding:8px 12px">Call</th><th class="td-col-mob-weg" style="padding:8px 12px">Aangemeld</th><th class="td-col-mob-weg" style="padding:8px 12px">Status</th></tr></thead>
       <tbody>${rijen}</tbody></table></div>
       <div style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">Klik op een naam voor het leaddossier.</div></div>`;
   }
@@ -197,14 +221,19 @@
       tegel('Bezoekers', num(x.bezoekers), 'unieke sessies')
       + tegel('Formulier gestart', num(x.formulier_gestart), x.bezoekers ? pctTxt(x.formulier_pct) + ' van de bezoekers' : '—')
       + tegel('Leads', num(x.leads), x.test_leads ? '+' + num(x.test_leads) + ' test niet meegeteld' : 'aanmeldingen')
-      + tegel('Conversie', pctTxt(x.conversie_pct), 'leads ÷ bezoekers'));
+      + tegel('Conversie', pctTxt(x.conversie_pct), 'leads ÷ bezoekers')
+      + tegel('Cadeau-klikken', num(x.cadeau_klik), num(x.cadeau_getoond) + ' keer getoond')
+      + tegel('Calls ingepland', num(x.calls), callUitsplitsing(x) || 'nog geen strategiesessies')
+      + tegel('Lead → call', pctTxt(x.lead_call_pct), num(x.leads_met_call) + ' van ' + num(x.leads) + ' leads'));
     const d = st.data || {};
-    return `${kop}${trackingBanner(d.meta)}${kpi}${kanaalTabel(x)}${leadTabel(x)}
+    const callsFout = d.meta && d.meta.calls_fout
+      ? `<div class="card" style="margin-bottom:12px"><div class="card-body" style="font-size:12.5px;color:var(--amber)">De calls konden niet gelezen worden: ${esc(d.meta.calls_fout)}.</div></div>` : '';
+    return `${kop}${trackingBanner(d.meta)}${callsFout}${kpi}${kanaalTabel(x)}${leadTabel(x)}
       <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">${esc((d.meta && d.meta.kanaal_uitleg) || '')} Een lead die later een andere training of funnel deed, staat er nog bij (via de sessie); "nu:" toont zijn huidige bron.</div>`;
   }
 
   // Telefoon: kolommen die niet passen verdwijnen (geen horizontaal scrollen).
-  const CSS = `<style>@media (max-width:640px){.td-tabel .td-col-kanaal,.td-tabel .td-col-mob-weg{display:none}.td-tabel table{min-width:0!important}.td-tabel td,.td-tabel th{padding-left:8px!important;padding-right:8px!important}.td-tabel td:first-child{white-space:normal!important}.td-leads .td-col-mob-weg{display:none}.td-leads table{min-width:0!important}}</style>`;
+  const CSS = `<style>@media (max-width:640px){.td-tabel .td-col-kanaal,.td-tabel .td-col-mob-weg,.td-kanaal .td-col-mob-weg{display:none}.td-tabel table{min-width:0!important}.td-tabel td,.td-tabel th{padding-left:8px!important;padding-right:8px!important}.td-tabel td:first-child{white-space:normal!important}.td-leads .td-col-mob-weg{display:none}.td-leads table{min-width:0!important}}</style>`;
 
   function trainingdropsView() {
     if (!st.fetched && !st.loading) queueMicrotask(() => laad(false));

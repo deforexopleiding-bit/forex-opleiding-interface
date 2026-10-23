@@ -24,6 +24,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
+import { trainingLabel } from './_lib/training-bron.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,7 +89,7 @@ export default async function handler(req, res) {
     if (!row) return res.status(404).json({ error: 'Submission niet gevonden' });
 
     // Bron-label (fallback = rauwe slug).
-    let bronLabel = row.booking_source || '—';
+    let bronLabel = trainingLabel(row.booking_source) || row.booking_source || '—';
     if (row.booking_source) {
       const { data: b } = await supabaseAdmin
         .from('booking_sources').select('label').eq('slug', row.booking_source).maybeSingle();

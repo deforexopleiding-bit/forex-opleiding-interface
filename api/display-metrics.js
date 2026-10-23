@@ -34,6 +34,7 @@ import {
   nlWeekStart, nlWeekEndExclusive, nlMonthStart, nlMonthEndExclusive,
 } from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
+import { trainingLabel } from './_lib/training-bron.js';
 import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
 import { computeSalesStreak } from './_lib/sales-streak-compute.js';
 import { getConfirmedCount } from './_lib/event-registration.js';
@@ -667,7 +668,7 @@ export default async function handler(req, res) {
       if (a.is_test === true) continue;
       const naam    = (a.lead_name && String(a.lead_name).trim()) || '—';
       const wanneer = fmtNlDateTime(a.scheduled_at);
-      const bron    = a.booking_source ? ' · ' + a.booking_source : '';
+      const bron    = a.booking_source ? ' · ' + (trainingLabel(a.booking_source) || a.booking_source) : '';
       feed.push({
         ts: new Date(a.created_at).toISOString(), type: 'call',
         text: `Nieuwe call gepland: ${naam}${wanneer ? ' · ' + wanneer : ''}${bron}`,

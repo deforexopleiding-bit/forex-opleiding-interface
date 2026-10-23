@@ -136,6 +136,8 @@ export const BEKENDE_EVENT_TYPES = Object.freeze([
   'geboekt', 'overgeslagen',
   // Bedankpagina van de Lab-funnels (2026-10-20).
   'bedankt_bekeken', 'sessie_geboekt',
+  // Training-cadeau: gratis strategiesessie met Dave (dfo-website #132, 2026-10-23).
+  'cadeau_getoond', 'cadeau_klik', 'sessie_ingepland',
 ]);
 
 // De event-types die de endpoint daadwerkelijk ophaalt (de rest is voor deze

@@ -42,6 +42,7 @@ import { supabaseAdmin } from './supabase.js';
 import { telefoonNlBe } from './_lib/phone-e164.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { isScanBron, scanGhlTitel, leesScanAssessor, maakScanConcept } from './_lib/strategiescan-boeking.js';
+import { isTrainingBron } from './_lib/training-bron.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE  = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -186,8 +187,12 @@ export default async function handler(req, res) {
 
   // Strategie-scan-funnel (bron 'strategiescan'): Dave is eigenaar + titel
   // 'Strategie-scan · …' in zijn agenda. Zie _lib/strategiescan-boeking.js.
+  // De gratis strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>',
+  // dfo-website #132) volgt dezelfde weg voor de eigenaar: Dave. Geen scan-rij
+  // en geen scan-titel — het is een strategiesessie, geen strategie-scan.
   const isScan = isScanBron(source);
-  const scanAssessor = isScan ? await leesScanAssessor() : null;
+  const isTraining = isTrainingBron(source);
+  const scanAssessor = (isScan || isTraining) ? await leesScanAssessor() : null;
   if (scanAssessor?.id) leadRow.owner_id = scanAssessor.id;
 
   // 3) Afspraak aanmaken (GHL contact-upsert + appointment + follow_up-row +

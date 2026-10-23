@@ -351,3 +351,161 @@ test('bedrading: menu-item in Groei, allowlist, view-registratie en script-tag',
   assert.match(view, /goMod\('leads'\)/);
   assert.match(view, /__leadOpen\(id\)/);
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6 · cadeau: strategiesessie met Dave (dfo-website #132)
+// ════════════════════════════════════════════════════════════════════════════
+
+const afspraak = (id, extra = {}) => ({
+  id, booking_source: 'training-22-10-26', scheduled_at: '2026-10-27T13:00:00Z', status: 'scheduled',
+  lead_email: null, is_test: false, parent_appointment_id: null, created_at: '2026-10-23T12:00:00Z', ...extra,
+});
+
+test('callCategorie: completed/no_show/cancelled, verwijderd telt niet, de rest = gepland', () => {
+  assert.deepEqual(
+    ['completed', 'no_show', 'cancelled', 'verwijderd', 'scheduled', 'in_progress', 'wacht_op_reschedule', 'verplaatst', null].map(C.callCategorie),
+    ['gehouden', 'no_show', 'geannuleerd', null, 'gepland', 'gepland', 'gepland', 'gepland', 'gepland'],
+  );
+});
+
+test('calls: koppeling, verzet-keten en e-mail; één call per lead; test en verwijderd tellen niet', () => {
+  const leads = [lead('L1'), lead('L2'), lead('L3'), lead('L4'), lead('T1', { email: 'iemand+test@x.nl' })];
+  const events = [
+    ev('s1', 'landing', { src: 'ig-story', lead_id: 'L1' }), ev('s1', 'cadeau_getoond', { lead_id: 'L1' }), ev('s1', 'cadeau_klik', { lead_id: 'L1' }),
+    ev('s2', 'landing', { src: 'nieuwsbrief', lead_id: 'L2' }), ev('s2', 'cadeau_klik', { lead_id: 'L2' }),
+    ev('s3', 'landing', { src: 'ig-story' }), ev('s3', 'cadeau_klik'),
+  ];
+  const afspraken = [
+    // L1: geboekt, daarna verzet → de nieuwe rij telt, gehouden.
+    afspraak('A1', { status: 'verplaatst', created_at: '2026-10-23T12:00:00Z' }),
+    afspraak('A1b', { status: 'completed', parent_appointment_id: 'A1', created_at: '2026-10-24T09:00:00Z' }),
+    // L2: no-show, via koppeling.
+    afspraak('A2', { status: 'no_show' }),
+    // L3: geannuleerd, alleen op e-mail te vinden.
+    afspraak('A3', { status: 'cancelled', lead_email: 'L3@x.nl' }),
+    // L4: verwijderd → telt niet.
+    afspraak('A4', { status: 'verwijderd', lead_email: 'l4@x.nl' }),
+    // Testafspraken tellen niet.
+    afspraak('AT', { is_test: true, lead_email: 'l4@x.nl' }),
+    afspraak('AT2', { lead_email: 'iemand+test@x.nl' }),
+    // Andere training.
+    afspraak('B1', { booking_source: 'training-29-10-26', lead_email: 'l4@x.nl' }),
+    // Geen training-bron.
+    afspraak('S1', { booking_source: 'strategiescan', lead_email: 'l4@x.nl' }),
+  ];
+  const koppelingen = [{ appointment_id: 'A1', lead_id: 'L1' }, { appointment_id: 'A2', lead_id: 'L2' }];
+  const { drops, totaal } = C.bouwTrainingdrops({ leads, events, afspraken, koppelingen });
+  const d = drops.find((x) => x.variant === 'training-22-10-26');
+  assert.equal(d.leads, 4);
+  assert.equal(d.test_leads, 1);
+  assert.equal(d.cadeau_getoond, 1);
+  assert.equal(d.cadeau_klik, 3);
+  assert.equal(d.calls, 3);
+  assert.deepEqual([d.calls_gepland, d.calls_gehouden, d.calls_no_show, d.calls_geannuleerd], [0, 1, 1, 1]);
+  assert.equal(d.leads_met_call, 3);
+  assert.equal(d.lead_call_pct, 75);
+  const call = (id) => d.lead_lijst.find((l) => l.id === id).call;
+  assert.deepEqual(call('L1'), { scheduled_at: '2026-10-27T13:00:00Z', status: 'completed', categorie: 'gehouden', label: 'Gehouden' });
+  assert.equal(call('L2').label, 'No-show');
+  assert.equal(call('L3').label, 'Geannuleerd');
+  assert.equal(call('L4'), null);                       // verwijderd → geen call
+  const k = Object.fromEntries(d.kanalen.map((x) => [x.kanaal, x]));
+  assert.deepEqual([k['ig-story'].cadeau_klik, k['ig-story'].calls, k['ig-story'].gehouden, k['ig-story'].lead_call_pct], [2, 1, 1, 100]);
+  assert.deepEqual([k.nieuwsbrief.calls, k.nieuwsbrief.no_show], [1, 1]);
+  assert.deepEqual([k.onbekend.calls, k.onbekend.geannuleerd, k.onbekend.leads], [1, 1, 2]);
+  // De call van de andere training maakt daar een drop (en L4 hoort erbij).
+  const d2 = drops.find((x) => x.variant === 'training-29-10-26');
+  assert.equal(d2.calls, 1);
+  assert.equal(d2.leads, 1);
+  assert.equal(d2.lead_lijst[0].id, 'L4');
+  assert.equal(d2.lead_call_pct, 100);
+  assert.equal(totaal.calls, 4);
+  assert.equal(totaal.leads_met_call, 4);
+});
+
+test('calls: zonder bekende lead wel geteld (kanaal onbekend), niet in de leadlijst', () => {
+  const { drops } = C.bouwTrainingdrops({ afspraken: [afspraak('X', { lead_email: 'vreemd@x.nl' })] });
+  assert.equal(drops[0].calls, 1);
+  assert.equal(drops[0].leads, 0);
+  assert.equal(drops[0].lead_call_pct, null);
+  assert.equal(drops[0].kanalen.find((k) => k.kanaal === 'onbekend').calls, 1);
+});
+
+test('endpoint: leest training-afspraken + koppelingen, haalt leads op id en e-mail erbij', async () => {
+  reset();
+  db.tabellen.funnel_events = [ev('s1', 'landing', { src: 'whatsapp', lead_id: 'L1' }), ev('s1', 'cadeau_klik', { lead_id: 'L1' })];
+  db.tabellen.leads = [
+    lead('L1'),
+    lead('L7', { bron: 'opstartsessie' }),          // via koppeling
+    lead('L8', { bron: '7-daagse-v5', email: 'l8@x.nl' }), // via e-mail
+  ];
+  db.tabellen.follow_up_appointments = [
+    afspraak('A1', { status: 'completed' }),
+    afspraak('A7'),
+    afspraak('A8', { status: 'no_show', lead_email: 'L8@x.nl' }),
+    afspraak('S', { booking_source: 'strategiescan' }),
+  ];
+  db.tabellen.opstartsessie_submissions = [{ appointment_id: 'A1', lead_id: 'L1' }, { appointment_id: 'A7', lead_id: 'L7' }];
+  const r = await call();
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.body.meta.calls_fout, null);
+  const d = r.body.drops[0];
+  assert.deepEqual(d.lead_lijst.map((l) => l.id).sort(), ['L1', 'L7', 'L8']);
+  assert.equal(d.calls, 3);
+  assert.equal(d.calls_gehouden, 1);
+  assert.equal(d.calls_no_show, 1);
+  assert.equal(d.kanalen.find((k) => k.kanaal === 'whatsapp').cadeau_klik, 1);
+  const q = db.log.find((x) => x.tabel === 'follow_up_appointments');
+  assert.ok(q.filters.some(([op, c, v]) => op === 'like' && c === 'booking_source' && v === 'training-%'));
+  assert.ok(db.log.some((x) => x.tabel === 'leads' && x.filters.some(([op, c]) => op === 'in' && c === 'email')));
+  // Fase-query vraagt de cadeau-events mee op.
+  const evQ = db.log.find((x) => x.tabel === 'funnel_events');
+  assert.ok(evQ.filters.some(([op, c, v]) => op === 'in' && c === 'event_type' && v.includes('cadeau_klik') && v.includes('cadeau_getoond')));
+});
+
+test('endpoint: afspraken niet leesbaar → drops blijven, meta.calls_fout', async () => {
+  reset();
+  db.tabellen.leads = [lead('L1')];
+  db.fout.follow_up_appointments = 'kapot';
+  const r = await call();
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.body.meta.calls_fout, 'kapot');
+  assert.equal(r.body.drops[0].leads, 1);
+  assert.equal(r.body.drops[0].calls, 0);
+});
+
+test('boek-route: training-* krijgt Dave als eigenaar zoals strategiescan, maar geen scan-rij of scan-titel', () => {
+  const src = lees('api/public-opstartsessie-book.js');
+  assert.match(src, /import \{ isTrainingBron \} from '\.\/_lib\/training-bron\.js';/);
+  assert.match(src, /const isTraining = isTrainingBron\(source\);/);
+  assert.match(src, /const scanAssessor = \(isScan \|\| isTraining\) \? await leesScanAssessor\(\) : null;/);
+  assert.match(src, /if \(scanAssessor\?\.id\) leadRow\.owner_id = scanAssessor\.id;/);
+  assert.match(src, /\.\.\.\(isScan \? \{ ghlTitel: scanGhlTitel/);
+  assert.match(src, /if \(isScan && result\?\.appointment_id\) \{\s+const scan = await maakScanConcept/);
+});
+
+test('funnel-stats: de cadeau-events zijn bekende types', () => {
+  for (const t of ['cadeau_getoond', 'cadeau_klik', 'sessie_ingepland']) assert.ok(F.BEKENDE_EVENT_TYPES.includes(t), t);
+});
+
+test('bronlabels van afspraken: training-* wordt "Live training dd/mm/jj"', async () => {
+  const N = await import('../api/_lib/afspraak-intern-notify.js');
+  assert.equal(N.bronVan({ booking_source: 'training-22-10-26' }), 'Live training 22/10/26');
+  assert.equal(N.bronVan({ booking_source: 'strategiescan' }), 'strategiescan');
+  const lijst = lees('api/leadsonderhoud-opstartsessies-list.js');
+  assert.match(lijst, /labelBySlug\.get\(r\.booking_source\) \|\| trainingLabel\(r\.booking_source\)/);
+  assert.match(lijst, /labelBySlug\.get\(c\.booking_source\) \|\| trainingLabel\(c\.booking_source\)/);
+  assert.match(lees('api/leadsonderhoud-opstartsessies-detail.js'), /let bronLabel = trainingLabel\(row\.booking_source\)/);
+  assert.match(lees('api/display-metrics.js'), /trainingLabel\(a\.booking_source\) \|\| a\.booking_source/);
+  // Chips in Kennismakingsgesprekken en Daves opvolging-agenda (patroon, geen regel per week).
+  assert.match(lees('modules/klanten-v2/views/leadsonderhoud-v2.js'), /const _LS_TRAINING_RE = \/\^training-/);
+  assert.match(lees('modules/klanten-v2/views/opvolging-v2.js'), /data-bron="training"/);
+});
+
+test('view: kolom Call in de leadlijst en de cadeau-cijfers', () => {
+  const view = lees('modules/klanten-v2/views/trainingdrops-v2.js');
+  assert.match(view, /Lead → call/);
+  assert.match(view, /Cadeau-klik/);
+  assert.match(view, /<th style="padding:8px 12px">Call<\/th>/);
+  assert.match(view, />geen<\/span>/);
+});

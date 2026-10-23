@@ -2250,11 +2250,17 @@
       const label = c.label ? ' <span class="tag t-grey">' + esc(c.label) + '</span>' : '';
       // WAAR DE BOEKING VANDAAN KOMT — alleen The Lab krijgt een eigen chip:
       // een strategiesessie na The Lab, met een Lab-dossier achter de klik.
+      // En de strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>'):
+      // een gewone chip, zodat Dave ziet uit welke training de call komt.
+      const trn = /^training-(\d{2})-(\d{2})-(\d{2})$/.exec(String(c.bron || ''));
       const bron = c.bron === 'the-lab'
         ? ' <span class="tag t-amber" data-bron="the-lab" style="cursor:pointer" role="button" tabindex="0" ' +
           'onclick="window.__opvLabDossierVanCall(' + i + ')" ' +
           'title="Strategiesessie geboekt vanuit The Lab — klik voor zijn Lab-antwoorden.">The Lab</span>'
-        : '';
+        : trn
+          ? ' <span class="tag t-amber" data-bron="training" title="Strategiesessie geboekt vanuit de live training van ' +
+            trn[1] + '/' + trn[2] + '/' + trn[3] + '.">Training ' + trn[1] + '/' + trn[2] + '</span>'
+          : '';
       return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
         '<div class="who"><div class="nm">' + esc(c.naam) + bron + label + '</div>' +
