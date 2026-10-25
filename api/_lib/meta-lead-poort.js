@@ -38,7 +38,9 @@ export function isBotAgent(ua) {
  * @returns {Promise<{ eventId: string|null, reden: string }>}
  * Fail-soft: een claim-fout geeft GEEN Lead (liever één te weinig dan dubbel).
  */
-export async function beslisMetaLead(sb, { leadId, email, userAgent, isTest = false, vercelEnv = process.env.VERCEL_ENV }) {
+export async function beslisMetaLead(sb, { leadId, email, userAgent, isTest = false, vercelEnv = process.env.VERCEL_ENV, toestemming = false }) {
+  // Alleen met toestemming voor advertentiecookies (2026-10-25, _lib/advertentie-toestemming.js).
+  if (toestemming !== true) return { eventId: null, reden: 'geen_toestemming' };
   if (vercelEnv !== 'production') return { eventId: null, reden: 'geen_productie' };
   if (isTest || isTestAdres(email)) return { eventId: null, reden: 'testadres' };
   if (isBotAgent(userAgent)) return { eventId: null, reden: 'bot' };

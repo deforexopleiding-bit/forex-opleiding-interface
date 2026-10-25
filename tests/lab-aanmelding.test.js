@@ -111,7 +111,7 @@ test('Meta-Lead: productie + echt adres → lead_<lead_id> één keer; tweede aa
   const oud = process.env.VERCEL_ENV;
   process.env.VERCEL_ENV = 'production';
   try {
-    const echt = { ...GELDIG, email: 'jan.peeters@gmail.com', hook: 'H03' };
+    const echt = { ...GELDIG, email: 'jan.peeters@gmail.com', hook: 'H03', cookie_toestemming: true };
     const ua = { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1' };
     const r1 = await post(echt, ua);
     const lead = crm.tabellen.leads[0];
@@ -120,6 +120,12 @@ test('Meta-Lead: productie + echt adres → lead_<lead_id> één keer; tweede aa
     const r2 = await post(echt, ua);
     assert.equal(r2.body.ok, true);
     assert.equal(r2.body.event_id, null, 'zelfde lead → geen tweede Lead');
+    // Geen toestemming advertentiecookies (2026-10-25) → geen Lead, keuze op de lead.
+    const zonder = await post({ ...echt, email: 'zonder.toestemming@gmail.com', cookie_toestemming: false }, ua);
+    assert.equal(zonder.body.ok, true);
+    assert.equal(zonder.body.event_id, null, 'geen toestemming → geen Lead');
+    const zonderLead = crm.tabellen.leads.find((l) => l.email === 'zonder.toestemming@gmail.com');
+    if (zonderLead && 'advertentie_toestemming' in zonderLead) assert.equal(zonderLead.advertentie_toestemming, false);
     const bot = await post({ ...echt, email: 'iemand.anders@gmail.com' }, { 'user-agent': 'HeadlessChrome/120' });
     assert.equal(bot.body.event_id, null, 'bot → geen Lead');
   } finally {

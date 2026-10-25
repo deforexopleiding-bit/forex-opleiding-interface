@@ -94,19 +94,6 @@ async function log(rij) {
   return error;
 }
 
-/**
- * Stuurt één event. Gooit nooit. Idempotent: een event_id dat al als 'sent'
- * gelogd staat wordt niet opnieuw verstuurd.
- *
- * @param {object} p
- * @param {'Lead'|'LabGestart'|'LabAfgewerkt'|'Schedule'} p.eventName
- * @param {string} p.eventId
- * @param {string|null} [p.aanmeldingId]
- * @param {object} p.userData         uit labUserData
- * @param {string|null} [p.bronUrl]   event_source_url (zonder querystring)
- * @param {number} [p.tijd]           unix seconden
- * @param {object|null} [p.customData] custom_data (content_category, funnel, ...)
- */
 export const LAB_CAPI_WACHT_MS = Object.freeze([0, 500, 1500]);
 
 /**
@@ -130,10 +117,29 @@ export async function verstuurMetHerhaling(url, body, { fetchFn = fetch, wacht =
   return { ok: false, resp };
 }
 
-export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null, customData = null }) {
+/**
+ * Stuurt één event. Gooit nooit. Idempotent: een event_id dat al als 'sent'
+ * gelogd staat wordt niet opnieuw verstuurd.
+ *
+ * @param {object} p
+ * @param {'Lead'|'LabGestart'|'LabAfgewerkt'|'Schedule'} p.eventName
+ * @param {string} p.eventId
+ * @param {string|null} [p.aanmeldingId]
+ * @param {object} p.userData         uit labUserData
+ * @param {string|null} [p.bronUrl]   event_source_url (zonder querystring)
+ * @param {number} [p.tijd]           unix seconden
+ * @param {object|null} [p.customData] custom_data (content_category, funnel, ...)
+ * @param {boolean} p.toestemming     toestemming advertentiecookies — VERPLICHT; zonder gaat er niets naar Meta
+ */
+export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null, customData = null, toestemming = false }) {
   const cfg = labMetaConfig();
   const basis = { aanmelding_id: aanmeldingId, event_name: eventName, event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!LAB_EVENTS.includes(eventName) || !eventId) return { ok: false, status: 'ongeldig' };
+  // Geen toestemming voor advertentiecookies → niets naar Meta (2026-10-25).
+  if (toestemming !== true) {
+    await log({ ...basis, status: 'skipped', skip_reason: 'geen_toestemming' });
+    return { ok: false, status: 'geen_toestemming' };
+  }
   if (!cfg.aan) {
     await log({ ...basis, status: 'skipped', skip_reason: 'META_PIXEL_ID/META_CAPI_TOKEN niet gezet' });
     return { ok: false, status: 'uit' };

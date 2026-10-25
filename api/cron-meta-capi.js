@@ -30,6 +30,7 @@ import {
   CAPI_MAX_AGE_MS,
   DEFAULT_EVENT_NAME,
 } from './_lib/meta-capi.js';
+import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
 
 const PER_RUN_LIMIT = 50;
 
@@ -199,6 +200,25 @@ export default async function handler(req, res) {
         customer = data || null;
       } catch (e) {
         if (!isMissingRelationError(e)) throw new Error('customer fetch: ' + (e?.message || e));
+      }
+
+      // Alleen met toestemming advertentiecookies op de lead van deze klant
+      // (2026-10-25, fail-closed). Geen toestemming → 'skipped', geen Meta-call.
+      if (!(await leadHeeftToestemming(supabaseAdmin, { email: customer?.email }))) {
+        const r = await logCapiRow({
+          deal_id:     deal.id,
+          event_name:  DEFAULT_EVENT_NAME,
+          event_id:    'crm_customer_' + deal.id,
+          status:      'skipped',
+          value:       Number(deal.total_amount || 0),
+          currency:    'EUR',
+          match_keys:  {},
+          skip_reason: 'geen_toestemming',
+          test_mode:   summary.test_mode,
+        });
+        if (r.ok) summary.skipped += 1;
+        else summary.errors.push({ phase: 'log_skip_toestemming', deal_id: deal.id, error: r.error || r.skipped });
+        continue;
       }
 
       // Attribution raw (voor fbc/fbp/ip/ua).
