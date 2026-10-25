@@ -432,7 +432,7 @@ export default async function handler(req, res) {
 
   await stuurLabEvent({
     eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
-    userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
+    userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, achternaam: lab.achternaam, externalId: lead.id }),
     ...(funnel ? { customData: { content_name: 'Lab-strategiesessie', content_category: LAB_SLUG, funnel } } : {}),
   });
 

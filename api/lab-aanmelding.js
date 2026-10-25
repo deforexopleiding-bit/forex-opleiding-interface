@@ -206,7 +206,7 @@ export default async function handler(req, res) {
   else await stuurLabEvent({
     eventName: 'Lead', eventId, aanmeldingId: bewaard ? aanmeldingId : null,
     userData: labUserData({
-      email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam,
+      email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam, achternaam: d.achternaam,
       externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
     }),
     bronUrl: d.landingspagina,
