@@ -42,6 +42,7 @@ import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-
 import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { selfServiceUrl } from './_lib/afspraak-berichten.js';
 import { normaliseerNlBe } from './_lib/phone-e164.js';
@@ -432,8 +433,10 @@ export default async function handler(req, res) {
 
   await stuurLabEvent({
     eventName: 'Schedule', eventId: labEventId('Schedule', afspraak.appointment_id),
-    userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, externalId: lead.id }),
+    userData: labUserData({ email: lab.email, telefoonE164: lab.telefoon, voornaam: lab.voornaam, achternaam: lab.achternaam, externalId: lead.id }),
     ...(funnel ? { customData: { content_name: 'Lab-strategiesessie', content_category: LAB_SLUG, funnel } } : {}),
+    // Alleen met toestemming advertentiecookies, zoals vastgelegd bij de aanmelding.
+    toestemming: await leadHeeftToestemming(supabaseAdmin, { leadId: lead.id, email: lab.email }),
   });
 
   return res.status(200).json({ ok: true, geboekt: { moment: iso }, afspraak_id: afspraak.appointment_id, zoom_join_url: afspraak.zoom_join_url || null, gastheer: zichtbaar });

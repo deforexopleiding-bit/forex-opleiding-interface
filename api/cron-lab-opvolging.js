@@ -23,6 +23,7 @@ import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { volgendeStap, isStilUur, standaardMail, linkDoel, vulLabSjabloon, kiesVariant } from './_lib/lab-opvolging.js';
 import { verwerkLmsEnBerichten } from './lab-aanmelding.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
+import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
 
 const MAX_PER_RUN = 40;
 const HERSTEL_MAX = 5;
@@ -142,8 +143,11 @@ export default async function handler(req, res) {
     try {
       const ud = () => labUserData({ email: em, telefoonE164: p.eerste.telefoon_e164, voornaam: p.eerste.voornaam, externalId: p.eerste.lead_id || p.eerste.id, fbc: p.eerste.fbc, fbp: p.eerste.fbp });
       const recent = sessie?.bijgewerkt_op && nu - Date.parse(sessie.bijgewerkt_op) < 3 * 86400000;
-      if (gestart && recent) { await stuurLabEvent({ eventName: 'LabGestart', eventId: labEventId('LabGestart', labLead.auth_id), aanmeldingId: p.eerste.id, userData: ud() }); verslag.meta++; }
-      if (afgerond && recent) { await stuurLabEvent({ eventName: 'LabAfgewerkt', eventId: labEventId('LabAfgewerkt', labLead.auth_id), aanmeldingId: p.eerste.id, userData: ud() }); verslag.meta++; }
+      // Alleen met toestemming advertentiecookies op de lead (fail-closed).
+      const toestemming = (gestart || afgerond) && recent
+        ? await leadHeeftToestemming(supabaseAdmin, { leadId: p.eerste.lead_id, email: em }) : false;
+      if (gestart && recent) { await stuurLabEvent({ eventName: 'LabGestart', eventId: labEventId('LabGestart', labLead.auth_id), aanmeldingId: p.eerste.id, userData: ud(), toestemming }); verslag.meta++; }
+      if (afgerond && recent) { await stuurLabEvent({ eventName: 'LabAfgewerkt', eventId: labEventId('LabAfgewerkt', labLead.auth_id), aanmeldingId: p.eerste.id, userData: ud(), toestemming }); verslag.meta++; }
     } catch (e) { console.warn('[cron-lab-opvolging] meta (soft):', e?.message || e); }
 
     if (verslag.stil || verzonden >= MAX_PER_RUN) continue;

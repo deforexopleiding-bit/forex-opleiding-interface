@@ -34,6 +34,7 @@ import { mailWelkom, mailNieuweLink, mailAlToegang, stuurLabMail, stuurLabWhatsA
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labUserData } from './_lib/lab-meta.js';
 import { beslisMetaLead } from './_lib/meta-lead-poort.js';
+import { legToestemmingVast, toestemmingUitBody } from './_lib/advertentie-toestemming.js';
 import { maakBoektoken } from './_lib/lab-boektoken.js';
 
 export const BERICHT_OK = 'Gelukt! Check je mailbox: je link naar The Lab is onderweg.';
@@ -200,16 +201,20 @@ export default async function handler(req, res) {
   // 5. Meta 'Lead' — één keer per CRM-lead (event_id 'lead_<lead_id>', zelfde als de
   //    website), alleen productie, geen test/bot (api/_lib/meta-lead-poort.js). De
   //    browser vuurt de pixel alleen met het event_id uit dit antwoord.
-  const metaLead = await beslisMetaLead(supabaseAdmin, { leadId, email: d.email, userAgent, isTest: d.is_test });
+  // Toestemming advertentiecookies uit het formulier (alleen true telt) → op de lead + de poort.
+  const advToestemming = toestemmingUitBody(req.body);
+  await legToestemmingVast(supabaseAdmin, leadId, advToestemming, 'lab-aanmelding');
+  const metaLead = await beslisMetaLead(supabaseAdmin, { leadId, email: d.email, userAgent, isTest: d.is_test, toestemming: advToestemming });
   const eventId = metaLead.eventId;
   if (!eventId) console.log('[lab-aanmelding] geen Meta-Lead', { aanmelding: aanmeldingId, reden: metaLead.reden });
   else await stuurLabEvent({
     eventName: 'Lead', eventId, aanmeldingId: bewaard ? aanmeldingId : null,
     userData: labUserData({
-      email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam,
+      email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam, achternaam: d.achternaam,
       externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
     }),
     bronUrl: d.landingspagina,
+    toestemming: advToestemming,
     customData: { content_name: 'The Lab', content_category: LAB_SLUG, funnel: d.funnel || LAB_SLUG },
   });
 
