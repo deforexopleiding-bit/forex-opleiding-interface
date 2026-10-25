@@ -174,6 +174,7 @@ test('bedrading: endpoint, v2-dashboard (tegels + Overig + kop), tv-bord', () =>
   assert.match(dm, /const aanmeldingen\s+= pick\(30, null\);/);
   assert.match(dm, /\{ key: 'overig',\s+label: 'Overig',\s+count: T\.overig\.totaal \}/);
   const tv = lees('display.html');
-  assert.match(tv, /if \(s\.key !== 'calls'\) tot \+= \(s\.v \|\| 0\);/);
-  assert.match(tv, /Aanmeldingen per funnel/);
+  // Kop "nieuwe leads per bron" = som van de tegels, calls tellen NIET mee.
+  assert.match(tv, /if \(b\.key !== 'calls' && b\.count != null\) som \+=/);
+  assert.match(tv, /Nieuwe leads per bron/);
 });
