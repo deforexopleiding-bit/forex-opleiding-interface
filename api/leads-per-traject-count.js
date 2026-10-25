@@ -22,7 +22,10 @@
 //
 // Response (default):
 //   { total, by_traject, traject_labels, all_traject_labels, period, since,
-//     excluded: { test_email: N, afwijzer: N, both: N, total_excluded: N } }
+//     excluded: { test_email: N, afwijzer: N, both: N, total_excluded: N },
+//     aanmeldingen: { totaal, tegels: { '7-daagse'|mini|event|webinar|overig:
+//       { totaal, toegelaten, afgewezen, delen? } }, labels, overig_labels, bronfouten } }
+//   `aanmeldingen` = de dashboard-tegels sinds 2026-10-25 (_lib/aanmeldingen-per-funnel.js).
 //
 // Response (?debug=1) — extra velden:
 //   { ..., debug: { raw: { total, by_traject }, uniek: { total, by_traject } } }
@@ -34,6 +37,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodRange, nlDayStart, nlDayEndExclusive } from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
+import { computeAanmeldingenPerFunnel } from './_lib/aanmeldingen-per-funnel.js';
 
 // Vertaal de publieke period-param (today|week|month|all) naar een NL-tijdzone-
 // aware UTC-range via nl-period.js. VOORHEEN bucketten we op de server-lokale
@@ -98,7 +102,14 @@ export default async function handler(req, res) {
     // 2026-08-25: hoofd-compute verhuisd naar _lib/leads-per-traject-compute.js
     // zodat tv-display-metrics en andere dashboards dezelfde definitie
     // hergebruiken zonder self-HTTP-loops. Response-shape identiek.
-    const out = await computeLeadsByTraject({ supabaseAdmin, range });
+    // 2026-10-25: de tegels tellen AANMELDINGEN PER FUNNEL uit de bron zelf
+    // (_lib/aanmeldingen-per-funnel.js) — zelfde venster voor tegels én kop.
+    // De oude velden (nieuwe leads op traject) blijven voor instellingen-v2.
+    const [out, aanmeldingen] = await Promise.all([
+      computeLeadsByTraject({ supabaseAdmin, range }),
+      computeAanmeldingenPerFunnel({ supabaseAdmin, range }),
+    ]);
+    out.aanmeldingen = aanmeldingen;
     out.period = period;
     out.since  = since;
 

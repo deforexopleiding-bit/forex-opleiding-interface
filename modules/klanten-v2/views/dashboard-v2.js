@@ -681,7 +681,14 @@
         <div class="card">
           <div class="card-head" style="border-bottom:none;padding-bottom:4px">
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
-            <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div></div>
+            <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div>${(() => {
+              // Kop = som van de tegels + Overig (zelfde venster). Alleen met de nieuwe telling.
+              const am = _live.leadsPer && _live.leadsPer.aanmeldingen;
+              if (!am || typeof am.totaal !== 'number') return '';
+              const per = curPeriod === 'Dag' ? 'vandaag' : curPeriod === 'Week' ? 'deze week' : curPeriod === 'Maand' ? 'deze maand'
+                : curPeriod === 'Jaar' ? 'alles' : (_custom.from ? _custom.from + ' t/m ' + _custom.to : 'periode');
+              return `<span class="lpt-kop" style="margin-left:auto;font-size:12px;color:var(--text-2)"><b style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--text)">${am.totaal}</b> aanmeldingen · ${per}</span>`;
+            })()}</div>
           <div class="card-body" style="padding:10px 17px 14px">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
               ${(() => {
@@ -763,16 +770,38 @@
                   return `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${parts.join(' · ')}</div>`;
                 }
                 const tiles = [];
+                // 2026-10-25: AANMELDINGEN PER FUNNEL uit de bron zelf (api/_lib/
+                // aanmeldingen-per-funnel.js). Tegels + Overig = de kop, zelfde venster.
+                // Oude endpoint (zonder 'aanmeldingen') → de oude traject-tegels.
+                const am = lp && lp.aanmeldingen && lp.aanmeldingen.tegels ? lp.aanmeldingen : null;
+                if (am) {
+                  const tot = am.totaal || 0;
+                  const pctVan = (n) => tot ? Math.round((n || 0) / tot * 100) : 0;
+                  const T = am.tegels;
+                  const tg = (k) => T[k] || { totaal: 0, toegelaten: 0, afgewezen: 0 };
+                  const sp = (k) => ({ toegelaten: tg(k).toegelaten, afgewezen: tg(k).afgewezen });
+                  const evExtra = `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px"><span style="color:var(--emerald);font-weight:600">${tg('event').toegelaten}</span> aangemeld · <span style="color:var(--rose);font-weight:600">${tg('event').afgewezen}</span> afgewezen</div>`;
+                  const OL = am.overig_labels || {};
+                  const delen = Object.entries(tg('overig').delen || {}).filter(([, n]) => n > 0)
+                    .map(([k, n]) => esc(OL[k] || k) + ' ' + n).join(' · ');
+                  const ovExtra = delen ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px;line-height:1.35">${delen}</div>` : '';
+                  tiles.push(['7-daagse',           tg('7-daagse').totaal, pctVan(tg('7-daagse').totaal), 'emerald', 'leads',  true, sp('7-daagse')]);
+                  tiles.push(['Event-aanmeldingen', tg('event').totaal,    pctVan(tg('event').totaal),    'teal',    'events', true, null, evExtra]);
+                  tiles.push(['Webinar',            tg('webinar').totaal,  pctVan(tg('webinar').totaal),  'blue',    'leads',  true, sp('webinar')]);
+                  tiles.push(['Mini cursus',        tg('mini').totaal,     pctVan(tg('mini').totaal),     'violet',  'leads',  true, sp('mini')]);
+                  tiles.push(['Overig',             tg('overig').totaal,   pctVan(tg('overig').totaal),   'amber',   'leads',  true, null, ovExtra]);
+                } else {
                 if (isLive && anyLabelMatches(['7-daagse','7 daagse','7daagse'])) { const sp = findCount(['7-daagse','7 daagse','7daagse']); tiles.push(['7-daagse',      sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100) : 0, 'emerald', 'leads',  true, sp]); }
                 if (isLive && anyLabelMatches(['event']))   { const sp = findCount(['event']);   tiles.push(['Event-aanmeldingen', sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100)  : 0, 'teal',   'events', true, sp]); }
                 if (isLive && anyLabelMatches(['webinar'])) { const sp = findCount(['webinar']); tiles.push(['Webinar',            sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100): 0, 'blue',   'leads',  true, sp]); }
                 if (isLive && anyLabelMatches(['mini']))    { const sp = findCount(['mini']);    tiles.push(['Mini cursus',        sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100)   : 0, 'violet', 'leads',  true, sp]); }
+                }
                 if (callsCnt != null) tiles.push(['Calls geboekt', callsCnt, 100, 'accent', 'sales', true, null]);
-                return tiles.map(([n, c, p, col, mod, tileLive, splitObj]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
+                return tiles.map(([n, c, p, col, mod, tileLive, splitObj, extraHtml]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${tileLive ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
-                  ${splitObj ? _leadSplitHtml(splitObj) : ''}
+                  ${splitObj ? _leadSplitHtml(splitObj) : ''}${extraHtml || ''}
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
                   <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Calls geboekt' ? 'nieuw geboekt' : `${p}% van totaal`) : `${p}% van totaal`}</div></div>`).join('');
               })()}
