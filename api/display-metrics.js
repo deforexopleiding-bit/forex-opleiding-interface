@@ -302,12 +302,14 @@ export default async function handler(req, res) {
                 until: nlDateString(weekEnd),
                 includeRecentIds: false,
               }),
-      /*19 */ // Sales maand [1e..volgende 1e) NL
+      /*19 */ // Sales maand [1e..volgende 1e) NL. includeRecentIds=true zodat we
+              //   de grootste sale van de maand (carousel-hoogtepunt) kunnen afleiden
+              //   zonder extra query — zelfde clean-set als het maandtotaal.
               computeSignedDealsTotal({
                 supabaseAdmin,
                 since: nlDateString(monthStart),
                 until: nlDateString(monthEnd),
-                includeRecentIds: false,
+                includeRecentIds: true,
               }),
       /*20 */ // Upcoming events (top 2 published, starts_at >= now)
               supabaseAdmin.from('events')
@@ -477,6 +479,52 @@ export default async function handler(req, res) {
     );
     const callsBookedCount = callsBookedRes.count;
 
+    // ── Totaal geplande (toekomstige) calls — voor "X gepland" in de kop van
+    //    Eerstvolgende calls. Zelfde filter als bron #3 (callsNext), maar zonder
+    //    de limit(10): we tellen alle toekomstige scheduled-afspraken.
+    const callsNextTotalRes = await safeAwait(
+      supabaseAdmin.from('follow_up_appointments').select('id', { count: 'exact', head: true })
+        .gte('scheduled_at', new Date().toISOString()).eq('status', 'scheduled'),
+      { count: null },
+      'callsNextTotal'
+    );
+    const callsNextTotal = callsNextTotalRes.count;
+
+    // ── Beltijd per medewerker vandaag — uit call_log (KLX-softphone logt
+    //    duration_sec + user_id per gesprek). We tonen de topbeller als pill.
+    //    LET OP: alleen calls via de softphone staan in call_log; een call via
+    //    een eigen mobiel buiten de softphone heeft geen duur en telt dus niet.
+    //    Fail-soft: zonder tabel/rijen → geen pill (geen nepgetal).
+    const callLogRes = await safeAwait(
+      supabaseAdmin.from('call_log').select('user_id, duration_sec')
+        .gte('started_at', dayStartIso).lt('started_at', dayEndIso),
+      { data: [] },
+      'callLogToday'
+    );
+    const callSecByUser = new Map();
+    for (const r of (callLogRes.data || [])) {
+      if (!r.user_id || !Number.isFinite(r.duration_sec)) continue;
+      callSecByUser.set(r.user_id, (callSecByUser.get(r.user_id) || 0) + Math.max(0, r.duration_sec));
+    }
+    let callTimeTop = null;
+    let callTeamSec = 0;
+    if (callSecByUser.size) {
+      callTeamSec = [...callSecByUser.values()].reduce((a, b) => a + b, 0);
+      const callUids = [...callSecByUser.keys()];
+      const cProfRes = await safeAwait(
+        supabaseAdmin.from('profiles').select('id, full_name').in('id', callUids),
+        { data: [] },
+        'callProfiles'
+      );
+      const cProf = new Map((cProfRes.data || []).map(p => [p.id, p]));
+      let topUid = null, topSec = -1;
+      for (const [uid, sec] of callSecByUser) if (sec > topSec) { topSec = sec; topUid = uid; }
+      if (topUid && topSec > 0) {
+        const full = (cProf.get(topUid)?.full_name || 'Onbekend').trim();
+        callTimeTop = { user_label: full.split(/\s+/)[0] || 'Onbekend', minutes: Math.round(topSec / 60) };
+      }
+    }
+
     // ── Leads-buckets — v2-conventie: total_incl_afwijzer + substring-match ─
     const buckets = { challenge: 0, mini: 0, event: 0, webinar: 0 };
     const unmatched = [];
@@ -580,6 +628,11 @@ export default async function handler(req, res) {
     const lastSaleMin = lastAcc ? Math.round((Date.now() - new Date(lastAcc).getTime()) / 60000) : null;
     const avgDealToday = (salesCompute.count && salesCompute.count >= 2 && salesCompute.total_incl_vat)
       ? Math.round(salesCompute.total_incl_vat / salesCompute.count) : null;
+    // Grootste sale deze maand (carousel-hoogtepunt) uit de maand-clean-set.
+    const monthRecent = monthSales.recent_ids || [];
+    const biggestMonth = monthRecent.length
+      ? Math.max(...monthRecent.map(s => Number(s.amount_incl || 0)))
+      : null;
 
     // Events top 2 + attendee-count via getConfirmedCount + safeAwait per event
     // (één count-fout degradeert alleen die tegel, niet het hele bord).
@@ -743,6 +796,12 @@ export default async function handler(req, res) {
         count_today:  callsTodayRes.count,     // afgeronde Zoom-calls vandaag (foot v-calls-sub)
         booked_today: callsBookedCount,        // GEBOEKTE calls vandaag (created_at) → hero v-calls
         next:         callsNext,
+        next_total:   callsNextTotal,          // alle toekomstige scheduled calls → "X gepland"
+      },
+      // Beltijd vandaag per medewerker (topbeller) uit call_log · softphone-only.
+      call_time_today: {
+        top:          callTimeTop,             // { user_label, minutes } of null
+        team_minutes: Math.round(callTeamSec / 60),
       },
       // Opvolging-module (bedrijfsbreed, NL-vandaag). Vervangt de oude,
       // Dave-gescopte `dave`-tak die op follow_up_* draaide.
@@ -767,6 +826,7 @@ export default async function handler(req, res) {
       },
       momentum: {
         biggest_today:  biggestToday,
+        biggest_month:  biggestMonth,
         last_sale_min:  lastSaleMin,
         avg_deal_today: avgDealToday,
         streak:         streakVal,
