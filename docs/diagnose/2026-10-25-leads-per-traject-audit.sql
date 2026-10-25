@@ -105,15 +105,15 @@ WITH venster AS (
 SELECT coalesce(a.source, '(null)') AS source,
        count(*)                                                    AS aanmeldingen,
        count(*) FILTER (WHERE l.id IS NULL)                        AS zonder_lead,
-       count(*) FILTER (WHERE l.aangemaakt >= (SELECT van FROM venster)) AS lead_nieuw_in_venster,
-       count(*) FILTER (WHERE l.aangemaakt <  (SELECT van FROM venster)) AS lead_ouder,
+       count(*) FILTER (WHERE l.aangemaakt >= v.van) AS lead_nieuw_in_venster,
+       count(*) FILTER (WHERE l.aangemaakt <  v.van) AS lead_ouder,
        string_agg(DISTINCT coalesce(l.traject, '(null)'), ', ')    AS traject_van_die_leads
-FROM a
+FROM a CROSS JOIN venster v
 LEFT JOIN LATERAL (
   SELECT id, aangemaakt, traject FROM public.leads
   WHERE lower(email) = a.mail AND verwijderd_op IS NULL ORDER BY aangemaakt LIMIT 1
 ) l ON true
-GROUP BY 1 ORDER BY aanmeldingen DESC;
+GROUP BY 1, v.van ORDER BY aanmeldingen DESC;
 
 -- ═══ Q5 · WEBINAR: webinar_aanmeldingen vs leads ═══
 WITH venster AS (
@@ -128,16 +128,16 @@ SELECT coalesce(w.bron, '(null)') AS bron,
        count(*)                                                    AS aanmeldingen,
        count(*) FILTER (WHERE w.lead_id IS NULL)                   AS zonder_lead_id,
        count(*) FILTER (WHERE l.id IS NULL)                        AS geen_lead_op_email,
-       count(*) FILTER (WHERE l.aangemaakt >= (SELECT van FROM venster)) AS lead_nieuw_in_venster,
-       count(*) FILTER (WHERE l.aangemaakt <  (SELECT van FROM venster)) AS lead_ouder,
+       count(*) FILTER (WHERE l.aangemaakt >= v.van) AS lead_nieuw_in_venster,
+       count(*) FILTER (WHERE l.aangemaakt <  v.van) AS lead_ouder,
        count(*) FILTER (WHERE l.id IS NOT NULL AND lower(coalesce(l.traject, '')) NOT LIKE '%webinar%') AS lead_met_ander_traject,
        string_agg(DISTINCT coalesce(l.traject, '(null)'), ', ')    AS traject_van_die_leads
-FROM w
+FROM w CROSS JOIN venster v
 LEFT JOIN LATERAL (
   SELECT id, aangemaakt, traject FROM public.leads
   WHERE lower(email) = w.mail AND verwijderd_op IS NULL ORDER BY aangemaakt LIMIT 1
 ) l ON true
-GROUP BY 1 ORDER BY aanmeldingen DESC;
+GROUP BY 1, v.van ORDER BY aanmeldingen DESC;
 
 -- ═══ Q6 · THE LAB: lab_aanmeldingen vs leads ═══
 WITH venster AS (
