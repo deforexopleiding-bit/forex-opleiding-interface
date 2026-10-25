@@ -161,7 +161,9 @@ test('een setter krijgt geen setterkeuze', async () => {
 
 test('versies opgehoogd en het dashboard verwijst naar de tab', () => {
   assert.match(INDEX, /views\/setter-payout-v2\.js\?v=10"/);
-  assert.match(INDEX, /views\/dashboard-v2\.js\?v=35"/);
+  // Minstens 35 (latere wijzigingen hogen hem verder op).
+  const dashV = Number((INDEX.match(/views\/dashboard-v2\.js\?v=(\d+)"/) || [])[1]);
+  assert.ok(dashV >= 35, 'dashboard-v2.js?v=' + dashV);
   // Minstens 1e1 (latere modules hogen hem verder op).
   const shellV = (INDEX.match(/app-shell\.js\?v=([0-9a-z]+)"/) || [])[1];
   assert.ok(shellV && parseInt(shellV, 36) >= parseInt('1e1', 36), 'app-shell.js?v=' + shellV);

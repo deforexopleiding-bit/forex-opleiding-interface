@@ -19,9 +19,18 @@
 //
 // De bevestiging (mail + WhatsApp, met datum + Zoom-link) gaat hier meteen uit
 // (api/_lib/webinar.js → meldAan). Geen limiet op het aantal aanmeldingen.
+//
+// LEAD-VANGNET (2026-10-25): komt er geen lead_id mee (de website kon de lead
+// niet opslaan) en bestaat er ook geen lead op dit e-mailadres, dan maakt het
+// CRM de lead hier alsnog aan (upsert_lead, traject 'webinar'). Lukt ook dat
+// niet, dan gaat de aanmelding door (de plek telt zwaarder) maar met een
+// console.error én een alarmmail — nooit meer stil.
 
 import { supabaseAdmin } from './supabase.js';
 import { meldAan } from './_lib/webinar.js';
+import { sendMail } from './_lib/email.js';
+
+const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
 export const BRONNEN = Object.freeze(['webinar-v1', 'webinar-v2']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -46,6 +55,53 @@ export function valideer(body) {
   return { ok: true, waarden: { voornaam, email, telefoon: telefoon || null, bron: b.bron, leadId, toestemming: b.toestemming === true, sessieId } };
 }
 
+/**
+ * Zorgt dat er een lead is voor deze aanmelding. Geeft het lead-id terug, of
+ * null als zelfs het vangnet faalt (dan is er gealarmeerd).
+ */
+export async function zorgVoorLead(sb, w, alarm = stuurLeadAlarm) {
+  if (w.leadId) return w.leadId;
+  console.error('[public-webinar-aanmelding] LEAD-VANGNET: website gaf geen lead_id', { bron: w.bron });
+  try {
+    const { data: l, error: lErr } = await sb.from('leads').select('id').ilike('email', w.email).is('verwijderd_op', null).limit(1);
+    if (lErr) throw new Error('lead zoeken: ' + lErr.message);
+    if (l?.[0]?.id) return l[0].id;
+    const { data, error } = await sb.rpc('upsert_lead', {
+      p: {
+        voornaam: w.voornaam, achternaam: null, email: w.email,
+        telefoon: w.telefoon || null, telefoon_e164: w.telefoon || null,
+        toestemming: w.toestemming === true, toestemming_op: w.toestemming ? new Date().toISOString() : null,
+        bron: w.bron, soort: 'onbekend', traject: 'webinar',
+        kwalificatie: null, score: null, drempel: null, afwijzer: false, antwoorden: [],
+      },
+    });
+    if (error) throw new Error('upsert_lead: ' + error.message);
+    const rij = Array.isArray(data) ? data[0] : data;
+    if (!rij?.id) throw new Error('upsert_lead gaf geen id');
+    console.warn('[public-webinar-aanmelding] LEAD-VANGNET: lead alsnog aangemaakt in het CRM', { lead_id: rij.id, bron: w.bron });
+    return rij.id;
+  } catch (e) {
+    console.error('[public-webinar-aanmelding] LEAD-VANGNET MISLUKT — aanmelding zonder lead', { bron: w.bron, fout: e?.message || String(e) });
+    await alarm(w, e?.message || String(e));
+    return null;
+  }
+}
+
+async function stuurLeadAlarm(w, fout) {
+  try {
+    const r = await sendMail({
+      to: ALARM_NAAR,
+      subject: '⚠ Webinar-aanmelding zonder lead',
+      html: `<p>Een webinar-aanmelding (${String(w.bron)}) kon NIET als lead worden opgeslagen, ook niet via het vangnet in het CRM.</p>`
+        + `<p>De aanmelding zelf staat wel in de webinarmodule (e-mail: ${String(w.email).replace(/[<>&]/g, '')}).</p>`
+        + `<p>Fout: <code>${String(fout).replace(/[<>&]/g, '')}</code></p>`,
+    });
+    if (!r?.sent) console.error('[public-webinar-aanmelding] alarmmail niet verstuurd:', r?.reason || r?.error || 'onbekend');
+  } catch (e) {
+    console.error('[public-webinar-aanmelding] alarmmail exception:', e?.message || e);
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -61,7 +117,8 @@ export default async function handler(req, res) {
   if (!v.ok) return res.status(400).json({ error: v.fout });
 
   try {
-    const r = await meldAan(supabaseAdmin, v.waarden);
+    const leadId = await zorgVoorLead(supabaseAdmin, v.waarden);
+    const r = await meldAan(supabaseAdmin, { ...v.waarden, leadId });
     if (r.geenSessie) return res.status(409).json({ error: 'Er staat geen webinar gepland', code: 'GEEN_SESSIE' });
     if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });
     return res.status(200).json({

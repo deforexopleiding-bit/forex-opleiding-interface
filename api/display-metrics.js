@@ -34,6 +34,7 @@ import {
   nlWeekStart, nlWeekEndExclusive, nlMonthStart, nlMonthEndExclusive,
 } from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
+import { computeAanmeldingenPerFunnel } from './_lib/aanmeldingen-per-funnel.js';
 import { trainingLabel } from './_lib/training-bron.js';
 import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
 import { computeSalesStreak } from './_lib/sales-streak-compute.js';
@@ -373,6 +374,9 @@ export default async function handler(req, res) {
                 .eq('richting', 'uit').is('taak_id', null)
                 .gte('tijdstip', dayStartIso).lt('tijdstip', dayEndIso)
                 .order('tijdstip', { ascending: false }).limit(300),
+      /*30 */ // 2026-10-25: hero "Nieuwe leads" + per-bron-tegels = AANMELDINGEN PER
+              //   FUNNEL uit de bron zelf (zelfde definitie als het v2-dashboard).
+              computeAanmeldingenPerFunnel({ supabaseAdmin, range: { start: dayStart, endExclusive: dayEnd } }),
     ]);
 
     const pick = (i, fallback) => {
@@ -412,6 +416,7 @@ export default async function handler(req, res) {
     const opvTakenAfgerondRes = pick(27, { count: 0 });
     const feedNewCallsRes    = pick(28, { data: [] });
     const waLosRes           = pick(29, { data: [] });
+    const aanmeldingen       = pick(30, null);
 
     // ── Opvolging-tellingen ───────────────────────────────────────────────
     // Belpogingen = alle uitgaande call-pogingen vandaag. Gesprekken = de
@@ -697,13 +702,25 @@ export default async function handler(req, res) {
     // [Fix 2 · 2026-08-26] Hero "Nieuwe leads" = alleen echte lead-bronnen
     // (challenge/mini/event/webinar). Calls-bucket blijft als aparte 5e tegel
     // in .leads.buckets[], telt NIET mee in het hero-totaal. Matcht v2-hero.
-    const leadsTotal = (leadsCompute.total_incl_afwijzer === null || leadsCompute.total_incl_afwijzer === undefined)
-      ? null
-      : leadsCompute.total_incl_afwijzer;
+    // 2026-10-25: met de aanmeldingen-telling is de hero = som van de tegels
+    // (incl. Overig); valt die bron weg, dan de oude telling (nieuwe leads).
+    const leadsTotal = aanmeldingen && typeof aanmeldingen.totaal === 'number'
+      ? aanmeldingen.totaal
+      : ((leadsCompute.total_incl_afwijzer === null || leadsCompute.total_incl_afwijzer === undefined)
+        ? null
+        : leadsCompute.total_incl_afwijzer);
 
     // Lead-buckets: de vier vaste bron-tegels. "Nieuwe calls" blijft de losse 5e
     // strip-tegel (geen lead, maar geboekte calls vandaag).
-    const leadBuckets = [
+    const T = aanmeldingen && aanmeldingen.tegels;
+    const leadBuckets = T ? [
+      { key: 'challenge', label: '7-daagse',    count: T['7-daagse'].totaal },
+      { key: 'mini',      label: 'Mini-cursus', count: T.mini.totaal },
+      // Events: aangemeld + afgewezen (apart zichtbaar via `afgewezen`).
+      { key: 'event',     label: 'Events',      count: T.event.totaal, afgewezen: T.event.afgewezen },
+      { key: 'webinar',   label: 'Webinar',     count: T.webinar.totaal },
+      { key: 'overig',    label: 'Overig',      count: T.overig.totaal },
+    ] : [
       { key: 'challenge', label: '7-daagse',    count: buckets.challenge },
       { key: 'mini',      label: 'Mini-cursus', count: buckets.mini      },
       { key: 'event',     label: 'Events',      count: buckets.event     },
