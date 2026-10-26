@@ -41,6 +41,7 @@ import { LAB_WEEKQUOTUM, telPerWeek, pasQuotumToe, weekVan } from './_lib/lab-we
 import { fetchGhlSlots, normaliseer, amsMidnightMs, amsPartsOf } from './public-opstartsessie-free-slots.js';
 import { createAppointmentForLead } from './_lib/create-appointment-from-lead.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
+import { productLabel } from './_lib/trial-product.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
@@ -120,6 +121,16 @@ export async function geboektMetVerzet(geboekt, afspraakId) {
  * `test-lab:<lab-lead-id>`: hij lijkt op geen enkel GHL-id (20 tekens,
  * alfanumeriek) en matcht dus nooit een echt contact.
  */
+/**
+ * De titel in Daves agenda: "Strategiesessie · via Minicursus · Lien Peeters".
+ * The Lab (of een lead van vóór 26 okt, product NULL) houdt de oude titel
+ * "The Lab · strategiesessie · …". PURE.
+ */
+export function sessieTitel(product, naam) {
+  if (!product || product === LAB_SLUG) return `The Lab · strategiesessie · ${naam}`;
+  return `Strategiesessie · via ${productLabel(product)} · ${naam}`;
+}
+
 export function testContactId(labLeadId) {
   return `test-lab:${labLeadId}`;
 }
@@ -412,8 +423,10 @@ export default async function handler(req, res) {
         owner_id: gastheer?.id || null,
       },
       scheduledAt: iso, durationMinutes: DUUR_MIN, source: LAB_SLUG,
-      // In Daves agenda (GHL/Google) meteen herkenbaar.
-      ghlTitel: `The Lab · strategiesessie · ${[lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lab.voornaam || 'lead'}`,
+      // In Daves agenda (GHL/Google) meteen herkenbaar, met de belofte waarlangs
+      // de lead binnenkwam (26 okt 2026: elke trial boekt hier). Bewust anders
+      // dan de strategie-scan (eigen funnel, titel "Strategie-scan · …").
+      ghlTitel: sessieTitel(lab.product, [lead.voornaam, lead.achternaam].filter(Boolean).join(' ') || lab.voornaam || 'lead'),
     });
   } catch (e) {
     console.error('[lab-sessie] boeken mislukt', { code: e?.code, fout: e?.message });

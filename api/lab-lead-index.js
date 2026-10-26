@@ -1,6 +1,9 @@
 // api/lab-lead-index.js
 //
-// GET /api/lab-lead-index → { leads: { <lead_id>: { hook } }, emails: { <email>: { hook } } }
+// GET /api/lab-lead-index → { leads: { <lead_id>: { hook } }, emails: { <email>: { hook } },
+//                             trials: { <email>: { product } } }
+// `trials` (26 okt 2026): de belofte van ELKE trial-lead (ook minicursus, …),
+// voor "Strategiesessie · via Minicursus" bij de afspraken.
 // Welke leads ooit via The Lab binnenkwamen, met de hook van hun eerste
 // aanmelding. Voor de badge "The Lab · H03" in Contacten en bij de
 // kennismakingsgesprekken. Alleen CRM-data, dus goedkoop. RBAC: leads.view.
@@ -24,16 +27,19 @@ export default async function handler(req, res) {
   const { data, error } = await supabaseAdmin.from('lab_aanmeldingen')
     .select('*').order('aangemaakt', { ascending: true }).limit(20000);
   if (error) {
-    if (error.code === '42P01' || error.code === 'PGRST205') return res.status(200).json({ ok: true, leads: {}, emails: {} });
+    if (error.code === '42P01' || error.code === 'PGRST205') return res.status(200).json({ ok: true, leads: {}, emails: {}, trials: {} });
     console.error('[lab-lead-index]', error.message);
     return res.status(500).json({ error: 'Lab-index ophalen mislukt' });
   }
-  const leads = {}; const emails = {};
+  const leads = {}; const emails = {}; const trials = {};
   for (const r of data || []) {
-    if (herkomstVanAanmelding(r).product !== 'the-lab') continue;
+    const product = herkomstVanAanmelding(r).product;
+    const em0 = String(r.email || '').toLowerCase();
+    if (em0 && !trials[em0]) trials[em0] = { product };
+    if (product !== 'the-lab') continue;
     if (r.lead_id && !leads[r.lead_id]) leads[r.lead_id] = { hook: r.hook || null };
     const em = String(r.email || '').toLowerCase();
     if (em && !emails[em]) emails[em] = { hook: r.hook || null };
   }
-  return res.status(200).json({ ok: true, leads, emails });
+  return res.status(200).json({ ok: true, leads, emails, trials });
 }

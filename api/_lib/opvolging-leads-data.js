@@ -18,6 +18,7 @@ import {
 import { telPogingen } from './opvolging-poging-telling.js';
 import { haalWaRegelsVanaf, volledigeHistorie } from './opvolging-call-wa.js';
 import { WACHT_UREN } from './opvolging-doorrol.js';
+import { leesLabStandPerEmail, labTrialAlsWarmte } from './lab-trial-stand.js';
 
 const DAG_MS = 86400000;
 const AFSPRAKEN_TERUG_DAGEN = 365;
@@ -120,6 +121,22 @@ async function leesTrials(db, leads, meldingen) {
   } catch (e) {
     console.warn('[opvolging-leads] trial lezen (soft):', e?.message || e);
     meldingen.push('Het LMS-gedrag was niet te lezen; de warmte telt nu alleen aanmelding, kwalificatie en eerdere calls.');
+  }
+  // Sinds 26 okt 2026 krijgen nieuwe proefleads hun trial in het ECHTE LMS
+  // (lab-lead), niet meer in lms_gebruikers/trial_warmte. Wie daar niet stond:
+  // de stand uit dfo-lms, in dezelfde vorm (lab-trial-stand.js).
+  try {
+    const zonder = leads.filter((l) => !perLead.has(l.id) && l.email);
+    if (zonder.length) {
+      const stand = await leesLabStandPerEmail(zonder.map((l) => l.email));
+      for (const l of zonder) {
+        const t = labTrialAlsWarmte(stand.get(String(l.email).trim().toLowerCase()));
+        if (t) perLead.set(l.id, t);
+      }
+    }
+  } catch (e) {
+    console.warn('[opvolging-leads] lab-trials lezen (soft):', e?.message || e);
+    meldingen.push('De trials in het nieuwe LMS waren niet te lezen; hun warmte telt nu alleen aanmelding, kwalificatie en eerdere calls.');
   }
   return perLead;
 }

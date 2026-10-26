@@ -14,6 +14,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { AANLEIDING_LABELS } from './lab-uitnodiging.js';
 import { LAB_SLUG, labSleutel } from './lab-config.js';
+import { herkomstVanAanmelding, productLabel } from './trial-product.js';
 
 /** De vragen uit de vragenlaag van het LMS (kopie van src/features/lab/lab-vragen.ts). */
 export const LMS_VRAGEN = Object.freeze({
@@ -90,7 +91,8 @@ export function minutenInLab(sessie) {
 }
 
 const SESSIE_LICHT = 'sessie_id, auth_id, stap, stappen, voortgang, gestart_op, bijgewerkt_op, afgerond:snapshot->>afgerond, leadscore:snapshot->leadscore';
-const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, utm, toegang_van, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, sessie_moment, is_test, aangemaakt_op';
+// product/bron/variant: hlms_lab_lead_product.sql (26 okt) — de belofte waarmee de lead binnenkwam.
+const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, utm, toegang_van, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, sessie_moment, is_test, aangemaakt_op, product, bron, variant';
 // Sinds hlms_lab_lead_gebeurtenis.sql (15 okt): de gekozen route. Apart, zodat
 // een LMS zonder die migratie het dossier niet breekt.
 const LEAD_ROUTE_KOLOMMEN = 'route, route_gekozen_op';
@@ -288,11 +290,17 @@ export async function leesDossier({ leadId = null, email = null }) {
   const filters = [];
   if (leadId) filters.push(`lead_id.eq.${leadId}`);
   if (mail) filters.push(`email.eq."${mail.replace(/"/g, '')}"`);
+  // '*': de herkomstkolommen (product/bron) bestaan pas na de migratie van 26 okt.
   const { data: touches, error: tf } = await supabaseAdmin.from('lab_aanmeldingen')
-    .select('id, aangemaakt, hook, utm_source, utm_medium, utm_campaign, utm_content, landingspagina, toestemming, resultaat, mail_status, wa_status, is_test')
+    .select('*')
     .or(filters.join(','))
     .order('aangemaakt', { ascending: true }).limit(50);
-  const aanmeldingen = tf ? [] : (touches || []);
+  const aanmeldingen = (tf ? [] : (touches || [])).map((a) => ({
+    id: a.id, aangemaakt: a.aangemaakt, hook: a.hook, utm_source: a.utm_source, utm_medium: a.utm_medium,
+    utm_campaign: a.utm_campaign, utm_content: a.utm_content, landingspagina: a.landingspagina, toestemming: a.toestemming,
+    resultaat: a.resultaat, mail_status: a.mail_status, wa_status: a.wa_status, is_test: a.is_test, lead_id: a.lead_id,
+    ...herkomstVanAanmelding(a),
+  }));
   if (tf) console.warn('[lab-dossier] lab_aanmeldingen (soft):', tf.message);
 
   const lms = getDfoLmsClient();
@@ -334,6 +342,25 @@ export async function leesDossier({ leadId = null, email = null }) {
     if (!oe) opvolging = ov || [];
   }
 
+  // Berichten (mail/WhatsApp, berichten_log) en belpogingen: voor de tijdlijn. Fail-soft.
+  let berichten = [];
+  let belpogingen = [];
+  const leadIds = [...new Set([leadId, lead?.id, ...aanmeldingen.map((a) => a.lead_id)].filter(Boolean))];
+  try {
+    const of = [...leadIds.map((id) => `lead_id.eq.${id}`), ...(mail ? [`naar.eq."${mail.replace(/"/g, '')}"`] : [])];
+    if (of.length) {
+      const { data: bl, error: be } = await supabaseAdmin.from('berichten_log')
+        .select('soort, kanaal, status, fout, verstuurd_op, traject').or(of.join(','))
+        .order('verstuurd_op', { ascending: true }).limit(200);
+      if (!be) berichten = bl || [];
+    }
+  } catch (e) { console.warn('[lab-dossier] berichten (soft):', e?.message || e); }
+  if (mail) {
+    const { data: bp, error: bpe } = await supabaseAdmin.from('trial_belpogingen')
+      .select('aangemaakt, resultaat, notitie, door_naam').eq('email', mail).order('aangemaakt', { ascending: true }).limit(100);
+    if (!bpe) belpogingen = bp || [];
+  }
+
   const snap = sessie?.snapshot || null;
   const eerste = aanmeldingen[0] || null;
   return {
@@ -342,6 +369,11 @@ export async function leesDossier({ leadId = null, email = null }) {
     status: labStatus({ labLead, sessie: sessie && { ...sessie, afgerond: snap?.afgerond } }),
     lms_fout: lmsFout,
     hook: labLead?.hook || eerste?.hook || null,
+    product: labLead?.product || eerste?.product || null,
+    product_label: productLabel(labLead?.product || eerste?.product || LAB_SLUG),
+    bron: labLead?.bron || eerste?.bron || null,
+    berichten,
+    belpogingen,
     campagne: eerste?.utm_campaign || labLead?.utm?.campaign || null,
     aanmeldingen,
     account: labLead && {

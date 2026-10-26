@@ -1,6 +1,8 @@
 // api/cron-lab-opvolging.js
 //
-// Traject "the-lab" — elk kwartier. Drie taken:
+// De opvolgmotor van ELKE trial-lead (minicursus, 7-daagse, webinar, website,
+// The Lab — sinds 26 okt 2026 allemaal lab-leads in het echte LMS). Traject
+// "the-lab" — elk kwartier. Drie taken:
 //
 //   1. HERSTEL. Een aanmelding waarvan het LMS-deel mislukte (resultaat
 //      'lms_fout') wordt opnieuw geprobeerd: hoogstens 5 keer, binnen 72 uur,
@@ -16,15 +18,16 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { instelWaarde } from './_lib/leadsonderhoud-sjabloon.js';
-import { leesLmsStand, leesLabGedrag, isAfgerond, isGestart, videosKlaarOp } from './_lib/lab-dossier.js';
+import { leesLmsStand, leesLabGedrag, isAfgerond, isGestart } from './_lib/lab-dossier.js';
 import { maakLoginSleutel } from './_lib/dfo-lms-lab-account.js';
 import { stuurLabMail, stuurLabWhatsApp, knop } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
-import { volgendeStap, isStilUur, standaardMail, linkDoel, vulLabSjabloon, kiesVariant } from './_lib/lab-opvolging.js';
+import { volgendeStap, isStilUur, standaardMail, linkDoel, vulLabSjabloon, kiesVariant, WA_STAPPEN, belofteKort, dagenOver } from './_lib/lab-opvolging.js';
+import { herkomstVanAanmelding } from './_lib/trial-product.js';
+import { eersteVideoMinuten } from './_lib/lab-video-duur.js';
 import { verwerkLmsEnBerichten } from './lab-aanmelding.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
-import { herkomstVanAanmelding } from './_lib/trial-product.js';
 
 /** Producten die altijd via de WhatsApp-gate (toegang_aanvragen) binnenkomen. */
 const GATE_PRODUCTEN = new Set(['minicursus', '7-daagse', 'website']);
@@ -91,8 +94,9 @@ export default async function handler(req, res) {
   await herstel(nu, verslag);
 
   // ── De stand van alle lab-leads uit de laatste weken ───────────────────
+  // '*': de herkomstkolommen (product/bron) bestaan pas na de migratie van 26 okt.
   const { data: aanm, error: ae } = await supabaseAdmin.from('lab_aanmeldingen')
-    .select('id, aangemaakt, lead_id, email, voornaam, telefoon_e164, toestemming, lms_auth_id, fbc, fbp, landingspagina, resultaat')
+    .select('*')
     .gte('aangemaakt', new Date(nu - VENSTER_DAGEN * 86400000).toISOString())
     .order('aangemaakt', { ascending: true }).limit(5000);
   if (ae) {
@@ -137,9 +141,24 @@ export default async function handler(req, res) {
     const { data: fa } = await supabaseAdmin.from('follow_up_appointments').select('lead_email').in('lead_email', emails.slice(i, i + 300));
     for (const f of fa || []) geboektViaAgenda.add(String(f.lead_email || '').toLowerCase());
   }
+  // Afgemeld (lead_mail_voorkeuren) of klant geworden → de motor zwijgt.
+  const afgemeld = new Set();
+  const klanten = new Set();
+  for (let i = 0; i < emails.length; i += 300) {
+    const deel = emails.slice(i, i + 300);
+    const [{ data: vk, error: ve }, { data: ld, error: le }] = await Promise.all([
+      supabaseAdmin.from('lead_mail_voorkeuren').select('email, afgemeld').in('email', deel),
+      supabaseAdmin.from('leads').select('email, status, customer_id').in('email', deel),
+    ]);
+    if (ve) console.warn('[cron-lab-opvolging] mailvoorkeuren (soft):', ve.message);
+    if (le) console.warn('[cron-lab-opvolging] leads (soft):', le.message);
+    for (const x of vk || []) if (x.afgemeld) afgemeld.add(String(x.email || '').toLowerCase());
+    for (const l of ld || []) if (l.customer_id || l.status === 'gewonnen') klanten.add(String(l.email || '').toLowerCase());
+  }
 
   verslag.live = await isLive();
   const tpl = await sjablonen();
+  let videoMin; // lazy: alleen als er een stap is die hem nodig heeft
   let verzonden = 0;
 
   for (const [em, p] of perEmail) {
@@ -163,40 +182,53 @@ export default async function handler(req, res) {
     if (verslag.stil || verzonden >= MAX_PER_RUN) continue;
 
     const g = gehadPer.get(p.eerste.id) || { stappen: new Set(), laatste: null };
+    const herkomst = herkomstVanAanmelding(p.eerste);
+    const product = labLead.product || herkomst.product;
     const stap = volgendeStap({
-      aangemeldOp: Date.parse(p.eerste.aangemaakt),
+      // De start van de trial: toegang_van (ook na een verlenging), anders de aanmelding.
+      aangemeldOp: labLead.toegang_van ? Date.parse(labLead.toegang_van) : Date.parse(p.eerste.aangemaakt),
       toestemming: !!p.laatste.toestemming,
       toegangTot: labLead.toegang_tot,
       geboekt: !!labLead.sessie_geboekt_op || geboektViaAgenda.has(em),
+      afgemeld: afgemeld.has(em),
+      klant: klanten.has(em),
+      ingelogd: !!labLead.eerste_login_op,
       gestart, afgerond,
-      laatsteActiviteit: sessie?.bijgewerkt_op ? Date.parse(sessie.bijgewerkt_op) : null,
+      videos: (gedrag.get(labLead.id)?.videoTijden || []).length,
       gehad: g.stappen,
       laatsteBericht: g.laatste,
-      // Jouw route: stap 1 (de video's) af — zelfde regel als het LMS.
-      videoBekeken: videosKlaarOp(gedrag.get(labLead.id)) != null,
-      videoOp: videosKlaarOp(gedrag.get(labLead.id)),
     }, nu);
     if (!stap) continue;
 
-    if (!verslag.live) { verslag.droog.push({ email: em, stap }); continue; }
+    if (!verslag.live) { verslag.droog.push({ email: em, stap, product }); continue; }
 
     try {
+      if (stap === 'niet-ingelogd-24u' && videoMin === undefined) videoMin = await eersteVideoMinuten();
       const sleutel = await maakLoginSleutel(labLead.id, 'opvolging');
       const link = labLoginLink(sleutel, linkDoel(stap));
-      const w = { voornaam: labLead.voornaam || p.eerste.voornaam, loginlink: link, stap: sessie?.stap ?? '', stappen: sessie?.stappen ?? '' };
+      const voornaam = labLead.voornaam || p.eerste.voornaam;
+      const w = {
+        voornaam, loginlink: link, belofte: belofteKort(product), eerste_video_min: videoMin || '',
+        dagen_over: dagenOver(labLead.toegang_tot, nu), stap: sessie?.stap ?? '', stappen: sessie?.stappen ?? '',
+      };
       const score = sessie?.leadscore?.totaal ?? null;
       const eigen = kiesVariant(tpl.filter((t) => t.soort === stap && t.kanaal === 'mail'), score);
       const mail = eigen && (eigen.html || eigen.tekst)
         ? { onderwerp: vulLabSjabloon(eigen.onderwerp || '', w), html: vulLabSjabloon(eigen.html || `<p>${eigen.tekst}</p>`, w) }
-        : standaardMail(stap, { ...w, link, knop });
+        : standaardMail(stap, { voornaam, link, knop, product, eersteVideoMin: videoMin || null });
       const m = await stuurLabMail({ leadId: p.eerste.lead_id, email: em, soort: `lab-${stap}`, ...mail });
-      const wa = await stuurLabWhatsApp({ leadId: p.eerste.lead_id, telefoon: p.eerste.telefoon_e164, toestemming: !!p.laatste.toestemming, soort: stap, waarden: w });
+      // WhatsApp enkel op de stappen die ervoor bedoeld zijn, en enkel met een
+      // goedgekeurd template. Anders overgeslagen — en gelogd — de mail ging wel.
+      const wa = WA_STAPPEN.has(stap)
+        ? await stuurLabWhatsApp({ leadId: p.eerste.lead_id, telefoon: p.eerste.telefoon_e164, toestemming: !!p.laatste.toestemming, soort: stap, waarden: w })
+        : { ok: false, status: 'geen_wa_stap' };
       if (m.ok) await noteer({ aanmelding_id: p.eerste.id, lead_id: p.eerste.lead_id, stap, kanaal: 'mail', status: 'verstuurd' });
-      if (wa.ok || ['geen_template', 'niet_goedgekeurd', 'geen_nummer'].includes(wa.status)) {
+      else await noteer({ aanmelding_id: p.eerste.id, lead_id: p.eerste.lead_id, stap: `${stap}-fout-${new Date(nu).toISOString().slice(0, 13)}`, kanaal: 'mail', status: 'fout', detail: String(m.fout || m.status || '').slice(0, 300) });
+      if (WA_STAPPEN.has(stap)) {
         await noteer({ aanmelding_id: p.eerste.id, lead_id: p.eerste.lead_id, stap, kanaal: 'whatsapp', status: wa.ok ? 'verstuurd' : 'overgeslagen', detail: wa.status });
       }
       if (m.ok || wa.ok) verzonden++;
-      verslag.verstuurd.push({ email: em, stap, mail: m.status, whatsapp: wa.status });
+      verslag.verstuurd.push({ email: em, stap, product, mail: m.status, whatsapp: wa.status });
     } catch (e) {
       console.error('[cron-lab-opvolging] versturen mislukt', { email: em, stap, fout: e?.message || e });
     }

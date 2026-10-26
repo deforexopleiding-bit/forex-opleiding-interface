@@ -2256,7 +2256,8 @@
       const bron = c.bron === 'the-lab'
         ? ' <span class="tag t-amber" data-bron="the-lab" style="cursor:pointer" role="button" tabindex="0" ' +
           'onclick="window.__opvLabDossierVanCall(' + i + ')" ' +
-          'title="Strategiesessie geboekt vanuit The Lab — klik voor zijn Lab-antwoorden.">The Lab</span>'
+          'title="Strategiesessie geboekt vanuit het LMS (trial) — klik voor zijn dossier.">' +
+          esc(window.DFOLabIndex && window.DFOLabIndex.sessieLabelVoorEmail ? window.DFOLabIndex.sessieLabelVoorEmail(c.email).replace(/^Strategiesessie · via /, 'via ') : 'The Lab') + '</span>'
         : trn
           ? ' <span class="tag t-amber" data-bron="training" title="Strategiesessie geboekt vanuit de live training van ' +
             trn[1] + '/' + trn[2] + '/' + trn[3] + '.">Training ' + trn[1] + '/' + trn[2] + '</span>'
