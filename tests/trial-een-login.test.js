@@ -223,3 +223,29 @@ test('funneltegels: een minicursus-trial in lab_aanmeldingen telt NIET als The L
   const lab = uit.tegels.overig.delen['the-lab'];
   assert.equal(lab, 2);
 });
+
+test('zonder de CRM-migratie: herhaling na een LMS-storing hergebruikt de mislukte aanmelding', async () => {
+  const echt = crm;
+  crm = new Proxy(echt, { get(t, k) {
+    if (k !== 'from') return typeof t[k] === 'function' ? t[k].bind(t) : t[k];
+    return (tabel) => {
+      const q = t.from(tabel);
+      if (tabel !== 'lab_aanmeldingen') return q;
+      const insert = q.insert.bind(q); const eq = q.eq.bind(q);
+      q.insert = (rij) => ('product' in rij ? { then: (ok) => ok({ data: null, error: { code: 'PGRST204', message: "Could not find the 'product' column" } }) } : insert(rij));
+      q.eq = (kol, v) => (kol === 'toegang_aanvraag_id' ? { limit: () => ({ then: (ok) => ok({ data: null, error: { code: '42703', message: 'column lab_aanmeldingen.toegang_aanvraag_id does not exist' } }) }) } : eq(kol, v));
+      return q;
+    };
+  } });
+  const lmsEcht = lms;
+  try {
+    lms = null; // eerste poging: LMS niet geconfigureerd → lms_fout
+    const r1 = await belProvisioning({ email: AANVRAAG.email, voornaam: 'Maxim', soort: 'minicursus', aanvraagId: AANVRAAG.id });
+    assert.equal(r1.ok, false);
+    lms = lmsEcht;
+    const r2 = await belProvisioning({ email: AANVRAAG.email, voornaam: 'Maxim', soort: 'minicursus', aanvraagId: AANVRAAG.id });
+    assert.equal(r2.ok, true);
+    assert.equal(echt.tabellen.lab_aanmeldingen.length, 1);
+    assert.equal(echt.tabellen.lab_aanmeldingen[0].resultaat, 'nieuw_account');
+  } finally { crm = echt; lms = lmsEcht; }
+});

@@ -24,6 +24,10 @@ import { volgendeStap, isStilUur, standaardMail, linkDoel, vulLabSjabloon, kiesV
 import { verwerkLmsEnBerichten } from './lab-aanmelding.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
 import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
+import { herkomstVanAanmelding } from './_lib/trial-product.js';
+
+/** Producten die altijd via de WhatsApp-gate (toegang_aanvragen) binnenkomen. */
+const GATE_PRODUCTEN = new Set(['minicursus', '7-daagse', 'website']);
 
 const MAX_PER_RUN = 40;
 const HERSTEL_MAX = 5;
@@ -48,15 +52,18 @@ async function herstel(nu, verslag) {
     .select('*').eq('resultaat', 'lms_fout').gte('aangemaakt', sinds).limit(20);
   if (error) { console.warn('[cron-lab-opvolging] herstel lezen (soft):', error.message); return; }
   for (const a of data || []) {
-    // Een trial uit de WhatsApp-gate (toegang_aanvraag_id) wordt hersteld door
-    // cron-toegang-aanvragen (provisioning-retry): niet ook hier.
-    if (a.toegang_aanvraag_id) continue;
+    // Een trial uit de WhatsApp-gate wordt hersteld door cron-toegang-aanvragen
+    // (provisioning-retry): niet ook hier. Herkenbaar aan toegang_aanvraag_id,
+    // of — zolang die kolom nog niet bestaat — aan het product: minicursus,
+    // 7-daagse en website komen altijd via de gate.
+    const herkomst = herkomstVanAanmelding(a);
+    if (a.toegang_aanvraag_id || GATE_PRODUCTEN.has(herkomst.product)) continue;
     try {
       const { data: pogingen } = await supabaseAdmin.from('lab_opvolging').select('stap').eq('aanmelding_id', a.id).like('stap', 'herstel-%');
       const n = (pogingen || []).length + 1;
       if (n > HERSTEL_MAX) continue;
       if (nu - Date.parse(a.aangemaakt) < n * 10 * 60 * 1000) continue;
-      const uit = await verwerkLmsEnBerichten({ aanmeldingId: a.id, leadId: a.lead_id, d: a });
+      const uit = await verwerkLmsEnBerichten({ aanmeldingId: a.id, leadId: a.lead_id, d: { ...a, ...herkomst } });
       await supabaseAdmin.from('lab_aanmeldingen').update(uit).eq('id', a.id);
       await noteer({ aanmelding_id: a.id, lead_id: a.lead_id, stap: `herstel-${n}`, kanaal: 'mail', status: uit.resultaat === 'lms_fout' ? 'fout' : 'verstuurd', detail: String(uit.resultaat_detail || uit.resultaat || '').slice(0, 300) });
       verslag.herstel.push({ aanmelding: a.id, poging: n, resultaat: uit.resultaat });
