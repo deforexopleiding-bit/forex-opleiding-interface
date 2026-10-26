@@ -19,7 +19,7 @@
   const rerender = () => { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); };
   const toast = (t, soort) => { try { (window.KV && window.KV.toast) ? window.KV.toast(t, soort) : console.log(t); } catch (_) { /* geen toast */ } };
 
-  const st = { laden: false, data: null, fout: null, bewerk: null, bezig: false };
+  const st = { laden: false, data: null, fout: null, bewerk: null, bezig: false, bevestig: null };
 
   async function json(url, init) {
     if (!window.KV || typeof window.KV.authedJson !== 'function') throw new Error('KV.authedJson niet beschikbaar');
@@ -34,15 +34,41 @@
     rerender();
   }
 
-  window.__trialOpvLive = async (aan) => {
-    if (aan && !window.confirm('De opvolgmotor AAN zetten? Vanaf de volgende run (elk kwartier) krijgen trial-leads echte mails en WhatsApps.')) return;
+  // Aan/uit: AAN vraagt eerst een bevestiging IN de pagina (geen native
+  // confirm(): die blokkeert browserautomatisering en past niet bij de andere
+  // modals in het CRM). UIT gaat meteen — dat is de veilige richting.
+  window.__trialOpvLive = (aan) => {
+    if (aan) { st.bevestig = { live: true }; rerender(); return; }
+    return zetLive(false);
+  };
+  window.__trialOpvBevestigAnnuleer = () => { st.bevestig = null; rerender(); };
+  window.__trialOpvBevestigOk = () => { st.bevestig = null; return zetLive(true); };
+
+  async function zetLive(aan) {
+    if (st.bezig) return;
+    st.bezig = true; rerender();
     try {
       const j = await json('/api/lab-opvolging-instellingen', { method: 'POST', body: JSON.stringify({ live: !!aan }) });
       if (st.data) st.data.live = j.live;
       toast(j.live ? 'Opvolgmotor staat AAN' : 'Opvolgmotor staat UIT (droogloop)', 'ok');
     } catch (e) { toast('Opslaan mislukt: ' + e.message, 'err'); }
+    st.bezig = false;
     rerender();
-  };
+  }
+
+  function bevestigModal() {
+    if (!st.bevestig) return '';
+    return `<div data-trial-opv-bevestig style="position:fixed;inset:0;background:rgba(10,20,30,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)window.__trialOpvBevestigAnnuleer()">
+      <div role="dialog" aria-modal="true" aria-labelledby="trial-opv-bevestig-titel" style="background:var(--surface,#fff);border-radius:var(--r-md,12px);max-width:460px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+        <h3 id="trial-opv-bevestig-titel" style="margin:0 0 8px;font-size:16px">Opvolgmotor aanzetten?</h3>
+        <p style="margin:0;font-size:13px;color:var(--text-2)">Vanaf de volgende run (elk kwartier) krijgen trial-leads echte mails en — met een goedgekeurd template — WhatsApps. Uitzetten kan altijd met dezelfde knop.</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button data-trial-opv-annuleer onclick="window.__trialOpvBevestigAnnuleer()" style="padding:8px 14px;border:1px solid var(--border);border-radius:var(--r-sm);background:transparent;cursor:pointer">Annuleren</button>
+          <button data-trial-opv-bevestig-ok onclick="window.__trialOpvBevestigOk()" style="padding:8px 14px;border:0;border-radius:var(--r-sm);background:var(--emerald,#1F9D6B);color:#fff;font-weight:600;cursor:pointer">Ja, zet aan</button>
+        </div>
+      </div>
+    </div>`;
+  }
 
   const tekstUitHtml = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim();
 
@@ -148,7 +174,7 @@
     }).join('');
     return `${schakelaar}${!d.wa_lijn_ok ? '<div style="font-size:12px;color:var(--amber,#B7791F);margin-bottom:10px">Geen leadsonderhoud-WhatsApp-lijn gevonden: WhatsApp wordt overgeslagen, de mails gaan wel.</div>' : ''}${kaarten}
       <div style="font-size:11.5px;color:var(--text-3);margin-top:6px">WhatsApp gaat enkel via een door Meta goedgekeurd template. Zolang dat er niet is, slaat de motor WhatsApp over (gelogd in lab_opvolging) en gaat de mail wel. Voorgestelde templateteksten: docs/trial-opvolging-whatsapp.md.</div>
-      ${bewerkModal()}`;
+      ${bewerkModal()}${bevestigModal()}`;
   }
 
   window.__trialOpvHerlaad = () => { st.fout = null; laad(true); };

@@ -27,7 +27,7 @@ async function opzet() {
   const calls = [];
   w.KV = { authedJson: async (url, init) => { calls.push({ url, body: init?.body ? JSON.parse(init.body) : null }); return url.startsWith('/api/lab-opvolging-instellingen') ? ANTWOORD : { ok: true }; }, toast: () => {} };
   w.DFO = { render: () => {} };
-  w.confirm = () => true;
+  w.confirm = () => { throw new Error('native confirm() gebruikt'); };
   w.eval(SRC);
   w.DFOTrialOpvolging.render();
   await new Promise((r) => setTimeout(r, 20));
@@ -61,8 +61,17 @@ test('mail bewerken en bewaren: traject the-lab, soort = stap, kanaal mail', asy
 
 test('schakelaar zet live via POST', async () => {
   const { w, calls } = await opzet();
-  await w.__trialOpvLive(true);
+  w.__trialOpvLive(true);
+  assert.equal(calls.filter((c) => c.body && 'live' in c.body).length, 0, 'eerst bevestigen, nog niets opgeslagen');
+  assert.match(w.DFOTrialOpvolging.render(), /data-trial-opv-bevestig-ok/);
+  w.__trialOpvBevestigAnnuleer();
+  assert.doesNotMatch(w.DFOTrialOpvolging.render(), /data-trial-opv-bevestig-ok/);
+  w.__trialOpvLive(true);
+  await w.__trialOpvBevestigOk();
   assert.deepEqual(calls.at(-1), { url: '/api/lab-opvolging-instellingen', body: { live: true } });
+  await w.__trialOpvLive(false);
+  assert.deepEqual(calls.at(-1), { url: '/api/lab-opvolging-instellingen', body: { live: false } }, 'uitzetten zonder bevestiging');
+  assert.doesNotMatch(SRC, /window\.confirm\(/, 'geen native confirm()');
 });
 
 test('zonder recht om te schakelen: geen knop, wel de stand', async () => {
