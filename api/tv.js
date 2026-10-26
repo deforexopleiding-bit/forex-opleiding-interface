@@ -1,7 +1,7 @@
 // api/tv.js
 //
 // Korte URL voor het Live Kantoorbord: /tv → 302 redirect naar
-// /display?key=<tv-token>&theme=light&zoom=0.9. Zo hoef je op de kantoor-TV
+// /display?key=<tv-token>&theme=light&zoom=0.93. Zo hoef je op de kantoor-TV
 // alleen "crm.deforexopleiding.nl/tv" in te typen; de token komt server-side,
 // nooit uit de getypte URL.
 //
@@ -14,8 +14,8 @@
 // /tv gebruikt ALTIJD alleen deze ene aangewezen token; een meegegeven ?key=
 // wordt overschreven, dus /tv is geen manier om willekeurige tokens te proberen.
 //
-// Standaard theme=light en zoom=0.9, allebei overschrijfbaar voor fijnregeling
-// (/tv?theme=dark, /tv?zoom=0.85). Overige params worden doorgegeven.
+// Standaard theme=light en zoom=0.93, allebei overschrijfbaar voor fijnregeling
+// (/tv?theme=dark, /tv?zoom=0.95). Overige params worden doorgegeven.
 
 import { supabaseAdmin } from './supabase.js';
 
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
   }
   const params = new URLSearchParams(req.query);        // overige params (bv. zoom/theme) behouden
   if (!params.has('theme')) params.set('theme', 'light'); // standaard licht, overschrijfbaar
-  if (!params.has('zoom')) params.set('zoom', '0.9');     // standaard marge voor overscan-TV's, overschrijfbaar
+  if (!params.has('zoom')) params.set('zoom', '0.93');    // standaard marge voor overscan-TV's, overschrijfbaar
   params.set('key', key);                                 // token ALTIJD server-side (overschrijft een meegegeven key)
   res.redirect(302, '/display?' + params.toString());
 }
