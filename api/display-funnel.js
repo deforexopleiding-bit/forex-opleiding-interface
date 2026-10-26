@@ -62,6 +62,18 @@ const GROEPEN = [
   { key: 'events',        label: 'Events',         color: 'var(--teal)',   groepen: ['events'] },
 ];
 
+// Funnels ZONDER call-boekingsstap. Via een fysiek event (masterclass) of een
+// webinar boek je geen opstartsessie-call. Voor die funnels (en de losse
+// Overig-rij) tonen we "Calls" en "Boeking%" als — (n.v.t.) en tellen ze niet
+// mee in de boeking-attributie. Zonder deze uitzondering laat de events-funnel
+// zijn event-aanmeldingen als "geboekte call" zien, want voor EVENT_VARIANTEN is
+// lead_resultaat.geboekt = het aantal event_attendees (zie funnel-stats-compute,
+// eventLeadResultaat) — dat is de aanmelding zelf, geen call.
+// Funnels MÉT call-stap: mini-cursus + 7-daagse (opstartsessie-flow),
+// The Lab (strategiesessie) en Strategie-scan (eigen agenda-afspraak).
+export const GROEPEN_ZONDER_CALL = new Set(['webinar', 'events', 'overig']);
+export function heeftCallStap(groepKey) { return !GROEPEN_ZONDER_CALL.has(groepKey); }
+
 const PERIODE_LABEL = { vandaag: 'vandaag', '7d': 'laatste 7 dagen', '30d': 'laatste 30 dagen' };
 
 // Korte server-cache per periode (het bord pollt 7d/30d alleen bij een klik,
@@ -303,11 +315,14 @@ export default async function handler(req, res) {
         calls += lr.geboekt || 0;
       }
       const optins = (canon && canon[g.key] != null) ? canon[g.key] : optinsTracked;
+      // Geen call-stap (Events/Webinar) → Calls en Boeking% zijn n.v.t. (null → "—").
+      const heeftCall = heeftCallStap(g.key);
       return {
         key: g.key, label: g.label, color: g.color,
-        visits, optins, calls,
+        visits, optins,
+        calls: heeftCall ? calls : null,
         optin_pct: pct(optins, visits),
-        book_pct: pct(calls, optins),
+        book_pct: heeftCall ? pct(calls, optins) : null,
       };
     });
 
@@ -318,14 +333,15 @@ export default async function handler(req, res) {
     if (canon && canon.overig > 0) {
       funnels.push({
         key: 'overig', label: 'Overig', color: 'var(--mut)',
-        visits: 0, optins: canon.overig, calls: 0,
+        visits: 0, optins: canon.overig, calls: null,
         optin_pct: null, book_pct: null,
       });
     }
 
     const tVisits = funnels.reduce((a, f) => a + f.visits, 0);
     const tOptins = funnels.reduce((a, f) => a + f.optins, 0);
-    const tCalls = funnels.reduce((a, f) => a + f.calls, 0);
+    // Alleen funnels mét call-stap tellen mee (calls van no-call-funnels = null).
+    const tCalls = funnels.reduce((a, f) => a + (f.calls || 0), 0);
 
     const payload = {
       periode: { van, tot, start: startIso, eind_exclusief: eindIso, tijdzone: 'Europe/Amsterdam' },

@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { telAanmeldingen } from '../api/_lib/aanmeldingen-per-funnel.js';
-import { canoniekeOptins } from '../api/display-funnel.js';
+import { canoniekeOptins, heeftCallStap } from '../api/display-funnel.js';
 
 test('canonieke funnel-opt-ins = KPI-totaal, incl. webinar + heraanmelding', () => {
   const nieuweLeads = [
@@ -53,4 +53,17 @@ test('canonieke funnel-opt-ins = KPI-totaal, incl. webinar + heraanmelding', () 
 
 test('canoniekeOptins(null) → null (endpoint valt dan terug op de tracking-telling)', () => {
   assert.equal(canoniekeOptins(null), null);
+});
+
+test('call-stap: alleen funnels met een opstartsessie/afspraak-boeking', () => {
+  // Wél een call-stap: mini-cursus + 7-daagse (opstartsessie), The Lab
+  // (strategiesessie), Strategie-scan (eigen agenda-afspraak).
+  for (const k of ['mini', '7-daagse', 'the-lab', 'strategiescan']) {
+    assert.equal(heeftCallStap(k), true, k + ' heeft een call-stap');
+  }
+  // Géén call-stap: Events (fysiek, geboekt = event-aanmeldingen) en Webinar
+  // (bijwonen, geen boeking); ook de losse Overig-rij.
+  for (const k of ['events', 'webinar', 'overig']) {
+    assert.equal(heeftCallStap(k), false, k + ' heeft geen call-stap');
+  }
 });
