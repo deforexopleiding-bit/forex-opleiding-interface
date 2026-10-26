@@ -1,0 +1,888 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<style>
+/* ==========================================================================
+   De Forex Opleiding — Masterclass keynote
+   Huisstijl: The Lab (navy #1a2f3e · goud #b18b4d · papier #f7f8f9)
+   ========================================================================== */
+
+:root{
+  --paper:#f7f8f9;
+  --paper-2:#eef1f3;
+  --card:#ffffff;
+  --ink:#1a2f3e;
+  --ink-soft:#41596c;
+  --muted:#70767f;
+  --line:#dde4e9;
+  --line-2:#cdd6dd;
+
+  --navy:#1a2f3e;
+  --navy-2:#24404f;
+  --navy-3:#2e4455;
+
+  --gold:#b18b4d;
+  --gold-2:#c19956;
+  --gold-3:#e8d9bd;
+  --gold-wash:#faf5ec;
+
+  --green:#1f8a5b;
+  --green-wash:#eaf6f0;
+  --red:#c14a3c;
+  --red-wash:#fbeeec;
+
+  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-xl:26px;
+  --sh-1:0 1px 2px rgba(26,47,62,.06), 0 8px 24px -14px rgba(26,47,62,.18);
+  --sh-2:0 2px 4px rgba(26,47,62,.05), 0 24px 60px -28px rgba(26,47,62,.35);
+  --font:ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:#e7ebee;font-family:var(--font);
+  -webkit-font-smoothing:antialiased;color:var(--ink)}
+
+.deck{position:fixed;inset:0;overflow:hidden}
+.stage{position:absolute;top:50%;left:50%;width:1600px;height:900px;transform-origin:center center}
+
+/* ---------- slide ---------- */
+.slide{
+  position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;
+  padding:110px 104px 96px;background:var(--paper);overflow:hidden;
+}
+.slide.is-active{display:flex}
+.slide.pad-sm{padding:100px 88px 84px}
+.slide.center{align-items:center;text-align:center}
+
+/* donkere sectieslide — voor emotie, bewijs en overgangen */
+.slide.dark{
+  background:
+    radial-gradient(1200px 700px at 88% -10%, rgba(177,139,77,.20), transparent 58%),
+    linear-gradient(158deg,#22384a 0%, #1a2f3e 52%, #14252f 100%);
+  color:#eef2f4;
+}
+.slide.dark h1,.slide.dark h2,.slide.dark h3{color:#ffffff}
+.slide.dark .lead,.slide.dark .sub,.slide.dark p{color:#b9c8d2}
+.slide.dark .card{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.14);box-shadow:none}
+.slide.dark .card h3{color:#fff}
+.slide.dark .card p{color:#aebecb}
+.slide.dark .kpi .v{color:var(--gold-2)}
+.slide.dark .kpi .k{color:#8fa3b1}
+.slide.dark .rule{background:rgba(255,255,255,.14)}
+.slide.dark b,.slide.dark strong{color:#fff}
+.slide.dark .gold{color:var(--gold-2)}
+.slide.dark .eyebrow{color:var(--gold-2)}
+.slide.dark .eyebrow::after{background:var(--gold-2)}
+.slide.dark ul.clean li{color:#e9eff3;border-bottom-color:rgba(255,255,255,.13)}
+.slide.dark .label{color:#8fa3b1}
+.slide.dark .label.g{color:var(--gold-2)}
+.slide.dark .label.ok{color:#6fe0a8}
+.slide.dark .label.no{color:#f0a99e}
+.slide.dark .verdict{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14)}
+.slide.dark .verdict .big{color:#fff}
+.slide.dark .verdict .cap{color:#b9c8d2}
+
+/* ---------- chrome ---------- */
+.counter{position:absolute;top:52px;right:104px;font-size:14px;letter-spacing:.16em;
+  color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums;z-index:3}
+.slide.dark .counter{color:#7f93a2}
+
+.bar{position:absolute;left:0;bottom:0;height:4px;background:var(--gold);transition:width .3s cubic-bezier(.4,0,.2,1);z-index:4}
+
+/* ---------- typografie ---------- */
+.eyebrow{font-size:15px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--gold);margin:0 0 22px;display:flex;align-items:center;gap:14px}
+.eyebrow::after{content:"";height:1px;width:64px;background:var(--gold);opacity:.45}
+.slide.center .eyebrow{justify-content:center}
+
+h1{font-size:92px;line-height:1.0;letter-spacing:-.04em;font-weight:800;margin:0 0 26px;color:var(--ink)}
+h1.xl{font-size:110px}
+h2{font-size:60px;line-height:1.06;letter-spacing:-.035em;font-weight:800;margin:0 0 20px;color:var(--ink);max-width:24ch}
+h2.sm{font-size:50px}
+h3{font-size:27px;line-height:1.2;letter-spacing:-.02em;font-weight:700;margin:0 0 9px;color:var(--ink)}
+
+.lead{font-size:28px;line-height:1.45;color:var(--ink-soft);max-width:46ch;margin:0;font-weight:400}
+.sub{font-size:21px;line-height:1.5;color:var(--muted);margin:0}
+.slide.center .lead{margin-left:auto;margin-right:auto}
+
+.gold{color:var(--gold)}
+.hl{background:linear-gradient(180deg,transparent 58%, rgba(177,139,77,.28) 58%);padding:0 .06em}
+b,strong{font-weight:700}
+.rule{height:1px;background:var(--line);margin:34px 0}
+
+/* ---------- kaarten ---------- */
+.grid{display:grid;gap:22px;margin-top:38px}
+.grid.two{grid-template-columns:repeat(2,1fr)}
+.grid.three{grid-template-columns:repeat(3,1fr)}
+.grid.four{grid-template-columns:repeat(4,1fr)}
+.grid.five{grid-template-columns:repeat(5,1fr)}
+.grid.tight{gap:16px}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:28px 26px;box-shadow:var(--sh-1);position:relative}
+.card p{margin:0;font-size:19px;line-height:1.45;color:var(--ink-soft)}
+.card .num{font-size:13px;font-weight:800;letter-spacing:.16em;color:var(--gold);margin-bottom:12px}
+.card.gold{border-color:var(--gold-3);background:var(--gold-wash)}
+.card.green{border-color:#c9e6d7;background:var(--green-wash)}
+.card.red{border-color:#f0cfc9;background:var(--red-wash)}
+.card.flat{box-shadow:none}
+
+.label{font-size:13px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.label.g{color:var(--gold)}
+.label.ok{color:var(--green)}
+.label.no{color:var(--red)}
+
+.chip{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);
+  border-radius:999px;padding:9px 18px;font-size:16px;font-weight:600;color:var(--ink-soft)}
+.chip.g{background:var(--gold-wash);border-color:var(--gold-3);color:var(--gold)}
+
+ul.clean{list-style:none;padding:0;margin:28px 0 0}
+ul.clean li{font-size:25px;line-height:1.35;padding:16px 0 16px 38px;border-bottom:1px solid var(--line);
+  position:relative;color:var(--ink)}
+ul.clean li:last-child{border-bottom:0}
+ul.clean li::before{content:"";position:absolute;left:4px;top:27px;width:10px;height:10px;border-radius:3px;background:var(--gold)}
+ul.clean.no li::before{background:var(--red)}
+ul.clean.ok li::before{background:var(--green)}
+ul.clean.sm li{font-size:21px;padding:11px 0 11px 32px}
+ul.clean.sm li::before{top:20px;width:8px;height:8px}
+
+/* ---------- getallen ---------- */
+.kpirow{display:flex;gap:56px;flex-wrap:wrap;margin-top:34px}
+.kpi .v{font-size:66px;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--ink)}
+.kpi .v.g{color:var(--gold)}
+.kpi .v.ok{color:var(--green)}
+.kpi .k{font-size:17px;color:var(--muted);margin-top:9px;font-weight:500}
+
+.split{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:center}
+.split.wl{grid-template-columns:1.35fr 1fr}
+.split.wr{grid-template-columns:1fr 1.35fr}
+
+.quote{font-size:38px;line-height:1.3;font-weight:500;color:var(--ink);max-width:22ch;margin:0}
+.quote.dark{color:#fff}
+.quote cite{display:block;font-size:18px;font-style:normal;color:var(--muted);margin-top:22px;font-weight:600;letter-spacing:.04em}
+
+.note{margin-top:30px;background:var(--gold-wash);border-left:3px solid var(--gold);
+  border-radius:0 var(--r-md) var(--r-md) 0;padding:18px 24px;font-size:20px;line-height:1.45;
+  color:#6b5735;max-width:74ch}
+.slide.dark .note{background:rgba(177,139,77,.14);color:#e3d3b5;border-color:var(--gold-2)}
+
+/* ---------- bewijs ---------- */
+.figure{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;box-shadow:var(--sh-2)}
+.figure img{display:block;width:100%;max-height:540px;object-fit:contain;border-radius:8px}
+.figure figcaption{font-size:16px;color:var(--muted);padding:12px 6px 2px}
+.slide.dark .figure{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14)}
+.slide.dark .figure figcaption{color:#93a7b5}
+
+.proof{background:#fff;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;
+  display:flex;flex-direction:column;box-shadow:var(--sh-1)}
+.proof .shot{background:#0f1a22;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px;height:300px}
+.proof .shot img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+.proof .meta{padding:14px 18px;display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.proof .who{font-size:17px;font-weight:600;color:var(--muted)}
+.proof .amount{font-size:26px;font-weight:800;color:var(--green);letter-spacing:-.02em}
+.slide.dark .proof{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14)}
+.slide.dark .proof .amount{color:#5fd39b}
+
+.disclaimer{position:absolute;left:104px;right:104px;bottom:34px;font-size:14px;line-height:1.4;color:#93a0a9}
+.slide.dark .disclaimer{color:#6f8493}
+
+/* ---------- fragments ---------- */
+.fr{opacity:0;transform:translateY(14px);transition:opacity .42s ease, transform .42s cubic-bezier(.2,.7,.3,1)}
+.fr.on{opacity:1;transform:none}
+
+/* ---------- interactief ---------- */
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--navy);color:#fff;border:0;
+  border-radius:999px;padding:15px 28px;font-size:18px;font-weight:700;cursor:pointer;font-family:var(--font);
+  box-shadow:var(--sh-1);transition:transform .12s ease, background .2s}
+.btn:hover{transform:translateY(-1px);background:var(--navy-2)}
+.btn:active{transform:translateY(0)}
+.btn.g{background:var(--gold)}
+.btn.g:hover{background:var(--gold-2)}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line-2);box-shadow:none}
+.slide.dark .btn.ghost{color:#fff;border-color:rgba(255,255,255,.3)}
+
+.pollcard{cursor:pointer;transition:transform .16s ease, border-color .2s, box-shadow .2s;user-select:none}
+.pollcard:hover{transform:translateY(-3px)}
+.pollcard.on{border-color:var(--gold);background:var(--gold-wash);box-shadow:0 0 0 3px rgba(177,139,77,.18),var(--sh-1)}
+.pollcard .cnt{position:absolute;top:18px;right:20px;font-size:30px;font-weight:800;color:var(--gold);opacity:0;transition:opacity .25s}
+.pollcard.on .cnt{opacity:1}
+
+.tiles{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 0}
+.tile{width:66px;height:66px;border-radius:12px;display:grid;place-items:center;font-size:24px;font-weight:800;
+  background:#eaeef1;color:#c3ccd3;border:1px dashed #d4dce2;transform:scale(.94);opacity:.6;transition:all .3s cubic-bezier(.2,.8,.3,1)}
+.tile.show{transform:scale(1);opacity:1;border-style:solid;border-color:transparent}
+.tile.l{background:var(--red-wash);color:var(--red)}
+.tile.w{background:var(--green-wash);color:var(--green)}
+.slide.dark .tile{background:rgba(255,255,255,.08);color:#7e93a2}
+.slide.dark .tile.l{background:rgba(193,74,60,.22);color:#f0a99e}
+.slide.dark .tile.w{background:rgba(31,138,91,.24);color:#6fe0a8}
+
+.runout{font-size:56px;font-weight:800;letter-spacing:-.04em;margin-top:22px;color:var(--muted);transition:color .3s}
+.runout.pos{color:var(--green)}
+.runout.neg{color:var(--red)}
+
+.slider{width:100%;appearance:none;height:8px;border-radius:99px;background:var(--line-2);outline:none;margin:14px 0 4px}
+.slider::-webkit-slider-thumb{appearance:none;width:30px;height:30px;border-radius:50%;background:var(--gold);
+  cursor:pointer;box-shadow:0 2px 8px rgba(26,47,62,.3);border:3px solid #fff}
+.slider::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:var(--gold);cursor:pointer;border:3px solid #fff}
+.srow{display:flex;justify-content:space-between;font-size:15px;color:var(--muted);font-weight:600}
+.sval{font-size:40px;font-weight:800;color:var(--ink);letter-spacing:-.03em;line-height:1}
+.slide.dark .sval{color:#fff}
+
+.verdict{margin-top:26px;border-radius:var(--r-lg);padding:26px 28px;border:1px solid var(--line);background:#fff;
+  transition:background .3s, border-color .3s;box-shadow:var(--sh-1)}
+.verdict.ok{background:var(--green-wash);border-color:#c9e6d7}
+.verdict.no{background:var(--red-wash);border-color:#f0cfc9}
+.verdict .big{font-size:58px;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--ink)}
+.verdict.ok .big{color:var(--green)}
+.verdict.no .big{color:var(--red)}
+.verdict .cap{font-size:18px;color:var(--ink-soft);margin-top:10px;font-weight:500}
+
+.flip{perspective:1200px;cursor:pointer;height:300px}
+.flip .in{position:relative;width:100%;height:100%;transition:transform .55s cubic-bezier(.3,.7,.3,1);transform-style:preserve-3d}
+.flip.on .in{transform:rotateY(180deg)}
+.flip .f,.flip .b{position:absolute;inset:0;backface-visibility:hidden;border-radius:var(--r-lg);
+  padding:24px 20px;display:flex;flex-direction:column;justify-content:center;border:1px solid var(--line);background:#fff;box-shadow:var(--sh-1);overflow:hidden}
+.flip .f{font-size:24px;font-weight:700;color:var(--ink);line-height:1.25}
+.flip .f small{display:block;font-size:14px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:800;margin-top:14px}
+.flip .b{transform:rotateY(180deg);background:var(--navy);border-color:var(--navy);color:#e8eef2;font-size:17.5px;line-height:1.4}
+.flip .b b{color:var(--gold-2)}
+
+.stepper{display:flex;gap:0;margin-top:40px;border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--line);background:#fff;box-shadow:var(--sh-1)}
+.stepper .st{flex:1;padding:20px 16px;border-right:1px solid var(--line);cursor:pointer;transition:background .2s;position:relative}
+.stepper .st:last-child{border-right:0}
+.stepper .st:hover{background:var(--paper-2)}
+.stepper .st.on{background:var(--navy)}
+.stepper .st.on .n,.stepper .st.on .t{color:#fff}
+.stepper .st.on .n{color:var(--gold-2)}
+.stepper .n{font-size:12px;font-weight:800;letter-spacing:.14em;color:var(--gold)}
+.stepper .t{font-size:17px;font-weight:700;color:var(--ink);margin-top:6px;line-height:1.2}
+.stepper .st.dead::after{content:"";position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--red)}
+
+.wallnum{font-size:176px;font-weight:800;letter-spacing:-.05em;line-height:.92;color:var(--gold);font-variant-numeric:tabular-nums}
+
+/* ---------- notities / overzicht ---------- */
+.notes{position:fixed;left:0;right:0;bottom:0;background:#14252f;color:#e6edf1;padding:18px 26px;
+  font-size:17px;line-height:1.45;display:none;z-index:20;border-top:3px solid var(--gold)}
+.notes.on{display:block}
+.notes b{color:var(--gold-2)}
+.help{position:fixed;right:16px;bottom:10px;font-size:11px;color:#9aa7b0;z-index:15;letter-spacing:.06em}
+.overview{position:fixed;inset:0;background:#eef1f3;overflow:auto;padding:26px;display:none;z-index:30;
+  grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:13px;align-content:start}
+.overview.on{display:grid}
+.ovcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer}
+.ovcard:hover{border-color:var(--gold);box-shadow:var(--sh-1)}
+.ovcard .num{font-size:11px;color:var(--gold);font-weight:800;letter-spacing:.14em}
+.ovcard .t{font-size:16px;font-weight:600;margin-top:5px;line-height:1.25;color:var(--ink)}
+
+@media print{
+  .deck{position:static}.stage{transform:none!important}
+  .slide{display:flex!important;page-break-after:always;position:relative;width:1600px;height:900px}
+  .fr{opacity:1!important;transform:none!important}
+  .notes,.help,.overview{display:none!important}
+}
+
+/* ---------- fotoslides ---------- */
+.slide .bg { position:absolute; inset:0; z-index:0; overflow:hidden; }
+.slide .bg img { width:100%; height:100%; object-fit:cover; display:block; }
+.slide .bg::after {
+  content:""; position:absolute; inset:0;
+  background:
+    linear-gradient(95deg, rgba(16,31,41,.96) 0%, rgba(16,31,41,.90) 38%, rgba(16,31,41,.55) 72%, rgba(16,31,41,.35) 100%),
+    radial-gradient(900px 620px at 80% 8%, rgba(177,139,77,.22), transparent 60%);
+}
+.slide.photo > *:not(.bg):not(.brand):not(.counter):not(.bar) { position:relative; z-index:1; }
+.slide.photo.center .bg::after {
+  background:
+    linear-gradient(180deg, rgba(16,31,41,.82) 0%, rgba(16,31,41,.92) 55%, rgba(16,31,41,.97) 100%),
+    radial-gradient(1000px 700px at 78% 12%, rgba(177,139,77,.20), transparent 62%);
+}
+.photoframe { border-radius:var(--r-xl); overflow:hidden; box-shadow:var(--sh-2); border:1px solid var(--line); background:#fff; }
+.photoframe img { display:block; width:100%; height:100%; object-fit:cover; }
+.slide.dark .photoframe { border-color:rgba(255,255,255,.14); }
+
+/* ---------- merkteken ---------- */
+.brand{position:absolute;top:40px;left:104px;display:flex;align-items:center;gap:16px;z-index:3}
+.brand img{height:42px;width:auto;display:block}
+.brand .lg-w{display:none}
+.brand span{font-size:13px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+  padding-left:16px;border-left:1px solid var(--line-2)}
+.slide.dark .brand .lg-d{display:none}
+.slide.dark .brand .lg-w{display:block}
+.slide.dark .brand span{color:#8fa3b1;border-left-color:rgba(255,255,255,.22)}
+.slide.pad-sm .brand{left:88px}
+.slide.center .brand,.slide.photo .brand{top:40px;left:104px}
+.cover-logo{height:92px;width:auto;display:block;margin:0 auto 34px}
+.slide.photo.veil .bg::after{
+  background:
+    linear-gradient(180deg, rgba(14,28,37,.94) 0%, rgba(14,28,37,.96) 60%, rgba(14,28,37,.98) 100%),
+    radial-gradient(1000px 680px at 84% 6%, rgba(177,139,77,.18), transparent 62%);
+}
+.slide.photo.quote-photo .bg::after{
+  background:
+    linear-gradient(110deg, rgba(14,28,37,.97) 0%, rgba(14,28,37,.90) 45%, rgba(14,28,37,.58) 100%),
+    radial-gradient(900px 600px at 86% 10%, rgba(177,139,77,.20), transparent 60%);
+}
+
+.slide.nobrand .brand{display:none}
+
+/* ---------- video ---------- */
+.videowrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:var(--r-xl);overflow:hidden;
+  box-shadow:var(--sh-2);background:#05090c;border:1px solid var(--line)}
+.videowrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.slide.dark .videowrap{border-color:rgba(255,255,255,.14)}
+.videoposter{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:16px;background:#0f1a22;color:#e8eef2;text-align:center;padding:30px}
+.videoposter .play{width:78px;height:78px;border-radius:50%;background:var(--gold);display:grid;place-items:center;
+  color:#12202b;font-size:28px;box-shadow:0 10px 30px -10px rgba(0,0,0,.6)}
+.videoposter p{margin:0;font-size:19px;color:#b9c8d2;max-width:42ch}
+.videoposter b{color:#fff;font-size:23px;display:block;margin-bottom:2px}
+
+.bg .bgvideo{position:absolute;inset:0;width:100%;height:100%;border:0;pointer-events:none;
+  object-fit:cover;display:block}
+
+/* draait er echt beeld? dan mag de sluier lichter, anders zie je de beweging niet */
+.slide.photo.center.video-on .bg::after{
+  background:
+    linear-gradient(180deg, rgba(14,28,37,.58) 0%, rgba(14,28,37,.74) 52%, rgba(14,28,37,.88) 100%),
+    radial-gradient(900px 620px at 50% 62%, rgba(10,20,27,.55), transparent 70%);
+}
+.slide.video-on h1, .slide.video-on .lead{text-shadow:0 2px 26px rgba(8,16,22,.75)}
+
+</style>
+<div class="deck"><div class="stage">
+
+<!-- 01 COVER -->
+<section class="slide dark center nobrand photo" data-notes="<b>De film draait stil op de achtergrond.</b> Begin staand, stil, 3 seconden. 'Iedereen in deze zaal wil hetzelfde: een tweede inkomen dat niet afhangt van je baas. De vraag is niet of het kan. De vraag is waarom het bij 9 op 10 niet lukt. Dat leg ik nu uit.'">
+  <div class="bg"><img src="img/zaal-presentatie.jpg" alt=""><video class="bgvideo" data-vimeo="1228188532" autoplay muted loop playsinline preload="auto"><source src="video/welkom.mp4" type="video/mp4"><source src="video/welkom.MP4" type="video/mp4"><source src="video/welkom.m4v" type="video/mp4"><source src="video/welkom.mov" type="video/quicktime"><source src="video/welkom.webm" type="video/webm"></video></div>
+  <img class="cover-logo" src="img/logo-wit.png" alt="De Forex Opleiding">
+  <div class="eyebrow">Forex Masterclass · Deel 1</div>
+  <h1 class="xl">Waarom de meeste<br>traders <span class="gold">falen</span></h1>
+  <p class="lead">En hoe jij vanavond leert waar het verschil precies zit.</p>
+</section>
+
+<!-- 02 BELOFTE -->
+<section class="slide" data-notes="Contract met de zaal. <b>Zeg letterlijk:</b> 'Je hoeft niets te kunnen. Je moet alleen twee uur meedenken.' Zo haal je de drempel weg bij wie zich dom voelt.">
+  <div class="eyebrow">Wat je vanavond meeneemt</div>
+  <h2>Aan het einde weet je precies<br>hoe traders <span class="hl">geld verdienen</span></h2>
+  <div class="grid three">
+    <div class="card fr"><div class="num">01</div><h3>Het spel</h3><p>Waarom traden geen gokken is — en waarom het toch zo voelt als je het verkeerd doet.</p></div>
+    <div class="card fr"><div class="num">02</div><h3>De drie knoppen</h3><p>De enige drie variabelen die bepalen of je winst maakt. Jij bedient ze alle drie.</p></div>
+    <div class="card fr"><div class="num">03</div><h3>De echte reden</h3><p>Waarom 90% faalt op psychologie en uitvoering, niet op techniek.</p></div>
+  </div>
+  <p class="sub fr" style="margin-top:34px">Geen voorkennis nodig. We bouwen het samen op — stap voor stap.</p>
+</section>
+
+<!-- 03 POLL -->
+<section class="slide" data-notes="<b>Interactief:</b> klik de kaart aan waar de meeste handen omhoog gaan. Laat het even stil vallen. 'Iedereen hier zit in één van deze drie. Ik heb in alle drie gezeten.' Dit is je eerste identificatie-moment — mensen moeten zichzélf herkennen vóór de rest kan landen.">
+  <div class="eyebrow">Even eerlijk · waar sta jij?</div>
+  <h2 class="sm">In welke fase zit jij vandaag?</h2>
+  <p class="sub">Handen mogen omhoog. Ik tel mee.</p>
+  <div class="grid three" style="margin-top:34px">
+    <div class="card" data-poll><div class="num">01</div><h3>De starter</h3><p>Je bent nog niet begonnen of net oriënterend. Veel motivatie, nog geen kader.</p></div>
+    <div class="card" data-poll><div class="num">02</div><h3>De worstelaar</h3><p>Je tradet al een tijd. Al eens (of vaker) een account opgeblazen. Je weet dat er iets mist.</p></div>
+    <div class="card" data-poll><div class="num">03</div><h3>De teruggever</h3><p>Al eens funded geweest — en het weer teruggegeven aan de markt.</p></div>
+  </div>
+  <div class="note fr">Waar je ook staat: <b>ik heb in elk van deze drie gezeten.</b> Vandaag laat ik je zien waar de sprong naar de volgende zit.</div>
+</section>
+
+<!-- 04 BEKENTENIS -->
+<section class="slide pad-sm" data-notes="<b>Kwetsbaarheid = geloofwaardigheid.</b> Niet snel doorgaan. Noem het bedrag hardop. Wie faalde en er doorheen kwam, is geloofwaardiger dan wie altijd won.">
+  <div class="split wl">
+    <div>
+      <div class="eyebrow">Eerst een bekentenis</div>
+      <h2 class="sm" style="font-size:46px">Ik heb <span class="hl">alle fouten</span> gemaakt die jij leert vermijden</h2>
+      <p class="lead">Opgeblazen accounts. Een payout van 10k teruggegeven aan de markt. Mijn job opgezegd — en alles kwijtgeraakt.</p>
+      <ul class="clean no sm fr" style="margin-top:22px">
+        <li><b>Te groot risico</b> — ik wilde snel groot worden. Eén slechte week wiste maanden uit.</li>
+        <li><b>Geen plan, wel een mening</b> — ik zocht bevestiging in plaats van een proces.</li>
+        <li><b>Alleen werken</b> — niemand die meekeek, dus dezelfde fout maandenlang.</li>
+      </ul>
+      <div class="note fr">Elke fout hier is een les die jou jaren kan besparen.</div>
+    </div>
+    <div class="photoframe" style="height:600px"><img src="img/team-maxim-kantoor.jpg" alt="De Forex Opleiding — kantoor"></div>
+  </div>
+</section>
+
+<!-- 05 VERWACHTINGEN -->
+<section class="slide" data-notes="Door te zeggen wat het níet is, word je de eerlijke in een markt vol goeroes. Dat maakt alles wat je daarna zegt geloofwaardiger.">
+  <div class="eyebrow">Verwachtingen · eerst dit</div>
+  <h2 class="sm">Wat dit <span class="gold">niet</span> is</h2>
+  <div class="grid two" style="margin-top:30px">
+    <div class="card red">
+      <div class="label no">Dit is het niet</div>
+      <ul class="clean no sm">
+        <li>Een get-rich-quick systeem</li>
+        <li>Een signalengroep waar je blind volgt</li>
+        <li>Een holy grail die altijd wint</li>
+        <li>Geld verdienen zonder werk</li>
+      </ul>
+    </div>
+    <div class="card green fr">
+      <div class="label ok">Dit is het wel</div>
+      <ul class="clean ok sm">
+        <li>Begrijpen <b>waaróm</b> forex werkt</li>
+        <li>Een herhaalbaar proces in plaats van geluk</li>
+        <li>Een eerlijk verhaal — inclusief mijn fouten</li>
+        <li>Een vak dat je naast je job leert</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note fr">Zoek je een knopje dat geld print — dan mag je nu al gaan. Voor de rest: dit wordt waardevol.</div>
+</section>
+
+<!-- 06 1000 EURO -->
+<section class="slide" data-notes="Dit is het spiegelbeeld van de zaal. De meesten hebben exact dit gedaan. Laat het pijnlijk klinken.">
+  <div class="split">
+    <div>
+      <div class="eyebrow">Hoe ik begon</div>
+      <h2 class="sm">Ik stortte €1.000 en wilde het <span class="hl">verdubbelen</span></h2>
+      <div class="card red" style="margin-top:28px">
+        <div class="label no">De 'strategie'</div>
+        <h3>2 trades van €500 om snel te verdubbelen</h3>
+        <p style="margin-top:8px;color:var(--red);font-weight:700">→ Account opgeblazen</p>
+      </div>
+    </div>
+    <div>
+      <ul class="clean no fr">
+        <li>Geen risk management</li>
+        <li>Geen sample size</li>
+        <li>Geen edge</li>
+        <li>Puur gokken</li>
+      </ul>
+      <div class="note fr">"Wat als het probleem niet de markt was — maar hoe ik ernaar keek?"</div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 MENTOR -->
+<section class="slide dark center photo quote-photo" data-notes="<b>Laat deze vraag 5 seconden hangen.</b> Vraag ze daarna aan de zaal: 'Wie zou vandaag winst maken over 1.000 trades? Steek je hand op.' Bijna niemand. Dat is precies het punt — en het zaait de behoefte aan begeleiding.">
+  <div class="bg"><img src="img/chart-uitleg.jpg" alt=""></div>
+  <div class="eyebrow">Het keerpunt</div>
+  <p class="quote dark" style="max-width:26ch;text-align:center;margin:0 auto">"Als ik je nu 1.000 trades liet nemen — zou je dan winst maken?"<cite>De vraag die alles veranderde</cite></p>
+  <p class="lead fr" style="margin-top:44px;text-align:center">Ik had geen antwoord. En dát was precies het probleem.</p>
+</section>
+
+<!-- 08 MISVATTING -->
+<section class="slide" data-notes="Herkader het spel. Zolang ze denken 'kopen en hopen', blijven ze gokken. Dit is de belangrijkste beliefs-shift van deel 1.">
+  <div class="eyebrow">De grootste misvatting</div>
+  <h2 class="sm">Traden is géén aandelen kopen en hopen</h2>
+  <div class="grid two" style="margin-top:28px">
+    <div class="card red"><div class="label no">Wat mensen denken</div><p style="font-size:22px;color:var(--ink)">"Ik koop, de lijn gaat omhoog, ik win een percentage."</p><p style="margin-top:12px">Hopen. Vasthouden. Bidden.</p></div>
+    <div class="card fr"><div class="label g">Wat het echt is</div><p style="font-size:22px;color:var(--ink)">Een <b>probability game</b>. Zoals een casino.</p><p style="margin-top:12px">Je wint niet elke keer — je wint <b>over veel keren</b>, omdat de kansen structureel in jouw voordeel staan.</p></div>
+  </div>
+  <div class="note fr">De vraag is dus nooit "win ik deze trade?" — maar <b>"heb ik een edge over 100 trades?"</b></div>
+</section>
+
+<!-- 09 CASINO -->
+<section class="slide" data-notes="Iedereen begrijpt het casino. Gebruik dat. 'Het casino wint niet elke spin. Het casino wint omdat het duizenden spins speelt met een kleine structurele voorsprong.' Daarna: 'Vanaf nu ben jij het casino, niet de speler.'">
+  <div class="eyebrow">Les van het casino</div>
+  <h2 class="sm">Waarom wint het casino <span class="gold">altijd</span>?</h2>
+  <div class="split" style="margin-top:20px">
+    <div>
+      <p class="lead">Je denkt: rood of zwart — 50/50, toch?</p>
+      <div class="grid two tight" style="margin-top:24px">
+        <div class="card flat"><div class="label">Jij ziet</div><div class="kpi"><div class="v">18 vs 18</div><div class="k">rood tegen zwart</div></div></div>
+        <div class="card flat gold fr"><div class="label g">De realiteit</div><div class="kpi"><div class="v g">+ 0 &amp; 00</div><div class="k">38 vakjes, geen 36</div></div></div>
+      </div>
+    </div>
+    <div class="fr">
+      <p class="lead">Die twee groene vakjes zijn de <b>house edge</b>. Het casino wint niet elke keer — het wint over <b>duizenden spins</b>, omdat de kansen structureel in hun voordeel staan.</p>
+      <div class="note">Traden werkt exact zo. Jij bouwt je eigen edge — met je <b>risk/reward</b> en je <b>win ratio</b>. Vanaf nu ben jij het huis.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 KNOP 1 -->
+<section class="slide" data-notes="Knop 1. Houd het fysiek: €10 riskeren om €30 te maken. Laat ze het hardop meerekenen.">
+  <div class="eyebrow">Bouwsteen 1 · risk / reward</div>
+  <h2 class="sm">Wij spelen niet op 1:1 — maar op <span class="hl">1:3</span></h2>
+  <div class="grid two" style="margin-top:30px">
+    <div class="card"><div class="label no">Casino / gokken — 1:1</div>
+      <div style="display:flex;gap:14px;margin-top:18px">
+        <div style="flex:1;background:var(--red-wash);border-radius:12px;padding:26px;text-align:center;font-weight:800;color:var(--red);font-size:22px">Risk €10</div>
+        <div style="flex:1;background:var(--paper-2);border-radius:12px;padding:26px;text-align:center;font-weight:800;color:var(--muted);font-size:22px">Reward €10</div>
+      </div>
+      <p style="margin-top:16px">Je moet meer dan de helft winnen om break-even te draaien.</p>
+    </div>
+    <div class="card green fr"><div class="label ok">Onze strategie — 1:3</div>
+      <div style="display:flex;gap:14px;margin-top:18px;align-items:stretch">
+        <div style="flex:1;background:var(--red-wash);border-radius:12px;padding:26px;text-align:center;font-weight:800;color:var(--red);font-size:22px">Risk €10</div>
+        <div style="flex:3;background:var(--green);border-radius:12px;padding:26px;text-align:center;font-weight:800;color:#fff;font-size:26px">Reward €30</div>
+      </div>
+      <p style="margin-top:16px">Zelfs met minder dan de helft wins ben je <b>winstgevend</b>.</p>
+    </div>
+  </div>
+  <div class="note fr">Dit is knop 1 — en jij bepaalt hem. Niet de markt.</div>
+</section>
+
+<!-- 11 RUNNER -->
+<section class="slide" data-notes="<b>Interactief:</b> druk op 'Speel 10 trades af'. Laat de zaal meetellen bij elke L. Rond 7 losses voelt het als een ramp — en dan springt het naar +2R. Dát moment is het moment. Zeg daarna: 'Je hoeft geen gelijk te hebben. Je moet groot winnen als je gelijk hebt.'">
+  <div class="eyebrow">Het bewijs · rr × win ratio</div>
+  <h2 class="sm">Je verliest <span class="gold">70%</span> van je trades — en wint nog steeds</h2>
+  <div class="split wl" style="margin-top:14px">
+    <div data-runner="LLLLLLLWWW" data-rr="3" class="interactive">
+      <p class="sub">10 trades · risk 1 · reward 3</p>
+      <div class="tiles"></div>
+      <div class="runout">0R</div>
+      <button class="btn g" style="margin-top:22px">▶ Speel 10 trades af</button>
+    </div>
+    <div>
+      <div class="card gold fr">
+        <div class="label g">Netto resultaat</div>
+        <div class="kpi"><div class="v g">+2R</div><div class="k">7 losses × −1 = −7 · 3 wins × +3 = +9</div></div>
+        <p style="margin-top:18px">Winst, met een win ratio van <b>30%</b>.</p>
+      </div>
+      <div class="note fr">Je hoeft geen gelijk te hebben. Je moet <b>groot winnen als je gelijk hebt</b>.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 CALCULATOR -->
+<section class="slide" data-notes="<b>Dit is de sterkste slide van deel 1.</b> Schuif zelf: zet win ratio op 25% bij 1:3 → nog steeds positief. Zet 60% bij 1:1 → mager. Vraag iemand uit de zaal een combinatie te roepen. Sluit af met: 'Dit is wiskunde, geen mening. En jij bedient beide knoppen.'">
+  <div class="eyebrow">Reken zelf mee</div>
+  <h2 class="sm">Twee knoppen bepalen <span class="hl">alles</span></h2>
+  <div class="split" style="margin-top:12px" data-edge>
+    <div class="interactive">
+      <div style="margin-bottom:26px">
+        <div class="srow"><span>Win ratio</span><span data-wrv class="sval" style="font-size:30px">30%</span></div>
+        <input class="slider" type="range" min="5" max="90" step="5" value="30" data-wr>
+        <div class="srow"><span>5%</span><span>90%</span></div>
+      </div>
+      <div>
+        <div class="srow"><span>Risk / reward</span><span data-rrv class="sval" style="font-size:30px">1:3,0</span></div>
+        <input class="slider" type="range" min="5" max="50" step="5" value="30" data-rr>
+        <div class="srow"><span>1:0,5</span><span>1:5,0</span></div>
+      </div>
+      <p class="sub" style="margin-top:22px">Uitgangspunt: €100 risico per trade, 100 trades.</p>
+    </div>
+    <div>
+      <div class="verdict ok"><div class="big">+0R</div><div class="cap"></div></div>
+      <div class="note fr">Dit is <b>geen mening</b>. Dit is rekenen. En allebei de knoppen liggen in jouw handen — niet bij de markt.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 13 SAMPLE SIZE -->
+<section class="slide" data-notes="<b>Interactief:</b> speel de reeks af — eerst 5 verliezen op rij. Zeg: 'Wie hier te veel riskeert, is al weg vóór zijn edge zich toont. Dat is waarom 90% stopt in maand twee.' Dit bereidt de behoefte aan begeleiding voor.">
+  <div class="eyebrow">Bouwsteen 3 · sample size</div>
+  <h2 class="sm">Een munt is 50/50 — maar niet <span class="gold">over 10 worpen</span></h2>
+  <div class="split wl" style="margin-top:14px">
+    <div data-runner="LLLLLWWWWW" data-rr="3" class="interactive">
+      <p class="sub">Zo kan een normale reeks eruitzien</p>
+      <div class="tiles"></div>
+      <div class="runout">0R</div>
+      <button class="btn ghost" style="margin-top:22px">▶ Speel de reeks af</button>
+    </div>
+    <div>
+      <div class="card"><h3>Over 1.000 worpen?</h3><p style="margin-top:8px">Dán effent 50/50 zich uit. Je edge <b>manifesteert zich alleen met een grote sample size</b>.</p>
+        <p style="margin-top:14px">Daarom riskeer je klein per trade — zodat je lang genoeg in het spel blijft.</p></div>
+      <div class="note fr">Eerst 5 losses op rij. Wie te veel riskeert, is <b>al weg</b> vóór de edge zich toont.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 14 DRIE KNOPPEN -->
+<section class="slide" data-notes="Samenvatting. Zeg: 'De markt bepaalt niet of jij wint. Deze drie knoppen doen dat.' Dit is het einde van de wiskunde — en het begin van het échte probleem.">
+  <div class="eyebrow">Jouw edge = drie knoppen die jij bepaalt</div>
+  <h2 class="sm">Dit heb je volledig <span class="hl">in eigen hand</span></h2>
+  <div class="grid three" style="margin-top:34px">
+    <div class="card gold fr"><div class="num">Knop 1</div><div class="kpi"><div class="v g">1:3</div><div class="k">Risk / reward</div></div><p style="margin-top:16px">Elke trade riskeert 1 om 3 te winnen.</p></div>
+    <div class="card gold fr"><div class="num">Knop 2</div><div class="kpi"><div class="v g">↑</div><div class="k">Win ratio</div></div><p style="margin-top:16px">Verhoogd via strategie, structuur en trend.</p></div>
+    <div class="card gold fr"><div class="num">Knop 3</div><div class="kpi"><div class="v g">100+</div><div class="k">Sample size</div></div><p style="margin-top:16px">Genoeg trades om je edge te laten spelen.</p></div>
+  </div>
+  <div class="note fr">De markt bepaalt niet of jij wint. <b>Deze drie knoppen doen dat.</b></div>
+</section>
+
+<!-- 15 BRUG -->
+<section class="slide dark photo veil" data-notes="<b>De brug. Niet haasten.</b> 'Alles wat ik net vertelde, is openbaar. Je kan het vanavond nog opzoeken. En tóch faalt 9 op 10. Waarom? Omdat weten en kunnen twee verschillende dingen zijn.' Daarna: 'Ik laat je eerst op het bord zien hóe we die win ratio verhogen. En daarna tonen we je het deel dat bijna niemand laat zien.'">
+  <div class="bg"><img src="img/zaal-certificaten.jpg" alt=""></div>
+  <div class="eyebrow">En toch...</div>
+  <h2>Je kent nu de wiskunde.<br>Waarom lukt het dan bij <span class="gold">9 op 10 niet</span>?</h2>
+  <div class="grid three" style="margin-top:40px">
+    <div class="card fr"><h3>Weten ≠ kunnen</h3><p>Je kent de regels. Onder druk doe je iets anders.</p></div>
+    <div class="card fr"><h3>Je ziet jezelf niet</h3><p>Niemand kijkt mee. Dus herhaal je dezelfde fout maandenlang.</p></div>
+    <div class="card fr"><h3>Je stopt te vroeg</h3><p>Precies vóór het moment dat je edge zich toont.</p></div>
+  </div>
+  <p class="lead fr" style="margin-top:40px">Eerst laat ik je op het bord zien <b style="color:#fff">hoe we die win ratio verhogen</b>.<br>Daarna tonen we je het deel dat bijna niemand laat zien.</p>
+</section>
+
+</div></div>
+<script>
+/* ==========================================================================
+   Masterclass keynote engine — slides, fragments, widgets
+   ← →  volgende stap / slide   ·  ↑ ↓  hele slide  ·  N notities
+   O overzicht  ·  F volledig scherm  ·  R reset interactie op slide
+   ========================================================================== */
+(function () {
+  const stage = document.querySelector('.stage');
+  const slides = [...document.querySelectorAll('.slide')];
+  const total = slides.length;
+  let cur = 0, frag = 0;
+
+  /* ---------- schalen ---------- */
+  function fit() {
+    const w = document.documentElement.clientWidth  || innerWidth;
+    const h = document.documentElement.clientHeight || innerHeight;
+    if (!w || !h) return;                       // achtergrondtab: nog niets te meten
+    stage.style.transform = `translate(-50%, -50%) scale(${Math.min(w / 1600, h / 900)})`;
+  }
+  addEventListener('resize', fit);
+  addEventListener('load', fit);
+  addEventListener('orientationchange', fit);
+  addEventListener('pageshow', fit);
+  // een tab die op de achtergrond geopend wordt, meet pas juist zodra je hem bekijkt
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) fit(); });
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(document.documentElement);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+
+  /* ---------- chrome ---------- */
+  slides.forEach((s, i) => {
+    if (!s.querySelector('.brand')) {
+      const p = document.createElement('div');
+      p.className = 'brand';
+      p.innerHTML = '<img class="lg-d" src="img/logo.png" alt="De Forex Opleiding">' +
+                    '<img class="lg-w" src="img/logo-wit.png" alt="De Forex Opleiding">' +
+                    '<span>Masterclass</span>';
+      s.prepend(p);
+    }
+    const c = document.createElement('div');
+    c.className = 'counter'; c.textContent = `${String(i + 1).padStart(2, '0')} / ${total}`;
+    s.appendChild(c);
+    const b = document.createElement('div');
+    b.className = 'bar'; b.style.width = ((i + 1) / total * 100) + '%';
+    s.appendChild(b);
+  });
+
+  const notes = document.createElement('div'); notes.className = 'notes'; document.body.appendChild(notes);
+  const help = document.createElement('div'); help.className = 'help';
+  help.textContent = '← → stap · ↑ ↓ slide · N notities · O overzicht · F scherm';
+  document.body.appendChild(help);
+
+  /* ---------- overzicht ---------- */
+  const ov = document.createElement('div'); ov.className = 'overview'; document.body.appendChild(ov);
+  slides.forEach((s, i) => {
+    const h = s.querySelector('h1, h2, .quote');
+    const d = document.createElement('div'); d.className = 'ovcard';
+    d.innerHTML = `<div class="num">${String(i + 1).padStart(2, '0')}</div>
+      <div class="t">${h ? h.textContent.trim().slice(0, 70) : '—'}</div>`;
+    d.onclick = () => { go(i); ov.classList.remove('on'); };
+    ov.appendChild(d);
+  });
+
+  /* ---------- fragmenten ---------- */
+  const fragsOf = i => [...slides[i].querySelectorAll('.fr')];
+
+  function paintFrags() {
+    fragsOf(cur).forEach((f, i) => f.classList.toggle('on', i < frag));
+  }
+
+  function go(n, endOfFrags) {
+    cur = Math.max(0, Math.min(total - 1, n));
+    slides.forEach((s, i) => s.classList.toggle('is-active', i === cur));
+    frag = endOfFrags ? fragsOf(cur).length : 0;
+    paintFrags();
+    const nt = slides[cur].dataset.notes;
+    notes.innerHTML = nt || '<i>geen notities</i>';
+    location.hash = 's' + (cur + 1);
+    slides[cur].dispatchEvent(new CustomEvent('slideshow'));
+  }
+
+  function next() {
+    if (frag < fragsOf(cur).length) { frag++; paintFrags(); return; }
+    if (cur < total - 1) go(cur + 1);
+  }
+  function prev() {
+    if (frag > 0) { frag--; paintFrags(); return; }
+    if (cur > 0) go(cur - 1, true);
+  }
+
+  /* ---------- toetsen ---------- */
+  addEventListener('keydown', e => {
+    if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); next(); }
+    else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); prev(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); go(cur + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); go(cur - 1); }
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(total - 1);
+    else if (e.key.toLowerCase() === 'n') notes.classList.toggle('on');
+    else if (e.key.toLowerCase() === 'o') ov.classList.toggle('on');
+    else if (e.key.toLowerCase() === 'f') {
+      document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(()=>{});
+    }
+    else if (e.key.toLowerCase() === 'r') slides[cur].dispatchEvent(new CustomEvent('slidereset'));
+    else if (e.key === 'Escape') { ov.classList.remove('on'); notes.classList.remove('on'); }
+  });
+
+  /* klik op de rechterhelft = volgende, linkerhelft = vorige (niet op knoppen) */
+  document.querySelector('.deck').addEventListener('click', e => {
+    if (e.target.closest('button, .pollcard, .flip, .stepper, input, a, .interactive')) return;
+    (e.clientX > innerWidth * .35) ? next() : prev();
+  });
+
+  /* ---------- widgets ---------- */
+  const euro = n => n.toLocaleString('nl-BE', { maximumFractionDigits: 0 });
+
+  // 1. handopsteek-poll
+  document.querySelectorAll('[data-poll]').forEach(card => {
+    const c = document.createElement('div'); c.className = 'cnt'; c.textContent = '✓';
+    card.appendChild(c);
+    card.classList.add('pollcard');
+    card.onclick = () => card.classList.toggle('on');
+  });
+
+  // 2. trade-runner: speelt een reeks trades af
+  document.querySelectorAll('[data-runner]').forEach(box => {
+    const seq = box.dataset.runner.split('');       // bv. "LLLLLLLWWW"
+    const rr = parseFloat(box.dataset.rr || '3');
+    const tiles = box.querySelector('.tiles');
+    const out = box.querySelector('.runout');
+    const btn = box.querySelector('button');
+    let running = false;
+    const reset = () => {
+      tiles.innerHTML = ''; out.className = 'runout'; out.textContent = '0R';
+      seq.forEach(() => { const t = document.createElement('div'); t.className = 'tile'; t.textContent = '?'; tiles.appendChild(t); });
+    };
+    const run = () => {
+      if (running) return; running = true; reset();
+      let tot = 0;
+      seq.forEach((ch, i) => setTimeout(() => {
+        const t = tiles.children[i];
+        const win = ch.toUpperCase() === 'W';
+        t.className = 'tile show ' + (win ? 'w' : 'l');
+        t.textContent = win ? 'W' : 'L';
+        tot += win ? rr : -1;
+        out.textContent = (tot > 0 ? '+' : '') + Math.round(tot * 100) / 100 + 'R';
+        out.className = 'runout ' + (tot > 0 ? 'pos' : tot < 0 ? 'neg' : '');
+        if (i === seq.length - 1) running = false;
+      }, 230 * (i + 1)));
+    };
+    reset();
+    if (btn) btn.onclick = run;
+    box.closest('.slide').addEventListener('slidereset', reset);
+    box.closest('.slide').addEventListener('slideshow', reset);
+  });
+
+  // 3. edge-calculator: winratio × RR → netto R per 100 trades
+  document.querySelectorAll('[data-edge]').forEach(box => {
+    const wr = box.querySelector('[data-wr]'), rr = box.querySelector('[data-rr]');
+    const wrv = box.querySelector('[data-wrv]'), rrv = box.querySelector('[data-rrv]');
+    const v = box.querySelector('.verdict'), big = v.querySelector('.big'), cap = v.querySelector('.cap');
+    const risk = 100; // €100 per trade
+    function calc() {
+      const W = +wr.value, R = +rr.value / 10;
+      wrv.textContent = W + '%'; rrv.textContent = '1:' + R.toFixed(1).replace('.', ',');
+      const net = (W * R) - (100 - W);              // R over 100 trades
+      const eur = net * risk;
+      big.textContent = (net > 0 ? '+' : '') + Math.round(net) + 'R';
+      cap.innerHTML = net > 0
+        ? `Over 100 trades. Met €${risk} risico per trade: <b>+€${euro(eur)}</b>. Je verliest ${100 - W} keer en je wint nog steeds.`
+        : `Over 100 trades. Met €${risk} risico per trade: <b>−€${euro(Math.abs(eur))}</b>. Deze combinatie kán niet winstgevend zijn.`;
+      v.className = 'verdict ' + (net > 0 ? 'ok' : 'no');
+    }
+    [wr, rr].forEach(s => s.addEventListener('input', calc));
+    calc();
+    box.closest('.slide').addEventListener('slidereset', () => { wr.value = 30; rr.value = 30; calc(); });
+  });
+
+  // 4. tellers die oplopen
+  function countUp(el) {
+    const target = +el.dataset.count, pre = el.dataset.pre || '', post = el.dataset.post || '';
+    const dur = 1400; let t0 = null;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      const p = Math.min((ts - t0) / dur, 1), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = pre + euro(Math.round(target * e)) + post;
+      if (p < 1) requestAnimationFrame(step);
+    }
+    el.textContent = pre + '0' + post;
+    requestAnimationFrame(step);
+  }
+  document.querySelectorAll('[data-count]').forEach(el => {
+    const s = el.closest('.slide');
+    s.addEventListener('slideshow', () => countUp(el));
+    s.addEventListener('slidereset', () => countUp(el));
+  });
+
+  // 5. objectie-kaarten
+  document.querySelectorAll('.flip').forEach(f => {
+    f.onclick = () => f.classList.toggle('on');
+    f.closest('.slide').addEventListener('slidereset', () => f.classList.remove('on'));
+  });
+
+  // 6. fase-stepper
+  document.querySelectorAll('.stepper').forEach(st => {
+    const items = [...st.querySelectorAll('.st')];
+    const panel = st.dataset.panel ? document.querySelector(st.dataset.panel) : null;
+    items.forEach((it, i) => it.onclick = () => {
+      items.forEach(x => x.classList.remove('on')); it.classList.add('on');
+      if (panel) {
+        panel.querySelectorAll('[data-phase]').forEach(p => p.hidden = (+p.dataset.phase !== i + 1));
+      }
+    });
+  });
+
+  // 7. schaal-rekenmachine: accountgrootte → maandbedrag bij X%
+  document.querySelectorAll('[data-scale]').forEach(box => {
+    const acc = box.querySelector('[data-acc]'), pct = box.querySelector('[data-pct]');
+    const accv = box.querySelector('[data-accv]'), pctv = box.querySelector('[data-pctv]');
+    const out = box.querySelector('[data-out]'), yr = box.querySelector('[data-yr]');
+    const sizes = [10000, 25000, 50000, 100000, 200000, 400000];
+    function calc() {
+      const a = sizes[+acc.value], p = +pct.value / 10;
+      accv.textContent = '$' + euro(a);
+      pctv.textContent = p.toFixed(1).replace('.', ',') + '%';
+      const gross = a * p / 100, net = gross * 0.8;   // 80% profit split
+      out.textContent = '$' + euro(net);
+      yr.textContent = '$' + euro(net * 12);
+    }
+    [acc, pct].forEach(s => s.addEventListener('input', calc));
+    calc();
+    box.closest('.slide').addEventListener('slidereset', () => { acc.value = 2; pct.value = 30; calc(); });
+  });
+
+
+  /* ---------- achtergrondvideo: lokaal bestand -> Vimeo -> foto ---------- */
+  document.querySelectorAll('video.bgvideo').forEach(v => {
+    const id = v.dataset.vimeo;
+    const slide = v.closest('.slide');
+    let settled = false;
+
+    const running = () => { settled = true; slide && slide.classList.add('video-on'); };
+
+    const toVimeo = () => {
+      if (settled || !id) return; settled = true;
+      const f = document.createElement('iframe');
+      f.className = 'bgvideo';
+      f.setAttribute('allow', 'autoplay');
+      f.setAttribute('tabindex', '-1');
+      f.style.opacity = '0';
+      f.style.transition = 'opacity .7s ease';
+      f.src = `https://player.vimeo.com/video/${id}?background=1&autoplay=1&loop=1&muted=1&dnt=1`;
+      v.replaceWith(f);
+      let alive = false;
+      const onMsg = ev => {
+        if (String(ev.origin).indexOf('vimeo.com') !== -1) {
+          alive = true; f.style.opacity = '1';
+          slide && slide.classList.add('video-on');
+          removeEventListener('message', onMsg);
+        }
+      };
+      addEventListener('message', onMsg);
+      setTimeout(() => { removeEventListener('message', onMsg); if (!alive) f.remove(); }, 6000);
+    };
+
+    // het lokale bestand speelt -> klaar. alle bronnen mislukt -> naar Vimeo.
+    ['loadeddata', 'playing', 'canplay'].forEach(ev => v.addEventListener(ev, running, { once: true }));
+    v.addEventListener('error', toVimeo);               // pas als ALLE <source> falen
+    setTimeout(() => { if (!settled && !v.videoWidth) toVimeo(); }, 6000);
+    v.play?.().catch(() => {});
+  });
+
+  /* ---------- start ---------- */
+  const h = location.hash.match(/^#s(\d+)$/);
+  go(h ? +h[1] - 1 : 0);
+  window.__go = go;
+})();
+
+</script>
+
+</body></html>
