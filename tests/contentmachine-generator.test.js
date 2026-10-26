@@ -401,7 +401,7 @@ test('genereer: vaste formulierteksten erin; weekdag uit de invoer bewaakt', asy
   drop().input.training_datum = '2026-10-22';
   const o = voorbeeldEditie();
   o.pagina.formulier_sub = 'we sturen je de link';
-  o.nieuwsbrief = { ...o.nieuwsbrief, blokken: o.nieuwsbrief.blokken.map((b, i) => (i === 0 ? { ...b, tekst: 'De live training van donderdag. **We zagen het live.**' } : b)) };
+  o.nieuwsbrief = { ...o.nieuwsbrief, opener: o.nieuwsbrief.opener + ' De live training van donderdag. **We zagen het live.**' };
   ai.antwoorden.push(voorbeeldRegie(), o);
   const r = await roep(GEN, { body: { id: ID } });
   assert.equal(r.statusCode, 200, JSON.stringify(r.body));

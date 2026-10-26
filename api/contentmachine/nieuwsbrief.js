@@ -87,6 +87,8 @@ export default async function handler(req, res) {
 
     if (actie === 'naar-ghl' || actie === 'test' || actie === 'stats') {
       if (!cfg.ok) return res.status(503).json(NIET_GEKOPPELD(cfg));
+      // Teaser (2.0): het beeld van het interactieve blok hoort erin.
+      if (actie !== 'stats' && r.beeld === false) return res.status(409).json({ error: 'Render eerst het beeld voor de mail (tab Nieuwsbrief → Beeld voor de mail).', code: 'BEELD_ONTBREEKT' });
       const nu = new Date().toISOString();
       let v = await verzendingVan(db, id);
 
