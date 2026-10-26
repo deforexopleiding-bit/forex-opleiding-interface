@@ -24,6 +24,7 @@ import { aggregeerFunnel, labStatus, leesLabGedrag, leesLmsStand } from './_lib/
 import { LAB_SLUG, labLandingLabel } from './_lib/lab-config.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { uitnodigingPerSleutel, leesUitnodigingGebeurtenissen } from './_lib/lab-uitnodiging.js';
+import { herkomstVanAanmelding } from './_lib/trial-product.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -40,8 +41,11 @@ export default async function handler(req, res) {
   if (periode.fout) return res.status(400).json({ error: periode.fout });
   const per = ['campagne', 'landing'].includes(q.per) ? q.per : 'hook';
 
-  const { data: aanm, error: ae } = await supabaseAdmin.from('lab_aanmeldingen')
-    .select('id, aangemaakt, lead_id, email, voornaam, hook, utm_campaign, landingspagina, lms_auth_id, resultaat, is_test')
+  // product: 'the-lab' (standaard, zoals vroeger), een andere belofte, of 'alle'.
+  // '*' omdat de herkomstkolommen pas met de migratie van 26 okt bestaan.
+  const productFilter = String(q.product || 'the-lab').toLowerCase();
+  const { data: aanmAlle, error: ae } = await supabaseAdmin.from('lab_aanmeldingen')
+    .select('*')
     .gte('aangemaakt', periode.start.toISOString()).lt('aangemaakt', periode.eindExclusief.toISOString())
     .order('aangemaakt', { ascending: false }).limit(10000);
   if (ae) {
@@ -51,7 +55,9 @@ export default async function handler(req, res) {
     console.error('[lab-statistieken] lab_aanmeldingen:', ae.message);
     return res.status(500).json({ error: 'Aanmeldingen ophalen mislukt' });
   }
-  const aanmeldingen = aanm || [];
+  const aanmeldingen = (aanmAlle || [])
+    .map((a) => ({ ...a, ...herkomstVanAanmelding(a) }))
+    .filter((a) => productFilter === 'alle' || a.product === productFilter);
   const emails = [...new Set(aanmeldingen.map((a) => String(a.email || '').toLowerCase()).filter(Boolean))];
 
   // LMS-stand per e-mail.
@@ -106,11 +112,11 @@ export default async function handler(req, res) {
       ? { code: 'geboekt', label: 'Sessie geboekt' }
       : labStatus({ labLead: l.labLead || null, sessie: l.sessie || null });
     leads.push({
-      lead_id: a.lead_id, email: em, voornaam: a.voornaam, hook: a.hook, campagne: a.utm_campaign, landing: labLandingLabel(a.landingspagina),
+      lead_id: a.lead_id, email: em, voornaam: a.voornaam, hook: a.hook, product: a.product, bron: a.bron, campagne: a.utm_campaign, landing: a.product === 'the-lab' ? labLandingLabel(a.landingspagina) : null,
       aangemeld: a.aangemaakt, status, is_test: a.is_test,
       stap: l.sessie?.stap ?? null, stappen: l.sessie?.stappen ?? null, route: l.route || null,
     });
   }
 
-  return res.status(200).json({ ok: true, per, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, per_route: perRoute, uitnodiging, leads });
+  return res.status(200).json({ ok: true, per, product: productFilter, periode: { van: periode.van, tot: periode.tot }, lms_fout: lmsFout, rijen, totaal, per_route: perRoute, uitnodiging, leads });
 }

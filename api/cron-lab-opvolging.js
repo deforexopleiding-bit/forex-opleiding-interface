@@ -48,6 +48,9 @@ async function herstel(nu, verslag) {
     .select('*').eq('resultaat', 'lms_fout').gte('aangemaakt', sinds).limit(20);
   if (error) { console.warn('[cron-lab-opvolging] herstel lezen (soft):', error.message); return; }
   for (const a of data || []) {
+    // Een trial uit de WhatsApp-gate (toegang_aanvraag_id) wordt hersteld door
+    // cron-toegang-aanvragen (provisioning-retry): niet ook hier.
+    if (a.toegang_aanvraag_id) continue;
     try {
       const { data: pogingen } = await supabaseAdmin.from('lab_opvolging').select('stap').eq('aanmelding_id', a.id).like('stap', 'herstel-%');
       const n = (pogingen || []).length + 1;

@@ -29,6 +29,8 @@
 import { supabaseAdmin } from './supabase.js';
 import { meldAan } from './_lib/webinar.js';
 import { sendMail } from './_lib/email.js';
+import { waitUntil } from '@vercel/functions';
+import { leesBestemming } from './_lib/trial-product.js';
 
 const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
@@ -102,6 +104,28 @@ async function stuurLeadAlarm(w, fout) {
   }
 }
 
+/** Laat een belofte afmaken nadat het antwoord weg is (Vercel waitUntil). */
+function naAntwoord(belofte) {
+  try { waitUntil(belofte); } catch (e) { console.warn('[public-webinar-aanmelding] waitUntil (soft):', e?.message || e); }
+  return belofte;
+}
+
+/** De Lab-trial bij een webinar-aanmelding. Gooit nooit. */
+export async function trialVoorWebinar(w) {
+  try {
+    if (await leesBestemming(supabaseAdmin, 'webinar') !== 'lab') return { overgeslagen: 'bestemming_oud' };
+    // Lazy: de Lab-keten (LMS, mail, WhatsApp) alleen laden als ze nodig is.
+    const { geefLabTrial } = await import('./_lib/lab-trial.js');
+    return await geefLabTrial({
+      product: 'webinar', bron: w.bron, email: w.email, voornaam: w.voornaam,
+      telefoon: w.telefoon, toestemming: w.toestemming, leadId: w.leadId || null,
+    });
+  } catch (e) {
+    console.error('[public-webinar-aanmelding] lab-trial mislukt:', e?.message || e);
+    return { ok: false };
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -121,6 +145,9 @@ export default async function handler(req, res) {
     const r = await meldAan(supabaseAdmin, { ...v.waarden, leadId });
     if (r.geenSessie) return res.status(409).json({ error: 'Er staat geen webinar gepland', code: 'GEEN_SESSIE' });
     if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });
+    // "Eén login voor alle funnels": een nieuwe webinar-aanmelding krijgt ook
+    // een trial in het echte LMS. Na het antwoord, zodat de website niet wacht.
+    if (!r.alAangemeld && !r.verplaatst) naAntwoord(trialVoorWebinar({ ...v.waarden, leadId }));
     return res.status(200).json({
       ok: true,
       aanmelding_id: r.aanmelding.id,

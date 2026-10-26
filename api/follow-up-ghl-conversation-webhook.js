@@ -474,7 +474,7 @@ export default async function handler(req, res) {
           //    er nog niet eerder is geprovisioneerd.
           if (primClaimed && !match.provisioned_at) {
             const r = await belProvisioning({
-              email: match.email, voornaam: match.voornaam, soort: match.soort,
+              email: match.email, voornaam: match.voornaam, soort: match.soort, aanvraagId: match.id,
             });
             pushTrace('provisioning-call', {
               ok: r?.ok === true,

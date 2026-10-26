@@ -34,39 +34,96 @@ export function knop(href, tekst) {
 // ── Mailteksten (PURE) ──────────────────────────────────────────────────────
 // Toon: direct, warm, Vlaams-Nederlands, geen verkooppraat. Eén knop.
 
-export function mailWelkom({ voornaam, link }) {
-  const v = esc(voornaam || 'daar');
-  return {
+/**
+ * De belofte per product: onderwerp, de eerste zin en wat je krijgt. Zelfde
+ * opbouw voor elk product, zodat de lead overal dezelfde weg ziet:
+ * video's → The Lab → strategiesessie. Een onbekend product valt terug op
+ * de algemene tekst ('website').
+ */
+export const WELKOM_BELOFTE = Object.freeze({
+  minicursus: {
+    onderwerp: 'Je minicursus staat klaar',
+    intro: 'Je minicursus staat voor je klaar. Je krijgt de korte video\'s waarmee onze studenten zelf begonnen — hoe de markt écht beweegt — en daarna plaats je in The Lab je eerste (simulatie)trade met onze strategie.',
+  },
+  '7-daagse': {
+    onderwerp: 'Je 7 dagen meekijken starten nu',
+    intro: 'Vanaf vandaag kijk je 7 dagen mee in onze leeromgeving. Je ziet de video\'s die onze studenten krijgen, de opname van een live training, en in The Lab plaats je zelf je eerste (simulatie)trade.',
+  },
+  webinar: {
+    onderwerp: 'Je toegang staat klaar — alvast vóór het webinar',
+    intro: 'Je plek in het webinar staat vast. Wil je er het maximum uithalen? Dan kan je nu al beginnen: in je leeromgeving staan de video\'s waar we in het webinar op verder bouwen, en in The Lab plaats je je eerste (simulatie)trade.',
+  },
+  website: {
+    onderwerp: 'Je toegang tot de leeromgeving staat klaar',
+    intro: 'Je persoonlijke leeromgeving staat klaar. Je krijgt de video\'s waarmee onze studenten zelf begonnen, en in The Lab plaats je je eerste (simulatie)trade met onze strategie.',
+  },
+  'the-lab': {
     onderwerp: 'Je toegang tot The Lab staat klaar',
+    intro: 'Je eigen account staat klaar. In The Lab plaats je je eerste trade met onze strategie — stap voor stap, in een echte chart. Reken op een twintigtal minuten.',
+  },
+});
+
+/** De belofte voor dit product (onbekend → website). PURE. */
+export function welkomBelofte(product) {
+  return WELKOM_BELOFTE[product] || WELKOM_BELOFTE.website;
+}
+
+const DATUM_NL = new Intl.DateTimeFormat('nl-BE', { timeZone: 'Europe/Amsterdam', weekday: 'long', day: 'numeric', month: 'long' });
+
+/** 'dinsdag 2 november' of null. PURE. */
+export function leesbareDatum(iso) {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? DATUM_NL.format(new Date(t)) : null;
+}
+
+export function mailWelkom({ voornaam, link, product = 'the-lab', toegangTot = null }) {
+  const v = esc(voornaam || 'daar');
+  const b = welkomBelofte(product);
+  const tot = leesbareDatum(toegangTot);
+  return {
+    onderwerp: b.onderwerp,
     html: `<p>Hey ${v},</p>
-<p>Je eigen account staat klaar. In The Lab plaats je je eerste trade met onze strategie — stap voor stap, in een echte chart. Reken op een twintigtal minuten.</p>
-${knop(link, 'Start The Lab')}
-<p>Inloggen hoeft niet: de knop doet dat voor je. Je hebt ${LAB_TOEGANG_DAGEN} dagen toegang.</p>
+<p>${esc(b.intro)}</p>
+${knop(link, 'Log in')}
+<p><strong>Wat je eerst doet:</strong></p>
+<ol style="padding-left:20px;margin:0 0 14px">
+<li style="margin-bottom:6px"><strong>Kijk de video's</strong> — kort en to the point, je begint bij de eerste.</li>
+<li style="margin-bottom:6px"><strong>Plaats je eerste trade in The Lab</strong> — een simulatie in een echte chart, een twintigtal minuten.</li>
+<li><strong>Plan je strategiesessie</strong> — 30 minuten met ons team over jouw doelen. Normaal €100, voor jou gratis.</li>
+</ol>
+<p>Inloggen hoeft niet: de knop doet dat voor je. Je toegang loopt ${LAB_TOEGANG_DAGEN} dagen${tot ? `, tot ${esc(tot)}` : ''}.</p>
 <p>Werkt de knop niet meer? Ga naar <a href="${esc(lmsBasisUrl())}">${esc(lmsBasisUrl().replace(/^https:\/\//, ''))}</a> en vraag een nieuwe link aan met je e-mailadres.</p>`,
   };
 }
 
-export function mailNieuweLink({ voornaam, link, verlopen = false }) {
+export function mailNieuweLink({ voornaam, link, verlopen = false, product = 'the-lab' }) {
   const v = esc(voornaam || 'daar');
+  const lab = product === 'the-lab' || !product;
   return {
-    onderwerp: 'Je nieuwe link voor The Lab',
+    onderwerp: lab ? 'Je nieuwe link voor The Lab' : 'Je nieuwe inloglink',
     html: verlopen
       ? `<p>Hey ${v},</p>
-<p>Je toegang tot The Lab is afgelopen, maar je strategiesessie kan je nog altijd inplannen. Met deze knop kom je meteen op de juiste plek.</p>
+<p>Je toegang ${lab ? 'tot The Lab' : 'tot je leeromgeving'} is afgelopen, maar je strategiesessie kan je nog altijd inplannen. Met deze knop kom je meteen op de juiste plek.</p>
 ${knop(link, 'Plan mijn strategiesessie')}`
       : `<p>Hey ${v},</p>
 <p>Hier is je nieuwe link. Je komt meteen terug waar je gebleven was.</p>
-${knop(link, 'Verder met The Lab')}`,
+${knop(link, lab ? 'Verder met The Lab' : 'Log in')}`,
   };
 }
 
-export function mailAlToegang({ voornaam }) {
+/** Wat de lead aanvroeg, in de zin "Je vroeg … aan". PURE. */
+const AANGEVRAAGD = Object.freeze({
+  minicursus: 'de minicursus', '7-daagse': 'de 7 dagen meekijken', webinar: 'toegang tot onze leeromgeving',
+  website: 'toegang tot onze leeromgeving', 'the-lab': 'toegang tot The Lab',
+});
+
+export function mailAlToegang({ voornaam, product = 'the-lab' }) {
   const v = esc(voornaam || 'daar');
   const basis = lmsBasisUrl();
   return {
     onderwerp: 'Je hebt al toegang bij De Forex Opleiding',
     html: `<p>Hey ${v},</p>
-<p>Je vroeg toegang tot The Lab aan, maar met dit e-mailadres heb je al een account bij ons. We hebben daar niets aan veranderd.</p>
+<p>Je vroeg ${esc(AANGEVRAAGD[product] || AANGEVRAAGD.website)} aan, maar met dit e-mailadres heb je al een account bij ons. We hebben daar niets aan veranderd.</p>
 ${knop(basis, 'Naar het leerplatform')}
 <p>Wachtwoord kwijt? Op het inlogscherm kan je een inloglink naar dit adres laten sturen.</p>`,
   };

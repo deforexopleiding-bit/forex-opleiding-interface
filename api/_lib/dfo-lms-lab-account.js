@@ -37,6 +37,23 @@ export function nieuweSleutel() {
   return crypto.randomBytes(32).toString('base64url');
 }
 
+const LEAD_SELECT = 'id, auth_id, email, voornaam, toegang_van, toegang_tot, crm_lead_id, sessie_geboekt_op, product';
+
+/** Na hoeveel dagen sinds de vorige start een verlopen trial opnieuw een week krijgt. */
+export const VERLENG_NA_DAGEN = 30;
+
+/**
+ * Mag een bestaande lab-lead bij een nieuwe aanmelding een verse week krijgen?
+ * Alleen als zijn toegang verlopen is én zijn vorige start minstens
+ * VERLENG_NA_DAGEN geleden is. Wie al geboekt heeft, gaat via de sessie. PURE.
+ */
+export function magVerlengen(labLead, nu = Date.now()) {
+  if (!labLead?.toegang_tot || labLead.sessie_geboekt_op) return false;
+  if (Date.parse(labLead.toegang_tot) > nu) return false;
+  const van = labLead.toegang_van ? Date.parse(labLead.toegang_van) : 0;
+  return nu - van >= VERLENG_NA_DAGEN * 24 * 3600 * 1000;
+}
+
 const STAF_OF_STUDENT = new Set(['student', 'mentor', 'hoofdmentor', 'admin', 'administratie']);
 
 /**
@@ -64,7 +81,7 @@ function lms() {
 
 async function leesLabLeadOpEmail(c, email) {
   const { data, error } = await c.from('hlms_lab_lead')
-    .select('id, auth_id, email, voornaam, toegang_tot, crm_lead_id, sessie_geboekt_op')
+    .select(LEAD_SELECT)
     .ilike('email', email).limit(1);
   if (error) throw new LabAccountFout('lms_fout', 'hlms_lab_lead lezen: ' + error.message);
   return data?.[0] || null;
@@ -110,7 +127,10 @@ async function bestaandeIdentiteit(c, email, authId) {
  * @param {string|null} [p.hook]
  * @param {object} [p.utm]
  * @param {boolean} [p.isTest]
- * @returns {Promise<{ soort: 'nieuw'|'bestaand_lab'|'heeft_toegang', authId: string|null, labLead: object|null }>}
+ * @param {string|null} [p.product]  de belofte (api/_lib/trial-product.js); NULL = the-lab
+ * @param {string|null} [p.bron]     funnel-slug (leads.bron)
+ * @param {string|null} [p.variant]  split-test-luik
+ * @returns {Promise<{ soort: 'nieuw'|'bestaand_lab'|'heeft_toegang', authId: string|null, labLead: object|null, verlengd?: boolean }>}
  */
 export async function zorgVoorLabAccount(p) {
   const c = lms();
@@ -122,6 +142,18 @@ export async function zorgVoorLabAccount(p) {
     if (p.crmLeadId && !bestaandLab.crm_lead_id) {
       const { error } = await c.from('hlms_lab_lead').update({ crm_lead_id: p.crmLeadId }).eq('id', bestaandLab.id);
       if (error) console.warn('[dfo-lms-lab-account] crm_lead_id bijzetten (soft):', error.message);
+    }
+    // Verlopen en via een (nieuwe) belofte terug? Dan een verse week — maar
+    // hoogstens één keer per VERLENG_NA_DAGEN, anders wordt elke heraanmelding
+    // een eindeloze trial.
+    if (magVerlengen(bestaandLab)) {
+      const van = new Date();
+      const { data: na, error } = await c.from('hlms_lab_lead')
+        .update({ toegang_van: van.toISOString(), toegang_tot: toegangTotVanaf(van) })
+        .eq('id', bestaandLab.id)
+        .select(LEAD_SELECT).single();
+      if (error) console.warn('[dfo-lms-lab-account] toegang verlengen (soft):', error.message);
+      else return { soort: 'bestaand_lab', authId: bestaandLab.auth_id, labLead: na, verlengd: true };
     }
     return { soort: 'bestaand_lab', authId: bestaandLab.auth_id, labLead: bestaandLab };
   }
@@ -167,7 +199,10 @@ export async function zorgVoorLabAccount(p) {
     utm: p.utm || {},
     toegang_tot: toegangTotVanaf(new Date()),
     is_test: !!p.isTest,
-  }).select('id, auth_id, email, voornaam, toegang_tot, crm_lead_id, sessie_geboekt_op').single();
+    product: p.product || 'the-lab',
+    bron: p.bron || null,
+    variant: p.variant || null,
+  }).select(LEAD_SELECT).single();
 
   if (leadFout) {
     // Een vers account zonder lab-lead-rij zou een trial zonder einddatum
