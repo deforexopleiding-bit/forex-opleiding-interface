@@ -526,7 +526,7 @@ export default async function handler(req, res) {
 
       summary.provisioning_retries++;
       const r = await belProvisioning({
-        email: row.email, voornaam: row.voornaam, soort: row.soort,
+        email: row.email, voornaam: row.voornaam, soort: row.soort, aanvraagId: row.id,
       });
 
       if (r.ok) {
@@ -741,7 +741,20 @@ Handmatige actie is nodig — controleer de lead in Leadsonderhoud → Toegang-a
       .is('dag6_sent_at', null)
       .lte('provisioned_at', grens)
       .limit(50);
+    // 26 okt 2026: een trial in het echte LMS (lab_aanmeldingen) krijgt zijn
+    // einde-van-de-trial-berichten van cron-lab-opvolging. Geen tweede dag-6.
+    const labMails = new Set();
+    const mails = [...new Set((rows || []).map((r) => String(r.email || '').toLowerCase()).filter(Boolean))];
+    if (mails.length) {
+      const { data: lab, error: labErr } = await supabaseAdmin.from('lab_aanmeldingen').select('email').in('email', mails);
+      if (labErr) console.warn('[cron-toegang-aanvragen] lab-trials lezen (soft):', labErr.message);
+      for (const l of lab || []) labMails.add(String(l.email || '').toLowerCase());
+    }
     for (const a of (rows || [])) {
+      if (labMails.has(String(a.email || '').toLowerCase())) {
+        if (await claimRow(a.id, 'dag6_sent_at')) summary.dag6_lab_overgeslagen = (summary.dag6_lab_overgeslagen || 0) + 1;
+        continue;
+      }
       // Atomic claim VÓÓR WA+mail. Race-loser slaat over. Bij dubbele
       // sends van dag-6 zou een lead 2 identieke check-in-berichten
       // krijgen — zelfde race-familie als de bevestiging + reminders.

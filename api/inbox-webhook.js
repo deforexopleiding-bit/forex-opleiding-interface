@@ -1538,7 +1538,7 @@ export async function verwerkWhatsAppWebhookBody(req, body, ctx = {}) {
                   // hebben geclaimd én er nog niet eerder is geprovisioneerd.
                   if (primClaimed && !match.provisioned_at) {
                     const r = await belProvisioning({
-                      email: match.email, voornaam: match.voornaam, soort: match.soort,
+                      email: match.email, voornaam: match.voornaam, soort: match.soort, aanvraagId: match.id,
                     });
                     traceEvents.push({ ...traceBase, stage: 'provisioning-call',
                       ok: r?.ok === true, status: r?.status || null, error: r?.error || null,

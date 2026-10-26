@@ -111,6 +111,7 @@ export async function verwerkLmsEnBerichten({ aanmeldingId, leadId, d }) {
       crmLeadId: leadId, hook: d.hook,
       utm: { source: d.utm_source, medium: d.utm_medium, campaign: d.utm_campaign, content: d.utm_content, term: d.utm_term },
       isTest: d.is_test,
+      product: d.product || LAB_SLUG, bron: d.bron || d.funnel || null, variant: d.variant || null,
     });
   } catch (e) {
     const code = e instanceof LabAccountFout ? e.code : 'lms_fout';
@@ -125,7 +126,7 @@ export async function verwerkLmsEnBerichten({ aanmeldingId, leadId, d }) {
 
   if (account.soort === 'heeft_toegang') {
     uit.resultaat = 'al_toegang';
-    const m = mailAlToegang({ voornaam: d.voornaam });
+    const m = mailAlToegang({ voornaam: d.voornaam, product: d.product || LAB_SLUG });
     uit.mail_status = (await stuurLabMail({ leadId, email: d.email, soort: 'lab-al-toegang', ...m })).status;
     return uit;
   }
@@ -142,16 +143,22 @@ export async function verwerkLmsEnBerichten({ aanmeldingId, leadId, d }) {
 
   const verlopen = !!account.labLead.toegang_tot && new Date(account.labLead.toegang_tot).getTime() < Date.now();
   const link = labLoginLink(sleutel, verlopen ? 'sessie' : 'start');
-  if (account.soort === 'nieuw') {
-    uit.resultaat = 'nieuw_account';
-    uit.mail_status = (await stuurLabMail({ leadId, email: d.email, soort: 'lab-welkom', ...mailWelkom({ voornaam: d.voornaam, link }) })).status;
-    uit.wa_status = (await stuurLabWhatsApp({
-      leadId, telefoon: d.telefoon_e164, toestemming: d.toestemming, soort: 'welkom',
-      waarden: { voornaam: d.voornaam, loginlink: link },
-    })).status;
+  const product = d.product || LAB_SLUG;
+  if (account.soort === 'nieuw' || account.verlengd) {
+    uit.resultaat = account.verlengd ? 'verlengd' : 'nieuw_account';
+    const welkom = mailWelkom({ voornaam: d.voornaam, link, product, toegangTot: account.labLead.toegang_tot });
+    uit.mail_status = (await stuurLabMail({ leadId, email: d.email, soort: product === LAB_SLUG ? 'lab-welkom' : `welkom-${product}`, ...welkom })).status;
+    // Kwam de lead via de WhatsApp-gate binnen, dan kreeg hij daar al "je
+    // inloggegevens staan in je mail" — geen tweede WhatsApp.
+    uit.wa_status = d.wa_al_bevestigd
+      ? 'gate_bevestigd'
+      : (await stuurLabWhatsApp({
+        leadId, telefoon: d.telefoon_e164, toestemming: d.toestemming, soort: 'welkom',
+        waarden: { voornaam: d.voornaam, loginlink: link },
+      })).status;
   } else {
     uit.resultaat = 'nieuwe_link';
-    const m = mailNieuweLink({ voornaam: d.voornaam, link, verlopen });
+    const m = mailNieuweLink({ voornaam: d.voornaam, link, verlopen, product });
     uit.mail_status = (await stuurLabMail({ leadId, email: d.email, soort: 'lab-nieuwe-link', ...m })).status;
   }
   return uit;
