@@ -135,7 +135,38 @@ export function voorbeeldEditie(over = {}) {
         { type: 'cadeau', props: {} },
       ],
     },
-    nieuwsbrief: voorbeeldTeaser(), stories: v1.stories, post: v1.post, vierkant: v1.vierkant, linkedin: v1.linkedin,
+    nieuwsbrief: voorbeeldTeaser(), ...voorbeeldSocial(),
+    ...over,
+  };
+}
+
+/** Social 2.0 (varianten zoals de Instagram-reeks). */
+export function voorbeeldSocial(over = {}) {
+  return {
+    stories: [
+      { rol: 'hook', variant: 'foto', eyebrow: 'Live training 22/10', titel: 'Sweep of break? **Jij beslist.**', tekst: 'Eén moment maakte het verschil.', beeld_asset_id: BEELD_FOTO },
+      { rol: 'nugget', variant: 'donker', eyebrow: 'De nugget', titel: 'Een wick is **geen break.**', tekst: 'Pas een body close verlegt de structuur.' },
+      { rol: 'bewijs', variant: 'kaart', eyebrow: 'Speel het zelf af', titel: 'De replay van **deze week**', tekst: 'Kaars per kaars.', blok_index: 1 },
+      { rol: 'cta', variant: 'licht', eyebrow: 'Nu online', titel: 'De volledige **weekeditie**', tekst: 'Gratis opname + replay.', sticker_tekst: 'Lees de weekeditie' },
+    ],
+    post: {
+      slides: [
+        { variant: 'foto', eyebrow: 'Live training 22/10', titel: 'De dollar draait. **Wij zagen het live.**', tekst: 'Swipe voor de short van de week.', beeld_asset_id: BEELD_FOTO },
+        { variant: 'donker', eyebrow: 'Stap 1 · H4', titel: 'Eerst **de context.**', tekst: 'Richting en locatie op H4, nog geen entry.' },
+        { variant: 'kaart', eyebrow: 'Sweep of break?', titel: 'Wat zou **jij** doen?', tekst: 'Speel de replay af op de pagina.', blok_index: 1 },
+        { variant: 'licht', eyebrow: 'Stap 2 · 15M', titel: 'Wacht op de **body close.**', tekst: 'Een wick alleen is geen break of structure.' },
+        { variant: 'data', eyebrow: 'Onze studenten', titel: 'Winrate in het **journal**', tekst: 'Over 6.881 journaltrades.', getal: { waarde: 48.5, suffix: '%', decimalen: 1, label: 'journal-winrate' } },
+        { variant: 'donker', eyebrow: 'Nu online', titel: 'De volledige **weekeditie.**', tekst: 'Gratis opname, replay en de rekensom.' },
+      ],
+      caption: 'De dollar draaide deze week, en we bouwden er live een short op.\n\nEén moment maakte het verschil: was het een sweep of een break?\n\nSpeel het zelf af in de weekeditie.',
+      hashtags: ['forex', 'trading', 'deforexopleiding'],
+    },
+    vierkant: { variant: 'donker', eyebrow: 'Weekeditie 22/10', titel: 'Een wick is **geen break.**', tekst: 'De volledige short staat online.' },
+    linkedin: {
+      tekst: 'Weten is niet hetzelfde als doen.\n\nDeze week kantelde de dollar en bouwden we in de live training een short op GBP/USD uit, van H4-context tot target.\n\nEén moment maakte het verschil: prijs zakte onder de low. Sweep of break? Wie op de wick instapt, staat vaak aan de verkeerde kant.\n\nDe regel is eenvoudig: pas een body close voorbij het niveau verlegt de structuur.\n\nIn de weekeditie kan je het moment zelf afspelen, kaars per kaars.',
+      hashtags: ['trading', 'forex'],
+      beeld: { variant: 'licht', eyebrow: 'De Weekeditie', titel: 'Weten is niet **hetzelfde** als doen.', tekst: 'Speel de replay van deze week af.' },
+    },
     ...over,
   };
 }

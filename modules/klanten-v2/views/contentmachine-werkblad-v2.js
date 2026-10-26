@@ -51,6 +51,8 @@
   function rerender() { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); }
   function teken(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; else rerender(); }
   const assetMap = () => Object.fromEntries((wb.assets || []).map((a) => [a.id, a]));
+  /** Social 2.0 (varianten, contentmachine-social2-v2.js) of de oude vorm? */
+  const s2 = () => !!(window.__cmSocial2 && window.__cmSocial2.isV2(wb.output));
 
   // ── Laden / openen ────────────────────────────────────────────────────────
   async function laad(id) {
@@ -196,6 +198,14 @@
     else delen.push(['NIEUWSBRIEF', 'Onderwerpen:', ...(n.onderwerpen || []).map((x, i) => `${String.fromCharCode(65 + i)}. ${x}`), `Preheader: ${n.preheader || ''}`,
       ...(n.blokken || []).map((b) => [`— ${BLOK_LABEL[b.type] || b.type}`, b.titel, b.vraag, strip(b.tekst), ...(b.stappen || []).map((s, i) => `${i + 1}. ${s.titel}: ${s.tekst}`), ...(b.opties || []).map((x, i) => `${String.fromCharCode(65 + i)}. ${x}`), b.getal ? `${b.getal} ${b.getal_label || ''}` : ''].filter(Boolean).join('\n')),
       n.ps ? `PS ${n.ps}` : ''].filter(Boolean).join('\n'));
+    if (s2()) {
+      const c = window.__cmSocial2.captions(o, wb.drop.slug);
+      const beeld = (b) => [b.eyebrow, strip(b.titel), b.tekst, b.getal ? `Getal: ${b.getal.prefix || ''}${b.getal.waarde}${b.getal.suffix || ''} ${b.getal.label || ''}` : ''].filter(Boolean).join('\n');
+      delen.push(['STORIES', ...(o.stories || []).map((s, i) => `${i + 1}. [${s.rol} · ${s.variant}]\n${beeld(s)}`), `Linksticker (${c.instagram_story_sticker}): ${c.instagram_story_link}`].join('\n\n'));
+      delen.push(['INSTAGRAM-CARROUSEL', ...((o.post || {}).slides || []).map((s, i) => `Slide ${i + 1} [${s.variant}]\n${beeld(s)}`), `Vierkant [${(o.vierkant || {}).variant}]\n${beeld(o.vierkant || {})}`, 'CAPTION:', c.instagram_post, `Link in bio: ${c.instagram_bio_link}`].join('\n\n'));
+      delen.push(['LINKEDIN', c.linkedin].join('\n'));
+      return delen.join('\n\n────────\n\n');
+    }
     delen.push(['STORIES', ...(o.stories || []).map((s, i) => `${i + 1}. [${ROL_LABEL[s.rol] || s.rol}] ${s.kicker} — ${s.titel}\n${s.tekst}\nSticker (${s.sticker}): ${s.sticker_tekst}`)].join('\n\n'));
     const post = o.post || {};
     delen.push(['INSTAGRAM-POST', ...(post.slides || []).map((s, i) => `Slide ${i + 1}: ${s.titel}\n${s.tekst}`), '', 'Caption:', post.caption, (post.hashtags || []).map((h) => (h.startsWith('#') ? h : '#' + h)).join(' '), '', `Vierkant: ${(o.vierkant || {}).titel} — ${(o.vierkant || {}).sub}`].join('\n'));
@@ -425,6 +435,7 @@
         <div style="font-size:12px;margin-bottom:6px"><b>${esc(wb.nbVoor || '')}</b><div style="color:var(--text-3)">${esc(n.preheader || '')}</div></div>${iframe(wb.nbHtml, 1100)}`
         .replace(/^/, `<div id="cm-wb-ghl">${ghlPaneel()}</div>${beeldPaneel}`);
     }
+    if (['stories', 'post', 'linkedin'].includes(wb.tab) && s2()) return window.__cmSocial2.voorbeeld(wb.tab, wb.drop.slug);
     if (wb.tab === 'stories' && social) return window.__cmSocialPaneel('stories') + `<div style="font-size:11px;color:var(--text-3);margin-top:6px">Laat onderaan ruimte voor de Instagram-sticker (${(o.stories || []).map((x, i) => `${i + 1}: ${esc(x.sticker)}`).join(' · ')}).</div>`;
     if (wb.tab === 'stories') return `<div class="cm-sv-rij">${(o.stories || []).map(storyKaart).join('')}</div><div style="font-size:11px;color:var(--text-3);margin-top:6px">Ruwe voorvertoning — de definitieve 1080×1920-beelden komen uit de social-rendering.</div>`;
     if (wb.tab === 'post') {
@@ -546,7 +557,13 @@
       ${grens.length ? '<div style="color:var(--text-3);margin-top:4px">De lijst wordt bijgewerkt bij Bewaar wijzigingen.</div>' : ''}</div></div>`;
   }
 
-  const EDITORS = { pagina: paginaEditor, nieuwsbrief: nieuwsbriefEditor, stories: storiesEditor, post: postEditor, linkedin: linkedinEditor };
+  // Social 2.0 (varianten zoals de Instagram-reeks): editors uit contentmachine-social2-v2.js.
+  const EDITORS = {
+    pagina: paginaEditor, nieuwsbrief: nieuwsbriefEditor,
+    stories: () => (s2() ? window.__cmSocial2.editor('stories') : storiesEditor()),
+    post: () => (s2() ? window.__cmSocial2.editor('post') : postEditor()),
+    linkedin: () => (s2() ? window.__cmSocial2.editor('linkedin') : linkedinEditor()),
+  };
 
   const CSS = `<style>
     .cm-wb-kol{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:12px;align-items:start}

@@ -222,6 +222,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   beeld: `controleerCijfers` blokkeert goedkeuren. genereer kent ook `{ blok:{index,type?,instructie?} }`.
   Werkblad: `views/contentmachine-weekeditie-v2.js` (editor uit het schema + de echte pagina in een iframe:
   www.deforexopleiding.nl/training/voorbeeld/<content_drops.voorbeeld_token>, noindex, geen tracking).
+  SOCIAL 2.0 (fase 4): elk beeld heeft een VARIANT zoals de IG-reeks (docs/contentmachine/v2/stijl-instagram):
+  foto (masterclass/team, full-bleed) · donker · licht (gouden marker) · data (één cijfer uit de feitenbank) · kaart
+  (frame van een blok via het blokframe). Schema's + controle + captions per kanaal: `api/_lib/contentmachine-social.js`
+  (stories 3-5 hook→cta met linksticker, carrousel 5-8, vierkant, LinkedIn 1080×1350 zonder link/hashtags in de
+  tekst, max 3 apart). Variatieregel: combinatie slide1|vierkant|story1|LinkedIn ≠ vorige 3. Renderer
+  `views/contentmachine-social2-v2.js` (logo, teller, eyebrow+lijn, @deforexopleiding.nl, SWIPE →); de oude
+  renderer geeft v2-drops door. Links zet de CODE (?src=ig-story / ig-bio / linkedin), nooit het model; de
+  browser-kopie van `captions()` wordt door tests/contentmachine-social2.test.js gelijk gehouden.
   v1-drops (zonder blokken) blijven werken. 12 masterclassfoto's in de seed (toestemming publiek, geen namen).
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.

@@ -22,11 +22,14 @@ import { modelKeten } from './contentmachine-ai.js';
 import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
 import { FEITENBANK, controleerCijfers } from './feitenbank.js';
 import {
-  FORMATS, FORMAT_KEYS, STORIES_SCHEMA, POST_SCHEMA, VIERKANT_SCHEMA, LINKEDIN_SCHEMA,
+  FORMATS, FORMAT_KEYS,
   valideerOutput, controleerGrenzen, grensOpties, nabewerk, teGelijk, systeemPrompt as v1Systeem,
 } from './contentmachine-generator.js';
 import { trainingDatum, datumVoluit } from './contentmachine-core.js';
 import { isTeaser } from './nieuwsbrief-render.js';
+import {
+  STORIES_V2_SCHEMA, POST_V2_SCHEMA, BEELD_V2_SCHEMA, LINKEDIN_V2_SCHEMA, socialGetallen, socialCombinatie, socialVariatieFout, isSocialV1,
+} from './contentmachine-social.js';
 import {
   BLOKKEN, BLOK_INFO, BLOK_TYPES, THEMAS, HERO_VARIANTEN, INTERACTIEF, NUGGETS,
   blokSchema, structuurFouten, editieFouten, combinatie, combinatieVrij, blokGebruik, editieSamenvatting,
@@ -153,8 +156,9 @@ export function schrijverSchema(regie, { onderdelen = null } = {}) {
     },
     required: ['seo_titel', 'seo_beschrijving', 'og_titel', 'og_beschrijving', 'blokken'],
   };
-  const alle = { pagina, nieuwsbrief: TEASER_SCHEMA, stories: STORIES_SCHEMA, post: POST_SCHEMA, vierkant: VIERKANT_SCHEMA, linkedin: LINKEDIN_SCHEMA };
-  const keys = onderdelen || Object.keys(alle);
+  // Social 2.0 (bouwopdracht §4): elk beeld heeft een variant zoals de Instagram-reeks.
+  const alle = { pagina, nieuwsbrief: TEASER_SCHEMA, stories: STORIES_V2_SCHEMA, post: POST_V2_SCHEMA, vierkant: { ...BEELD_V2_SCHEMA, description: 'Vierkant beeld 1080×1080 (feed/delen).' }, linkedin: LINKEDIN_V2_SCHEMA };
+  const keys = onderdelen ? [...new Set(onderdelen.flatMap((k) => (k === 'post' ? ['post', 'vierkant'] : [k])))] : Object.keys(alle);
   return { type: 'object', properties: Object.fromEntries(keys.map((k) => [k, alle[k]])), required: keys };
 }
 
@@ -198,9 +202,14 @@ export function valideerV2(o, { metVideo, assets = [], vorige = [], regie = null
     if (!vrij.ok && vrij.botsing) fouten.push(`combinatie gelijk aan ${vrij.botsing}`);
   }
   if (check('nieuwsbrief') && o && o.nieuwsbrief && !isTeaser(o.nieuwsbrief)) fouten.push('nieuwsbrief: lever de teaser (opener, nugget, beeld_blok_index, open_lus, ps), geen blokken');
+  // Nieuwsbrief + social (valideerOutput kiest zelf: social 2.0 met varianten, of de v1-vorm van oudere edities).
   const andere = ['nieuwsbrief', 'stories', 'post', 'linkedin'].filter(check);
-  if (andere.length) fouten.push(...valideerOutput(o, { assetIds: assets.map((a) => a.id), onderdelen: andere }).fouten);
-  const cijfers = check('pagina') ? controleerCijfers(o && o.pagina, cijferBronnen(input, assets)) : [];
+  if (andere.length) fouten.push(...valideerOutput(o, { assets, onderdelen: andere }).fouten);
+  const social = andere.filter((k) => k !== 'nieuwsbrief');
+  if (!onderdelen) { const v = socialVariatieFout(o, vorige); if (v) fouten.push(v); }
+  const ONDERDEEL = { story: 'stories', post: 'post', vierkant: 'post', linkedin: 'linkedin' };
+  const extra = social.length && !isSocialV1(o) ? socialGetallen(o).filter((x) => social.includes(ONDERDEEL[x.pad.split('[')[0]])) : [];
+  const cijfers = check('pagina') || extra.length ? controleerCijfers(check('pagina') ? o && o.pagina : null, cijferBronnen(input, assets), extra) : [];
   return { fouten, cijfers };
 }
 
@@ -272,7 +281,18 @@ Je bent nu de SCHRIJVER. De regisseur koos al het format, het thema, de hero, de
 - vooruitblik: scenario-taal ("als…, dan…"), geen zekerheden.
 - cadeau: props {} (vaste tekst). video-poort/inschrijven: enkel eyebrow/titel/intro (het formulier is vast).
 - NIEUWSBRIEF = TEASER naar de Weekeditie (de pagina ís de volledige nieuwsbrief online): kort (130-240 woorden samen), opener in Maxims stem, ÉÉN nugget die op zich al waarde heeft (= de nugget van de regie), beeld_blok_index = het interactieve blok waarvan het mailbeeld een frame is, een open lus (de vraag die pas op de pagina sluit), en een PS met het cadeau. Geen blokkenlijst, geen links in de tekst: de knop "Lees de volledige weekeditie" staat vast in de mail. Het format van de week kleurt de toon en de invalshoek (trade ontleed → één stap als nugget; wat zou jij doen → de vraag; het bewijs → het cijfer).
-- Stories, post, LinkedIn: zelfde kernidee en nugget.
+- SOCIAL = de stijl van de Instagram-reeks van DFO (46 posts). Elk beeld (story, carrousel-slide, vierkant, LinkedIn-beeld) heeft een VARIANT:
+  · foto — een masterclass-/teamfoto full-bleed met donker verloop; kop onderaan. Enkel met een beeld van soort masterclass/team/community.
+  · donker — navy effen, grote vette kop, 1-3 gouden accentwoorden (**…**).
+  · licht — lichte achtergrond, navy kop, gouden marker op het accent.
+  · data — één ENORM getal (getal.waarde + label, enkel een echt cijfer uit de feitenbank/invoer) + korte kop.
+  · kaart — een frame van een blok van de pagina als UI-kaart (blok_index = het blok; bij voorkeur het interactieve blok of een data-blok).
+  Elk beeld: eyebrow (klein label, hoofdletters, 2-5 woorden), titel (kort, max ±9 woorden, accentwoorden tussen **), tekst (1-2 korte zinnen). Geen links of @-handles in het beeld (die zet het systeem).
+- Stories (3-5, 1080×1920): hook → nugget → bewijs (data/kaart/foto) → cta (rol cta, sticker_tekst "Lees de weekeditie" of iets kort). Zelfde kernidee en nugget als de pagina.
+- Carrousel (5-8 slides, 1080×1350): slide 1 = hook die doet swipen, dan het verhaal in stappen (één idee per slide), laatste = "de volledige weekeditie staat online" (link in bio). Wissel varianten af zoals de reeks (bv. foto → donker → kaart → licht → data → donker). Caption: hook in de eerste regel, korte alinea's, uitnodiging naar de weekeditie; GEEN link (systeem: "link in bio"); max 5 hashtags apart.
+- Vierkant (1080×1080): één sterk beeld voor feed/delen.
+- LinkedIn: professioneler en langer dan Instagram: hook (1-2 regels), 3-5 korte alinea's gescheiden door een lege regel, één inzicht, eindig met een uitnodiging om de weekeditie te lezen. GEEN link en GEEN hashtags in de tekst (max 3 hashtags apart; de link met src=linkedin zet het systeem). Plus één beeld (variant naar keuze, 1080×1350).
+- De combinatie van varianten (slide 1 | vierkant | story 1 | LinkedIn-beeld) moet anders zijn dan bij elk van de vorige 3 edities (staat bij LAATSTE EDITIES).
 
 ${gemeenschappelijk()}`;
 }
@@ -306,7 +326,8 @@ export function weekContext({ drop, input, vorige = [], toegelaten, paginaUrl, b
   regels.push('', `TOEGELATEN FORMATS: ${toegelaten.join(', ')}`);
   regels.push('', 'LAATSTE EDITIES (nieuwste eerst; niet herhalen):', vorige.length ? vorige.map((d) => {
     const e = editieSamenvatting(d);
-    return `- ${e.slug} · format ${e.format || '—'} · thema ${e.thema || 'v1'} · hero ${e.hero || 'v1'} · blokken ${e.blokken.join(', ') || 'v1-pagina'}\n  hook: ${e.hook || '—'} · onderwerpen: ${e.onderwerpen.join(' | ') || '—'}`;
+    const sc = socialCombinatie(d.output);
+    return `- ${e.slug} · format ${e.format || '—'} · thema ${e.thema || 'v1'} · hero ${e.hero || 'v1'} · blokken ${e.blokken.join(', ') || 'v1-pagina'}${sc ? ` · social (slide1|vierkant|story1|linkedin) ${sc}` : ''}\n  hook: ${e.hook || '—'} · onderwerpen: ${e.onderwerpen.join(' | ') || '—'}`;
   }).join('\n') : 'Nog geen.');
   regels.push('', 'GEBRUIK PER BLOK (laatste 6 edities): ' + Object.entries(gebruik).map(([k, v]) => `${k} ${v.aantal}×${v.laatst ? ' (laatst ' + v.laatst + ')' : ''}`).join(' · '));
   regels.push('', beelden.length ? 'BEELDEN (enkel deze id\'s):' : 'Geen beelden.');

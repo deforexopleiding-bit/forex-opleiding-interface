@@ -383,6 +383,12 @@
    * assets: [{id, publieke_url}] — enkel de beelden die de output gebruikt worden geladen.
    */
   async function renderAlles({ drop, output, assets, stijl }) {
+    // Contentmachine 2.0: varianten zoals de Instagram-reeks (contentmachine-social2-v2.js).
+    if (window.__cmSocial2 && window.__cmSocial2.isV2(output)) {
+      const LABEL = { vierkant: 'Vierkant 1080', linkedin: 'LinkedIn 1080×1350', og: 'Deelbeeld (OG) 1200×630' };
+      const l = await window.__cmSocial2.renderAlles({ drop, output, assets });
+      return { stijl: 0, v2: true, beelden: l.map((b) => ({ ...b, label: LABEL[b.naam] || b.naam.replace(/^story-/, 'Story ').replace(/^post-/, 'Slide ') })) };
+    }
     await laadFonts();
     const map = Object.fromEntries((assets || []).map((a) => [a.id, a]));
     const beeld = async (id) => (id && map[id] ? laadBeeld(map[id].publieke_url) : null);
@@ -474,7 +480,7 @@
   const sv = window.__cmSv = window.__cmSv || { sleutel: null, bezig: false, stijl: null, beelden: [], fout: null, opslaan: false };
 
   function wbState() { return window.__cmWerkblad || null; }
-  function sleutelVan(wb) { return wb && wb.drop ? `${wb.drop.id}|${wb.drop.versie}|${JSON.stringify(wb.output && [wb.output.stories, wb.output.post, wb.output.vierkant, wb.output.linkedin, wb.output.pagina && [wb.output.pagina.hero_kicker, wb.output.pagina.hero_titel, wb.output.pagina.hero_accent]])}|${sv.stijl}` : null; }
+  function sleutelVan(wb) { return wb && wb.drop ? `${wb.drop.id}|${wb.drop.versie}|${JSON.stringify(wb.output && [wb.output.stories, wb.output.post, wb.output.vierkant, wb.output.linkedin, wb.output.pagina && [wb.output.pagina.hero_kicker, wb.output.pagina.hero_titel, wb.output.pagina.hero_accent, wb.output.pagina.thema, wb.output.pagina.og_beschrijving, wb.output.pagina.blokken]])}|${sv.stijl}` : null; }
 
   async function zorgVoorRender() {
     const wb = wbState();
@@ -484,7 +490,7 @@
     sv.bezig = true; sv.fout = null;
     try {
       const r = await renderAlles({ drop: wb.drop, output: wb.output, assets: wb.assets, stijl: sv.stijl == null ? undefined : sv.stijl });
-      sv.beelden = r.beelden; sv.stijl = r.stijl; sv.sleutel = sleutelVan(wb);
+      sv.beelden = r.beelden; sv.stijl = r.stijl; sv.v2 = !!r.v2; sv.sleutel = sleutelVan(wb);
     } catch (e) { sv.fout = e && e.message ? e.message : 'Renderen mislukt'; console.error('[contentmachine-social] renderen mislukt:', e); }
     sv.bezig = false;
     const el = document.getElementById('cm-social');
@@ -502,8 +508,8 @@
   function paneelInhoud(filter) {
     const wb = wbState();
     const kop = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <span style="font-size:12px;color:var(--text-2)">Stijl: <b>${esc(STIJLEN[sv.stijl] || '…')}</b></span>
-      <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__cmSocialStijl()">Andere stijl</button>
+      ${sv.v2 ? '<span style="font-size:12px;color:var(--text-2)">Varianten per beeld (links aan te passen)</span>' : `<span style="font-size:12px;color:var(--text-2)">Stijl: <b>${esc(STIJLEN[sv.stijl] || '…')}</b></span>
+      <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__cmSocialStijl()">Andere stijl</button>`}
       <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__cmSocialZip()">⬇ Alle beelden (zip)</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__cmSocialOpslaan()" ${sv.opslaan ? 'disabled' : ''}>${sv.opslaan ? 'Opslaan…' : 'Opslaan in Storage'}</button>
       ${wb && wb.output && wb.output.social && wb.output.social.opgeslagen_op ? `<span style="font-size:11px;color:var(--text-3)">opgeslagen ${esc(new Date(wb.output.social.opgeslagen_op).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</span>` : ''}</div>`;

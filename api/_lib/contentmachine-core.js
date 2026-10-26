@@ -260,7 +260,7 @@ export function isEigenPad(pad) {
 }
 
 /** Namen van de social-beelden (fase 3): story-1..5, post-1..7, vierkant, linkedin, og. */
-export const SOCIAL_NAAM_RE = /^(story-[1-5]|post-[1-7]|vierkant|linkedin|og|nieuwsbrief)$/;
+export const SOCIAL_NAAM_RE = /^(story-[1-5]|post-[1-8]|vierkant|linkedin|og|nieuwsbrief)$/;
 export function socialPad(slug, naam) {
   if (!SLUG_RE.test(String(slug || '')) || !SOCIAL_NAAM_RE.test(String(naam || ''))) return null;
   return `drops/${slug}/social/${naam}.png`;
