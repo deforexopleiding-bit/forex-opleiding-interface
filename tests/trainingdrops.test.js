@@ -143,8 +143,9 @@ test('leads-v2: bronLabel herkent het training-patroon (één regel, niet per we
   const m = src.match(/const TRAINING_BRON_RE = (\/.+\/);/);
   assert.ok(m, 'TRAINING_BRON_RE in leads-v2.js');
   const re = new Function('return ' + m[1])();
-  assert.deepEqual(re.exec('training-22-10-26').slice(1), ['22', '10', '26']);
-  assert.match(src, /'Live training ' \+ t\[1\] \+ '\/' \+ t\[2\] \+ '\/' \+ t\[3\]/);
+  assert.deepEqual(re.exec('training-22-10-26').slice(1), ['training', '22', '10', '26', undefined]);
+  assert.deepEqual(re.exec('drop-22-10-26-2').slice(1), ['drop', '22', '10', '26', '2']);
+  assert.match(src, /\(t\[1\] === 'drop' \? 'Drop ' : 'Live training '\) \+ t\[2\]/);
   assert.doesNotMatch(src, /'training-22-10-26'/);
 });
 
@@ -296,7 +297,7 @@ test('endpoint: leest training-leads + events (paging), haalt leads met latere b
   assert.deepEqual(d.lead_lijst.map((l) => l.id).sort(), ['L1', 'L9']);
   assert.equal(d.leads_per_kanaal.find((k) => k.kanaal === 'ig-bio').n, 1);
   const evQ = db.log.filter((q) => q.tabel === 'funnel_events');
-  assert.equal(evQ.length, 2);
+  assert.equal(evQ.length, 3, '2 pagina\'s training-% + 1 pagina drop-%');
   assert.ok(evQ[1].filters.some(([op, c]) => op === 'gt' && c === 'id'));
   assert.ok(evQ[0].filters.some(([op, c, v]) => op === 'like' && c === 'variant' && v === 'training-%'));
   assert.match(evQ[0].kol, /src:meta->>src/);
@@ -498,7 +499,7 @@ test('bronlabels van afspraken: training-* wordt "Live training dd/mm/jj"', asyn
   assert.match(lees('api/leadsonderhoud-opstartsessies-detail.js'), /let bronLabel = trainingLabel\(row\.booking_source\)/);
   assert.match(lees('api/display-metrics.js'), /trainingLabel\(a\.booking_source\) \|\| a\.booking_source/);
   // Chips in Kennismakingsgesprekken en Daves opvolging-agenda (patroon, geen regel per week).
-  assert.match(lees('modules/klanten-v2/views/leadsonderhoud-v2.js'), /const _LS_TRAINING_RE = \/\^training-/);
+  assert.match(lees('modules/klanten-v2/views/leadsonderhoud-v2.js'), /const _LS_TRAINING_RE = \/\^\(\?:training\|drop\)-/);
   assert.match(lees('modules/klanten-v2/views/opvolging-v2.js'), /data-bron="training"/);
 });
 
@@ -508,4 +509,17 @@ test('view: kolom Call in de leadlijst en de cadeau-cijfers', () => {
   assert.match(view, /Cadeau-klik/);
   assert.match(view, /<th style="padding:8px 12px">Call<\/th>/);
   assert.match(view, />geen<\/span>/);
+});
+
+test('Contentmachine: drop-<dd-mm-jj> en een volgnummer horen bij dezelfde familie', () => {
+  assert.ok(B.isTrainingBron('drop-22-10-26'));
+  assert.ok(B.isTrainingBron('training-22-10-26-2'));
+  assert.ok(!B.isTrainingBron('drop-22-10-26-12'));
+  assert.ok(!B.isTrainingBron('drops-22-10-26'));
+  assert.equal(B.trainingLabel('drop-22-10-26'), 'Drop 22/10/26');
+  assert.equal(B.trainingLabel('training-22-10-26-2'), 'Live training 22/10/26 (2)');
+  assert.equal(B.trainingSlug('drop-22-10-26-2'), '22-10-26-2');
+  assert.equal(B.trainingDatum('drop-29-10-26'), '2026-10-29');
+  assert.equal(B.trainingLinks('drop-29-10-26').live, 'https://training.deforexopleiding.nl/29-10-26');
+  assert.deepEqual(B.TRAINING_BRON_PREFIXEN, ['training-', 'drop-']);
 });

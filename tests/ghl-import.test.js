@@ -170,7 +170,7 @@ test('bedrading: leads-list, leads-v2, popup, tellingen, SQL, vercel.json', () =
   const mb = lees('modules/klanten-v2/views/_massa-bericht.js');
   assert.match(mb, /if \(f\.import_batch\) uit\.import_batch = \[Number\(f\.import_batch\)\];/);
   assert.match(mb, /Import-leads hebben geen toestemmingsvinkje/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/leads-v2\.js\?v=36"/);
+  assert.match(lees('modules/klanten-v2/index.html'), /views\/leads-v2\.js\?v=37"/);
   assert.match(lees('api/_lib/leads-per-traject-compute.js'), /if \(row && \(row\.bron === 'Import' \|\| row\.bron === 'Import-telefoon'\)\) continue;/);
   assert.match(lees('api/_lib/aanmeldingen-per-funnel.js'), /l\.bron !== 'Import' && l\.bron !== 'Import-telefoon'/);
   const sql = lees('docs/sql-migrations/2026-10-26-leads-ghl-import.sql');

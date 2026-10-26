@@ -192,6 +192,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   één keer opnieuw. Grens-overtredingen blokkeren Goedkeuren (server). Elke bewaring = nieuwe versie
   (`content_drop_versies`, optimistisch op `versie`). Nieuwsbrief-HTML: `api/_lib/nieuwsbrief-render.js`
   (puur, één functie per bloktype, utm_source=nieuwsbrief). Werkblad: `views/contentmachine-werkblad-v2.js`.
+  SOCIAL (fase 3): `views/contentmachine-social-v2.js` tekent op canvas (fonts zelf-gehost in
+  img/contentmachine/fonts), zip zonder externe lib, opslag drops/<slug>/social/<naam>.png → output.social.
+  WEBSITE (fase 4): dfo-website leest gepubliceerde drops (service-key, ISR 60 s) en valt terug op
+  lib/trainingen.ts. Bron/variant-familie is nu `(training|drop)-dd-mm-jj(-n)` (`api/_lib/training-bron.js`
+  + browser-kopieën in leads-v2/opvolging-v2/leadsonderhoud-v2): `drop-*` = update-drop zonder video
+  ("Drop dd/mm/jj"), `-2` = tweede drop die dag. Trainingdrops leest beide prefixen. funnel_events-CHECK
+  uitgebreid (dfo-website docs/sql-migrations/2026-10-26-funnel-events-varianten-drops.sql, gedraaid).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

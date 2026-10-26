@@ -54,7 +54,7 @@ const FUNNEL_TEGELS = Object.freeze([
 /** Overig-delen met funnelmeting + nieuwe leads. */
 const FUNNEL_OVERIG = Object.freeze([
   { key: 'strategiescan', variant: (v) => v.startsWith('strategiescan-'), lead: (l) => laag(l.traject) === 'strategiescan' || laag(l.bron).startsWith('strategiescan-') },
-  { key: 'training', variant: (v) => /^training-\d{2}-\d{2}-\d{2}$/.test(v), lead: (l) => /^training-\d{2}-\d{2}-\d{2}$/.test(laag(l.bron)) },
+  { key: 'training', variant: (v) => /^(training|drop)-\d{2}-\d{2}-\d{2}(-\d)?$/.test(v), lead: (l) => /^(training|drop)-\d{2}-\d{2}-\d{2}(-\d)?$/.test(laag(l.bron)) },
 ]);
 
 export const TEGEL_LABELS = Object.freeze({
