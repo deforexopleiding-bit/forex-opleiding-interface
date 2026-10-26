@@ -311,12 +311,14 @@ export default async function handler(req, res) {
                 until: nlDateString(monthEnd),
                 includeRecentIds: true,
               }),
-      /*20 */ // Upcoming events (top 2 published, starts_at >= now)
+      /*20 */ // Upcoming events (published, starts_at >= now). Ruimer ophalen zodat
+              //   ze samen met de webinars (eigen tabel) de kaart vullen; pas na het
+              //   samenvoegen/sorteren kappen we af.
               supabaseAdmin.from('events')
                 .select('id, title, starts_at, location, capacity')
                 .eq('status', 'published')
                 .gte('starts_at', new Date().toISOString())
-                .order('starts_at', { ascending: true }).limit(2),
+                .order('starts_at', { ascending: true }).limit(8),
       /*21 */ // Streak (helper doet 2 queries intern)
               computeSalesStreak({ supabaseAdmin, todayDayStart: dayStart }),
       /*22 */ // Event-bellijst: attendees waarvoor vandaag een bel-uitkomst is
@@ -634,17 +636,58 @@ export default async function handler(req, res) {
       ? Math.max(...monthRecent.map(s => Number(s.amount_incl || 0)))
       : null;
 
-    // Events top 2 + attendee-count via getConfirmedCount + safeAwait per event
-    // (één count-fout degradeert alleen die tegel, niet het hele bord).
-    const evRaw = (eventsRes.data || []).slice(0, 2);
+    // ── Komende events = fysieke events (events-tabel) + webinars (eigen
+    //    webinar_sessies-tabel). Samengevoegd, gesorteerd op datum, en afgekapt
+    //    op wat in de kaart past ("vol is vol"). ──────────────────────────────
+    const EVENTS_MAX = 8;   // kaart-vulling; overvloed clipt in de UI
+    // Fysieke events + confirmed-count per event (safeAwait per event: één
+    // count-fout degradeert alleen die rij, niet het hele bord).
+    const evRaw = (eventsRes.data || []).slice(0, EVENTS_MAX);
     const evCounts = await Promise.all(evRaw.map((e, i) =>
       safeAwait(getConfirmedCount(e.id), 0, 'eventCount#' + i)
     ));
-    const eventsOut = evRaw.map((e, i) => ({
+    const physicalEvents = evRaw.map((e, i) => ({
       id: e.id, title: e.title, starts_at: e.starts_at,
       location: e.location || '', capacity: e.capacity || null,
       attendee_count: evCounts[i],
     }));
+    // Webinars: komende geplande sessies (webinar_sessies) + reeks-titel. Online,
+    //   dus locatie = "Online · Zoom". Aanmeldingen = niet-test rijen per sessie.
+    const webSessRes = await safeAwait(
+      supabaseAdmin.from('webinar_sessies')
+        .select('id, starts_at, webinar_reeksen(titel)')
+        .eq('status', 'gepland').gte('starts_at', new Date().toISOString())
+        .order('starts_at', { ascending: true }).limit(EVENTS_MAX),
+      { data: [] }, 'webinarSessies'
+    );
+    const webSess = webSessRes.data || [];
+    const webCountBySessie = {};
+    if (webSess.length) {
+      const sessIds = webSess.map(s => s.id);
+      const webAanmRes = await safeAwait(
+        supabaseAdmin.from('webinar_aanmeldingen').select('sessie_id')
+          .in('sessie_id', sessIds).eq('is_test', false),
+        { data: [] }, 'webinarAanmeldingen'
+      );
+      for (const r of (webAanmRes.data || [])) {
+        if (r.sessie_id) webCountBySessie[r.sessie_id] = (webCountBySessie[r.sessie_id] || 0) + 1;
+      }
+    }
+    const webinarEvents = webSess.map(s => {
+      const reeks = Array.isArray(s.webinar_reeksen) ? s.webinar_reeksen[0] : s.webinar_reeksen;
+      return {
+        id: s.id,
+        title: (reeks && reeks.titel) || 'Webinar',
+        starts_at: s.starts_at,
+        location: 'Online · Zoom',
+        capacity: null,
+        attendee_count: webCountBySessie[s.id] || 0,
+      };
+    });
+    // Samenvoegen + sorteren op startdatum (eerstvolgende bovenaan), afkappen.
+    const eventsOut = physicalEvents.concat(webinarEvents)
+      .sort((a, b) => (a.starts_at < b.starts_at ? -1 : (a.starts_at > b.starts_at ? 1 : 0)))
+      .slice(0, EVENTS_MAX);
 
     // ── Feed sales derive uit salesCompute.recent_ids ─────────────────────
     // Fix 1 (2026-08-26): oude losse deals-query miste test-deal- +
