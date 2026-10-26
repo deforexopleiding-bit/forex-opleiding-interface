@@ -490,14 +490,16 @@
       return '<div class="act' + (r[2] === 'warn' ? ' warn' : '') + '"><div class="l">' + r[0] + '</div><div class="v num">' + fmtInt(r[1]) + '</div></div>';
     }).join('');
 
-    /* Beltijd per medewerker (topbeller vandaag), uit call_log. */
+    /* Beltijd per medewerker (topbeller vandaag), uit call_log. Pill is ALTIJD
+       zichtbaar: met gesprekken toont 'ie de topbeller + minuten, anders dat er
+       nog niet gebeld is (dus nooit weglaten). */
     var ct = d.call_time_today;
     var pill = el('belpill');
+    pill.style.display = '';
     if (ct && ct.top && ct.top.minutes > 0) {
-      pill.style.display = '';
       pill.textContent = '⏱ ' + ct.top.user_label + ': ' + ct.top.minutes + ' min gebeld';
     } else {
-      pill.style.display = 'none';
+      pill.textContent = '⏱ Nog niet gebeld vandaag';
     }
   }
 
