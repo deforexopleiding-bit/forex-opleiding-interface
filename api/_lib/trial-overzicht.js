@@ -7,7 +7,10 @@
 //
 //   * de KPI's per product: leads → ingelogd → video gezien → Lab gestart →
 //     Lab afgewerkt → sessie geboekt → klant (testleads tellen nooit mee);
-//   * per lead de status-chips, dagen over, laatste motorbericht en belpoging;
+//   * per lead de status-chips, dagen over, laatste bericht (motor, of anders
+//     de welkomstmail van de aanmelding) en laatste belpoging;
+//   * wie al student is (resultaat al_toegang, geen lab-account) staat apart
+//     (al_student): niet in de KPI's, niet in de bellijst;
 //   * de BELLIJST: wie nu het meest waard is om te bellen.
 //       1. warm (Lab afgewerkt of ≥ 2 video's) en geen sessie
 //       2. ingelogd zonder sessie
@@ -72,6 +75,11 @@ export function sorteerBellijst(a, b, nu = Date.now()) {
   return String(b.aangemeld).localeCompare(String(a.aangemeld));
 }
 
+/** Het nieuwste van een paar { op }-berichten (null's genegeerd). PURE. */
+function nieuwste(...lijst) {
+  return lijst.filter(Boolean).sort((x, y) => String(y.op).localeCompare(String(x.op)))[0] || null;
+}
+
 const DATUM = new Intl.DateTimeFormat('nl-BE', { timeZone: 'Europe/Brussels', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const datumLabel = (iso) => { try { return iso ? DATUM.format(new Date(iso)) : null; } catch { return null; } };
 
@@ -82,7 +90,7 @@ const datumLabel = (iso) => { try { return iso ? DATUM.format(new Date(iso)) : n
  * @param {Map} [p.leadsPerEmail]            email → { id, voornaam, achternaam, telefoon_e164, toestemming, status, customer_id }
  * @param {Set} [p.geboektAgenda]            e-mails met een Lab-strategiesessie in de agenda
  * @param {Set} [p.afgemeld]                 e-mails die zich afmeldden
- * @param {Map} [p.laatsteMotor]             aanmelding_id → { stap, kanaal, status, op }
+ * @param {Map} [p.laatsteMotor]             email (of aanmelding_id) → { stap, kanaal, op }
  * @param {Map} [p.laatsteBel]               email → { op, resultaat, notitie, door_naam }
  * @param {{product?:string, hook?:string, variant?:string}} [p.filter]
  * @param {number} [p.nu]
@@ -91,14 +99,21 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
   // Eén rij per e-mail: de EERSTE aanmelding in de periode bepaalt de belofte.
   const eerste = new Map();
   const touches = new Map();
+  const alToegang = new Set();
+  const welkom = new Map(); // email → eerste verstuurde welkomstmail (aanmelding)
   for (const a of [...aanmeldingen].sort((x, y) => String(x.aangemaakt).localeCompare(String(y.aangemaakt)))) {
     const em = String(a.email || '').toLowerCase();
     if (!em) continue;
     touches.set(em, (touches.get(em) || 0) + 1);
     if (!eerste.has(em)) eerste.set(em, { ...a, ...herkomstVanAanmelding(a) });
+    if (a.resultaat === 'al_toegang') alToegang.add(em);
+    if (a.mail_status === 'verstuurd' && !welkom.has(em)) {
+      welkom.set(em, { stap: a.resultaat === 'al_toegang' ? 'al-toegang' : a.resultaat === 'nieuwe_link' ? 'nieuwe-link' : 'welkom', kanaal: 'mail', op: a.aangemaakt });
+    }
   }
 
   const rijen = [];
+  const alStudent = [];
   for (const [em, a] of eerste) {
     const st = standPerEmail.get(em) || null;
     const ll = st?.labLead || null;
@@ -108,6 +123,16 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
     if (filter.hook && String(a.hook || '') !== filter.hook) continue;
     const variant = a.variant || null;
     if (filter.variant && String(variant || '') !== filter.variant) continue;
+    // Al student / bestaande LMS-identiteit: geen lab-account, dus geen trial.
+    // Apart tonen, buiten de KPI's en de bellijst.
+    if (!ll && alToegang.has(em)) {
+      alStudent.push({
+        email: em, lead_id: a.lead_id || lead?.id || null, naam: [lead?.voornaam || a.voornaam, lead?.achternaam || a.achternaam].filter(Boolean).join(' ') || em,
+        product, product_label: productLabel(product), bron: a.bron || null, aangemeld: a.aangemaakt,
+        is_test: a.is_test === true, chips: [{ code: 'al_student', label: 'Al student' }],
+      });
+      continue;
+    }
     const totMs = ll?.toegang_tot ? Date.parse(ll.toegang_tot) : NaN;
     const gestart = isGestart(st?.sessie);
     const afgerond = isAfgerond(st?.sessie);
@@ -137,7 +162,7 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
       is_test: a.is_test === true || ll?.is_test === true,
       geen_account: !ll,
       resultaat: a.resultaat || null,
-      laatste_bericht: laatsteMotor.get(a.id) || null,
+      laatste_bericht: nieuwste(laatsteMotor.get(em), laatsteMotor.get(a.id), welkom.get(em)),
       laatste_belpoging: laatsteBel.get(em) || null,
       score: labScore({ ingelogd, videos, gestart, afgerond }),
     };
@@ -165,7 +190,8 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
 
   rijen.sort((a, b) => String(b.aangemeld).localeCompare(String(a.aangemeld)));
   const bellijst = rijen.filter((r) => r.bel_groep).sort((a, b) => sorteerBellijst(a, b, nu));
-  return { kpi: [...per.values(), totaal], leads: rijen, bellijst };
+  alStudent.sort((a, b) => String(b.aangemeld).localeCompare(String(a.aangemeld)));
+  return { kpi: [...per.values(), totaal], leads: rijen, bellijst, al_student: alStudent };
 }
 
 /** CSV van de bellijst (puntkomma, voor Excel NL/BE). PURE. */

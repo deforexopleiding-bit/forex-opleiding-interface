@@ -130,3 +130,9 @@ test('bedrading: cron elk kwartier, live-schakelaar standaard uit, noodstop', ()
   assert.match(src, /LEADSONDERHOUD_UIT/);
   assert.match(src, /if \(!verslag\.live\) \{ verslag\.droog\.push/);
 });
+
+test('schakelaar: enkel super_admin/admin/manager/sales (Maxim, Dave) — niet mentor of setter', async () => {
+  const src = readFileSync(new URL('../api/lab-opvolging-instellingen.js', import.meta.url), 'utf8');
+  assert.match(src, /SCHAKELAAR_ROLLEN = Object\.freeze\(\['super_admin', 'admin', 'manager', 'sales'\]\)/);
+  assert.ok(src.indexOf('if (!magSchakelen) return res.status(403)') < src.indexOf(".upsert({ key: SLEUTEL"));
+});

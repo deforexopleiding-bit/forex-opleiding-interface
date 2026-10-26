@@ -64,3 +64,13 @@ test('schakelaar zet live via POST', async () => {
   await w.__trialOpvLive(true);
   assert.deepEqual(calls.at(-1), { url: '/api/lab-opvolging-instellingen', body: { live: true } });
 });
+
+test('zonder recht om te schakelen: geen knop, wel de stand', async () => {
+  ANTWOORD.mag_schakelen = false;
+  try {
+    const { w } = await opzet();
+    const html = w.DFOTrialOpvolging.render();
+    assert.doesNotMatch(html, /__trialOpvLive/);
+    assert.match(html, /Aan\/uit: Dave of Maxim/);
+  } finally { delete ANTWOORD.mag_schakelen; }
+});
