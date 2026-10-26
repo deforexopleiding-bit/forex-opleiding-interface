@@ -199,6 +199,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   + browser-kopieën in leads-v2/opvolging-v2/leadsonderhoud-v2): `drop-*` = update-drop zonder video
   ("Drop dd/mm/jj"), `-2` = tweede drop die dag. Trainingdrops leest beide prefixen. funnel_events-CHECK
   uitgebreid (dfo-website docs/sql-migrations/2026-10-26-funnel-events-varianten-drops.sql, gedraaid).
+  NIEUWSBRIEF (fase 5, GHL — GEEN Brevo): `api/_lib/ghl-nieuwsbrief.js` (enkel wat de officiële API kan:
+  html-template aanmaken/vullen, testmail via conversations/messages naar de INGELOGDE gebruiker,
+  campagnes+stats lezen). Bulkverzending aanmaken kan niet via de API → Maxim maakt de campagne in GHL
+  ("Open in GHL") en verstuurt zelf; het CRM verstuurt NOOIT naar de lijst. Acties in
+  `api/contentmachine/nieuwsbrief.js` (naar-ghl enkel na goedkeuren, test, stats) → rij in
+  `nieuwsbrief_verzendingen`. Env optioneel: GHL_NIEUWSBRIEF_USER_ID, GHL_UITSCHRIJF_TAG.
+  dfo-website tagt aanmeldingen met GHL_NIEUWSBRIEF_TAG (standaard 'nieuwsbrief') + bron.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

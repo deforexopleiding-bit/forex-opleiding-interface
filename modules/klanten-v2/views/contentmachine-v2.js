@@ -152,6 +152,16 @@
     return `${nl(c.bezoekers)} · <b>${nl(c.leads)}</b> · ${nl(c.calls)}`;
   }
 
+  const NB_LABEL = { concept: ['accent', 'In GHL'], test_verstuurd: ['accent', 'Test verstuurd'], ingepland: ['warn', 'Ingepland'], verstuurd: ['ok', 'Verstuurd'] };
+  function nbCel(d) {
+    const n = d.nieuwsbrief;
+    if (!n) return '<span style="color:var(--text-3)">—</span>';
+    const [c, l] = NB_LABEL[n.status] || ['neutral', n.status];
+    const s = n.stats || {};
+    const cijfers = s.geopend != null || s.geklikt != null ? `<div style="color:var(--text-3);font-size:11px">${s.geopend != null ? nl(s.geopend) + ' open' : ''}${s.geklikt != null ? ' · ' + nl(s.geklikt) + ' klik' : ''}</div>` : '';
+    return pill(c, l) + cijfers;
+  }
+
   function overzichtHtml() {
     const L = st.lijst;
     const kop = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap">
@@ -182,11 +192,12 @@
         <td class="cm-mob-weg" style="${td}">${d.format_key ? esc(FORMATS[d.format_key] || d.format_key) : '<span style="color:var(--text-3)">—</span>'}</td>
         <td style="${td};max-width:420px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titel)}</div></td>
         <td class="cm-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums" title="bezoekers · leads · calls (Trainingdrops)">${cijferCel(d)}</td>
+        <td class="cm-mob-weg" style="${td};white-space:nowrap">${nbCel(d)}</td>
         <td class="cm-mob-weg" style="${td};white-space:nowrap;color:var(--text-3);font-size:12px">${esc(fmtTijd(d.gewijzigd_op))}</td>
       </tr>`;
     }).join('');
     return `${kop}<div class="card cm-tabel" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr><th style="${th}">Drop</th><th style="${th}">Status</th><th class="cm-mob-weg" style="${th}">Soort</th><th class="cm-mob-weg" style="${th}">Format</th><th style="${th}">Titel / kernidee</th><th class="cm-mob-weg" style="${th};text-align:right">Bezoekers · leads · calls</th><th class="cm-mob-weg" style="${th}">Gewijzigd</th></tr></thead>
+      <thead><tr><th style="${th}">Drop</th><th style="${th}">Status</th><th class="cm-mob-weg" style="${th}">Soort</th><th class="cm-mob-weg" style="${th}">Format</th><th style="${th}">Titel / kernidee</th><th class="cm-mob-weg" style="${th};text-align:right">Bezoekers · leads · calls</th><th class="cm-mob-weg" style="${th}">Nieuwsbrief</th><th class="cm-mob-weg" style="${th}">Gewijzigd</th></tr></thead>
       <tbody>${rijen}</tbody></table></div></div>
       <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop om hem te openen. Bezoekers, leads en calls per drop staan in Groei → Trainingdrops.</div>`;
   }
