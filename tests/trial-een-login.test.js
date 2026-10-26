@@ -74,12 +74,39 @@ test('productUitBron: elke funnel naar zijn belofte', () => {
   assert.equal(tp.variantUitBron('website'), null);
 });
 
-test('schakelaar: standaard lab, per product terug te zetten, onzin = lab', () => {
+test('schakelaar: standaard lab, per product terug te zetten, onzin = lab (behalve webinar)', () => {
   assert.equal(tp.bestemmingUit(null, 'minicursus'), 'lab');
   assert.equal(tp.bestemmingUit({ minicursus: 'oud' }, 'minicursus'), 'oud');
   assert.equal(tp.bestemmingUit({ minicursus: 'oud' }, '7-daagse'), 'lab');
   assert.equal(tp.bestemmingUit('{"webinar":"OUD"}', 'webinar'), 'oud');
-  assert.equal(tp.bestemmingUit({ webinar: 'ergens' }, 'webinar'), 'lab');
+  assert.equal(tp.bestemmingUit({ website: 'ergens' }, 'website'), 'lab');
+});
+
+test('webinar hoort NIET in de trialflow: enkel een uitdrukkelijke lab geeft een trial', () => {
+  assert.equal(tp.isBuitenTrialflow('webinar'), true);
+  assert.equal(tp.isBuitenTrialflow('minicursus'), false);
+  assert.equal(tp.isBuitenTrialflow(null), false);
+  assert.equal(tp.standaardBestemming('webinar'), 'oud');
+  assert.equal(tp.standaardBestemming('minicursus'), 'lab');
+  // Ontbreekt, onzin, of de hele schakelaar weg → geen trial.
+  assert.equal(tp.bestemmingUit(null, 'webinar'), 'oud');
+  assert.equal(tp.bestemmingUit({ minicursus: 'lab' }, 'webinar'), 'oud');
+  assert.equal(tp.bestemmingUit({ webinar: 'ergens' }, 'webinar'), 'oud');
+  assert.equal(tp.bestemmingUit('kapot{', 'webinar'), 'oud');
+  // Uitdrukkelijk lab: dan wel.
+  assert.equal(tp.bestemmingUit({ webinar: 'lab' }, 'webinar'), 'lab');
+  // Een lead met enkel webinar-aanmeldingen valt buiten de flow; kwam hij ook via de minicursus, niet.
+  assert.equal(tp.alleenBuitenTrialflow(['webinar', 'webinar']), true);
+  assert.equal(tp.alleenBuitenTrialflow(['webinar', 'minicursus']), false);
+  assert.equal(tp.alleenBuitenTrialflow([]), false);
+});
+
+test('leesBestemming: leesfout = lab voor de trialproducten, oud voor de webinar', async () => {
+  const kapot = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ error: { message: 'stuk' } }) }) }) }) };
+  assert.equal(await tp.leesBestemming(kapot, 'minicursus'), 'lab');
+  assert.equal(await tp.leesBestemming(kapot, 'webinar'), 'oud');
+  const gooit = { from: () => { throw new Error('weg'); } };
+  assert.equal(await tp.leesBestemming(gooit, 'webinar'), 'oud');
 });
 
 test('herkomst: kolommen, of de marker van vóór de migratie, anders The Lab; nieuwe beloftes mogen', () => {
@@ -197,7 +224,15 @@ test('verlopen lab-lead komt via een nieuwe belofte terug: verse week + welkomst
 
 // ── 6. Webinar ──────────────────────────────────────────────────────────────
 
-test('webinar-aanmelding: trial met product webinar en de webinar-welkomstmail', async () => {
+test('webinar-aanmelding ZONDER schakelaar: geen trial (webinar heeft een eigen flow)', async () => {
+  const r = await trialVoorWebinar({ bron: 'webinar-v2', email: 'jan.webinar@gmail.com', voornaam: 'Jan', telefoon: null, toestemming: false, leadId: null });
+  assert.equal(r.overgeslagen, 'bestemming_oud');
+  assert.equal((lms.tabellen.hlms_lab_lead || []).length, 0);
+  assert.equal(mails.length, 0);
+});
+
+test('webinar-aanmelding met een uitdrukkelijke lab: trial met product webinar en de webinar-welkomstmail', async () => {
+  crm.tabellen.app_settings.push({ key: 'trial_bestemming', value: { webinar: 'lab' } });
   const r = await trialVoorWebinar({ bron: 'webinar-v2', email: 'jan.webinar@gmail.com', voornaam: 'Jan', telefoon: null, toestemming: false, leadId: null });
   assert.equal(r.ok, true);
   assert.equal(r.product, 'webinar');

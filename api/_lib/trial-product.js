@@ -35,6 +35,36 @@ export const BESTEMMINGEN = Object.freeze(['lab', 'oud']);
 export const BESTEMMING_SLEUTEL = 'trial_bestemming';
 
 /**
+ * Producten die NIET in de trialflow horen: ze hebben een eigen flow die
+ * ongemoeid moet blijven (26 okt 2026, Maxim: de webinar). Voor deze
+ * producten geldt de omgekeerde standaard — enkel een uitdrukkelijke 'lab' in
+ * de schakelaar geeft een trial — en de opvolgmotor en de belmelding slaan
+ * hun lab-leads over.
+ */
+export const BUITEN_TRIALFLOW = Object.freeze(['webinar']);
+
+/** Hoort dit product buiten de trialflow? PURE. */
+export function isBuitenTrialflow(product) {
+  return BUITEN_TRIALFLOW.includes(String(product || '').trim().toLowerCase());
+}
+
+/**
+ * Valt een lead helemaal buiten de trialflow? Ja als AL zijn aanmeldingen van
+ * zo'n product komen (een webinarlead die zich later ook voor de minicursus
+ * aanmeldde, hoort er wél bij). PURE.
+ * @param {Array<string|null>} producten
+ */
+export function alleenBuitenTrialflow(producten) {
+  const lijst = (producten || []).filter((p) => p != null && p !== '');
+  return lijst.length > 0 && lijst.every(isBuitenTrialflow);
+}
+
+/** De bestemming als de schakelaar niets (bruikbaars) zegt. PURE. */
+export function standaardBestemming(product) {
+  return isBuitenTrialflow(product) ? 'oud' : STANDAARD_BESTEMMING;
+}
+
+/**
  * Is dit een geldige productwaarde? De gekende staan in PRODUCTEN, maar een
  * nieuwe belofte (bv. 'eerste-trade') moet er zonder migratie bij kunnen:
  * elke korte slug telt. PURE.
@@ -80,24 +110,25 @@ export function bestemmingUit(waarde, product) {
   let w = waarde;
   if (typeof w === 'string') { try { w = JSON.parse(w); } catch { w = null; } }
   const v = w && typeof w === 'object' ? String(w[product] ?? '').trim().toLowerCase() : '';
-  return BESTEMMINGEN.includes(v) ? v : STANDAARD_BESTEMMING;
+  return BESTEMMINGEN.includes(v) ? v : standaardBestemming(product);
 }
 
 /**
- * Leest de schakelaar. Een leesfout = de standaard ('lab'): dat is de
- * bestemming die Maxim wil, en de oude weg blijft met één rij terug te zetten.
+ * Leest de schakelaar. Een leesfout = de standaard van het product ('lab': de
+ * bestemming die Maxim wil; 'oud' voor een product buiten de trialflow, zodat
+ * de webinar nooit per ongeluk een trial krijgt).
  */
 export async function leesBestemming(sb, product) {
   try {
     const { data, error } = await sb.from('app_settings').select('value').eq('key', BESTEMMING_SLEUTEL).maybeSingle();
     if (error) {
       console.warn('[trial-product] schakelaar lezen (soft):', error.message);
-      return STANDAARD_BESTEMMING;
+      return standaardBestemming(product);
     }
     return bestemmingUit(data?.value, product);
   } catch (e) {
     console.warn('[trial-product] schakelaar exception (soft):', e?.message || e);
-    return STANDAARD_BESTEMMING;
+    return standaardBestemming(product);
   }
 }
 

@@ -74,6 +74,21 @@ test('stop: boeking, afmelding, klant of geen toestemming = nooit iets', () => {
   }
 });
 
+test('webinar (buiten de trialflow): nooit een opvolgbericht, ook niet als hij warm is', () => {
+  for (const over of [{}, { videos: 3, ingelogd: true }, { afgerond: true, ingelogd: true }]) {
+    for (let u = 0; u < 16 * 24; u += 5) assert.equal(volgendeStap(basis({ ...over, buitenFlow: true }), T0 + u * UUR), null, JSON.stringify(over));
+  }
+});
+
+test('bedrading: de cron geeft buitenFlow mee en slaat de webinar ook bij herstel over; de belmelding ook', () => {
+  const cron = readFileSync(new URL('../api/cron-lab-opvolging.js', import.meta.url), 'utf8');
+  assert.match(cron, /buitenFlow: alleenBuitenTrialflow\(p\.producten\)/);
+  assert.match(cron, /if \(isBuitenTrialflow\(herkomst\.product\)\) continue;/);
+  const bel = readFileSync(new URL('../api/cron-lab-belmelding.js', import.meta.url), 'utf8');
+  assert.match(bel, /if \(isBuitenTrialflow\(labLead\.product\)\) continue;/);
+  assert.match(bel, /aangemaakt_op, product'/);
+});
+
 test('hoogstens één bericht per 20 uur', () => {
   const s = basis({ laatsteBericht: T0 + 20 * UUR });
   assert.equal(volgendeStap(s, T0 + 25 * UUR), null);

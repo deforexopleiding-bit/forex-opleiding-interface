@@ -110,7 +110,15 @@ function naAntwoord(belofte) {
   return belofte;
 }
 
-/** De Lab-trial bij een webinar-aanmelding. Gooit nooit. */
+/**
+ * De Lab-trial bij een webinar-aanmelding. Gooit nooit.
+ *
+ * UIT sinds 26 okt 2026 (Maxim): de webinar heeft een eigen flow en hoort niet
+ * in de trialflow. Enkel als de schakelaar UITDRUKKELIJK op 'lab' staat komt
+ * er een trial; ontbreekt de waarde, staat er onzin of lukt het lezen niet,
+ * dan niets (de omgekeerde standaard van de andere producten, zie
+ * standaardBestemming in trial-product.js).
+ */
 export async function trialVoorWebinar(w) {
   try {
     if (await leesBestemming(supabaseAdmin, 'webinar') !== 'lab') return { overgeslagen: 'bestemming_oud' };
@@ -145,8 +153,8 @@ export default async function handler(req, res) {
     const r = await meldAan(supabaseAdmin, { ...v.waarden, leadId });
     if (r.geenSessie) return res.status(409).json({ error: 'Er staat geen webinar gepland', code: 'GEEN_SESSIE' });
     if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });
-    // "Eén login voor alle funnels": een nieuwe webinar-aanmelding krijgt ook
-    // een trial in het echte LMS. Na het antwoord, zodat de website niet wacht.
+    // Enkel bij een uitdrukkelijke 'lab' in trial_bestemming (standaard: geen
+    // trial — de webinar heeft een eigen flow). Na het antwoord.
     if (!r.alAangemeld && !r.verplaatst) naAntwoord(trialVoorWebinar({ ...v.waarden, leadId }));
     return res.status(200).json({
       ok: true,
