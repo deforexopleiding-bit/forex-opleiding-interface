@@ -62,6 +62,44 @@ async function haalSjabloon(traject, soort, score) {
   return past[0] || rijen[0] || null;
 }
 
+/** Trajecten waarvan een lead sinds 26 okt een Lab-trial krijgt i.p.v. een lms_gebruikers-account. */
+export const LAB_TRIAL_TRAJECTEN = Object.freeze(['minicursus', '7-daagse']);
+
+/**
+ * Lead-id's en e-mails met een Lab-trial, voor de rijen van de wachtrij.
+ * Fail-CLOSED voor die trajecten: lukt het lezen niet, dan slaan we ze deze
+ * ronde allemaal over (beter een bericht later dan één naar het oude LMS).
+ */
+async function leesLabTrialSleutels(rijen) {
+  const kand = rijen.filter((r) => LAB_TRIAL_TRAJECTEN.includes(r.traject));
+  const emails = [...new Set(kand.map((r) => String(r.email || '').toLowerCase()).filter(Boolean))];
+  const leadIds = [...new Set(kand.map((r) => r.lead_id).filter(Boolean))];
+  const uit = { emails: new Set(), leadIds: new Set(), fout: false };
+  try {
+    for (let i = 0; i < emails.length; i += 200) {
+      const { data, error } = await supabaseAdmin.from('lab_aanmeldingen').select('email').in('email', emails.slice(i, i + 200));
+      if (error) throw error;
+      for (const a of data || []) uit.emails.add(String(a.email || '').toLowerCase());
+    }
+    for (let i = 0; i < leadIds.length; i += 200) {
+      const { data, error } = await supabaseAdmin.from('lab_aanmeldingen').select('lead_id').in('lead_id', leadIds.slice(i, i + 200));
+      if (error) throw error;
+      for (const a of data || []) if (a.lead_id) uit.leadIds.add(a.lead_id);
+    }
+  } catch (e) {
+    console.error('[cron-leadsonderhoud] lab-trials lezen mislukt — minicursus/7-daagse deze ronde overgeslagen:', e?.message || e);
+    uit.fout = true;
+  }
+  return uit;
+}
+
+/** Hoort deze wachtrij-rij bij een lead met een Lab-trial? PURE. */
+export function heeftLabTrial(r, sleutels) {
+  if (!LAB_TRIAL_TRAJECTEN.includes(r.traject)) return false;
+  if (sleutels.fout) return true;
+  return sleutels.leadIds.has(r.lead_id) || sleutels.emails.has(String(r.email || '').toLowerCase());
+}
+
 export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
@@ -129,6 +167,14 @@ export default async function handler(req, res) {
       .order('dag', { ascending: true });
     if (wErr) throw wErr;
 
+    // 1b) "Eén login voor alle funnels" (26 okt 2026): wie een trial in het
+    //     ECHTE LMS kreeg (lab_aanmeldingen), wordt opgevolgd door
+    //     cron-lab-opvolging. De view onderhoud_wachtrij vertrekt van
+    //     leads.traject en ziet zo'n lead als "nooit ingelogd" (geen
+    //     lms_gebruikers-rij) — dan zou hij o.a. niet_ingelogd sturen, met een
+    //     link naar het OUDE LMS. Die rijen slaan we hier over.
+    const labTrial = await leesLabTrialSleutels(wachtrij || []);
+
     // 2) Wie kreeg vandaag (Amsterdamse dag) al een bericht? Voor de één-per-dag-
     //    regel. In droogloop tellen de 'droog'-regels mee als "zou zijn gegaan",
     //    zodat het rapport precies laat zien wat er live zou gebeuren.
@@ -185,6 +231,7 @@ export default async function handler(req, res) {
         rapport.regels.push({ gebruiker_id: r.gebruiker_id, traject: r.traject, soort: r.soort, kanaal: r.kanaal, naar, status, reden: reden || null });
       };
 
+      if (heeftLabTrial(r, labTrial)) { rapport.overgeslagen++; meld('overgeslagen', 'trial in het echte LMS — opgevolgd door cron-lab-opvolging'); continue; }
       // één per dag
       if (alVandaag.has(r.gebruiker_id)) { rapport.overgeslagen++; meld('overgeslagen', 'al bericht vandaag'); continue; }
       // toestemming (dubbelcheck; de view doet dit ook al)
