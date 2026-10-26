@@ -41,13 +41,58 @@
 // automatische retry. 20s past ruim binnen Vercel's 30s webhook-limit én
 // binnen de cron-tick van 2 minuten. Retry-branch in cron-toegang-aanvragen.js
 // vangt alsnog restanten op mocht 't 20s ook overschrijden.
+import { supabaseAdmin } from '../supabase.js';
+import { productUitBron, leesBestemming } from './trial-product.js';
+
 const PROVISIONING_TIMEOUT_MS = 20000;
 
+// ── 26 okt 2026: "Eén login voor alle funnels" ──────────────────────────────
+// Staat de schakelaar voor dit product op 'lab' (standaard, app_settings
+// 'trial_bestemming'), dan provisionen we NIET meer in het oude trial-LMS via
+// dfo-website, maar maken we een lab-lead in het echte LMS (lab-trial.js).
+// Zelfde antwoordvorm, dus de drie aanroepers (inbox-webhook, GHL-webhook,
+// cron-toegang-aanvragen) en hun provisioned_at-guard blijven ongewijzigd.
+
+/** De aanvraag-rij erbij (bron, telefoon). Fail-soft: null. */
+async function leesAanvraag(id) {
+  if (!id) return null;
+  const { data, error } = await supabaseAdmin.from('toegang_aanvragen')
+    .select('id, voornaam, email, telefoon, soort, bron').eq('id', id).maybeSingle();
+  if (error) console.warn('[toegang-provisioning-caller] aanvraag lezen (soft):', error.message);
+  return data || null;
+}
+
+async function provisionLab(lead, aanvraag) {
+  // Lazy: de Lab-keten (LMS, mail, WhatsApp) alleen laden als ze nodig is.
+  const { geefLabTrial } = await import('./lab-trial.js');
+  const r = await geefLabTrial({
+    email: lead.email, voornaam: lead.voornaam || aanvraag?.voornaam || null,
+    telefoon: aanvraag?.telefoon || lead.telefoon || null,
+    bron: aanvraag?.bron || lead.bron || null, soort: lead.soort,
+    toegangAanvraagId: aanvraag?.id || lead.aanvraagId || null,
+    waAlBevestigd: true,
+  });
+  const body = { ok: r.ok, bestemming: 'lab', product: r.product, resultaat: r.resultaat, mail_sent: r.mail_status === 'verstuurd', aanmelding_id: r.aanmeldingId };
+  if (!r.ok) return { ok: false, status: 502, error: 'lab: ' + (r.fout || 'lms_fout'), body };
+  return { ok: true, status: 200, body };
+}
+
 /**
- * @param {{ email:string, voornaam:string|null, soort:'7-daagse'|'minicursus' }} lead
+ * @param {{ email:string, voornaam:string|null, soort:'7-daagse'|'minicursus', aanvraagId?:string, bron?:string }} lead
+ *   aanvraagId = toegang_aanvragen.id (voor bron/telefoon en één trial per aanvraag)
  * @returns {Promise<{ ok:boolean, status?:number, error?:string, body?:any }>}
  */
 export async function belProvisioning(lead) {
+  if (lead?.email && lead?.soort) {
+    const aanvraag = await leesAanvraag(lead.aanvraagId);
+    const product = productUitBron(aanvraag?.bron || lead.bron, lead.soort);
+    if (await leesBestemming(supabaseAdmin, product) === 'lab') {
+      try { return await provisionLab(lead, aanvraag); } catch (e) {
+        console.error('[toegang-provisioning-caller] lab-provisioning exception:', e?.message || e);
+        return { ok: false, error: 'lab: ' + (e?.message || String(e)) };
+      }
+    }
+  }
   const url    = process.env.TOEGANG_PROVISIONING_URL;
   const secret = process.env.TOEGANG_PROVISIONING_SECRET;
   if (!url || !secret) {

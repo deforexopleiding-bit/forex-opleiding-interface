@@ -213,7 +213,7 @@ test('webhook: antwoord op het toegangsbericht → toegang + inlogbericht zoals 
   try {
     const db = await draaiWebhook(webhookBody({ wamid: 'wamid.IN3', context: 'wamid.REM48', tekst: 'Ja ik wil toegang', ts: '2026-10-10T20:57:49Z' }), tab());
     assert.equal(db.tab.toegang_aanvragen[0].status, 'gereageerd');
-    assert.deepEqual(geroepen.provisioning, [{ email: 'jeffrey@example.com', voornaam: 'Jeffrey', soort: 'minicursus' }]);
+    assert.deepEqual(geroepen.provisioning, [{ email: 'jeffrey@example.com', voornaam: 'Jeffrey', soort: 'minicursus', aanvraagId: 'aanvraag-1' }]);
     assert.ok(db.tab.toegang_aanvragen[0].provisioned_at, 'provisioned_at gezet → het inlogbericht volgt (sendText; zonder Meta-config in de test soft-skipped)');
   } finally { terug(); }
 });

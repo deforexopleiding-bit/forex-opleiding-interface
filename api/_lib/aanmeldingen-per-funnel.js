@@ -34,6 +34,8 @@
 // Alleen lezen. Fail-soft per bron: een leesfout zet die bron op 0 en komt in
 // `bronfouten` (+ console.error), de rest blijft staan.
 
+import { herkomstVanAanmelding } from './trial-product.js';
+
 const TEST_EMAIL_MARKERS = ['test', 'deforexopleiding'];
 export function isTestEmail(e) {
   if (!e || typeof e !== 'string') return false;
@@ -141,7 +143,10 @@ export function telAanmeldingen({
   // Overig.
   const delen = {};
   const lab = new Set();
-  for (const r of labAanmeldingen || []) { const m = mail(r && r.email); if (m && !isTestEmail(m)) lab.add(m); }
+  for (const r of labAanmeldingen || []) {
+    if (herkomstVanAanmelding(r).product !== 'the-lab') continue; // trial van een andere belofte
+    const m = mail(r && r.email); if (m && !isTestEmail(m)) lab.add(m);
+  }
   for (const l of leads) if (laag(l.traject) === 'the-lab') { const m = mail(l.email); if (m) lab.add(m); else lab.add('lead:' + l.id); }
   delen['the-lab'] = lab.size;
   for (const o of FUNNEL_OVERIG) delen[o.key] = telUnie(sMap, o.variant, leads, o.lead).totaal;
@@ -215,7 +220,9 @@ export async function computeAanmeldingenPerFunnel({ supabaseAdmin, range = null
       .order('id', { ascending: true }), 'event_kwalificatie_submissions', fouten),
     leesAlles(() => venster(supabaseAdmin.from('webinar_aanmeldingen').select('id,email,is_test'), 'created_at')
       .order('id', { ascending: true }), 'webinar_aanmeldingen', fouten),
-    leesAlles(() => venster(supabaseAdmin.from('lab_aanmeldingen').select('email'), 'aangemaakt')
+    // '*': product/landingspagina bepalen of het een Lab-aanmelding is of een
+    // trial van een andere belofte (26 okt 2026) — die telt al in haar eigen tegel.
+    leesAlles(() => venster(supabaseAdmin.from('lab_aanmeldingen').select('*'), 'aangemaakt')
       .order('id', { ascending: true }), 'lab_aanmeldingen', fouten),
   ]);
 
