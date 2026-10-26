@@ -22,10 +22,11 @@ import { modelKeten } from './contentmachine-ai.js';
 import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
 import { FEITENBANK, controleerCijfers } from './feitenbank.js';
 import {
-  FORMATS, FORMAT_KEYS, NIEUWSBRIEF_SCHEMA, STORIES_SCHEMA, POST_SCHEMA, VIERKANT_SCHEMA, LINKEDIN_SCHEMA,
+  FORMATS, FORMAT_KEYS, STORIES_SCHEMA, POST_SCHEMA, VIERKANT_SCHEMA, LINKEDIN_SCHEMA,
   valideerOutput, controleerGrenzen, grensOpties, nabewerk, teGelijk, systeemPrompt as v1Systeem,
 } from './contentmachine-generator.js';
 import { trainingDatum, datumVoluit } from './contentmachine-core.js';
+import { isTeaser } from './nieuwsbrief-render.js';
 import {
   BLOKKEN, BLOK_INFO, BLOK_TYPES, THEMAS, HERO_VARIANTEN, INTERACTIEF, NUGGETS,
   blokSchema, structuurFouten, editieFouten, combinatie, combinatieVrij, blokGebruik, editieSamenvatting,
@@ -106,6 +107,34 @@ export function valideerRegie(regie, { metVideo, toegelaten = FORMAT_KEYS, asset
 }
 
 // ── Schrijver ───────────────────────────────────────────────────────────────
+/**
+ * De nieuwsbrief als teaser naar de Weekeditie (bouwopdracht §3): kort, één nugget, één beeld
+ * (een frame van een blok van de pagina, gerenderd in het CRM), een open lus en één hoofdknop
+ * "Lees de volledige weekeditie" (vaste tekst in de renderer), PS met het cadeau.
+ */
+export const TEASER_SCHEMA = {
+  type: 'object',
+  description: 'De nieuwsbrief: kort (130-240 woorden samen), de brug naar de pagina. Geen link-teksten: de knop "Lees de volledige weekeditie" staat vast in de mail.',
+  properties: {
+    onderwerpen: { type: 'array', minItems: 3, maxItems: 3, items: S, description: 'Drie A/B-onderwerpregels (max 60 tekens elk), elk een andere invalshoek, sterk en concreet, geen clickbait.' },
+    preheader: { type: 'string', description: 'Voorbeeldtekst (max 110 tekens), vult het onderwerp aan.' },
+    opener: { type: 'string', description: 'Opener in Maxims stem: 2-4 korte zinnen, persoonlijk ("Hoi," mag), wat er deze week gebeurde. **vet** mag.' },
+    nugget: {
+      type: 'object',
+      properties: { kicker: S, titel: { type: 'string', description: 'De nugget in één zin (max 12 woorden).' }, tekst: { type: 'string', description: '2-4 zinnen: de nugget heeft op zich al waarde. Uit de strategiekennis of feitenbank.' } },
+      required: ['titel', 'tekst'],
+    },
+    beeld_blok_index: { type: 'integer', description: 'Index in pagina.blokken van het blok waarvan het beeld een frame is (bij voorkeur interactief: replay, fib, quiz, sliders, calculator, trechter).' },
+    open_lus: {
+      type: 'object',
+      properties: { kicker: S, vraag: { type: 'string', description: 'De vraag die pas op de pagina beantwoord wordt (bv. "Sweep of break? Wat zou jij doen?").' }, tekst: { type: 'string', description: '1-2 zinnen: het antwoord (en meer) staat in de weekeditie.' } },
+      required: ['vraag'],
+    },
+    ps: { type: 'string', description: 'PS met het cadeau: gratis strategiesessie met Dave, t.w.v. €100, nu €0 (1-2 zinnen).' },
+  },
+  required: ['onderwerpen', 'preheader', 'opener', 'nugget', 'beeld_blok_index', 'open_lus', 'ps'],
+};
+
 /** Schema van de schrijver: de pagina met precies de gekozen bloktypes + de andere kanalen. */
 export function schrijverSchema(regie, { onderdelen = null } = {}) {
   const types = [...new Set(regieAlsPagina(regie).blokken.map((b) => b.type))].filter((t) => BLOK_INFO[t]);
@@ -124,7 +153,7 @@ export function schrijverSchema(regie, { onderdelen = null } = {}) {
     },
     required: ['seo_titel', 'seo_beschrijving', 'og_titel', 'og_beschrijving', 'blokken'],
   };
-  const alle = { pagina, nieuwsbrief: NIEUWSBRIEF_SCHEMA, stories: STORIES_SCHEMA, post: POST_SCHEMA, vierkant: VIERKANT_SCHEMA, linkedin: LINKEDIN_SCHEMA };
+  const alle = { pagina, nieuwsbrief: TEASER_SCHEMA, stories: STORIES_SCHEMA, post: POST_SCHEMA, vierkant: VIERKANT_SCHEMA, linkedin: LINKEDIN_SCHEMA };
   const keys = onderdelen || Object.keys(alle);
   return { type: 'object', properties: Object.fromEntries(keys.map((k) => [k, alle[k]])), required: keys };
 }
@@ -168,6 +197,7 @@ export function valideerV2(o, { metVideo, assets = [], vorige = [], regie = null
     const vrij = combinatieVrij(p, vorige);
     if (!vrij.ok && vrij.botsing) fouten.push(`combinatie gelijk aan ${vrij.botsing}`);
   }
+  if (check('nieuwsbrief') && o && o.nieuwsbrief && !isTeaser(o.nieuwsbrief)) fouten.push('nieuwsbrief: lever de teaser (opener, nugget, beeld_blok_index, open_lus, ps), geen blokken');
   const andere = ['nieuwsbrief', 'stories', 'post', 'linkedin'].filter(check);
   if (andere.length) fouten.push(...valideerOutput(o, { assetIds: assets.map((a) => a.id), onderdelen: andere }).fouten);
   const cijfers = check('pagina') ? controleerCijfers(o && o.pagina, cijferBronnen(input, assets)) : [];
@@ -241,7 +271,8 @@ Je bent nu de SCHRIJVER. De regisseur koos al het format, het thema, de hero, de
 - funded-calculator en rr-sliders zijn rekenvoorbeelden: geen beloftes in de teksten.
 - vooruitblik: scenario-taal ("als…, dan…"), geen zekerheden.
 - cadeau: props {} (vaste tekst). video-poort/inschrijven: enkel eyebrow/titel/intro (het formulier is vast).
-- Nieuwsbrief, stories, post, LinkedIn: zelfde kernidee en nugget; de nieuwsbrief opent de open lus en stuurt naar de pagina.
+- NIEUWSBRIEF = TEASER naar de Weekeditie (de pagina ís de volledige nieuwsbrief online): kort (130-240 woorden samen), opener in Maxims stem, ÉÉN nugget die op zich al waarde heeft (= de nugget van de regie), beeld_blok_index = het interactieve blok waarvan het mailbeeld een frame is, een open lus (de vraag die pas op de pagina sluit), en een PS met het cadeau. Geen blokkenlijst, geen links in de tekst: de knop "Lees de volledige weekeditie" staat vast in de mail. Het format van de week kleurt de toon en de invalshoek (trade ontleed → één stap als nugget; wat zou jij doen → de vraag; het bewijs → het cijfer).
+- Stories, post, LinkedIn: zelfde kernidee en nugget.
 
 ${gemeenschappelijk()}`;
 }

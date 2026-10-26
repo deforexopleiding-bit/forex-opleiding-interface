@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#333">
+<script src="modules/klanten-v2/views/weekeditie-chart-v2.js"></script>
+<script src="modules/klanten-v2/views/contentmachine-canvas-v2.js"></script>
+<script src="modules/klanten-v2/views/contentmachine-blokframe-v2.js"></script>
+<script>
+window.render = async (pagina, idx, assets) => { const cv = await window.__cmBlokFrame.renderMail({ pagina, blokIndex: idx, assets }); return cv.toDataURL('image/png'); };
+</script></body></html>

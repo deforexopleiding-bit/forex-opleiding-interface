@@ -19,6 +19,7 @@ import { modelKeten } from './contentmachine-ai.js';
 import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
 import { trainingDatum, datumVoluit, weekdagVan } from './contentmachine-core.js';
 import { editieFouten, editieTitel, isWeekeditie } from './weekeditie.js';
+import { isTeaser, teaserFouten } from './nieuwsbrief-render.js';
 
 // ── Formats ─────────────────────────────────────────────────────────────────
 export const FORMATS = [
@@ -245,7 +246,10 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
     }
   }
 
-  if (check('nieuwsbrief')) {
+  if (check('nieuwsbrief') && isTeaser(o.nieuwsbrief)) {
+    // Contentmachine 2.0: korte teaser naar de Weekeditie.
+    teaserFouten(o.nieuwsbrief, o.pagina).forEach(f);
+  } else if (check('nieuwsbrief')) {
     const n = o.nieuwsbrief;
     if (!n || typeof n !== 'object') f('nieuwsbrief ontbreekt');
     else {
