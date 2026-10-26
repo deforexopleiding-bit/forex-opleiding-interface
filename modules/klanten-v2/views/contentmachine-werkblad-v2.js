@@ -110,9 +110,12 @@
     o[delen[delen.length - 1]] = waarde;
   }
   let vbTimer = null;
+  const isWe = () => !!(wb.output && wb.output.pagina && Array.isArray(wb.output.pagina.blokken) && wb.output.pagina.blokken.length);
   function markeer() {
     if (!wb.dirty) { wb.dirty = true; teken('cm-wb-acties', actiesHtml()); }
     if (wb.tab === 'nieuwsbrief') { planVoorbeeld(); return; }
+    // Weekeditie: het voorbeeld is de echte pagina (bewaarde versie); enkel de melding bijwerken.
+    if (wb.tab === 'pagina' && isWe()) { if (typeof window.__cmWeMarkeer === 'function') window.__cmWeMarkeer(); return; }
     clearTimeout(vbTimer);
     vbTimer = setTimeout(() => teken('cm-wb-voorbeeld', voorbeeldHtml()), 400);
   }
@@ -187,7 +190,8 @@
     const strip = (s) => String(s || '').replace(/\*\*/g, '');
     const delen = [];
     delen.push(`DROP ${wb.drop.slug} — ${FORMATS[o.format_key] || o.format_key || ''}\nKernidee: ${o.kernidee || ''}`);
-    delen.push(['PAGINA', `${p.hero_kicker}`, `${p.hero_titel} ${p.hero_accent}`, strip(p.lead), ...(p.frustraties || []).map((x) => '- ' + x), strip(p.frustraties_antwoord), ...(p.kaarten || []).map((k) => `[${k.label}] ${k.titel}: ${k.tekst}`), strip(p.quote)].filter(Boolean).join('\n'));
+    if (isWe() && typeof window.__cmWeTekst === 'function') delen.push(window.__cmWeTekst(o));
+    else delen.push(['PAGINA', `${p.hero_kicker}`, `${p.hero_titel} ${p.hero_accent}`, strip(p.lead), ...(p.frustraties || []).map((x) => '- ' + x), strip(p.frustraties_antwoord), ...(p.kaarten || []).map((k) => `[${k.label}] ${k.titel}: ${k.tekst}`), strip(p.quote)].filter(Boolean).join('\n'));
     delen.push(['NIEUWSBRIEF', 'Onderwerpen:', ...(n.onderwerpen || []).map((x, i) => `${String.fromCharCode(65 + i)}. ${x}`), `Preheader: ${n.preheader || ''}`,
       ...(n.blokken || []).map((b) => [`— ${BLOK_LABEL[b.type] || b.type}`, b.titel, b.vraag, strip(b.tekst), ...(b.stappen || []).map((s, i) => `${i + 1}. ${s.titel}: ${s.tekst}`), ...(b.opties || []).map((x, i) => `${String.fromCharCode(65 + i)}. ${x}`), b.getal ? `${b.getal} ${b.getal_label || ''}` : ''].filter(Boolean).join('\n')),
       n.ps ? `PS ${n.ps}` : ''].filter(Boolean).join('\n'));
@@ -268,6 +272,7 @@
 
   // ── Editors per tab ───────────────────────────────────────────────────────
   function paginaEditor() {
+    if (isWe()) return typeof window.__cmWeEditor === 'function' ? window.__cmWeEditor() : '<div style="color:var(--text-3);font-size:12px">Weekeditie-editor laden…</div>';
     const p = haal('pagina') || {};
     const update = wb.drop.soort !== 'training';
     return [
@@ -407,6 +412,7 @@
   function voorbeeldHtml() {
     const o = wb.output || {};
     const social = typeof window.__cmSocialPaneel === 'function';
+    if (wb.tab === 'pagina' && isWe()) return `${social ? window.__cmSocialPaneel('pagina') : ''}${typeof window.__cmWeVoorbeeld === 'function' ? window.__cmWeVoorbeeld() : ''}`;
     if (wb.tab === 'pagina') return `${social ? window.__cmSocialPaneel('pagina') : ''}${iframe(paginaHtml(), 900)}`;
     if (wb.tab === 'nieuwsbrief') {
       if (!wb.nbHtml) { planVoorbeeld(); return `<div id="cm-wb-ghl">${ghlPaneel()}</div><div style="color:var(--text-3);font-size:12px;padding:10px">Voorbeeld laden…</div>`; }
@@ -585,4 +591,6 @@
   };
 
   window.__cmWerkblad = wb;
+  // Hulpstukken voor de Weekeditie-editor (contentmachine-weekeditie-v2.js).
+  window.__cmWbHulp = { haal, zetPad, markeer, veld, beeldVeld, groep, esc, pill, rerender, teken, post, api, toast, foutTekst, zet, kloon, assetMap, regenHtml };
 })();

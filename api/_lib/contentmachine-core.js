@@ -290,6 +290,7 @@ const hoofd = (s) => s.charAt(0).toUpperCase() + s.slice(1);
  *   'leslie-ftmo-6721.png' → payout, Leslie, toestemming, bijschrift 'Payout Leslie — FTMO · 6.721'
  *   'team-lachend.jpg'     → team
  *   'zaal-certificaten.jpg'→ masterclass
+ *   'masterclass-2526.jpg' → masterclass (toestemming publiek, Contentmachine 2.0)
  *   'chart-uitleg.jpg'     → chart
  */
 export function seedMetadata(bestandsnaam) {
@@ -317,6 +318,26 @@ export function seedMetadata(bestandsnaam) {
       bijschrift: `Payout ${persoon}${delen2.length ? ' — ' + delen2.join(' · ') : ''}`,
       tags: ['seed', 'payout', eerste, ...rest.filter((d) => FIRMA[d])],
     };
+  }
+  if (eerste === 'masterclass') {
+    // Contentmachine 2.0: echte foto's van de masterclass op kantoor (Maxim levert ze met
+    // toestemming aan; geen namen). Bijschrift = wat er te zien is.
+    const MC = {
+      2497: 'Masterclass op kantoor — de zaal aan tafel, de spreker bij het scherm (staand)',
+      2499: 'Masterclass op kantoor — de spreker legt uit aan de volle tafel',
+      2504: 'Masterclass op kantoor — de zaal luistert, scherm met de vraag van de avond',
+      2512: 'Masterclass op kantoor — uitleg bij het scherm, publiek aan tafel',
+      2518: 'Masterclass op kantoor — een payout-certificaat op het scherm',
+      2522: 'Masterclass op kantoor — de spreker bij een payout op het scherm',
+      2526: 'Masterclass op kantoor — "€138.695 aan uitbetalingen" op het scherm',
+      2528: 'Masterclass op kantoor — de zaal bij "€138.695 aan uitbetalingen"',
+      2531: 'Masterclass op kantoor — "€138.695 aan uitbetalingen, van vijf mensen" op het scherm',
+      2556: 'Masterclass op kantoor — de zaal vanuit de hoek (staand)',
+      2562: 'Masterclass op kantoor — de volle tafel, overzicht (staand)',
+      2567: 'Masterclass op kantoor — de ruimte met publiek en scherm (staand)',
+    };
+    const nr = delen[1];
+    return { soort: 'masterclass', persoon_naam: null, toestemming_publiek: true, bijschrift: MC[nr] || 'Masterclass op kantoor', tags: ['seed', 'masterclass', 'kantoor'] };
   }
   if (eerste === 'chart') return { soort: 'chart', persoon_naam: null, toestemming_publiek: false, bijschrift: 'Chart-uitleg uit de masterclass', tags: ['seed', 'chart'] };
   if (eerste === 'zaal') return { soort: 'masterclass', persoon_naam: null, toestemming_publiek: false, bijschrift: 'De zaal met certificaten na de masterclass', tags: ['seed', 'masterclass', 'certificaten'] };

@@ -75,3 +75,54 @@ export const ASSETS = [
   { id: BEELD_PAYOUT, soort: 'payout', publieke_url: 'https://cdn.test/content/payout.png', bijschrift: 'Payout FTMO', persoon_naam: 'Leslie', toestemming_publiek: true, drop_id: null, laatst_gebruikt_op: '2026-10-01T00:00:00Z' },
   { id: BEELD_ZONDER, soort: 'payout', publieke_url: 'https://cdn.test/content/payout2.png', bijschrift: 'Payout', persoon_naam: 'Jeroen', toestemming_publiek: false, drop_id: null, laatst_gebruikt_op: null },
 ];
+
+// ── Contentmachine 2.0: regie (stap 1) en editie (stap 2) ──────────────────
+export const BEELD_FOTO = '44444444-4444-4444-8444-444444444444';
+ASSETS.push({ id: BEELD_FOTO, soort: 'masterclass', publieke_url: 'https://cdn.test/content/masterclass.jpg', bijschrift: 'Masterclass op kantoor', persoon_naam: null, toestemming_publiek: true, drop_id: null, laatst_gebruikt_op: null });
+
+export function voorbeeldRegie(over = {}) {
+  return {
+    format_key: 'trade_ontleed',
+    kernidee: 'De dollar kantelt en we bouwden er live een short op GBP/USD uit, van H4-context tot target.',
+    rode_draad: 'Eerst zelf ervaren dat een sweep geen break is, dan de volgorde, dan rekenen.',
+    nugget: 'Een wick door een niveau is geen break of structure; een body close wel.',
+    open_lus: 'Prijs zakt onder de low: sweep of break? Het antwoord staat in de weekeditie.',
+    thema: 'nacht',
+    hero_variant: 'video-poort',
+    blokken: [
+      { type: 'hero', variant: 'video-poort', waarom: 'De opname is de kern.' },
+      { type: 'replay-sweep-bos', waarom: 'Het moment van de week zelf beleven.' },
+      { type: 'trechter', waarom: 'De volgorde van de short.' },
+      { type: 'payout-muur', waarom: 'Bewijs dat de methode werkt.' },
+      { type: 'rr-sliders', waarom: 'Waarom 1 op 3 telt.' },
+      { type: 'tip', waarom: 'De nugget.' },
+      { type: 'cadeau', waarom: 'Volgende stap.' },
+    ],
+    beelden: [{ asset_id: BEELD_PAYOUT, waar: 'payout-muur' }],
+    motivatie: 'Vorige weken waren data-zwaar; nu interactie eerst.',
+    ...over,
+  };
+}
+
+export function voorbeeldEditie(over = {}) {
+  const v1 = voorbeeldOutput();
+  return {
+    pagina: {
+      seo_titel: 'De dollar draait — Weekeditie 22/10 | De Forex Opleiding',
+      seo_beschrijving: 'Gratis opname van de live training en speel zelf de replay af.',
+      og_titel: 'De dollar draait. Wij zagen het live.',
+      og_beschrijving: 'De Weekeditie van 22/10.',
+      blokken: [
+        { type: 'hero', variant: 'video-poort', props: { eyebrow: 'Gratis opname · Live training 22/10', titel: 'De dollar draait. **Wij zagen het live.**', intro: 'Deze week kantelde de **DXY**.' } },
+        { type: 'replay-sweep-bos', props: { richting: 'short', scenario: 'bos', uitleg: 'De body sloot onder het niveau en bleef eronder: een break.' } },
+        { type: 'trechter', props: { stappen: [{ label: 'H4-context', titel: 'De DXY kantelt', tekst: 'Richting en locatie.' }, { label: '15M', titel: 'Bevestiging', tekst: 'Liquidity en een structure shift.' }, { label: 'Entry', titel: 'Op 71', tekst: 'Van de nieuwe 15M-impuls.' }] } },
+        { type: 'payout-muur', props: { payouts: [{ asset_id: BEELD_PAYOUT, bedrag: 4536, valuta: '$', label: 'Leslie · FTMO' }] } },
+        { type: 'rr-sliders', props: { start_winrate: 30, start_rr: 3, voorinstellingen: [{ label: 'Onze studenten', winrate: 48.5, rr: 3.17 }] } },
+        { type: 'tip', props: { voorkant: 'Bepaal eerst waar je trade **ongeldig** is.', achterkant: 'Daar ligt je stop; die afstand bepaalt je positie.' } },
+        { type: 'cadeau', props: {} },
+      ],
+    },
+    nieuwsbrief: v1.nieuwsbrief, stories: v1.stories, post: v1.post, vierkant: v1.vierkant, linkedin: v1.linkedin,
+    ...over,
+  };
+}

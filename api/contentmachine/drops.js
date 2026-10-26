@@ -27,7 +27,10 @@ import {
   slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo, SOCIAL_NAAM_RE, socialPad, datumUitTitel,
 } from '../_lib/contentmachine-core.js';
 import { controleerGrenzen, valideerOutput, grensOpties, metVasteTeksten } from '../_lib/contentmachine-generator.js';
-import { bewaarVersie } from '../_lib/contentmachine-opslag.js';
+import { bewaarVersie, ASSET_KOLOMMEN as CTX_ASSET_KOLOMMEN } from '../_lib/contentmachine-opslag.js';
+import { isWeekeditie, editieFouten, BLOKKEN } from '../_lib/weekeditie.js';
+import { controleerCijfers } from '../_lib/feitenbank.js';
+import { cijferBronnen } from '../_lib/contentmachine-regie.js';
 
 /**
  * Grens-overtredingen van een output (met de namenlijst van bij het genereren en
@@ -42,7 +45,22 @@ export function grensProblemen(output, input) {
 
 const zelfde = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-const LIJST_KOLOMMEN = 'id,slug,datum,soort,status,format_key,versie,aangemaakt_op,gewijzigd_op,gegenereerd_op,goedgekeurd_op,gepubliceerd_op,input,kern:output->>kernidee,titel:output->pagina->>hero_titel';
+/**
+ * Weekeditie (2.0): wat goedkeuren blokkeert naast de grenzen — de editieregels (anders
+ * laat de website blokken weg) en cijfers die niet in de feitenbank/invoer/beelden staan.
+ */
+export async function editieProblemen(db, drop) {
+  const o = drop.output;
+  if (!o || !isWeekeditie(o.pagina)) return [];
+  const uit = editieFouten(o.pagina, { metVideo: !!(drop.input && drop.input.vimeo_id) }).map((x) => ({ pad: 'pagina', regel: x }));
+  const { data: assets, error } = await db.from('content_assets').select(CTX_ASSET_KOLOMMEN).is('verwijderd_op', null).limit(2000);
+  if (error) throw error;
+  const relevant = (assets || []).filter((a) => !a.drop_id || a.drop_id === drop.id);
+  for (const c of controleerCijfers(o.pagina, cijferBronnen(drop.input || {}, relevant))) uit.push({ pad: 'pagina.' + c.pad, regel: `cijfer ${c.waarde} staat niet in de feitenbank, de invoer of op een beeld` });
+  return uit;
+}
+
+const LIJST_KOLOMMEN = 'id,slug,datum,soort,status,format_key,versie,aangemaakt_op,gewijzigd_op,gegenereerd_op,goedgekeurd_op,gepubliceerd_op,input,kern:output->>kernidee,titel:output->pagina->>hero_titel,titel2:output->>titel,thema:output->pagina->>thema';
 const ASSET_KOLOMMEN = 'id,drop_id,soort,storage_path,publieke_url,breedte,hoogte,bijschrift,ai_beschrijving,ai_details,persoon_naam,toestemming_publiek,tags,laatst_gebruikt_op,aangemaakt_op';
 
 export async function vimeoInfo(url, fetchImpl = fetch) {
@@ -73,7 +91,7 @@ function lijstRij(d) {
     id: d.id, slug: d.slug, datum: d.datum, soort: d.soort, status: d.status, format_key: d.format_key,
     versie: d.versie, aangemaakt_op: d.aangemaakt_op, gewijzigd_op: d.gewijzigd_op,
     gegenereerd_op: d.gegenereerd_op, goedgekeurd_op: d.goedgekeurd_op, gepubliceerd_op: d.gepubliceerd_op,
-    kernidee: d.kern || null, titel: d.titel || null,
+    kernidee: d.kern || null, titel: d.titel || d.titel2 || null, weekeditie: !!d.thema, thema: d.thema || null,
     heeft_video: !!i.vimeo_id, vimeo_thumbnail: i.vimeo_thumbnail || null,
     kanalen: Array.isArray(i.kanalen) ? i.kanalen : [],
     wat_gebeurde_kort: String(i.wat_gebeurde || '').slice(0, 140),
@@ -87,6 +105,8 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      // De blokken van de Weekeditie (schema's van de website) voor de editor in het werkblad.
+      if (req.query?.blokken) return res.status(200).json({ blokken: BLOKKEN });
       const id = String(req.query?.id || '');
       const versieNr = parseInt(req.query?.versie, 10);
       if (id && Number.isFinite(versieNr)) {
@@ -189,8 +209,12 @@ export default async function handler(req, res) {
       if (!o || typeof o !== 'object' || Array.isArray(o)) return res.status(400).json({ error: 'output ontbreekt' });
       // Structuur blijft die van de generator; meta en format komen van de server.
       // Het formulier op de pagina is vast (vasteFormulierTeksten).
-      const output = metVasteTeksten({ ...o, format_key: drop.output.format_key, meta: drop.output.meta || {} }, { drop });
-      const v = valideerOutput(output, { toegelaten: [output.format_key] });
+      const vast = { format_key: drop.output.format_key, meta: drop.output.meta || {} };
+      if (drop.output.regie) vast.regie = drop.output.regie;
+      if (drop.output.versie) vast.versie = drop.output.versie;
+      const output = metVasteTeksten({ ...o, ...vast }, { drop });
+      if (isWeekeditie(output.pagina)) output.titel = String((output.pagina.blokken.find((x) => x && x.type === 'hero') || { props: {} }).props.titel || '').replace(/\*\*/g, '').trim();
+      const v = valideerOutput(output, { toegelaten: [output.format_key], metVideo: !!(drop.input && drop.input.vimeo_id) });
       if (!v.ok) return res.status(400).json({ error: 'De output klopt niet meer: ' + v.fouten.slice(0, 3).join('; ') });
       const grens = grensProblemen(output, drop.input).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
       output.meta = { ...output.meta, waarschuwingen: [...(output.meta.waarschuwingen || []).filter((w) => w.soort !== 'grens'), ...grens] };
@@ -200,7 +224,7 @@ export default async function handler(req, res) {
 
     if (actie === 'goedkeuren') {
       if (drop.status !== 'gegenereerd' || !drop.output) return res.status(409).json({ error: 'Alleen een gegenereerde drop kan je goedkeuren.' });
-      const problemen = grensProblemen(drop.output, drop.input);
+      const problemen = [...grensProblemen(drop.output, drop.input), ...await editieProblemen(db, drop)];
       if (problemen.length) return res.status(409).json({ error: 'Eerst deze teksten aanpassen: ' + problemen.slice(0, 3).map((x) => `${x.pad} (${x.regel})`).join('; '), code: 'GRENZEN', problemen });
       // Oudere drops: de vaste formulierteksten erin zetten (als nieuwe versie).
       const vast = metVasteTeksten(drop.output, { drop });
@@ -217,7 +241,7 @@ export default async function handler(req, res) {
 
     if (actie === 'publiceer') {
       if (drop.status !== 'goedgekeurd') return res.status(409).json({ error: 'Keur de drop eerst goed.' });
-      if (grensProblemen(drop.output, drop.input).length) return res.status(409).json({ error: 'Er staan nog teksten in die niet mogen.', code: 'GRENZEN' });
+      if (grensProblemen(drop.output, drop.input).length || (await editieProblemen(db, drop)).length) return res.status(409).json({ error: 'Er staan nog teksten of blokken in die niet mogen.', code: 'GRENZEN' });
       const kanalen = (drop.input && drop.input.kanalen) || [];
       if (kanalen.length && !kanalen.includes('pagina')) return res.status(409).json({ error: 'Het kanaal Pagina staat uit voor deze drop.' });
       const nu = new Date().toISOString();

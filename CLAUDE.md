@@ -209,6 +209,20 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   CORRECTIES 26 okt: formuliertitel/-ondertitel/knop/na-ontgrendelen zijn VASTE teksten per soort
   (`vasteFormulierTeksten`/`metVasteTeksten`, ook bij bewaren en goedkeuren); `input.training_datum`
   ("Datum training", anders uit de Vimeo-titel) → weekdag berekend; een geraden/andere weekdag = grens.
+  CONTENTMACHINE 2.0 (26 okt, bouwopdracht docs/contentmachine/v2/BOUWOPDRACHT-contentmachine-v2.md):
+  de pagina wordt de WEEKEDITIE = `output.pagina.blokken[]` ({type, variant, props}) + `pagina.thema`
+  (nacht/goud/licht/data), gerenderd door dfo-website `components/weekeditie/`. Blokschema's =
+  `api/_lib/weekeditie-blokken.json` (export van dfo-website zod; zelfde bestand in docs/contentmachine/,
+  NOOIT met de hand wijzigen: in dfo-website exporteren en kopiëren). Regels in `api/_lib/weekeditie.js`
+  (1 hero eerst, ≥2 interactief, ≥1 nugget, 1 cadeau, video-poort XOR inschrijven, 6-14 blokken, combinatie
+  thema+hero+interactief ≠ vorige 3). Generator 2.0 `api/_lib/contentmachine-regie.js`: REGISSEUR
+  (format/thema/hero/blokken/beelden/rode draad + motivatie → `output.regie`) → SCHRIJVER (props per
+  blokschema + nieuwsbrief/stories/post/LinkedIn), elk met één herstelronde (na 130 s niet meer).
+  Cijfers ENKEL uit `docs/contentmachine/feitenbank.md` (kopie `api/_lib/feitenbank.js`), de invoer of een
+  beeld: `controleerCijfers` blokkeert goedkeuren. genereer kent ook `{ blok:{index,type?,instructie?} }`.
+  Werkblad: `views/contentmachine-weekeditie-v2.js` (editor uit het schema + de echte pagina in een iframe:
+  www.deforexopleiding.nl/training/voorbeeld/<content_drops.voorbeeld_token>, noindex, geen tracking).
+  v1-drops (zonder blokken) blijven werken. 12 masterclassfoto's in de seed (toestemming publiek, geen namen).
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle

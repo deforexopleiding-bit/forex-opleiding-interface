@@ -7,7 +7,7 @@
 // verboden namen).
 
 import { supabaseAdmin } from '../supabase.js';
-import { kiesBibliotheek } from './contentmachine-generator.js';
+import { kiesBibliotheek, kiesBibliotheekV2 } from './contentmachine-generator.js';
 
 export const ASSET_KOLOMMEN = 'id,drop_id,soort,storage_path,publieke_url,breedte,hoogte,bijschrift,ai_beschrijving,ai_details,persoon_naam,toestemming_publiek,tags,laatst_gebruikt_op';
 export const MAX_BEELDEN = 12;
@@ -54,7 +54,7 @@ export function verbodenNamenUit({ teamNamen = [], beelden = [] }) {
 }
 
 /** Alles wat de generator nodig heeft voor één drop. */
-export async function laadContext({ db = supabaseAdmin, drop }) {
+export async function laadContext({ db = supabaseAdmin, drop, v2 = false }) {
   const input = drop.input || {};
   const gekozen = Array.isArray(input.gekozen_asset_ids) ? input.gekozen_asset_ids : [];
   const [eigen, bib, vorig, team] = await Promise.all([
@@ -71,7 +71,7 @@ export async function laadContext({ db = supabaseAdmin, drop }) {
 
   const bibliotheek = bib.data || [];
   const gekozenAssets = gekozen.map((id) => bibliotheek.find((a) => a.id === id)).filter(Boolean);
-  const bibKeuze = gekozenAssets.length ? gekozenAssets : kiesBibliotheek(bibliotheek, 4);
+  const bibKeuze = gekozenAssets.length ? gekozenAssets : (v2 ? kiesBibliotheekV2(bibliotheek, 8) : kiesBibliotheek(bibliotheek, 4));
   const beelden = [
     ...(eigen.data || []).map((a) => ({ ...a, bron: 'drop' })),
     ...bibKeuze.map((a) => ({ ...a, bron: 'bibliotheek' })),
