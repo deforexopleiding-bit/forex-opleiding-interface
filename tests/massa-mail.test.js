@@ -59,6 +59,7 @@ function nepDb(tab) {
       neq: (c, v) => { f.push((r) => r[c] !== v); return k; },
       in: (c, v) => { f.push((r) => v.map(String).includes(String(r[c]))); return k; },
       is: (c, v) => { f.push((r) => (v === null ? r[c] == null : r[c] === v)); return k; },
+      not: (c, o, v) => { if (o === 'is' && v === null) f.push((r) => r[c] != null); return k; },
       // GHL-import (2026-10-26): massa-mail sluit bron Import(-telefoon) standaard uit via .or().
       or: (expr) => { const m = /^bron.is.null,bron.not.in.((.*))$/.exec(String(expr)); if (m) { const uit = m[1].split(','); f.push((r) => r.bron == null || !uit.includes(r.bron)); } return k; },
       lt: (c, v) => { f.push((r) => r[c] != null && String(r[c]) < String(v)); return k; },

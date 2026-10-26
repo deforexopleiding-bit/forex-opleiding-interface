@@ -52,6 +52,9 @@ export const MIGRATIE = '2026-10-10-massa-mail-fase2a.sql';
 export const IMPORT_BRONNEN = Object.freeze(['Import', 'Import-telefoon']);
 export const MIGRATIE_2B = '2026-10-11-massa-whatsapp-fase2b.sql';
 export const MIGRATIE_BOUWER = '2026-10-11-mail-bouwer.sql';
+// Reacties op massa-WhatsApp-knoppen (api/_lib/massa-wa-reactie.js): vervolgteksten
+// op de campagne, reactie per item, leads.wa_nu_niet_op.
+export const MIGRATIE_REACTIES = '2026-10-26-massa-wa-reacties.sql';
 export const MASSA_SOORTEN = Object.freeze({
   tips: 'Tips & lessen over traden',
   events: 'Webinars & events',
@@ -282,6 +285,16 @@ export async function zoekSegment(sb, filterRaw, { nu = new Date() } = {}) {
   }
   for (const v of vk || []) voorkeurOp.set(v.email, v);
 
+  // "Nu even niet" op een eerdere massa-WhatsApp. Aparte lookup (niet in
+  // LEAD_VELDEN) zodat alles zonder de reacties-migratie blijft werken.
+  const nuNiet = new Set();
+  const { data: nn, error: nErr } = await inBlokken(ids, (d) => sb.from('leads')
+    .select('id').in('id', d).not('wa_nu_niet_op', 'is', null));
+  if (nErr) {
+    if (!['42703', 'PGRST204'].includes(String(nErr.code))) console.error('[massa-mail] wa_nu_niet_op lezen mislukt:', nErr.message);
+  }
+  for (const r of nn || []) nuNiet.add(r.id);
+
   const verrijkt = leads.map((l) => {
     const c = cats.get(l.id);
     const email = String(l.email || '').trim().toLowerCase();
@@ -299,6 +312,7 @@ export async function zoekSegment(sb, filterRaw, { nu = new Date() } = {}) {
       laatst_massa_op: h ? h.laatst : null,
       massa_campagnes: h ? [...h.campagnes] : [],
       afgemeld: !!(v && v.afgemeld),
+      wa_nu_niet: nuNiet.has(l.id),
       voorkeuren: v ? v.voorkeuren || {} : {},
       geldig_email: EMAIL_RE.test(email),
       geldig_nummer: E164_RE.test(String(l.telefoon_e164 || '')),
@@ -353,6 +367,7 @@ export function planWhatsApp(leads) {
     const tel = String(l.telefoon_e164 || '').trim();
     let reden = null;
     if (!E164_RE.test(tel)) reden = 'geen_geldig_nummer';
+    else if (l.wa_nu_niet) reden = 'nu_niet';
     else if (gezien.has(tel)) reden = 'dubbel_nummer';
     if (reden) overgeslagen.push({ lead: l, reden });
     else { gezien.add(tel); verzenden.push(l); }
@@ -368,6 +383,27 @@ export const itemKanalen = (kanaal) => (kanaal === 'beide' ? ['email', 'whatsapp
 
 // WhatsApp-parameters: geen regeleinden/tabs en geen 4+ spaties achter elkaar (Meta).
 const WA_PARAM_FOUT = /[\n\r\t]| {4,}/;
+
+/**
+ * Vervolg op de knoppen van de massa-template (puur): tekst na "Ja" (met
+ * {{voornaam}} / {{link}}), de link, en de afsluiting na "Nu even niet".
+ * Leeg = geen automatisch vervolg (de reactie wordt wel gelogd).
+ * -> { ja, link, nee } (null-velden als leeg) of MassaFout.
+ */
+export function valideerVervolg(b = {}) {
+  const ja = String(b.wa_vervolg_ja || '').trim();
+  const link = String(b.wa_vervolg_ja_link || '').trim();
+  const nee = String(b.wa_vervolg_nee || '').trim();
+  if (ja.length > 1000) throw new MassaFout(400, 'VERVOLG_TE_LANG', 'De tekst na "Ja" is te lang (max 1000 tekens).');
+  if (nee.length > 500) throw new MassaFout(400, 'VERVOLG_TE_LANG', 'De afsluiting na "Nu even niet" is te lang (max 500 tekens).');
+  for (const [t, toegestaan] of [[ja, ['voornaam', 'link']], [nee, ['voornaam']]]) {
+    const vreemd = [...t.matchAll(/\{\{\s*([^}]*?)\s*\}\}/g)].map((m) => m[1].toLowerCase()).filter((x) => !toegestaan.includes(x));
+    if (vreemd.length) throw new MassaFout(400, 'VERVOLG_ONBEKENDE_VARIABELE', `Onbekende variabele(n) in het vervolg: ${[...new Set(vreemd)].map((x) => '{{' + x + '}}').join(', ')}. Gebruik ${toegestaan.map((x) => '{{' + x + '}}').join(' en ')}.`);
+  }
+  if (link && !/^https:\/\/[^\s]+\.[^\s]+$/i.test(link)) throw new MassaFout(400, 'VERVOLG_LINK_ONGELDIG', 'De link moet een volledige https://-link zijn.');
+  if (/\{\{\s*link\s*\}\}/i.test(ja) && !link) throw new MassaFout(400, 'VERVOLG_LINK_LEEG', 'Vul de link in (de tekst na "Ja" gebruikt {{link}}).');
+  return { ja: ja || null, link: link || null, nee: nee || null };
+}
 
 /**
  * Velden van een campagne valideren (puur; de template zelf wordt in
@@ -417,7 +453,7 @@ export function valideerCampagne(b = {}) {
     const param2 = String(b.wa_param2 || '').trim();
     if (param2.length > 200) throw new MassaFout(400, 'WA_PARAM_TE_LANG', 'De tekst voor {{2}} is te lang (max 200 tekens).');
     if (WA_PARAM_FOUT.test(param2)) throw new MassaFout(400, 'WA_PARAM_ONGELDIG', 'De tekst voor {{2}} mag geen enters, tabs of 4+ spaties achter elkaar bevatten.');
-    uit.wa = { template, taal: String(b.wa_taal || 'nl').trim() || 'nl', param2 };
+    uit.wa = { template, taal: String(b.wa_taal || 'nl').trim() || 'nl', param2, vervolg: valideerVervolg(b) };
   }
   return uit;
 }
@@ -584,8 +620,16 @@ export async function maakCampagne(sb, b, { start = false, userId = null, nu = n
   if (metMail) Object.assign(rij, { soort: v.soort, onderwerp: v.onderwerp, html: v.html, sjabloon_id: v.sjabloon_id });
   if (metMail && v.blokken) rij.blokken = v.blokken; // alleen dan: zonder de bouwer-migratie werkt losse HTML gewoon
   if (metWa) Object.assign(rij, { wa_template: waTpl.name, wa_taal: waTpl.language, wa_param2: v.wa.param2 || null, wa_body: waTpl.body });
+  // Vervolgkolommen alleen noemen als er iets is ingevuld: zonder de
+  // reacties-migratie werken campagnes zonder vervolg gewoon.
+  const vv = metWa ? v.wa.vervolg : null;
+  const metVervolg = !!(vv && (vv.ja || vv.nee || vv.link));
+  if (metVervolg) Object.assign(rij, { wa_vervolg_ja: vv.ja, wa_vervolg_ja_link: vv.link, wa_vervolg_nee: vv.nee });
   const { data: camp, error: cErr } = await sb.from('massa_campagnes').insert(rij).select('id').single();
   if (cErr) {
+    if (metVervolg && (cErr.code === 'PGRST204' || cErr.code === '42703' || /wa_vervolg/i.test(cErr.message || ''))) {
+      throw new MassaFout(409, 'MIGRATIE_NODIG', `Een vervolg op "Ja" / "Nu even niet" vraagt eerst de migratie ${MIGRATIE_REACTIES}. Of laat de vervolgteksten leeg.`);
+    }
     if (v.blokken && (cErr.code === 'PGRST204' || cErr.code === '42703' || /blokken/i.test(cErr.message || ''))) {
       throw new MassaFout(409, 'MIGRATIE_NODIG', `Mails uit de mailbouwer vragen eerst de migratie ${MIGRATIE_BOUWER}.`);
     }
@@ -678,6 +722,24 @@ export async function tellingPerKanaal(sb, id) {
       r[status] = count || 0;
     }
     if (Object.values(r).some(Boolean)) uit[kanaal] = r;
+  }
+  // Reacties op de knoppen (WhatsApp). Zonder de reacties-migratie: weglaten.
+  if (uit.whatsapp && uit.whatsapp.sent) {
+    try {
+      const re = {};
+      for (const reactie of ['ja', 'nee', 'stop']) {
+        const { count, error } = await sb.from('massa_items').select('id', { count: 'exact', head: true }).eq('campagne_id', id).eq('kanaal', 'whatsapp').eq('reactie', reactie);
+        if (error) throw error;
+        re[reactie] = count || 0;
+      }
+      const { count: vervolg, error: vErr } = await sb.from('massa_items').select('id', { count: 'exact', head: true }).eq('campagne_id', id).eq('kanaal', 'whatsapp').eq('vervolg_status', 'verstuurd');
+      if (vErr) throw vErr;
+      re.geen = Math.max(0, uit.whatsapp.sent - re.ja - re.nee - re.stop);
+      re.vervolg_verstuurd = vervolg || 0;
+      uit.whatsapp.reacties = re;
+    } catch (e) {
+      if (!['42703', 'PGRST204'].includes(String(e?.code || ''))) console.warn('[massa-mail] reacties tellen (soft):', e?.message || e);
+    }
   }
   return uit;
 }

@@ -64,6 +64,7 @@ function nepDb(tab) {
       neq: (c, v) => { f.push((r) => r[c] !== v); return k; },
       in: (c, v) => { f.push((r) => v.map(String).includes(String(r[c]))); return k; },
       is: (c, v) => { f.push((r) => (v === null ? r[c] == null : r[c] === v)); return k; },
+      not: (c, o, v) => { if (o === 'is' && v === null) f.push((r) => r[c] != null); return k; },
       // GHL-import (2026-10-26): massa-mail sluit bron Import(-telefoon) standaard uit via .or().
       or: (expr) => { const m = /^bron.is.null,bron.not.in.((.*))$/.exec(String(expr)); if (m) { const uit = m[1].split(','); f.push((r) => r.bron == null || !uit.includes(r.bron)); } return k; },
       lt: (c, v) => { f.push((r) => r[c] != null && String(r[c]) < String(v)); return k; },
@@ -120,7 +121,7 @@ test('planWhatsApp + waarden + valideerCampagne', () => {
   const v = M.valideerCampagne(CAMP);
   assert.equal(v.kanaal, 'whatsapp');
   assert.equal(v.soort, null, 'geen soort/onderwerp nodig voor alleen WhatsApp');
-  assert.deepEqual(v.wa, { template: 'massa_heropenen', taal: 'nl', param2: 'een gratis live webinar over onze strategie' });
+  assert.deepEqual(v.wa, { template: 'massa_heropenen', taal: 'nl', param2: 'een gratis live webinar over onze strategie', vervolg: { ja: null, link: null, nee: null } });
   const fout = (b) => { try { M.valideerCampagne(b); return null; } catch (e) { return e.code; } };
   assert.equal(fout({ ...CAMP, wa_template: '' }), 'WA_TEMPLATE_LEEG');
   assert.equal(fout({ ...CAMP, wa_param2: 'regel1\nregel2' }), 'WA_PARAM_ONGELDIG');
@@ -325,6 +326,11 @@ test('popup: kanaal WhatsApp → template, {{2}}, live voorbeeld, controle per k
   assert.ok($('[data-mb-actie="naar-controle"]').disabled, '{{2}} nog leeg');
   zet('[data-mb-b="wa_param2"]', 'een gratis live webinar');
   assert.match($('[data-mb-wapreview]').textContent, /iets nieuws voor je: een gratis live webinar\./, 'live voorbeeld');
+  // Knoppen-template → automatisch antwoord; de standaardtekst vraagt een link.
+  assert.match($('[data-mb-b="wa_vervolg_ja"]').value, /\{\{link\}\}/);
+  assert.ok($('[data-mb-actie="naar-controle"]').disabled, 'link nog leeg');
+  zet('[data-mb-b="wa_vervolg_ja_link"]', 'https://deforexopleiding.nl/webinar');
+  assert.match($('[data-mb-vervolgpreview]').textContent, /Top, Anna! Hier is alles over het gratis webinar: https:\/\/deforexopleiding\.nl\/webinar/);
   assert.equal($('[data-mb-actie="naar-controle"]').disabled, false);
   klik($('[data-mb-actie="naar-controle"]'));
   await wacht(); await wacht();
@@ -333,6 +339,9 @@ test('popup: kanaal WhatsApp → template, {{2}}, live voorbeeld, controle per k
   assert.equal(pv.wa_template, 'massa_heropenen');
   assert.equal(pv.wa_taal, 'nl');
   assert.equal(pv.wa_param2, 'een gratis live webinar');
+  assert.equal(pv.wa_vervolg_ja_link, 'https://deforexopleiding.nl/webinar');
+  assert.match(pv.wa_vervolg_ja, /^Top, \{\{voornaam\}\}!/);
+  assert.match(pv.wa_vervolg_nee, /niets meer/);
   assert.equal(pv.onderwerp, undefined, 'geen e-mailvelden mee');
   assert.match($('[data-mb-perkanaal]').textContent, /2 WhatsApps/);
   assert.match($('[data-mb-actie="start"]').textContent, /2 berichten in de wachtrij/);
