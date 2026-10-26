@@ -102,3 +102,23 @@ test('belpoging: validatie', () => {
   assert.equal(valideerBelpoging({ email: 'x@y.be', resultaat: 'onzin' }).ok, false);
   assert.equal(valideerBelpoging({ email: 'X@Y.be', resultaat: 'voicemail', lead_id: 'geen-uuid' }).rij.lead_id, null);
 });
+
+test('al student (resultaat al_toegang, geen lab-account): apart, niet in KPI, lijst of bellijst', () => {
+  const { aanmeldingen, standPerEmail } = opzet();
+  aanmeldingen.push(A('a-stud', 'student@x.be', { product: 'minicursus', resultaat: 'al_toegang', mail_status: 'verstuurd' }));
+  const o = bouwOverzicht({ aanmeldingen, standPerEmail, nu: NU });
+  assert.deepEqual(o.al_student.map((r) => [r.email, r.chips[0].label]), [['student@x.be', 'Al student']]);
+  assert.ok(!o.leads.some((r) => r.email === 'student@x.be'));
+  assert.ok(!o.bellijst.some((r) => r.email === 'student@x.be'));
+  assert.equal(o.kpi.find((k) => k.sleutel === 'totaal').leads, 6, 'telt niet mee');
+});
+
+test('laatste bericht: de welkomstmail als er nog geen motorbericht is; het nieuwste wint', () => {
+  const { aanmeldingen, standPerEmail } = opzet();
+  aanmeldingen.find((a) => a.id === 'a-in').mail_status = 'verstuurd';
+  aanmeldingen.find((a) => a.id === 'a-in').resultaat = 'nieuw_account';
+  let o = bouwOverzicht({ aanmeldingen, standPerEmail, nu: NU });
+  assert.deepEqual(o.leads.find((r) => r.email === 'in@x.be').laatste_bericht, { stap: 'welkom', kanaal: 'mail', op: '2026-10-26T10:00:00Z' });
+  o = bouwOverzicht({ aanmeldingen, standPerEmail, nu: NU, laatsteMotor: new Map([['in@x.be', { stap: 'niet-ingelogd-24u', kanaal: 'mail', op: '2026-10-27T10:00:00Z' }]]) });
+  assert.equal(o.leads.find((r) => r.email === 'in@x.be').laatste_bericht.stap, 'niet-ingelogd-24u');
+});

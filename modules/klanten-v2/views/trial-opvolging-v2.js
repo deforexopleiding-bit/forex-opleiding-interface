@@ -124,9 +124,11 @@
     const d = st.data;
     const schakelaar = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 16px;border:1px solid var(--border);border-radius:var(--r-md,12px);background:var(--surface-2,var(--surface));margin-bottom:16px">
       <div style="flex:1;min-width:240px"><div style="font-weight:700;font-size:14px">Opvolgmotor trial-leads</div>
-        <div style="font-size:12px;color:var(--text-3);margin-top:2px">Elke trial (minicursus, 7-daagse, webinar, website, The Lab). Elk kwartier, nooit tussen 21u en 8u, max. 1 bericht per 20 uur, stopt bij sessie geboekt, afmelding of klant.</div></div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:2px">Elke trial (minicursus, 7-daagse, webinar, website, The Lab). Elk kwartier (${esc(d.cron?.pad || '/api/cron-lab-opvolging')}, ${esc(d.cron?.schema || '*/15 * * * *')}), nooit tussen 21u en 8u, max. 1 bericht per 20 uur, stopt bij sessie geboekt, afmelding of klant.</div></div>
       ${d.noodstop ? chip('NOODSTOP actief (env LEADSONDERHOUD_UIT) — er gaat niets weg', 'var(--rose,#C22B3E)') : ''}
-      <button onclick="window.__trialOpvLive(${d.live ? 'false' : 'true'})" style="padding:8px 16px;border-radius:999px;border:0;font-weight:700;cursor:pointer;background:${d.live ? 'var(--emerald,#1F9D6B)' : 'var(--text-3,#7a8794)'};color:#fff">${d.live ? 'AAN — klik om uit te zetten' : 'UIT (droogloop) — klik om aan te zetten'}</button>
+      ${d.mag_schakelen === false
+        ? chip(d.live ? 'AAN' : 'UIT (droogloop)', d.live ? 'var(--emerald,#1F9D6B)' : 'var(--text-3)') + '<span style="font-size:11.5px;color:var(--text-3)">Aan/uit: Dave of Maxim</span>'
+        : `<button onclick="window.__trialOpvLive(${d.live ? 'false' : 'true'})" style="padding:8px 16px;border-radius:999px;border:0;font-weight:700;cursor:pointer;background:${d.live ? 'var(--emerald,#1F9D6B)' : 'var(--text-3,#7a8794)'};color:#fff">${d.live ? 'AAN — klik om uit te zetten' : 'UIT (droogloop) — klik om aan te zetten'}</button>`}
     </div>`;
     const kaarten = (d.stappen || []).map((s) => {
       const mailChip = s.mail ? (s.mail.eigen && s.mail.eigen.actief !== false ? chip('Mail · eigen tekst', 'var(--brand,#0A7490)') : chip('Mail · standaardtekst', 'var(--text-2,#4a5a68)')) : chip('Mail · welkomst per belofte (code)', 'var(--text-2,#4a5a68)');

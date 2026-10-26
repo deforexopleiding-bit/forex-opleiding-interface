@@ -7,7 +7,9 @@
 //          mail: { standaard: { onderwerp, html }, eigen: <onderhoud_sjablonen-rij>|null },
 //          whatsapp: { voorgesteld_template, eigen: <rij>|null, goedgekeurd: bool|null } }],
 //          variabelen, wa_lijn_ok }
-// POST { live: true|false } → zet app_settings 'lab_opvolging_live'.
+// POST { live: true|false } → zet app_settings 'lab_opvolging_live'. Enkel
+//      super_admin / admin / manager / sales (Maxim, Dave): leads.view hebben
+//      ook mentoren en setters, en die horen de motor niet aan te zetten.
 //
 // De teksten zelf bewaar je met de bestaande /api/leadsonderhoud-sjabloon-opslaan
 // (traject_slug 'the-lab', soort = de stap, kanaal mail|whatsapp). Een eigen
@@ -24,6 +26,10 @@ import { knop } from './_lib/lab-berichten.js';
 import { haalLijn } from './_lib/leadsonderhoud-gesprekken.js';
 import { goedgekeurdeTemplatesOpLijn } from './_lib/meta-whatsapp.js';
 import { LAB_SLUG } from './_lib/lab-config.js';
+import { getEffectiveRoles, hasAnyRole } from './_lib/roles.js';
+
+/** Wie de motor aan/uit mag zetten. */
+export const SCHAKELAAR_ROLLEN = Object.freeze(['super_admin', 'admin', 'manager', 'sales']);
 
 const SLEUTEL = 'lab_opvolging_live';
 const aanUit = (v) => ['1', 'true', 'aan', 'on', 'ja'].includes(String(v ?? '').trim().toLowerCase());
@@ -39,7 +45,10 @@ export default async function handler(req, res) {
 
   const noodstop = aanUit(process.env.LEADSONDERHOUD_UIT);
 
+  const magSchakelen = hasAnyRole(await getEffectiveRoles(user.id, supabaseAdmin), SCHAKELAAR_ROLLEN);
+
   if (req.method === 'POST') {
+    if (!magSchakelen) return res.status(403).json({ error: 'Alleen super_admin, admin, manager of sales zet de opvolgmotor aan of uit.' });
     const live = (req.body || {}).live === true;
     const { error } = await supabaseAdmin.from('app_settings')
       .upsert({ key: SLEUTEL, value: live ? 'true' : 'false', updated_by_user_id: user.id }, { onConflict: 'key' });
@@ -93,7 +102,8 @@ export default async function handler(req, res) {
   });
 
   return res.status(200).json({
-    ok: true, live: aanUit(instelWaarde(inst)), noodstop, wa_lijn_ok: waLijnOk,
+    ok: true, live: aanUit(instelWaarde(inst)), noodstop, wa_lijn_ok: waLijnOk, mag_schakelen: magSchakelen,
+    cron: { pad: '/api/cron-lab-opvolging', schema: '*/15 * * * *' },
     variabelen: SJABLOON_VARIABELEN, stappen,
   });
 }

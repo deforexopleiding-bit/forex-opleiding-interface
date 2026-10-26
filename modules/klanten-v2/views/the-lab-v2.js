@@ -63,7 +63,7 @@
     return '<span title="' + esc(bron ? 'bron ' + bron : '') + '" style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:' + k + ';color:#fff">' + esc(label || PRODUCT_LABEL[p] || p) + '</span>';
   }
   const RESULTAAT_LABEL = { geen_antwoord: 'Geen antwoord', voicemail: 'Voicemail', gesproken: 'Gesproken', sessie_geboekt: 'Sessie geboekt', terugbellen: 'Terugbellen', geen_interesse: 'Geen interesse', verkeerd_nummer: 'Verkeerd nummer' };
-  const CHIP_KLEUR = { klant: 'var(--emerald,#1F9D6B)', geboekt: 'var(--emerald,#1F9D6B)', ingelogd: 'var(--blue,#2F6FEB)', niet_ingelogd: 'var(--text-3,#7a8794)', video: 'var(--teal,#0F8C8C)', lab: 'var(--amber,#B7791F)', lab_af: 'var(--teal,#0F8C8C)', verlopen: 'var(--rose,#C22B3E)', afgemeld: 'var(--rose,#C22B3E)' };
+  const CHIP_KLEUR = { al_student: 'var(--brand,#0A7490)', klant: 'var(--emerald,#1F9D6B)', geboekt: 'var(--emerald,#1F9D6B)', ingelogd: 'var(--blue,#2F6FEB)', niet_ingelogd: 'var(--text-3,#7a8794)', video: 'var(--teal,#0F8C8C)', lab: 'var(--amber,#B7791F)', lab_af: 'var(--teal,#0F8C8C)', verlopen: 'var(--rose,#C22B3E)', afgemeld: 'var(--rose,#C22B3E)' };
   function chips(lijst, titels) {
     return (lijst || []).map((c) => '<span ' + (c.code === 'video' && titels && titels.length ? 'title="' + esc(titels.join(' · ')) + '" ' : '') + 'style="display:inline-block;margin:0 4px 3px 0;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid ' + (CHIP_KLEUR[c.code] || 'var(--text-3)') + ';color:' + (CHIP_KLEUR[c.code] || 'var(--text-3)') + '">' + esc(c.label) + '</span>').join('');
   }
@@ -196,24 +196,24 @@
         '<div style="font-size:11.5px;color:var(--text-3)">mail ' + esc(x.mail_status || '—') + ' · WhatsApp ' + esc(x.wa_status || '—') + (x.toestemming ? '' : ' · geen toestemming') + (x.is_test ? ' · TEST' : '') + '</div>')).join(''));
     }
     const tl = tijdlijn(d);
-    if (tl.length) h += sectie('Tijdlijn', tl.map((t) => regel(datum(t.op), (t.icoon ? t.icoon + ' ' : '') + esc(t.tekst))).join(''));
+    if (tl.length) h += sectie('Tijdlijn', tl.map((t) => regel(datum(t.op), (t.icoon ? '<span style="display:inline-block;min-width:62px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3)">' + esc(t.icoon) + '</span>' : '') + esc(t.tekst))).join(''));
     return h;
   }
 
   /** Alles wat er met deze lead gebeurde, in de tijd: aanmelding, berichten, logins, video's, Lab, boeking, belpogingen. */
   function tijdlijn(d) {
     const t = [];
-    for (const a of d.aanmeldingen || []) t.push({ op: a.aangemaakt, icoon: '📝', tekst: 'Aangemeld via ' + (PRODUCT_LABEL[a.product] || a.product || 'The Lab') + (a.bron ? ' (' + a.bron + ')' : '') + (a.hook ? ' · ' + a.hook : '') });
-    for (const b of d.berichten || []) t.push({ op: b.verstuurd_op, icoon: b.kanaal === 'whatsapp' ? '💬' : '✉️', tekst: (b.kanaal === 'whatsapp' ? 'WhatsApp' : 'Mail') + ' · ' + b.soort + ' · ' + b.status + (b.fout ? ' (' + b.fout + ')' : '') });
-    for (const o of d.opvolging || []) if (o.status !== 'verstuurd') t.push({ op: o.aangemaakt, icoon: '⏭', tekst: 'Motor · ' + o.stap + ' · ' + o.kanaal + ' ' + o.status + (o.detail ? ' (' + o.detail + ')' : '') });
+    for (const a of d.aanmeldingen || []) t.push({ op: a.aangemaakt, icoon: 'Aanmelding', tekst: 'Aangemeld via ' + (PRODUCT_LABEL[a.product] || a.product || 'The Lab') + (a.bron ? ' (' + a.bron + ')' : '') + (a.hook ? ' · ' + a.hook : '') });
+    for (const b of d.berichten || []) t.push({ op: b.verstuurd_op, icoon: b.kanaal === 'whatsapp' ? 'WhatsApp' : 'Mail', tekst: (b.kanaal === 'whatsapp' ? 'WhatsApp' : 'Mail') + ' · ' + b.soort + ' · ' + b.status + (b.fout ? ' (' + b.fout + ')' : '') });
+    for (const o of d.opvolging || []) if (o.status !== 'verstuurd') t.push({ op: o.aangemaakt, icoon: 'Motor', tekst: 'Motor · ' + o.stap + ' · ' + o.kanaal + ' ' + o.status + (o.detail ? ' (' + o.detail + ')' : '') });
     const a = d.account;
-    if (a && a.eerste_login_op) t.push({ op: a.eerste_login_op, icoon: '🔑', tekst: 'Eerste login' });
-    if (a && a.laatste_login_op && a.laatste_login_op !== a.eerste_login_op) t.push({ op: a.laatste_login_op, icoon: '🔑', tekst: 'Laatste login' });
-    for (const g of d.gebeurtenissen || []) t.push({ op: g.op, icoon: /video/.test(g.soort) ? '▶' : '•', tekst: g.regel });
-    if (d.sessie && d.sessie.gestart_op) t.push({ op: d.sessie.gestart_op, icoon: '🧪', tekst: 'Startte The Lab' });
-    if (d.sessie && d.sessie.afgerond) t.push({ op: d.sessie.bijgewerkt_op, icoon: '🏁', tekst: 'Werkte The Lab af' + ((d.vragen || []).length ? ' · ' + d.vragen.length + ' antwoorden' : '') });
-    if (a && a.sessie_geboekt_op) t.push({ op: a.sessie_geboekt_op, icoon: '📅', tekst: 'Boekte de strategiesessie' + (a.sessie_moment ? ' voor ' + datum(a.sessie_moment) : '') });
-    for (const b of d.belpogingen || []) t.push({ op: b.aangemaakt, icoon: '📞', tekst: 'Belpoging · ' + (RESULTAAT_LABEL[b.resultaat] || b.resultaat) + (b.door_naam ? ' · ' + b.door_naam : '') + (b.notitie ? ' — ' + b.notitie : '') });
+    if (a && a.eerste_login_op) t.push({ op: a.eerste_login_op, icoon: 'Login', tekst: 'Eerste login' });
+    if (a && a.laatste_login_op && a.laatste_login_op !== a.eerste_login_op) t.push({ op: a.laatste_login_op, icoon: 'Login', tekst: 'Laatste login' });
+    for (const g of d.gebeurtenissen || []) t.push({ op: g.op, icoon: /video/.test(g.soort) ? 'Video' : 'LMS', tekst: g.regel });
+    if (d.sessie && d.sessie.gestart_op) t.push({ op: d.sessie.gestart_op, icoon: 'Lab', tekst: 'Startte The Lab' });
+    if (d.sessie && d.sessie.afgerond) t.push({ op: d.sessie.bijgewerkt_op, icoon: 'Lab', tekst: 'Werkte The Lab af' + ((d.vragen || []).length ? ' · ' + d.vragen.length + ' antwoorden' : '') });
+    if (a && a.sessie_geboekt_op) t.push({ op: a.sessie_geboekt_op, icoon: 'Boeking', tekst: 'Boekte de strategiesessie' + (a.sessie_moment ? ' voor ' + datum(a.sessie_moment) : '') });
+    for (const b of d.belpogingen || []) t.push({ op: b.aangemaakt, icoon: 'Bellen', tekst: 'Belpoging · ' + (RESULTAAT_LABEL[b.resultaat] || b.resultaat) + (b.door_naam ? ' · ' + b.door_naam : '') + (b.notitie ? ' — ' + b.notitie : '') });
     return t.filter((x) => x.op).sort((x, y) => String(x.op).localeCompare(String(y.op)));
   }
 
@@ -540,7 +540,18 @@
         '</tr>').join('') + '</tbody></table></div>';
   }
 
-  const GROEP_LABEL = { warm: '🔥 Warm, geen sessie', ingelogd: 'Ingelogd, geen sessie', niet_ingelogd: 'Niet ingelogd (met toestemming)' };
+  /** Wie al student is (geen trial): apart, buiten KPI's en bellijst. */
+  function alStudentBlok(lijst) {
+    if (!lijst.length) return '';
+    return '<div style="font-weight:600;margin:18px 0 6px">Al student <span style="font-weight:400;color:var(--text-3);font-size:12px">(' + lijst.length + ') — vroeg een trial aan met een adres dat al toegang heeft; geen trial, telt niet mee</span></div>' +
+      '<div style="overflow-x:auto" data-trial-al-student><table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>' + lijst.map((r) =>
+        '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px"><b>' + esc(r.naam) + '</b><div style="font-size:11.5px;color:var(--text-3)">' + esc(r.email) + (r.is_test ? ' · TEST' : '') + '</div></td>' +
+        '<td style="padding:6px 10px">' + productChip(r.product, r.product_label, r.bron) + '</td>' +
+        '<td style="padding:6px 10px;white-space:nowrap">' + esc(datum(r.aangemeld)) + '</td>' +
+        '<td style="padding:6px 10px">' + chips(r.chips) + '</td></tr>').join('') + '</tbody></table></div>';
+  }
+
+  const GROEP_LABEL = { warm: 'Warm, geen sessie', ingelogd: 'Ingelogd, geen sessie', niet_ingelogd: 'Niet ingelogd (met toestemming)' };
   function bellijst(d) {
     const lijst = d.bellijst || [];
     if (!lijst.length) return '<div style="color:var(--text-3);font-size:13px">Niemand om te bellen in deze periode (geboekt, klant, afgemeld, test of zonder nummer tellen niet).</div>';
@@ -559,7 +570,7 @@
           '<div style="margin-top:4px">' + chips(r.chips, r.video_titels) + '</div>' +
           '<div style="font-size:11.5px;color:var(--text-3)">aangemeld ' + esc(datum(r.aangemeld)) + ' · ' + (r.dagen_over != null ? (r.dagen_over >= 0 ? r.dagen_over + ' d toegang over' : 'toegang verlopen') : '') +
           (r.laatste_belpoging ? ' · laatst gebeld ' + esc(geledenTekst(r.laatste_belpoging.op)) + ': ' + esc(RESULTAAT_LABEL[r.laatste_belpoging.resultaat] || r.laatste_belpoging.resultaat) + (r.laatste_belpoging.notitie ? ' — ' + esc(r.laatste_belpoging.notitie) : '') : '') + '</div></div>' +
-        '<a class="btn btn-sm btn-primary" href="tel:' + esc(tel) + '" onclick="event.stopPropagation()" style="white-space:nowrap">📞 ' + esc(tel) + '</a>' +
+        '<a class="btn btn-sm btn-primary" href="tel:' + esc(tel) + '" onclick="event.stopPropagation()" style="white-space:nowrap">Bel ' + esc(tel) + '</a>' +
         (d.belpogingen_ok
           ? '<select onchange="window.__trialBelVeld(\'' + esc(r.email) + '\',\'resultaat\',this.value)" style="padding:6px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface)"><option value="">Resultaat…</option>' + opties.replace('value="' + (b.resultaat || '') + '"', 'value="' + (b.resultaat || '') + '" selected') + '</select>' +
             '<input placeholder="Notitie" value="' + esc(b.notitie || '') + '" oninput="window.__trialBelVeld(\'' + esc(r.email) + '\',\'notitie\',this.value)" style="flex:1 1 160px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface)">' +
@@ -597,8 +608,8 @@
     else if (d) {
       const meld = (d.meldingen || []).map((m) => '<div style="margin-bottom:8px;padding:8px 12px;background:var(--amber-soft,#FFF4E0);border-radius:6px;font-size:12px">' + esc(m) + '</div>').join('');
       inhoud = meld + (ov.tab === 'bellijst'
-        ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div style="font-size:12px;color:var(--text-3)">Eerst warm zonder sessie, dan ingelogd zonder sessie, dan niet ingelogd met toestemming. Binnen een groep de hoogste score eerst; wie vandaag al gebeld werd schuift achteraan.</div><button class="btn btn-sm" onclick="window.__trialBelCsv()">⬇ CSV</button></div>' + bellijst(d)
-        : kpiBlok(d.kpi) + '<div style="font-weight:600;margin:6px 0 8px">Trial-leads <span style="font-weight:400;color:var(--text-3);font-size:12px">— klik voor het dossier · % t.o.v. leads · testleads tellen niet mee in de cijfers</span></div>' + trialLijst(d.leads || []));
+        ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div style="font-size:12px;color:var(--text-3)">Eerst warm zonder sessie, dan ingelogd zonder sessie, dan niet ingelogd met toestemming. Binnen een groep de hoogste score eerst; wie vandaag al gebeld werd schuift achteraan.</div><button class="btn btn-sm" onclick="window.__trialBelCsv()">CSV downloaden</button></div>' + bellijst(d)
+        : kpiBlok(d.kpi) + '<div style="font-weight:600;margin:6px 0 8px">Trial-leads <span style="font-weight:400;color:var(--text-3);font-size:12px">— klik voor het dossier · % t.o.v. leads · testleads tellen niet mee in de cijfers</span></div>' + trialLijst(d.leads || []) + alStudentBlok(d.al_student || []));
     } else inhoud = '';
     return '<div class="card" style="padding:16px 18px">' + tabBalk +
       '<div style="font-weight:700;font-size:15px;margin-bottom:10px">Alle trial-leads · één login, elke belofte</div>' +

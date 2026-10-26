@@ -60,7 +60,7 @@ test('bellijst: tel-link en een belpoging noteren', async () => {
   const { w, view, calls } = await opzet();
   w.__trialOvZet('tab', 'bellijst');
   const html = view();
-  assert.match(html, /href="tel:\+32470000000"/);
+  assert.match(html, /href="tel:\+32470000000"[^>]*>Bel \+32470000000</);
   assert.match(html, /Warm, geen sessie/);
   w.__trialBelVeld('lien@x.be', 'resultaat', 'terugbellen');
   w.__trialBelVeld('lien@x.be', 'notitie', 'na 18u');

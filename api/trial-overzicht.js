@@ -85,13 +85,17 @@ export default async function handler(req, res) {
     meldingen.push('Telefoon/toestemming/afspraken waren niet volledig te lezen.');
   }
 
+  // Laatste motorbericht per e-mail (de motor noteert op de eerste aanmelding
+  // van zijn venster, dat is niet altijd de eerste van deze periode).
   const laatsteMotor = new Map();
+  const mailVan = new Map(aanmeldingen.map((a) => [a.id, String(a.email || '').toLowerCase()]));
   try {
     const ov = await inBlokken(aanmeldingen.map((a) => a.id), (d) => supabaseAdmin.from('lab_opvolging').select('aanmelding_id, stap, kanaal, status, aangemaakt').in('aanmelding_id', d));
     for (const o of ov) {
       if (o.status !== 'verstuurd') continue;
-      const h = laatsteMotor.get(o.aanmelding_id);
-      if (!h || String(o.aangemaakt) > String(h.op)) laatsteMotor.set(o.aanmelding_id, { stap: o.stap, kanaal: o.kanaal, op: o.aangemaakt });
+      const em = mailVan.get(o.aanmelding_id);
+      const h = em && laatsteMotor.get(em);
+      if (em && (!h || String(o.aangemaakt) > String(h.op))) laatsteMotor.set(em, { stap: o.stap, kanaal: o.kanaal, op: o.aangemaakt });
     }
   } catch (e) { console.warn('[trial-overzicht] lab_opvolging (soft):', e?.message || e); }
 
