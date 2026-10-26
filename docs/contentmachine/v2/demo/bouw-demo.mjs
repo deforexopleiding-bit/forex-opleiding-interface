@@ -95,7 +95,7 @@ const teaserA = {
 };
 const socialA = {
   stories: [
-    { rol: 'hook', variant: 'donker', eyebrow: 'Live training 22/10', titel: 'Prijs zakt onder de low. **Short?**', tekst: 'Kies voor je verder tikt.' },
+    { rol: 'hook', variant: 'foto', eyebrow: 'Live training 22/10', titel: 'Prijs zakt onder de low. **Short?**', tekst: 'Kies voor je verder tikt.', beeld_asset_id: A.zaal },
     { rol: 'nugget', variant: 'licht', eyebrow: 'De nugget', titel: 'Een sweep is **brandstof**, geen break.', tekst: 'Pas een body close verlegt de structuur.' },
     { rol: 'bewijs', variant: 'kaart', eyebrow: 'Speel het zelf af', titel: 'Het moment van **22/10**', tekst: 'Kaars per kaars, met de onthulling erna.', blok_index: 2 },
     { rol: 'cta', variant: 'donker', eyebrow: 'Nu online', titel: 'De volledige **weekeditie**', tekst: 'Opname, replay en de trade ontleed.', sticker_tekst: 'Lees de weekeditie' },
@@ -197,7 +197,7 @@ const teaserB = {
 const socialB = {
   stories: [
     { rol: 'hook', variant: 'data', eyebrow: 'Het bewijs', titel: 'Aan **uitbetalingen**', tekst: 'Van vijf mensen, uit de masterclass.', getal: { waarde: 138695, prefix: '€', decimalen: 0, label: 'aan uitbetalingen' } },
-    { rol: 'nugget', variant: 'donker', eyebrow: 'De nugget', titel: 'Je stop bepaalt je positie. **Niet andersom.**', tekst: '1% risico per trade-idee.' },
+    { rol: 'nugget', variant: 'foto', eyebrow: 'De nugget', titel: 'Je stop bepaalt je positie. **Niet andersom.**', tekst: '1% risico per trade-idee.', beeld_asset_id: A.zaal },
     { rol: 'bewijs', variant: 'kaart', eyebrow: 'Met toestemming', titel: 'Payouts op **één muur**', blok_index: 1 },
     { rol: 'cta', variant: 'licht', eyebrow: 'Nu online', titel: 'De volledige **weekeditie**', tekst: 'Het bewijs en het proces erachter.', sticker_tekst: 'Lees de weekeditie' },
   ],

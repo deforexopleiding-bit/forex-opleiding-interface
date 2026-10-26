@@ -288,6 +288,7 @@ Je bent nu de SCHRIJVER. De regisseur koos al het format, het thema, de hero, de
   · data — één ENORM getal (getal.waarde + label, enkel een echt cijfer uit de feitenbank/invoer) + korte kop.
   · kaart — een frame van een blok van de pagina als UI-kaart (blok_index = het blok; bij voorkeur het interactieve blok of een data-blok).
   Elk beeld: eyebrow (klein label, hoofdletters, 2-5 woorden), titel (kort, max ±9 woorden, accentwoorden tussen **), tekst (1-2 korte zinnen). Geen links of @-handles in het beeld (die zet het systeem).
+- FOTO VERPLICHT: elke storyset én elke carrousel bevat minstens één foto-variant met een MASTERCLASSFOTO uit de beelden (soort masterclass; anders team), full-bleed zoals de reeks ("Geen goeroe met een Lambo. Een team aan een tafel.").
 - Stories (3-5, 1080×1920): hook → nugget → bewijs (data/kaart/foto) → cta (rol cta, sticker_tekst "Lees de weekeditie" of iets kort). Zelfde kernidee en nugget als de pagina.
 - Carrousel (5-8 slides, 1080×1350): slide 1 = hook die doet swipen, dan het verhaal in stappen (één idee per slide), laatste = "de volledige weekeditie staat online" (link in bio). Wissel varianten af zoals de reeks (bv. foto → donker → kaart → licht → data → donker). Caption: hook in de eerste regel, korte alinea's, uitnodiging naar de weekeditie; GEEN link (systeem: "link in bio"); max 5 hashtags apart.
 - Vierkant (1080×1080): één sterk beeld voor feed/delen.

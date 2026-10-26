@@ -62,6 +62,8 @@
     return g;
   }
 
+  /** Spiegel van accentDelen() in dfo-website lib/trainingen.ts. */
+  const FUNCTIEWOORDEN = new Set(['de', 'het', 'een', 'in', 'op', 'van', 'met', 'voor', 'aan', 'tot', 'naar', 'bij', 'om', 'uit', 'en', 'of', 'als', 'dan', 'je', 'jouw', 'ons', 'onze', 'die', 'dat', 'is', 'zijn', 'te', 'er', 'nog', 'ook', 'wel']);
   /** "a **b** c" → woorden met accent-vlag; \n = harde regel. */
   function delen(tekst) {
     const uit = [];
@@ -75,7 +77,13 @@
         if (!r) return;
         // "**woord**, rest": geen spatie vóór de komma (het stuk plakt aan het vorige woord).
         const plak = /^\S/.test(r) && !spatieErvoor && uit.length > 0 && !uit[uit.length - 1].breek;
-        r.split(/\s+/).filter(Boolean).forEach((woord, i) => uit.push({ woord, accent, plak: plak && i === 0 }));
+        // goud enkel op zelfstandige sleutelwoorden: een accent opent nooit met een lidwoord/voorzetsel
+        let opening = accent;
+        r.split(/\s+/).filter(Boolean).forEach((woord, i) => {
+          if (opening && FUNCTIEWOORDEN.has(woord) && woord === woord.toLowerCase()) { uit.push({ woord, accent: false, plak: plak && i === 0 }); return; }
+          opening = false;
+          uit.push({ woord, accent, plak: plak && i === 0 });
+        });
         spatieErvoor = /\s$/.test(r);
       });
     });

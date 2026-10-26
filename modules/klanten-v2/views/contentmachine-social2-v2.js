@@ -105,7 +105,8 @@
       s, marge: 72 * s, boven: 60 * s, onder: 64 * s,
       eyebrowPx: 20 * s, eyebrowGap: 30 * s, kopPx: 92 * s, kopRegels: 5, tekstGap: 34 * s, tekstPx: 31 * s, tekstRegels: 4,
     };
-    if (soort === 'story') return { ...basis, marge: 84 * s, boven: 200 * s, onder: 230 * s, kopPx: 112 * s, kopRegels: 6, tekstPx: 38 * s, tekstGap: 40 * s, eyebrowPx: 24 * s, tekstRegels: 5 };
+    // story 9:16: grotere koppen en tekst; boven/onder blijft vrij voor de IG-balken
+    if (soort === 'story') return { ...basis, story: true, marge: 84 * s, boven: 190 * s, onder: 220 * s, kopPx: 140 * s, kopRegels: 6, tekstPx: 44 * s, tekstGap: 44 * s, eyebrowPx: 28 * s, eyebrowGap: 36 * s, tekstRegels: 5 };
     if (soort === 'vierkant') return { ...basis, kopPx: 88 * s, kopRegels: 4, tekstRegels: 3 };
     if (soort === 'og') return { ...basis, s: H / 630, marge: 64, boven: 44, onder: 46, eyebrowPx: 18, eyebrowGap: 22, kopPx: 64, kopRegels: 3, tekstPx: 24, tekstGap: 20, tekstRegels: 2 };
     return basis;
@@ -133,13 +134,60 @@
     return pal;
   }
 
+  const hashTekst = (t) => { let h = 7; for (const ch of String(t || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+
+  /** Grote chart-illustratie (kaarsen + gouden slotlijn) die het onderste deel van een story vult. */
+  function chartDecor(ctx, x, y, w, h, pal, seed) {
+    const CH = window.__weChart;
+    if (!CH || h < 120) return;
+    const D = CH.miniReeks(seed % 2 ? 'long' : 'short', 3 + (seed % 17));
+    const n = D.length;
+    let mn = Infinity, mx = -Infinity;
+    for (const k of D) { mn = Math.min(mn, k.l); mx = Math.max(mx, k.h); }
+    const cw = w / n; const bw = Math.max(3, cw * 0.62);
+    const yv = (p) => y + ((mx - p) / (mx - mn || 1)) * h;
+    ctx.save();
+    // raster
+    ctx.strokeStyle = pal.licht ? 'rgba(19,41,58,.07)' : 'rgba(217,227,232,.07)'; ctx.lineWidth = 1.5;
+    for (let i = 1; i < 4; i++) { const yy = y + (h * i) / 4; ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); ctx.stroke(); }
+    D.forEach((k, i) => {
+      const cx = x + (i + 0.5) * cw; const op = k.c >= k.o;
+      ctx.strokeStyle = pal.licht ? '#1d3a4f' : '#8FA7B5'; ctx.lineWidth = Math.max(2.5, w / 420);
+      ctx.beginPath(); ctx.moveTo(cx, yv(k.h)); ctx.lineTo(cx, yv(k.l)); ctx.stroke();
+      ctx.fillStyle = op ? (pal.licht ? '#FFFFFF' : '#E6ECF0') : (pal.licht ? '#1d3a4f' : '#45627a');
+      const yt = yv(Math.max(k.o, k.c)); const hb = Math.max(2, yv(Math.min(k.o, k.c)) - yt);
+      ctx.fillRect(cx - bw / 2, yt, bw, hb);
+      if (op && pal.licht) { ctx.strokeStyle = '#1d3a4f'; ctx.lineWidth = Math.max(2.5, w / 380); ctx.strokeRect(cx - bw / 2, yt, bw, hb); }
+    });
+    // gouden slotkoerslijn + stip op de laatste koers
+    ctx.strokeStyle = K().KLEUR.goud; ctx.lineWidth = Math.max(3, w / 300); ctx.lineJoin = 'round'; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); D.forEach((k, i) => { const px = x + (i + 0.5) * cw; const py = yv(k.c); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }); ctx.stroke();
+    ctx.globalAlpha = 1;
+    const lx = x + (n - 0.5) * cw; const ly = yv(D[n - 1].c);
+    ctx.fillStyle = K().KLEUR.goud; ctx.beginPath(); ctx.arc(lx, ly, Math.max(8, w / 110), 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // zacht laten opkomen bovenaan
+    const g = ctx.createLinearGradient(0, y - 4, 0, y + h * 0.35);
+    const bg = pal.licht ? '246,247,249' : '24,40,55';
+    g.addColorStop(0, `rgba(${bg},1)`); g.addColorStop(1, `rgba(${bg},0)`);
+    ctx.fillStyle = g; ctx.fillRect(x - 2, y - 4, w + 4, h * 0.35 + 4);
+  }
+
   function tekenEffen(ctx, W, H, b, m, variant, soort) {
     achtergrond(ctx, W, H, variant);
     const pal = palet(variant);
     const x = m.marge; const maxW = W - 2 * m.marge;
+    if (soort === 'story') {
+      // 9:16 gevuld zoals de reeks: tekst in het bovenste deel, grote chart-illustratie eronder
+      const y = m.boven + 170 * m.s;
+      const yNa = tekstBlok(ctx, b, { pal, x, maxW, y, ...m });
+      const top = yNa + 110 * m.s; const bodem = H - m.onder - 70 * m.s;
+      chartDecor(ctx, x, top, maxW, bodem - top, pal, hashTekst(b.titel));
+      return pal;
+    }
     const hoog = meetTekst(b, { pal, x, maxW, ...m });
     // carrousel zoals de reeks: het blok in het bovenste deel (de swipe trekt verder);
-    // story, vierkant en LinkedIn staan op zich: optisch gecentreerd. Nooit tegen het logo.
+    // vierkant en LinkedIn staan op zich: optisch gecentreerd. Nooit tegen het logo.
     const vrij = H - m.boven - m.onder - 120 * m.s;
     const factor = soort === 'post' ? 0.35 : 0.46;
     const plafond = soort === 'post' ? vrij * 0.22 : vrij;
@@ -171,7 +219,7 @@
     const hoogTekst = meetTekst({ titel: labelB.titel, tekst: labelB.tekst }, { pal, x, maxW, ...m, kopPx: m.kopPx * 0.5, kopRegels: 3 });
     const totaal = m.eyebrowPx + m.eyebrowGap + px * 0.95 + 40 * m.s + hoogTekst;
     const vrij = H - m.boven - m.onder - 120 * m.s;
-    let y = m.boven + 90 * m.s + Math.max(0, (vrij - totaal) * 0.3);
+    let y = m.story ? m.boven + 170 * m.s : m.boven + 90 * m.s + Math.max(0, (vrij - totaal) * 0.3);
     if (b.eyebrow) { c.eyebrow(ctx, b.eyebrow, x, y, { px: m.eyebrowPx, kleur: pal.eyebrow, lijnW: 58 * m.s }); y += m.eyebrowPx + m.eyebrowGap * 0.6; }
     ctx.save();
     ctx.font = c.font(800, px, 'kop'); c.spatie(ctx, -0.055 * px); ctx.fillStyle = '#F4F6F8'; ctx.textBaseline = 'alphabetic';
@@ -179,7 +227,8 @@
     ctx.restore();
     y += px * 0.95 + 40 * m.s;
     const labelTitel = labelB.titel || g.label;
-    tekstBlok(ctx, { titel: labelTitel, tekst: labelB.tekst || (labelB.titel ? g.label : '') }, { pal, x, maxW, y, ...m, kopPx: m.kopPx * 0.5, kopRegels: 3, tekstGap: m.tekstGap * 0.8 });
+    const yNa = tekstBlok(ctx, { titel: labelTitel, tekst: labelB.tekst || (labelB.titel ? g.label : '') }, { pal, x, maxW, y, ...m, kopPx: m.kopPx * 0.5, kopRegels: 3, tekstGap: m.tekstGap * 0.8 });
+    if (m.story) { const top = yNa + 110 * m.s; chartDecor(ctx, x, top, maxW, H - m.onder - 70 * m.s - top, pal, hashTekst(getal)); }
     return pal;
   }
 
@@ -190,14 +239,17 @@
     const pal = palet(variant);
     const x = m.marge; const maxW = W - 2 * m.marge;
     const kopPx = m.kopPx * 0.82;
-    const yNa = tekstBlok(ctx, b, { pal, x, maxW, y: m.boven + 120 * m.s, ...m, kopPx, kopRegels: 3, tekstRegels: 2 });
+    const yNa = tekstBlok(ctx, b, { pal, x, maxW, y: m.boven + (m.story ? 170 : 120) * m.s, ...m, kopPx, kopRegels: 3, tekstRegels: 2 });
     const pagina = ctx2.pagina || {};
     const bf = BF();
     const { blok } = bf.kiesBlok(pagina, b.blok_index);
     // kaart: licht gekanteld en tot voorbij de rand, zoals de platform-posts van de reeks
-    const ky = yNa + 56 * m.s;
-    const kh = Math.max(260 * m.s, H - ky - m.onder - 90 * m.s);
-    const kw = Math.min(W - x + 40 * m.s, kh * 1.7);
+    let ky = yNa + 56 * m.s;
+    const ruimte = H - ky - m.onder - 90 * m.s;
+    const kw = Math.min(W - x + 40 * m.s, Math.max(260 * m.s, ruimte) * 1.7);
+    // story: de kaart vult het vlak eronder (niet hoger dan breed, dan verticaal gecentreerd)
+    const kh = m.story ? Math.min(ruimte, kw * 1.05) : Math.max(260 * m.s, ruimte);
+    if (m.story) ky += Math.max(0, (ruimte - kh) / 2);
     let payouts = [];
     if (blok && blok.type === 'payout-muur') payouts = await Promise.all(((blok.props && blok.props.payouts) || []).slice(0, 3).map((p) => K().laadBeeld(ctx2.assets[p.asset_id] && ctx2.assets[p.asset_id].publieke_url)));
     ctx.save();
@@ -252,14 +304,14 @@
     let pal;
     const cta = o.soort === 'story' && b.rol === 'cta';
     if (cta) {
-      // cta-story: kop + linkstickervak in het midden, altijd effen (de sticker moet opvallen)
+      // cta-story: kop bovenaan, linkstickervak eronder, chart-illustratie vult de rest (altijd effen: de sticker moet opvallen)
       const v = variant === 'licht' ? 'licht' : 'donker';
       achtergrond(ctx, W, H, v); pal = palet(v);
       const x = m.marge; const maxW = W - 2 * m.marge;
-      const hoog = meetTekst(b, { pal, x, maxW, ...m });
-      const y0 = Math.max(m.boven + 160 * m.s, (H - hoog - 300 * m.s) / 2);
-      const yNa = tekstBlok(ctx, b, { pal, x, maxW, y: y0, ...m });
-      sticker(ctx, W, yNa + 90 * m.s, b.sticker_tekst, o.korteUrl || '', m.s, pal);
+      const yNa = tekstBlok(ctx, b, { pal, x, maxW, y: m.boven + 170 * m.s, ...m });
+      const ySt = sticker(ctx, W, yNa + 90 * m.s, b.sticker_tekst, o.korteUrl || '', m.s, pal);
+      const top = ySt + 120 * m.s;
+      chartDecor(ctx, x, top, maxW, H - m.onder - 70 * m.s - top, pal, hashTekst(b.titel) + 1);
     } else if (variant === 'foto') pal = await tekenFoto(ctx, W, H, b, m, ctx2);
     else if (variant === 'data' && b.getal) pal = tekenData(ctx, W, H, b, m);
     else if (variant === 'kaart') pal = await tekenKaart(ctx, W, H, b, m, ctx2);

@@ -244,3 +244,20 @@ test('tekenkit: geen spatie vóór leestekens na een accentwoord ("**brandstof**
     ['Een', false, false], ['sweep', false, false], ['is', false, false], ['brandstof', true, false], [',', false, true], ['geen', false, false], ['break.', true, false],
   ]);
 });
+
+test('polish: elke storyset en carrousel heeft een foto-variant; goud nooit op een lidwoord/voorzetsel', async () => {
+  const o = editie();
+  const zonder = kopie(o);
+  zonder.stories = zonder.stories.map((x) => (x.variant === 'foto' ? { ...x, variant: 'donker', beeld_asset_id: null } : x));
+  zonder.post.slides = zonder.post.slides.map((x) => (x.variant === 'foto' ? { ...x, variant: 'licht', beeld_asset_id: null } : x));
+  const f = S.socialFouten(zonder, { pagina: o.pagina, assets: ASSETS }).join(' | ');
+  assert.match(f, /stories: minstens één foto-variant/);
+  assert.match(f, /post\.slides: minstens één foto-variant/);
+  assert.match(RG.schrijverPrompt(), /FOTO VERPLICHT/);
+  const w = await browser();
+  w.eval(lees('modules/klanten-v2/views/contentmachine-canvas-v2.js'));
+  const d = JSON.parse(JSON.stringify(w.__cmCanvas.delen('EUR/USD long, **in de DFO-volgorde** en **een long.**')));
+  assert.deepEqual(d.filter((x) => x.accent).map((x) => x.woord), ['DFO-volgorde', 'long.']);
+  const s2 = lees('modules/klanten-v2/views/contentmachine-social2-v2.js');
+  assert.match(s2, /story: true/); assert.match(s2, /function chartDecor/);
+});
