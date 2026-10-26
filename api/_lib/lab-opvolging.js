@@ -19,6 +19,7 @@
 // verschil, en daarom werken wij met 1-op-1 begeleiding. Elke stap één actie.
 //
 // DE REGELS, die nooit gebroken worden:
+//   - nooit een lead van buiten de trialflow (webinar: eigen flow, 26 okt);
 //   - alleen met toestemming; nooit na een afmelding (lead_mail_voorkeuren);
 //   - nooit nog iets na een boeking, of als de lead klant is;
 //   - nooit "je bent nog niet ingelogd" aan wie al inlogde;
@@ -78,9 +79,11 @@ const DAG = 24 * UUR;
  * @param {number}  [s.videos]          aantal uitgekeken video's
  * @param {Set<string>} s.gehad         stappen die al verstuurd zijn (of overgeslagen)
  * @param {number|null} s.laatsteBericht ms — laatste opvolgbericht (elk kanaal)
+ * @param {boolean} [s.buitenFlow]      lead hoort niet in de trialflow (webinar: eigen flow)
  * @param {number} nu
  */
 export function volgendeStap(s, nu) {
+  if (s.buitenFlow) return null;
   if (!s.toestemming || s.geboekt || s.afgemeld || s.klant) return null;
   if (s.laatsteBericht && nu - s.laatsteBericht < 20 * UUR) return null;
   const tot = s.toegangTot ? Date.parse(s.toegangTot) : null;

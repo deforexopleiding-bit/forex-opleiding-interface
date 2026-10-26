@@ -21,6 +21,7 @@ import { leesLabGedrag } from './_lib/lab-dossier.js';
 import { alleenDaglijst } from './_lib/opvolging-lijst.js';
 import { telefoonNlBe } from './_lib/phone-e164.js';
 import { LAB_BEL_REDEN, leadStand, beslis, taakRij } from './_lib/lab-belmelding.js';
+import { isBuitenTrialflow } from './_lib/trial-product.js';
 
 const VENSTER_DAGEN = 21;
 const MAX_NIEUW_PER_RUN = 25;
@@ -28,7 +29,7 @@ const GEBOEKT_STATUSSEN = ['scheduled', 'completed'];
 
 const aanUit = (v) => ['1', 'true', 'aan', 'on', 'ja'].includes(String(v ?? '').trim().toLowerCase());
 
-const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, is_test, aangemaakt_op';
+const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, is_test, aangemaakt_op, product';
 const SESSIE_KOLOMMEN = 'auth_id, stap, stappen, voortgang, bijgewerkt_op, afgerond:snapshot->>afgerond, afgerond_op:snapshot->>afgerondOp';
 
 function nieuwste(sessies) {
@@ -95,6 +96,8 @@ export async function draaiBelmelding(nu = Date.now()) {
 
   let nieuw = 0;
   for (const labLead of leads) {
+    // Webinar: eigen flow — geen belopdracht voor Dave (26 okt).
+    if (isBuitenTrialflow(labLead.product)) continue;
     try {
       const sessie = sessiePer.get(labLead.auth_id) || null;
       const aangemeld = Date.parse(labLead.aangemaakt_op) - 86400000;

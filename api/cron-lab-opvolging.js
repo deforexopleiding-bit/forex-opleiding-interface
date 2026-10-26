@@ -23,7 +23,7 @@ import { maakLoginSleutel } from './_lib/dfo-lms-lab-account.js';
 import { stuurLabMail, stuurLabWhatsApp, knop } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { volgendeStap, isStilUur, standaardMail, linkDoel, vulLabSjabloon, kiesVariant, WA_STAPPEN, belofteKort, dagenOver } from './_lib/lab-opvolging.js';
-import { herkomstVanAanmelding } from './_lib/trial-product.js';
+import { herkomstVanAanmelding, isBuitenTrialflow, alleenBuitenTrialflow } from './_lib/trial-product.js';
 import { eersteVideoMinuten } from './_lib/lab-video-duur.js';
 import { verwerkLmsEnBerichten } from './lab-aanmelding.js';
 import { stuurLabEvent, labEventId, labUserData } from './_lib/lab-meta.js';
@@ -61,6 +61,8 @@ async function herstel(nu, verslag) {
     // 7-daagse en website komen altijd via de gate.
     const herkomst = herkomstVanAanmelding(a);
     if (a.toegang_aanvraag_id || GATE_PRODUCTEN.has(herkomst.product)) continue;
+    // Webinar: eigen flow — geen nieuwe poging (die zou een welkomstmail sturen).
+    if (isBuitenTrialflow(herkomst.product)) continue;
     try {
       const { data: pogingen } = await supabaseAdmin.from('lab_opvolging').select('stap').eq('aanmelding_id', a.id).like('stap', 'herstel-%');
       const n = (pogingen || []).length + 1;
@@ -108,8 +110,9 @@ export default async function handler(req, res) {
   for (const a of aanm || []) {
     const em = String(a.email || '').toLowerCase();
     const p = perEmail.get(em);
-    if (!p) perEmail.set(em, { eerste: a, laatste: a, authId: a.lms_auth_id });
-    else { p.laatste = a; p.authId = p.authId || a.lms_auth_id; }
+    const product = herkomstVanAanmelding(a).product;
+    if (!p) perEmail.set(em, { eerste: a, laatste: a, authId: a.lms_auth_id, producten: [product] });
+    else { p.laatste = a; p.authId = p.authId || a.lms_auth_id; p.producten.push(product); }
   }
   const authIds = [...new Set([...perEmail.values()].map((p) => p.authId).filter(Boolean))];
   if (!authIds.length) return res.status(200).json({ ok: true, ...verslag });
@@ -197,6 +200,8 @@ export default async function handler(req, res) {
       videos: (gedrag.get(labLead.id)?.videoTijden || []).length,
       gehad: g.stappen,
       laatsteBericht: g.laatste,
+      // Webinar heeft een eigen flow: de motor stuurt die leads niets (26 okt).
+      buitenFlow: alleenBuitenTrialflow(p.producten),
     }, nu);
     if (!stap) continue;
 
