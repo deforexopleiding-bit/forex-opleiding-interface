@@ -326,7 +326,7 @@ test('endpoint: fail-soft zonder funnel_events → drops uit de leads', async ()
 });
 
 test('endpoint: bron-code schrijft nooit en gebruikt geen rpc', () => {
-  const src = lees('api/trainingdrops.js') + lees('api/_lib/trainingdrops-compute.js') + lees('api/_lib/training-bron.js');
+  const src = lees('api/trainingdrops.js') + lees('api/_lib/trainingdrops-laden.js') + lees('api/_lib/trainingdrops-compute.js') + lees('api/_lib/training-bron.js');
   assert.doesNotMatch(src, /\.(insert|update|upsert|delete|rpc)\(/);
   assert.match(lees('api/trainingdrops.js'), /requirePermission\(req, 'leads\.view'\)/);
 });

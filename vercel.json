@@ -56,12 +56,26 @@
       "memory": 1024,
       "includeFiles": "img/contentmachine/bibliotheek-seed/**"
     },
+    "api/contentmachine/lanceer.js": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "api/_lib/weekeditie-blokken.json"
+    },
+    "api/cron-weekeditie-lancering.js": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "api/_lib/weekeditie-blokken.json"
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
     }
   },
   "crons": [
+    {
+      "path": "/api/cron-weekeditie-lancering",
+      "schedule": "*/2 * * * *"
+    },
     {
       "path": "/api/cron-massa-mail",
       "schedule": "*/15 * * * *"

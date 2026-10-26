@@ -87,13 +87,11 @@
     const L = st.lijst;
     if (L.loading || (L.fetched && !force)) return;
     L.loading = true; L.error = null; rerender();
-    // Cijfers per drop uit Trainingdrops (bezoekers, leads, calls) — fail-soft:
-    // zonder recht leads.view of bij een fout blijven de kolommen leeg.
-    const cijfers = api('/api/trainingdrops').then((j) => {
-      const m = {};
-      for (const x of (j && Array.isArray(j.drops) ? j.drops : [])) if (x.slug) m[x.slug] = x;
-      return m;
-    }).catch((e) => { console.warn('[contentmachine-v2] trainingdrops-cijfers niet beschikbaar:', e && e.status); return null; });
+    // Cijfers per drop (zelfde bron als Trainingdrops + top-3 blokken van de Weekeditie) — fail-soft.
+    const cijfers = api('/api/contentmachine/data').then((j) => {
+      window.__cmData = j;
+      return (j && j.drops) || {};
+    }).catch((e) => { console.warn('[contentmachine-v2] cijfers niet beschikbaar:', e && e.status); return null; });
     try {
       const j = await api('/api/contentmachine/drops');
       L.drops = Array.isArray(j.drops) ? j.drops : []; L.migratie = false;
@@ -149,11 +147,19 @@
   function cijferCel(d) {
     const c = st.lijst.cijfers && st.lijst.cijfers[d.slug];
     if (!c) return `<span style="color:var(--text-3)">${d.status === 'gepubliceerd' ? '0 · 0 · 0' : '—'}</span>`;
-    return `${nl(c.bezoekers)} · <b>${nl(c.leads)}</b> · ${nl(c.calls)}`;
+    const top = (c.top_blokken || []).map((b) => b.type).join(' · ');
+    return `${nl(c.bezoekers)} · <b>${nl(c.leads)}</b> · ${nl(c.calls)}${c.bezoekers ? `<div style="color:var(--text-3);font-size:11px">${String(c.conversie_pct).replace('.', ',')}% conversie</div>` : ''}${top ? `<div style="color:var(--text-3);font-size:11px" title="Meest gebruikte blokken">▲ ${esc(top)}</div>` : ''}`;
   }
 
   const NB_LABEL = { concept: ['accent', 'In GHL'], test_verstuurd: ['accent', 'Test verstuurd'], ingepland: ['warn', 'Ingepland'], verstuurd: ['ok', 'Verstuurd'] };
+  const LANC_LABEL = { ingepland: ['warn', 'Ingepland'], taggen: ['accent', 'Wordt verstuurd'], klaar: ['ok', 'Verstuurd'], geannuleerd: ['neutral', 'Geannuleerd'], mislukt: ['danger', 'Mislukt'] };
   function nbCel(d) {
+    const lz = d.lancering;
+    if (lz) {
+      const [c, l] = LANC_LABEL[lz.status] || ['neutral', lz.status];
+      const extra = lz.status === 'ingepland' ? fmtTijd(lz.ingepland_op) : lz.totaal != null ? `${nl(lz.getagd)} van ${nl(lz.totaal)}` : '';
+      return pill(c, l) + (extra ? `<div style="color:var(--text-3);font-size:11px">${esc(extra)}</div>` : '');
+    }
     const n = d.nieuwsbrief;
     if (!n) return '<span style="color:var(--text-3)">—</span>';
     const [c, l] = NB_LABEL[n.status] || ['neutral', n.status];
@@ -191,7 +197,7 @@
         <td class="cm-mob-weg" style="${td}">${d.soort === 'training' ? pill('accent', 'Training') : pill('neutral', 'Update')}</td>
         <td class="cm-mob-weg" style="${td}">${d.format_key ? esc(FORMATS[d.format_key] || d.format_key) : '<span style="color:var(--text-3)">—</span>'}${d.weekeditie ? `<div style="margin-top:3px">${pill('ok', 'Weekeditie · ' + (d.thema || ''))}</div>` : ''}</td>
         <td style="${td};max-width:420px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titel)}</div></td>
-        <td class="cm-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums" title="bezoekers · leads · calls (Trainingdrops)">${cijferCel(d)}</td>
+        <td class="cm-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums" title="bezoekers · leads · calls, conversie en de meest gebruikte blokken">${cijferCel(d)}</td>
         <td class="cm-mob-weg" style="${td};white-space:nowrap">${nbCel(d)}</td>
         <td class="cm-mob-weg" style="${td};white-space:nowrap;color:var(--text-3);font-size:12px">${esc(fmtTijd(d.gewijzigd_op))}</td>
       </tr>`;
@@ -199,7 +205,7 @@
     return `${kop}<div class="card cm-tabel" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr><th style="${th}">Drop</th><th style="${th}">Status</th><th class="cm-mob-weg" style="${th}">Soort</th><th class="cm-mob-weg" style="${th}">Format</th><th style="${th}">Titel / kernidee</th><th class="cm-mob-weg" style="${th};text-align:right">Bezoekers · leads · calls</th><th class="cm-mob-weg" style="${th}">Nieuwsbrief</th><th class="cm-mob-weg" style="${th}">Gewijzigd</th></tr></thead>
       <tbody>${rijen}</tbody></table></div></div>
-      <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop om hem te openen. Bezoekers, leads en calls per drop staan in Groei → Trainingdrops.</div>`;
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop om hem te openen. Bezoekers, leads, calls en per kanaal: zelfde bron als Groei → Trainingdrops; ▲ = de meest gebruikte blokken van de Weekeditie.</div>`;
   }
 
   // ── Nieuwe drop: invoer ───────────────────────────────────────────────────

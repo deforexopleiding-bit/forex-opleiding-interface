@@ -146,6 +146,13 @@ export default async function handler(req, res) {
           const x = per[d.id];
           d.nieuwsbrief = x ? { status: x.status, stats: (x.stats && x.stats.laatste) || null } : null;
         }
+        // Lancering (2.0): laatste per drop — fail-soft (zonder migratie gewoon leeg).
+        const { data: lz, error: lzErr } = await db.from('weekeditie_lanceringen').select('drop_id,status,getagd,totaal,overgeslagen,ingepland_op,klaar_op,aangemaakt_op')
+          .in('drop_id', drops.map((d) => d.id)).order('aangemaakt_op', { ascending: false });
+        if (lzErr) console.error('[contentmachine/drops] lanceringen lezen mislukt:', lzErr.message);
+        const lp = {};
+        for (const x of lz || []) if (!lp[x.drop_id]) lp[x.drop_id] = x;
+        for (const d of drops) { const x = lp[d.id]; d.lancering = x ? { status: x.status, getagd: x.getagd, totaal: x.totaal, overgeslagen: x.overgeslagen, ingepland_op: x.ingepland_op, klaar_op: x.klaar_op } : null; }
       }
       return res.status(200).json({ drops });
     }

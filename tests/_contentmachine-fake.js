@@ -9,7 +9,8 @@
 import { randomUUID } from 'node:crypto';
 
 export function maakFake() {
-  const db = { tabellen: {}, ontbreekt: {}, storage: {}, log: [] };
+  // uniek: { tabel: [[kolommen], filter?] } → insert met dezelfde waarden = 23505 (zoals een unieke index).
+  const db = { tabellen: {}, ontbreekt: {}, storage: {}, log: [], uniek: {} };
 
   function waarde(rij, kolom) {
     // alias:pad->a->>b
@@ -45,6 +46,7 @@ export function maakFake() {
       if (op === 'in') return v.includes(x);
       if (op === 'like') return typeof x === 'string' && new RegExp('^' + v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$').test(x);
       if (op === 'gt') return x > v;
+      if (op === 'lte') return x <= v;
       return true;
     });
     const k = {
@@ -55,11 +57,12 @@ export function maakFake() {
       in: (c, v) => { q.filters.push(['in', c, v]); return k; },
       like: (c, v) => { q.filters.push(['like', c, v]); return k; },
       gt: (c, v) => { q.filters.push(['gt', c, v]); return k; },
+      lte: (c, v) => { q.filters.push(['lte', c, v]); return k; },
       order: (c, o) => { q.order.push([c, o?.ascending !== false]); return k; },
       limit: (n) => { q.lim = n; return k; },
       insert: (d) => { q.actie = 'insert'; q.data = d; return k; },
       update: (d) => { q.actie = 'update'; q.data = d; return k; },
-      upsert: (d) => { q.actie = 'upsert'; q.data = d; return k; },
+      upsert: (d, opts) => { q.actie = 'upsert'; q.data = d; q.onConflict = opts && opts.onConflict; return k; },
       delete: () => { q.actie = 'delete'; return k; },
       maybeSingle: () => { q.enkel = 'maybe'; return k; },
       single: () => { q.enkel = 'single'; return k; },
@@ -70,8 +73,22 @@ export function maakFake() {
       if (db.ontbreekt[tabel]) return { data: null, error: { code: 'PGRST205', message: `Could not find the table 'public.${tabel}'` } };
       const rijen = (db.tabellen[tabel] = db.tabellen[tabel] || []);
       let uit;
-      if (q.actie === 'insert' || q.actie === 'upsert') {
+      if (q.actie === 'upsert' && q.onConflict) {
+        const sleutels = q.onConflict.split(',').map((x) => x.trim());
+        uit = (Array.isArray(q.data) ? q.data : [q.data]).map((d) => {
+          const bestaand = rijen.find((r) => sleutels.every((c) => r[c] === d[c]));
+          if (bestaand) return Object.assign(bestaand, d);
+          const nieuw = { id: randomUUID(), aangemaakt_op: new Date().toISOString(), ...d };
+          rijen.push(nieuw); return nieuw;
+        });
+      } else if (q.actie === 'insert' || q.actie === 'upsert') {
         const lijst = (Array.isArray(q.data) ? q.data : [q.data]).map((d) => ({ id: randomUUID(), aangemaakt_op: new Date().toISOString(), ...d }));
+        for (const [kol, filter] of db.uniek[tabel] || []) {
+          for (const n of lijst) {
+            if (filter && !filter(n)) continue;
+            if (rijen.some((r) => (!filter || filter(r)) && kol.every((c) => r[c] === n[c]))) return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint (${kol.join(',')})` } };
+          }
+        }
         rijen.push(...lijst);
         uit = lijst;
       } else if (q.actie === 'update') {

@@ -531,9 +531,14 @@
     const d = wb.drop; const s = d.status;
     const knoppen = [];
     if (wb.dirty) knoppen.push('<button class="btn btn-primary btn-sm" onclick="__cmWbBewaar()">Bewaar wijzigingen</button>');
-    if (s === 'gegenereerd') knoppen.push(`<button class="btn ${wb.dirty ? 'btn-ghost' : 'btn-primary'} btn-sm" onclick="__cmWbGoedkeuren()">✓ Goedkeuren</button>`);
-    if (s === 'goedgekeurd') knoppen.push('<button class="btn btn-primary btn-sm" onclick="__cmWbPubliceer()">Publiceer pagina</button>');
+    // Contentmachine 2.0: één flow "Keur goed en lanceer" (super_admin, contentmachine-lanceer-v2.js)
+    // vervangt Goedkeuren + Publiceren. Anderen kunnen nog goedkeuren (nalezen), niet lanceren.
+    const lancering = typeof window.__cmLanceerKnop === 'function';
+    const superAdmin = !!(window.__cmLz && window.__cmLz.data && window.__cmLz.data.super_admin);
+    if (s === 'gegenereerd' && !(lancering && superAdmin)) knoppen.push(`<button class="btn ${wb.dirty ? 'btn-ghost' : 'btn-primary'} btn-sm" onclick="__cmWbGoedkeuren()">✓ Goedkeuren</button>`);
+    if (s === 'goedgekeurd' && !lancering) knoppen.push('<button class="btn btn-primary btn-sm" onclick="__cmWbPubliceer()">Publiceer pagina</button>');
     if (s === 'gepubliceerd') knoppen.push(`<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="${TRAINING}/${esc(d.slug)}">Live ↗</a><button class="btn btn-ghost btn-sm" onclick="__cmWbDepubliceer()">Offline halen</button>`);
+    if (lancering) knoppen.push(window.__cmLanceerKnop());
     knoppen.push('<button class="btn btn-ghost btn-sm" onclick="__cmWbKopieer()">Kopieer teksten</button>');
     knoppen.push(typeof window.__cmSocialZip === 'function'
       ? '<button class="btn btn-ghost btn-sm" onclick="__cmSocialZip()">Download alle beelden (zip)</button>'
@@ -606,11 +611,13 @@
     const tabs = `<div class="cm-wb-tabs">${TABS.map(([k, lab]) => `<button class="cm-wb-tab ${wb.tab === k ? 'aan' : ''}" onclick="__cmWbTab('${k}')">${lab}</button>`).join('')}</div>`;
     const bewerkbaar = ['gegenereerd', 'goedgekeurd'].includes(d.status);
     const editor = bewerkbaar ? `${regenBalk(wb.tab)}${EDITORS[wb.tab]()}` : `<div class="card"><div class="card-body" style="font-size:12.5px;color:var(--text-2)">Deze drop is ${esc(l.toLowerCase())}: teksten zijn vergrendeld.${d.status === 'gepubliceerd' ? ' Haal hem offline om aan te passen.' : ''}</div></div>`;
-    return `${CSS}${kop}${waarschuwingenHtml()}${tabs}<div id="cm-wb-kiezer">${kiezerHtml()}</div>
+    const lanceer = typeof window.__cmLanceerPaneel === 'function' ? window.__cmLanceerPaneel() : '';
+    return `${CSS}${kop}${lanceer}${waarschuwingenHtml()}${tabs}<div id="cm-wb-kiezer">${kiezerHtml()}</div>
       <div class="cm-wb-kol"><div>${editor}</div><div style="position:sticky;top:8px"><div id="cm-wb-voorbeeld">${voorbeeldHtml()}</div></div></div>`;
   };
 
   window.__cmWerkblad = wb;
+  window.__cmWbActiesHtml = () => (wb.drop ? actiesHtml() : '');
   // Hulpstukken voor de Weekeditie-editor (contentmachine-weekeditie-v2.js).
   window.__cmWbHulp = { haal, zetPad, markeer, veld, beeldVeld, groep, esc, pill, rerender, teken, post, api, toast, foutTekst, zet, kloon, assetMap, regenHtml, laadNbVoorbeeld: () => laadNbVoorbeeld() };
 })();
