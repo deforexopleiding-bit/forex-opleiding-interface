@@ -235,7 +235,7 @@ test('genereer: grensfout → één herstelronde; nog fout → waarschuwing, goe
   const g = await roep(D, { body: { actie: 'goedkeuren', id: ID } });
   assert.equal(g.statusCode, 409); assert.equal(g.body.code, 'GRENZEN');
   // Maxim past de tekst aan → bewaar-output → goedkeuren → publiceren
-  const o = JSON.parse(JSON.stringify(drop().output)); o.linkedin.tekst = 'De dollar draait. Zo zagen we het live.';
+  const o = JSON.parse(JSON.stringify(drop().output)); o.linkedin.tekst = 'De dollar draait.\n\nZo zagen we het live.\n\nLees de weekeditie.';
   const b = await roep(D, { body: { actie: 'bewaar-output', id: ID, versie: drop().versie, output: o } });
   assert.equal(b.statusCode, 200, JSON.stringify(b.body));
   assert.equal(drop().output.meta.waarschuwingen.filter((w) => w.soort === 'grens').length, 0);
@@ -256,7 +256,7 @@ test('genereer: onbekend model → volgende in de keten; schema-herstel', async 
   assert.equal(r.statusCode, 200);
   assert.equal(r.body.model, 'claude-sonnet-4-6');
   assert.deepEqual(ai.aanroepen.map((a) => a.model), ['claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-6'], 'onbekend model wordt onthouden');
-  assert.equal(drop().output.stories.length, 3);
+  assert.equal(drop().output.stories.length, 4);
 });
 
 test('genereer: één onderdeel opnieuw met instructie; rest blijft', async () => {

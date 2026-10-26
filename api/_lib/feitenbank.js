@@ -24,15 +24,21 @@ export function getallenIn(tekst) {
 
 const BASIS = getallenIn(FEITENBANK);
 
-/**
- * Cijfers die nergens vandaan komen. `bronnen` = extra teksten (invoer van de week,
- * bijschriften en AI-details van de beelden). → [{ pad, waarde }]
- */
-export function controleerCijfers(pagina, bronnen = []) {
+/** Toets: komt een cijfer uit de feitenbank of de bronnen? */
+export function cijferToets(bronnen = []) {
   const toegestaan = new Set(BASIS);
   for (const t of bronnen) for (const n of getallenIn(t)) toegestaan.add(n);
-  const ok = (v) => typeof v === 'number' && [...toegestaan].some((t) => Math.abs(t - v) < 1e-9);
-  const uit = [];
+  return (v) => typeof v === 'number' && [...toegestaan].some((t) => Math.abs(t - v) < 1e-9);
+}
+
+/**
+ * Cijfers die nergens vandaan komen. `extra` = losse [{ pad, waarde }] (bv. de data-beelden
+ * van de social). `bronnen` = extra teksten (invoer van de week,
+ * bijschriften en AI-details van de beelden). → [{ pad, waarde }]
+ */
+export function controleerCijfers(pagina, bronnen = [], extra = []) {
+  const ok = cijferToets(bronnen);
+  const uit = extra.filter((x) => !ok(x.waarde));
   ((pagina && pagina.blokken) || []).forEach((b, i) => {
     const p = (b && b.props) || {};
     if (b.type === 'hero' && p.getal && !ok(p.getal.waarde)) uit.push({ pad: `blokken[${i}].props.getal`, waarde: p.getal.waarde });

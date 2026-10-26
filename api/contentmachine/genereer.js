@@ -103,8 +103,8 @@ export default async function handler(req, res) {
       waarschuwingen = r.waarschuwingen;
       output = { ...r.output, meta: { model, herstel: r.herstel, duur_ms: r.duur_ms, gegenereerd_op: new Date().toISOString(), toegelaten_formats: toegelaten, beelden: ctx.beelden.map((a) => a.id), verboden_namen: ctx.verbodenNamen, waarschuwingen } };
       reden = 'Weekeditie gegenereerd' + (instructie ? ` — ${instructie}` : '');
-    } else if (['pagina', 'nieuwsbrief'].includes(onderdeel) && isWeekeditie(drop.output.pagina) && drop.output.regie) {
-      // 2.0: de schrijver met dezelfde regie (pagina-blokken of de teaser).
+    } else if (isWeekeditie(drop.output.pagina) && drop.output.regie) {
+      // 2.0: de schrijver met dezelfde regie (pagina-blokken, de teaser of social 2.0; post = carrousel + vierkant).
       const r = await schrijf(basis, drop.output.regie, { onderdelen: [onderdeel], huidige: drop.output, instructie });
       model = r.model;
       output = { ...drop.output, ...r.output };

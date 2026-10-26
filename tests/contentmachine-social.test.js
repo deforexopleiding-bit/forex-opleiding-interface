@@ -89,7 +89,7 @@ test('social-upload-url: pad drops/<slug>/social/<naam>.png, ongeldige naam gewe
   const slecht = maakRes();
   await A.default({ method: 'POST', body: { actie: 'social-upload-url', drop_id: '99999999-9999-4999-8999-999999999999', naam: '../x' }, headers: {} }, slecht);
   assert.equal(slecht.statusCode, 400);
-  assert.equal(C.socialPad('22-10-26', 'post-8'), null);
+  assert.equal(C.socialPad('22-10-26', 'post-9'), null);
 });
 
 test("drops 'social': enkel eigen Storage-URL's, geen nieuwe versie", async () => {

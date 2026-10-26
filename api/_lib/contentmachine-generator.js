@@ -20,6 +20,7 @@ import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
 import { trainingDatum, datumVoluit, weekdagVan } from './contentmachine-core.js';
 import { editieFouten, editieTitel, isWeekeditie } from './weekeditie.js';
 import { isTeaser, teaserFouten } from './nieuwsbrief-render.js';
+import { socialFouten, isSocialV1 } from './contentmachine-social.js';
 
 // ── Formats ─────────────────────────────────────────────────────────────────
 export const FORMATS = [
@@ -207,7 +208,8 @@ const isTekst = (v) => typeof v === 'string' && v.trim().length > 0;
  * Schema + logica. → { ok, fouten:[string] }. `toegelaten` = format-keys die
  * mochten; `assetIds` = beeld-id's die de generator mocht gebruiken.
  */
-export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, onderdelen = null, metVideo = null } = {}) {
+export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, assets = null, onderdelen = null, metVideo = null } = {}) {
+  if (assets && !assetIds) assetIds = assets.map((a) => a.id);
   const fouten = [];
   const f = (m) => fouten.push(m);
   if (!o || typeof o !== 'object') return { ok: false, fouten: ['output is geen object'] };
@@ -275,7 +277,11 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
     }
   }
 
-  if (check('stories')) {
+  // Social 2.0 (varianten zoals de Instagram-reeks): eigen regels in contentmachine-social.js.
+  const social2 = !isSocialV1(o) && ['stories', 'post', 'linkedin'].some((k) => check(k) && o[k] != null);
+  if (social2) socialFouten(o, { pagina: o.pagina, assets, onderdelen: ['stories', 'post', 'linkedin'].filter(check) }).forEach(f);
+
+  if (check('stories') && !social2) {
     const s = o.stories;
     if (!Array.isArray(s) || s.length < 3 || s.length > 5) f('stories: 3 tot 5');
     else {
@@ -291,7 +297,7 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
     }
   }
 
-  if (check('post')) {
+  if (check('post') && !social2) {
     const p = o.post;
     if (!p || !Array.isArray(p.slides) || p.slides.length < 5 || p.slides.length > 7) f('post.slides: 5 tot 7');
     else p.slides.forEach((x, i) => { if (!isTekst(x.titel)) f(`post.slides[${i}].titel ontbreekt`); beeld(x.beeld_asset_id, `post.slides[${i}]`); });
@@ -302,7 +308,7 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
     else beeld(v.beeld_asset_id, 'vierkant');
   }
 
-  if (check('linkedin')) {
+  if (check('linkedin') && !social2) {
     const l = o.linkedin;
     if (!l || !isTekst(l.tekst)) f('linkedin.tekst ontbreekt');
     else if (!['vierkant', 'slide1'].includes(l.beeld)) f('linkedin.beeld: vierkant of slide1');

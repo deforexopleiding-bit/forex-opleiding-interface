@@ -3,7 +3,7 @@
 // Contentmachine (2026-10-23) — de wekelijkse drops.
 //
 // GET                    → { drops:[…] } nieuwste bovenaan (zonder output-inhoud)
-// GET ?id=<uuid>         → { drop, assets:[…], versies:[…] }
+// GET ?id=<uuid>         → { drop, assets:[…], versies:[…], captions? } (captions = social 2.0 per kanaal)
 // POST { actie:'maak', datum:'YYYY-MM-DD' }          → nieuwe concept-drop (slug dd-mm-jj[-n])
 // POST { actie:'bewaar', id, datum?, input }         → invoer bewaren (enkel concept/gegenereerd)
 // POST { actie:'vimeo', url }                        → Vimeo oEmbed: titel, duur, thumbnail
@@ -31,6 +31,7 @@ import { bewaarVersie, ASSET_KOLOMMEN as CTX_ASSET_KOLOMMEN } from '../_lib/cont
 import { isWeekeditie, editieFouten, BLOKKEN } from '../_lib/weekeditie.js';
 import { controleerCijfers } from '../_lib/feitenbank.js';
 import { cijferBronnen } from '../_lib/contentmachine-regie.js';
+import { captions, isSocialV2, socialGetallen } from '../_lib/contentmachine-social.js';
 
 /**
  * Grens-overtredingen van een output (met de namenlijst van bij het genereren en
@@ -56,7 +57,8 @@ export async function editieProblemen(db, drop) {
   const { data: assets, error } = await db.from('content_assets').select(CTX_ASSET_KOLOMMEN).is('verwijderd_op', null).limit(2000);
   if (error) throw error;
   const relevant = (assets || []).filter((a) => !a.drop_id || a.drop_id === drop.id);
-  for (const c of controleerCijfers(o.pagina, cijferBronnen(drop.input || {}, relevant))) uit.push({ pad: 'pagina.' + c.pad, regel: `cijfer ${c.waarde} staat niet in de feitenbank, de invoer of op een beeld` });
+  const social = isSocialV2(o) ? socialGetallen(o).map((x) => ({ ...x, pad: 'social.' + x.pad })) : [];
+  for (const c of controleerCijfers(o.pagina, cijferBronnen(drop.input || {}, relevant), social)) uit.push({ pad: c.pad.startsWith('social.') ? c.pad : 'pagina.' + c.pad, regel: `cijfer ${c.waarde} staat niet in de feitenbank, de invoer of op een beeld` });
   return uit;
 }
 
@@ -125,7 +127,9 @@ export default async function handler(req, res) {
         ]);
         if (a.error) throw a.error;
         if (v.error) throw v.error;
-        return res.status(200).json({ drop, assets: a.data || [], versies: v.data || [] });
+        // Social 2.0: de captions per kanaal met de juiste link (afgeleid, niet bewaard).
+        const extra = drop.output && isSocialV2(drop.output) ? { captions: captions(drop.output, drop.slug) } : {};
+        return res.status(200).json({ drop, assets: a.data || [], versies: v.data || [], ...extra });
       }
       const { data, error } = await db.from('content_drops').select(LIJST_KOLOMMEN)
         .order('datum', { ascending: false }).order('aangemaakt_op', { ascending: false }).limit(200);
