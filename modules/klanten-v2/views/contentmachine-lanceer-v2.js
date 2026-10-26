@@ -14,7 +14,7 @@
   'use strict';
   const H = () => window.__cmWbHulp;
   const wb = () => window.__cmWb || {};
-  const lz = window.__cmLz = window.__cmLz || { dropId: null, data: null, laden: false, open: false, modus: 'nu', ingepland: '', onderwerp: 0, bezig: null, fout: null, ghl: null, poll: null, cijfers: null };
+  const lz = window.__cmLz = window.__cmLz || { dropId: null, data: null, laden: false, open: false, modus: 'nu', ingepland: '', onderwerp: 0, doelgroep: 'tag', verstuur: '', ontvangers: {}, bezig: null, fout: null, ghl: null, poll: null, cijfers: null };
 
   const nl = (n) => (n == null ? '—' : Number(n).toLocaleString('nl-NL'));
   const tijd = (s) => (s ? new Date(s).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -58,7 +58,28 @@
     }
     return '';
   };
-  window.__cmLzOpen = () => { lz.open = true; teken(); const el = document.getElementById('cm-lz'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); laad(true); };
+  window.__cmLzOpen = () => { lz.open = true; lz.verstuur = ''; teken(); const el = document.getElementById('cm-lz'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); laad(true); telOntvangers(); };
+  /** Verwacht aantal ontvangers van de gekozen doelgroep (GHL), één keer per doelgroep. */
+  async function telOntvangers() {
+    const k = lz.doelgroep;
+    if (lz.ontvangers[k] && !lz.ontvangers[k].fout) return;
+    lz.ontvangers[k] = { laden: true }; teken();
+    try { lz.ontvangers[k] = await H().post('/api/contentmachine/lanceer', { actie: 'ontvangers', doelgroep: k }); }
+    catch (e) { lz.ontvangers[k] = { fout: H().foutTekst(e, 'Tellen mislukt.') }; }
+    teken();
+  }
+  window.__cmLzDoelgroep = (d) => { lz.doelgroep = d === 'alle' ? 'alle' : 'tag'; lz.verstuur = ''; teken(); telOntvangers(); };
+  window.__cmLzVerstuur = (v) => {
+    lz.verstuur = v;
+    const knop = document.getElementById('cm-lz-knop');
+    if (knop) knop.disabled = !!knop.dataset.blok || v !== 'VERSTUUR';
+  };
+  const ontvangersTekst = (o) => {
+    if (!o || o.laden) return 'aantal ontvangers tellen…';
+    if (o.fout) return o.fout;
+    const v = o.zonder_dnd != null ? o.zonder_dnd : o.totaal;
+    return `verwacht ±${nl(v)} ontvangers${o.zonder_dnd != null ? ` (${nl(o.totaal)} contacten, zonder DND)` : ` (${nl(o.totaal)} contacten; DND/uitgeschreven vallen nog weg)`}`;
+  };
   window.__cmLzSluit = () => { lz.open = false; teken(); };
 
   // ── paneel ────────────────────────────────────────────────────────────────
@@ -89,7 +110,7 @@
         <ol style="margin:0 0 10px 18px;line-height:1.55">
           ${s.kanalen.includes('pagina') ? `<li><b>Pagina</b> wordt gepubliceerd op training.deforexopleiding.nl/${h.esc(d.slug)}; daarna controleert het CRM dat ze 200 geeft met de juiste titel (max 2 min).</li>` : ''}
           <li><b>Beelden</b>: alle social-beelden${metMail ? ' en het mailbeeld' : ''} gerenderd en in Storage; zip en captions klaar.</li>
-          ${metMail ? `<li><b>Nieuwsbrief via GHL</b>: de template "${h.esc(s.instellingen.template_naam)}" en het onderwerp worden bijgewerkt; daarna krijgen de contacten met tag <code>${h.esc(s.instellingen.doelgroep_tag)}</code> de tag <code>${h.esc(s.instellingen.verzend_tag)}</code> (DND/uitgeschreven worden overgeslagen) en de workflow "${h.esc(s.instellingen.workflow_naam)}" verstuurt.</li>` : '<li>Het kanaal nieuwsbrief staat uit voor deze drop.</li>'}
+          ${metMail ? `<li><b>Nieuwsbrief via GHL</b>: de template "${h.esc(s.instellingen.template_naam)}" en het onderwerp worden bijgewerkt; daarna krijgen ${lz.doelgroep === 'alle' ? '<b>alle contacten</b>' : `de contacten met tag <code>${h.esc(s.instellingen.doelgroep_tag)}</code>`} de tag <code>${h.esc(s.instellingen.verzend_tag)}</code> (DND/uitgeschreven worden overgeslagen) en de workflow "${h.esc(s.instellingen.workflow_naam)}" verstuurt.</li>` : '<li>Het kanaal nieuwsbrief staat uit voor deze drop.</li>'}
         </ol>
         <div style="font-weight:700;margin-bottom:4px">Controle</div>
         <ul style="list-style:none;margin:0 0 10px;padding:0">${s.voorwaarden.map(rij).join('')}</ul>
@@ -97,12 +118,17 @@
           <div style="margin:8px 0 12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn btn-sm" onclick="__cmLzTest()" ${lz.bezig ? 'disabled' : ''}>${lz.bezig === 'test' ? 'Versturen…' : '✉ Stuur testmail naar mij'}</button>
             <span style="color:var(--text-3)">${test ? `Laatste test: ${h.esc(tijd(test.verstuurd_op))} naar ${h.esc(test.email)} (variant ${String.fromCharCode(65 + (test.onderwerp_index || 0))})` : 'Verplicht: een testmail van deze versie.'}</span></div>
+          <div style="font-weight:700;margin-bottom:4px">Naar wie</div>
+          <label style="display:flex;gap:6px;align-items:center;margin:3px 0;flex-wrap:wrap"><input type="radio" name="cm-lz-doel" ${lz.doelgroep === 'tag' ? 'checked' : ''} onchange="__cmLzDoelgroep('tag')"> Contacten met tag <code>${h.esc(s.instellingen.doelgroep_tag)}</code> <span style="color:var(--text-3)">· ${h.esc(lz.doelgroep === 'tag' ? ontvangersTekst(lz.ontvangers.tag) : 'bv. weekeditie-test om te testen')}</span></label>
+          <label style="display:flex;gap:6px;align-items:center;margin:3px 0;flex-wrap:wrap"><input type="radio" name="cm-lz-doel" ${lz.doelgroep === 'alle' ? 'checked' : ''} onchange="__cmLzDoelgroep('alle')"> <b>Alle contacten</b> (zonder DND/uitgeschreven, zoals de huidige nieuwsbrief) ${lz.doelgroep === 'alle' ? `<span style="color:var(--text-3)">· ${h.esc(ontvangersTekst(lz.ontvangers.alle))}</span>` : ''}</label>
+          ${lz.doelgroep === 'alle' ? `<div style="margin:6px 0 10px;padding:8px 10px;border:1px solid var(--rose);border-radius:8px">Dit stuurt de nieuwsbrief naar de <b>volledige lijst</b>. Typ <b>VERSTUUR</b> om te bevestigen:
+            <input class="ib-input cm-mini" style="width:140px;margin-left:6px" value="${h.esc(lz.verstuur)}" oninput="__cmLzVerstuur(this.value)" autocomplete="off"></div>` : ''}
           <div style="font-weight:700;margin-bottom:4px">Versturen</div>
           <label style="display:flex;gap:6px;align-items:center;margin:3px 0"><input type="radio" name="cm-lz-modus" ${lz.modus === 'nu' ? 'checked' : ''} onchange="__cmLzModus('nu')"> Nu versturen</label>
           <label style="display:flex;gap:6px;align-items:center;margin:3px 0;flex-wrap:wrap"><input type="radio" name="cm-lz-modus" ${lz.modus === 'ingepland' ? 'checked' : ''} onchange="__cmLzModus('ingepland')"> Inplannen op
             <input type="datetime-local" class="ib-input cm-mini" style="width:auto" value="${h.esc(lz.ingepland)}" oninput="__cmLzTijd(this.value)" onfocus="__cmLzModus('ingepland', true)"></label>` : ''}
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="__cmLzLanceer()" ${blok.length || lz.bezig ? 'disabled' : ''}>${lz.bezig === 'lanceer' ? 'Bezig met lanceren…' : `Lanceer ${metMail ? (lz.modus === 'nu' ? '(nu versturen)' : '(ingepland)') : ''}`}</button>
+          <button class="btn btn-primary" id="cm-lz-knop" ${blok.length || lz.bezig ? 'data-blok="1"' : ''} onclick="__cmLzLanceer()" ${blok.length || lz.bezig || (metMail && lz.doelgroep === 'alle' && lz.verstuur !== 'VERSTUUR') ? 'disabled' : ''}>${lz.bezig === 'lanceer' ? 'Bezig met lanceren…' : `Lanceer ${metMail ? (lz.modus === 'nu' ? '(nu versturen)' : '(ingepland)') : ''}`}</button>
           ${blok.length ? `<span style="color:var(--rose)">Eerst: ${h.esc(blok.map((v) => v.sleutel).join(', '))}</span>` : ''}
           ${s.super_admin ? '<a href="javascript:void(0)" style="margin-left:auto;font-size:12px" onclick="__cmLzGhl(\'ghl-check\')">GHL controleren / instellen</a>' : ''}
         </div>
@@ -119,8 +145,8 @@
     if (!s.kanalen.includes('nieuwsbrief')) mail = 'kanaal uit';
     else if (!l) mail = 'nog niet gelanceerd';
     else if (l.status === 'ingepland') mail = `ingepland op ${tijd(l.ingepland_op)}`;
-    else if (l.status === 'taggen') mail = `wordt verstuurd: getagd ${nl(l.getagd)} van ${nl(l.totaal)}${l.overgeslagen ? ` · ${nl(l.overgeslagen)} overgeslagen` : ''}`;
-    else if (l.status === 'klaar') mail = `${nl(l.getagd)} contacten getagd${l.totaal != null ? ` van ${nl(l.totaal)}` : ''}${l.overgeslagen ? ` · ${nl(l.overgeslagen)} overgeslagen (DND/uitgeschreven)` : ''}${l.mislukt ? ` · ${nl(l.mislukt)} mislukt` : ''} · ${tijd(l.klaar_op)}`;
+    else if (l.status === 'taggen') mail = `${l.doelgroep_tag === '*alle-contacten*' ? 'alle contacten · ' : ''}wordt verstuurd: getagd ${nl(l.getagd)} van ${nl(l.totaal)}${l.overgeslagen ? ` · ${nl(l.overgeslagen)} overgeslagen` : ''}`;
+    else if (l.status === 'klaar') mail = `${l.doelgroep_tag === '*alle-contacten*' ? 'alle contacten · ' : ''}${nl(l.getagd)} contacten getagd${l.totaal != null ? ` van ${nl(l.totaal)}` : ''}${l.overgeslagen ? ` · ${nl(l.overgeslagen)} overgeslagen (DND/uitgeschreven)` : ''}${l.mislukt ? ` · ${nl(l.mislukt)} mislukt` : ''} · ${tijd(l.klaar_op)}`;
     else mail = `${l.status}${l.fout ? ': ' + l.fout : ''}`;
     const cel = (label, ok, tekst, extra = '') => `<div style="border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:150px;flex:1"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">${label}</div><div style="font-size:13px;margin-top:2px">${ok == null ? '' : vink(ok) + ' '}${tekst}</div>${extra}</div>`;
     const pagina = d.status !== 'gepubliceerd' ? cel('Pagina', false, 'niet gepubliceerd')
@@ -210,14 +236,17 @@
       if (!lz.ingepland || !Number.isFinite(t.getTime())) { H().toast('Kies een datum en uur.'); return; }
       ingepland = t.toISOString();
     }
-    const vraag = metMail ? (lz.modus === 'nu' ? 'Lanceren: pagina online en de nieuwsbrief NU naar de lijst?' : `Lanceren: pagina online en de nieuwsbrief ingepland op ${tijd(ingepland)}?`) : 'Lanceren: pagina online?';
+    if (metMail && lz.doelgroep === 'alle' && lz.verstuur !== 'VERSTUUR') { H().toast('Typ VERSTUUR om naar alle contacten te versturen.'); return; }
+    const o = lz.ontvangers[lz.doelgroep];
+    const wie = lz.doelgroep === 'alle' ? `ALLE contacten${o && !o.fout && !o.laden ? ` (±${nl(o.zonder_dnd != null ? o.zonder_dnd : o.totaal)})` : ''}` : `de tag ${s.instellingen.doelgroep_tag}${o && !o.fout && !o.laden ? ` (±${nl(o.zonder_dnd != null ? o.zonder_dnd : o.totaal)})` : ''}`;
+    const vraag = metMail ? (lz.modus === 'nu' ? `Lanceren: pagina online en de nieuwsbrief NU naar ${wie}?` : `Lanceren: pagina online en de nieuwsbrief ingepland op ${tijd(ingepland)} naar ${wie}?`) : 'Lanceren: pagina online?';
     if (!window.confirm(vraag)) return;
     lz.bezig = 'lanceer'; lz.stap = null; teken();
     try {
       await zorgBeelden();
       lz.stap = metMail && lz.modus === 'nu' ? 'Pagina publiceren, template bijwerken en de eerste contacten taggen (± 40 s)…' : 'Pagina publiceren…';
       teken();
-      const r = await H().post('/api/contentmachine/lanceer', { actie: 'lanceer', id: wb().drop.id, modus: metMail ? lz.modus : 'nu', ingepland_op: ingepland, onderwerp: lz.onderwerp });
+      const r = await H().post('/api/contentmachine/lanceer', { actie: 'lanceer', id: wb().drop.id, modus: metMail ? lz.modus : 'nu', ingepland_op: ingepland, onderwerp: lz.onderwerp, doelgroep: lz.doelgroep, ...(lz.doelgroep === 'alle' ? { bevestiging: lz.verstuur } : {}) });
       H().toast('Gelanceerd.');
       if (r.drop) H().zet(r.drop, null, null);
       lz.open = false;

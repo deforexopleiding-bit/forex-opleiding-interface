@@ -1,6 +1,6 @@
 // api/cron-weekeditie-lancering.js
 //
-// Contentmachine 2.0, fase 5 — cron (*/2): de nieuwsbrief van een gelanceerde Weekeditie
+// Contentmachine 2.0, fase 5 — cron (elke minuut): de nieuwsbrief van een gelanceerde Weekeditie
 // naar de lijst, via de verzendtag waarop de GHL-workflow "DFO Weekeditie versturen" mailt.
 //   1. loopt er een lancering (status 'taggen')? → verder taggen tot het tijdsbudget op is;
 //   2. anders de eerstvolgende ingeplande lancering die aan de beurt is: controleren dat de

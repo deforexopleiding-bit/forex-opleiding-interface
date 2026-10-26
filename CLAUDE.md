@@ -241,7 +241,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   inline, rest `api/cron-weekeditie-lancering.js` (*/2, één lancering tegelijk, template pas op het tijdstip bij
   inplannen; drop gewijzigd → geannuleerd). Elk contact eerst geclaimd in `weekeditie_lancering_contacten`
   (PK lancering+contact) en dan getagd: NOOIT dubbel (opnieuw taggen = opnieuw mailen). DND/uitgeschreven/geen
-  e-mail/had de tag al → overgeslagen. Het CRM verstuurt zelf niets naar de lijst. Migratie
+  e-mail/had de tag al → overgeslagen. Het CRM verstuurt zelf niets naar de lijst.
+  DOELGROEP per lancering: tag (`doelgroep_tag`, bv. `weekeditie-test` om te testen) of ALLE CONTACTEN van de
+  location (zoals de nieuwsbrief in GHL tot nu: geen tag/smart list) → `doelgroep_tag = '*alle-contacten*'`
+  (`ALLE_CONTACTEN`, search zonder filter); enkel met bevestiging `VERSTUUR` (server). Verwacht aantal via
+  `actie:'ontvangers'` (filter dnd=false als GHL dat aanvaardt). Taggen in groepjes van 4 met ≥500 ms (≤8/s),
+  cron elke minuut. Migratie
   docs/sql-migrations/2026-10-26-weekeditie-lancering.sql (gedraaid 26 okt). Data: `api/contentmachine/data.js`
   (zelfde bron als Trainingdrops via `api/_lib/trainingdrops-laden.js` + top-3 blokken uit de blok-events).
   v1-drops (zonder blokken) blijven werken. 12 masterclassfoto's in de seed (toestemming publiek, geen namen).

@@ -31,8 +31,15 @@ export const STANDAARD = Object.freeze({
   doelgroep_tag: 'nieuwsbrief',
   custom_value_naam: 'Weekeditie onderwerp',
 });
-/** Minimale tijd tussen twee GHL-aanvragen bij het taggen (ms). */
-export const TAG_PAUZE_MS = 150;
+/** Taggen: zoveel contacten tegelijk, met minstens deze pauze per groep (ms) → max ±8 aanvragen/s. */
+export const TAG_PARALLEL = 4;
+export const TAG_PAUZE_MS = 500;
+/**
+ * Doelgroep "alle contacten van de location" (zoals de huidige wekelijkse nieuwsbrief in GHL:
+ * geen tag of smart list). Wordt als doelgroep_tag bewaard; DND/uitgeschreven vallen weg bij het taggen.
+ */
+export const ALLE_CONTACTEN = '*alle-contacten*';
+export const isAlleContacten = (tag) => tag === ALLE_CONTACTEN;
 export const ZOEK_PAGINA = 100;
 
 const wacht = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -102,7 +109,7 @@ export async function tagsVanLocatie(cfg, fetchImpl) {
 export async function zoekContactenMetTag(cfg, { tag, searchAfter = null, limiet = ZOEK_PAGINA }, fetchImpl) {
   const body = {
     locationId: cfg.locationId, pageLimit: limiet,
-    filters: [{ field: 'tags', operator: 'contains', value: tag }],
+    filters: isAlleContacten(tag) ? [] : [{ field: 'tags', operator: 'contains', value: tag }],
     sort: [{ field: 'dateAdded', direction: 'asc' }],
     ...(searchAfter ? { searchAfter } : {}),
   };
@@ -120,6 +127,24 @@ export async function zoekContactenMetTag(cfg, { tag, searchAfter = null, limiet
 export async function telTag(cfg, tag, fetchImpl) {
   const r = await zoekContactenMetTag(cfg, { tag, limiet: 1 }, fetchImpl);
   return r.totaal;
+}
+
+/**
+ * Verwacht aantal ontvangers van een doelgroep (tag of alle contacten). → { totaal, zonder_dnd }
+ * zonder_dnd = met filter dnd=false (als GHL dat filter aanvaardt, anders null). E-mail-DND per
+ * kanaal valt pas bij het taggen weg, dus het echte aantal kan iets lager liggen.
+ */
+export async function telOntvangers(cfg, tag, fetchImpl) {
+  const totaal = (await zoekContactenMetTag(cfg, { tag, limiet: 1 }, fetchImpl)).totaal;
+  let zonderDnd = null;
+  try {
+    const j = await roep(cfg, '/contacts/search', {
+      method: 'POST', fetchImpl, wat: 'ontvangers tellen', pogingen: 1,
+      body: { locationId: cfg.locationId, pageLimit: 1, filters: [...(isAlleContacten(tag) ? [] : [{ field: 'tags', operator: 'contains', value: tag }]), { field: 'dnd', operator: 'eq', value: false }] },
+    });
+    zonderDnd = Number.isFinite(Number(j.total)) ? Number(j.total) : null;
+  } catch (e) { console.warn('[ghl-weekeditie] dnd-filter niet beschikbaar:', e?.message); }
+  return { totaal, zonder_dnd: zonderDnd };
 }
 
 export async function zetTag(cfg, contactId, tag, fetchImpl) {
