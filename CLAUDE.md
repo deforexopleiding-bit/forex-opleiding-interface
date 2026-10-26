@@ -206,6 +206,8 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `api/contentmachine/nieuwsbrief.js` (naar-ghl enkel na goedkeuren, test, stats) → rij in
   `nieuwsbrief_verzendingen`. Env optioneel: GHL_NIEUWSBRIEF_USER_ID, GHL_UITSCHRIJF_TAG.
   dfo-website tagt aanmeldingen met GHL_NIEUWSBRIEF_TAG (standaard 'nieuwsbrief') + bron.
+  DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
+  test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

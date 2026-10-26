@@ -141,6 +141,7 @@ conversations.json, contacts.json).
 4. **Website leest drops**: dfo-website-PR (aparte repo), soort `update`, patroon-migratie, inschrijving op nieuwsbrief. Bestaande training 22/10/26 blijft werken.
 5. **Nieuwsbrief via GoHighLevel** (gewijzigd 23 okt, was Brevo + abonnees): template/campagne-concept in GHL, testmail via GHL, "Open in GHL", drop-leads met nieuwsbrief-tag naar GHL, stats als de API ze geeft.
 6. **Eerste echte drop als demo**: maak een concept-drop met slug `22-10-26-demo` uit de bestaande training (Vimeo `https://player.vimeo.com/video/1238714790?h=4822ada5ee`, start 600s) en status `gegenereerd`, niet gepubliceerd, zodat Maxim het resultaat meteen ziet.
+   - **Uitgevoerd (26 okt 2026):** rij `22-10-26-demo` staat in `content_drops` (status `gegenereerd`, versie 2, format `trade_ontleed` — de vooruitblik was net gebruikt door `26-10-26`). Bron: `docs/contentmachine/demo-drop-22-10-26.json`, bewaakt door `tests/contentmachine-demo.test.js` (zelfde schema- en grenscontrole als de generator). De output is met de hand opgebouwd uit de bestaande training (de generator vraagt een ingelogde gebruiker); `meta.model` = "handmatig (demo, fase 6)". **Alles opnieuw** in het werkblad laat de machine hem zelf maken. Let op: `-demo` is geen website-slug (dfo-website kent enkel `dd-mm-jj[-n]`), dus publiceren toont hem niet op training.deforexopleiding.nl.
 
 ## 5. Randvoorwaarden
 - CRM is live met echte klantgegevens: geen bestaande opslaglogica, rechten of tabellen wijzigen; alles nieuw en additief.
