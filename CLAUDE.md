@@ -230,6 +230,20 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `views/contentmachine-social2-v2.js` (logo, teller, eyebrow+lijn, @deforexopleiding.nl, SWIPE →); de oude
   renderer geeft v2-drops door. Links zet de CODE (?src=ig-story / ig-bio / linkedin), nooit het model; de
   browser-kopie van `captions()` wordt door tests/contentmachine-social2.test.js gelijk gehouden.
+  LANCEREN (fase 5): één flow "Keur goed en lanceer" (super_admin; anderen enkel Goedkeuren) in
+  `views/contentmachine-lanceer-v2.js` → `api/contentmachine/lanceer.js`: grenzen/editie/cijfers → beelden in Storage
+  (anders eerst renderen) → pagina gepubliceerd + server-side controle (200 + <title> = seo_titel, max 2 min ISR; DNS
+  van het subdomein faalt → www/training/<slug>) → nieuwsbrief via GHL: VASTE template "DFO Weekeditie (actueel)" +
+  custom value "Weekeditie onderwerp" bijwerken, dan de tag `weekeditie-verzenden` op de contacten met de
+  doelgroep-tag (standaard `nieuwsbrief`), en de GHL-workflow "DFO Weekeditie versturen" mailt en haalt de tag weg.
+  Instellingen in app_settings `contentmachine_weekeditie_ghl` (template_id, custom_value_id, tags, workflow_naam).
+  VERPLICHT: testmail van DEZE versie (`weekeditie_testmails`), workflow bestaat (GET /workflows). Nu = eerste batch
+  inline, rest `api/cron-weekeditie-lancering.js` (*/2, één lancering tegelijk, template pas op het tijdstip bij
+  inplannen; drop gewijzigd → geannuleerd). Elk contact eerst geclaimd in `weekeditie_lancering_contacten`
+  (PK lancering+contact) en dan getagd: NOOIT dubbel (opnieuw taggen = opnieuw mailen). DND/uitgeschreven/geen
+  e-mail/had de tag al → overgeslagen. Het CRM verstuurt zelf niets naar de lijst. Migratie
+  docs/sql-migrations/2026-10-26-weekeditie-lancering.sql (gedraaid 26 okt). Data: `api/contentmachine/data.js`
+  (zelfde bron als Trainingdrops via `api/_lib/trainingdrops-laden.js` + top-3 blokken uit de blok-events).
   v1-drops (zonder blokken) blijven werken. 12 masterclassfoto's in de seed (toestemming publiek, geen namen).
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
