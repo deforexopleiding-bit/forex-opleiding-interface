@@ -141,6 +141,7 @@ export function socialFouten(o, { pagina = null, assets = null, onderdelen = nul
     if (s.length < 3 || s.length > 5) f.push('stories: 3 tot 5');
     s.forEach((x, i) => { beeld(x, `stories[${i}]`); if (x && !STORY_ROLLEN_V2.includes(x.rol)) f.push(`stories[${i}].rol onbekend`); });
     if (s.length && s[0].rol !== 'hook') f.push('stories: de eerste is de hook');
+    if (s.length && !s.some((x) => x && x.variant === 'foto')) f.push('stories: minstens één foto-variant (een masterclassfoto uit de bibliotheek, full-bleed)');
     if (s.length && s[s.length - 1].rol !== 'cta') f.push('stories: de laatste is de cta (linksticker naar de weekeditie)');
   }
   if (check('post')) {
@@ -149,6 +150,7 @@ export function socialFouten(o, { pagina = null, assets = null, onderdelen = nul
     if (sl.length < 5 || sl.length > 8) f.push('post.slides: 5 tot 8');
     sl.forEach((x, i) => beeld(x, `post.slides[${i}]`));
     if (sl.length >= 5 && new Set(sl.map((x) => x && x.variant)).size < 2) f.push('post.slides: wissel minstens 2 varianten af');
+    if (sl.length && !sl.some((x) => x && x.variant === 'foto')) f.push('post.slides: minstens één foto-variant (een masterclassfoto uit de bibliotheek, full-bleed)');
     if (!tekst(p.caption)) f.push('post.caption ontbreekt');
     else if (/https?:\/\//i.test(p.caption)) f.push('post.caption: geen link (het systeem zet "link in bio")');
     if (Array.isArray(p.hashtags) && p.hashtags.length > 5) f.push('post.hashtags: max 5');

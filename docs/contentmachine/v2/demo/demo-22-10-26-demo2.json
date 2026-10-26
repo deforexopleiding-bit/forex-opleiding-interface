@@ -270,10 +270,11 @@
     "stories": [
       {
         "rol": "hook",
-        "variant": "donker",
+        "variant": "foto",
         "eyebrow": "Live training 22/10",
         "titel": "Prijs zakt onder de low. **Short?**",
-        "tekst": "Kies voor je verder tikt."
+        "tekst": "Kies voor je verder tikt.",
+        "beeld_asset_id": "c0902297-a369-4f49-a157-9e47713fe6ea"
       },
       {
         "rol": "nugget",
