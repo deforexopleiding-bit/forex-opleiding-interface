@@ -293,7 +293,12 @@
   }
 
   /** Carrousel-slide 1080×1350. Slide 1 = cover, laatste = volgende stap. */
+  /** "1. Eerst de 4-uur" / "4-5. Locatie" → zonder nummer: het nummer staat al groot op de slide. */
+  const zonderNummer = (t) => String(t || '').replace(/^\s*\d{1,2}(?:\s*[-–]\s*\d{1,2})?\s*[.)]\s*/, '');
+  window.__cmZonderNummer = zonderNummer;
+
   function slide(ctx, { sl, idx, totaal, img, stijl, slug }) {
+    sl = { ...sl, titel: zonderNummer(sl.titel) };
     const W = 1080, H = 1350, s = 1;
     achtergrond(ctx, W, H, stijl);
     merk(ctx, 72, 72, s);
@@ -406,7 +411,7 @@
     if (li.beeld === 'slide1' && slides[0]) {
       // Slide 1 als vierkant 1200×1200 (de 4:5-slide past niet in een vierkant).
       const img = await beeld(slides[0].beeld_asset_id);
-      await maak('linkedin', 'LinkedIn 1200', 1200, 1200, (ctx) => vierkant(ctx, { v: { titel: slides[0].titel, sub: slides[0].tekst }, img, stijl: st, slug: drop.slug, maat: 1200 }));
+      await maak('linkedin', 'LinkedIn 1200', 1200, 1200, (ctx) => vierkant(ctx, { v: { titel: zonderNummer(slides[0].titel), sub: slides[0].tekst }, img, stijl: st, slug: drop.slug, maat: 1200 }));
     } else {
       await maak('linkedin', 'LinkedIn 1200', 1200, 1200, (ctx) => vierkant(ctx, { v, img: vImg, stijl: st, slug: drop.slug, maat: 1200 }));
     }

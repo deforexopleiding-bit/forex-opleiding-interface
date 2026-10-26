@@ -101,6 +101,18 @@ export function vasteFormulierTeksten({ soort, startSec } = {}) {
   };
 }
 
+/** Slidetitel zonder leidend nummer ("1. …", "4-5. …"): het nummer staat al groot op de slide. */
+export function zonderSlideNummer(t) {
+  return String(t == null ? '' : t).replace(/^\s*\d{1,2}(?:\s*[-–]\s*\d{1,2})?\s*[.)]\s*/, '');
+}
+
+/** Nabewerking van elke generatie: vaste formulierteksten + slidetitels zonder nummer. */
+export function nabewerk(o, ctx = {}) {
+  const uit = metVasteTeksten(o, ctx);
+  if (!uit || !uit.post || !Array.isArray(uit.post.slides)) return uit;
+  return { ...uit, post: { ...uit.post, slides: uit.post.slides.map((x) => (x && typeof x === 'object' ? { ...x, titel: zonderSlideNummer(x.titel) } : x)) } };
+}
+
 /** Output met de vaste formulierteksten (kopie; zonder pagina ongewijzigd). */
 export function metVasteTeksten(o, { drop, input } = {}) {
   if (!o || !o.pagina || typeof o.pagina !== 'object') return o;
@@ -148,7 +160,7 @@ const STORIES_SCHEMA = {
 const POST_SCHEMA = {
   type: 'object',
   properties: {
-    slides: ARR({ type: 'object', properties: { titel: S, tekst: S, beeld_asset_id: SN }, required: ['titel', 'tekst'] }, 5, 7),
+    slides: ARR({ type: 'object', properties: { titel: { type: 'string', description: 'Titel ZONDER nummer ervoor (geen "1." of "4-5."): het slidenummer staat al groot op de slide.' }, tekst: S, beeld_asset_id: SN }, required: ['titel', 'tekst'] }, 5, 7),
     caption: { type: 'string', description: 'Instagram-caption, eerste regel = hook, eindigt met de volgende stap (link in bio).' },
     hashtags: ARR(S, 3, 12),
   },
@@ -444,6 +456,7 @@ HARDE GRENZEN
 - Geen verkooppraat: geen "verkoop", "deal", "korting", "aanbieding", "laatste kans", geen meerdere uitroeptekens. Benoem wat er feitelijk gebeurt. Het cadeau mag: "t.w.v. €100, nu €0".
 - Zeg nooit "swing" of "swingtrade" naar buiten; noem het een H4-limit.
 - Datums: noem ENKEL de datum en weekdag van de training die je meekrijgt ("DATUM TRAINING"). Raad nooit een weekdag. Is de datum onbekend, noem dan geen weekdag en geen datum: zeg "deze week" of "in de live training". De datum van de drop is NIET de datum van de training.
+- Carrousel-slides: zet GEEN nummer voor de titel ("1.", "4-5."); het slidenummer staat al groot op de slide.
 - De poort op de pagina werkt zo: de bezoeker vult naam, e-mail en gsm-nummer in; bij een training start de video METEEN op de pagina (er wordt nooit een link gemaild); daarna komt het cadeau. Bij een update schrijft hij zich in op de wekelijkse marktanalyse. De teksten van dat formulier zijn vast; die schrijf jij niet.
 - Trading-uitleg en tips ENKEL uit de DFO-strategiekennis hieronder. Wat er niet in staat, verzin je niet en vul je niet aan met algemene ICT/SMC-regels.
 - Een disclaimer (educatief, geen financieel advies, risico op verlies) wordt automatisch toegevoegd; schrijf er zelf geen.
@@ -554,7 +567,7 @@ export async function genereerDrop(ctx) {
   const opties = grensOpties(ctx.input, verbodenNamen);
   const content = gebruikersBericht(ctx);
   let { resultaat: output, model } = await roepAan({ content, schema: OUTPUT_SCHEMA });
-  output = metVasteTeksten(output, ctx);
+  output = nabewerk(output, ctx);
   let v = valideerOutput(output, { toegelaten, assetIds });
   let g = controleerGrenzen(output, opties);
   let herstel = false;
@@ -565,7 +578,7 @@ export async function genereerDrop(ctx) {
       schema: OUTPUT_SCHEMA,
       temperature: 0.4,
     });
-    output = metVasteTeksten(r.resultaat, ctx); model = r.model;
+    output = nabewerk(r.resultaat, ctx); model = r.model;
     v = valideerOutput(output, { toegelaten, assetIds });
     g = controleerGrenzen(output, opties);
   }
@@ -579,7 +592,7 @@ export async function genereerDrop(ctx) {
     try {
       const bijna = gelijk.filter((x) => x.onderdeel === onderdeel).map((x) => `"${x.nieuw}" lijkt te veel op "${x.oud}" (${x.slug})`).join('; ');
       const r = await genereerOnderdeel({ ...ctx, onderdeel, huidige: output, instructie: `Te gelijkend op vorige drops: ${bijna}. Kies een duidelijk andere invalshoek en andere woorden.` });
-      output = metVasteTeksten({ ...output, ...r.deel }, ctx);
+      output = nabewerk({ ...output, ...r.deel }, ctx);
     } catch (e) {
       waarschuwingen.push({ soort: 'uniek', tekst: `${onderdeel} opnieuw maken mislukt: ${e?.message || e}` });
     }
@@ -612,7 +625,7 @@ export async function genereerOnderdeel(ctx) {
   const content = [...gebruikersBericht(ctx), { type: 'text', text: opdracht }];
   const opties = grensOpties(ctx.input, verbodenNamen);
   let { resultaat, model } = await roepAan({ content, schema, max_tokens: 8000 });
-  resultaat = metVasteTeksten(resultaat, ctx);
+  resultaat = nabewerk(resultaat, ctx);
   const onderdelen = onderdeel === 'post' ? ['post'] : [onderdeel];
   const metHuidig = (r) => ({ ...huidige, ...r });
   let v = valideerOutput(metHuidig(resultaat), { assetIds, onderdelen });
@@ -622,7 +635,7 @@ export async function genereerOnderdeel(ctx) {
       content: [...content, { type: 'text', text: 'VORIGE VERSIE:\n' + JSON.stringify(resultaat) + '\n\n' + herstelTekst(v.fouten, g) }],
       schema, max_tokens: 8000, temperature: 0.4,
     });
-    resultaat = metVasteTeksten(r.resultaat, ctx); model = r.model;
+    resultaat = nabewerk(r.resultaat, ctx); model = r.model;
     v = valideerOutput(metHuidig(resultaat), { assetIds, onderdelen });
     g = controleerGrenzen(resultaat, opties);
   }

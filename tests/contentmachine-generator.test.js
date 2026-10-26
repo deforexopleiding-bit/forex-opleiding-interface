@@ -424,3 +424,19 @@ test('bedrading: invoer heeft "Datum training"; werkblad toont het formulier als
   assert.match(wb, /Formulier \(vast\)/); assert.doesNotMatch(wb, /veld\('pagina\.formulier_titel'/);
   assert.match(lees('api/contentmachine/drops.js'), /training_datum: datumUitTitel\(j\.title\)/);
 });
+
+test('carrousel: geen nummer voor de slidetitel (generator én rendering)', () => {
+  for (const [in_, uit] of [['1. Eerst de 4-uur', 'Eerst de 4-uur'], ['4-5. Locatie en reden', 'Locatie en reden'], ['6) Risk free', 'Risk free'], ['71% is locatie', '71% is locatie'], ['2026 was goed', '2026 was goed'], ['Eén trade, zes stappen', 'Eén trade, zes stappen']]) {
+    assert.equal(G.zonderSlideNummer(in_), uit, in_);
+  }
+  const o = voorbeeldOutput(); o.post.slides[1].titel = '1. Eerst de 4-uur'; o.post.slides[3].titel = '4-5. Locatie';
+  const n = G.nabewerk(o, { drop: { soort: 'training' }, input: { start_sec: 600 } });
+  assert.deepEqual([n.post.slides[1].titel, n.post.slides[3].titel], ['Eerst de 4-uur', 'Locatie']);
+  assert.match(n.pagina.formulier_sub, /gsm-nummer/, 'vaste teksten blijven');
+  assert.match(G.systeemPrompt(), /GEEN nummer voor de titel/);
+  const social = lees('modules/klanten-v2/views/contentmachine-social-v2.js');
+  assert.match(social, /sl = \{ \.\.\.sl, titel: zonderNummer\(sl\.titel\) \}/);
+  const vm = { window: {} };
+  new Function('window', social.match(/const zonderNummer = [^\n]+\n\s+window\.__cmZonderNummer = zonderNummer;/)[0])(vm.window);
+  assert.equal(vm.window.__cmZonderNummer('4-5. Locatie'), 'Locatie');
+});
