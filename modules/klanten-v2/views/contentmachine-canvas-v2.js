@@ -65,13 +65,18 @@
   /** "a **b** c" → woorden met accent-vlag; \n = harde regel. */
   function delen(tekst) {
     const uit = [];
+    let spatieErvoor = true;
     String(tekst || '').split(/(\*\*[^*]+\*\*)/).forEach((stuk) => {
       if (!stuk) return;
       const accent = /^\*\*.*\*\*$/.test(stuk);
       const schoon = accent ? stuk.slice(2, -2) : stuk;
       schoon.split(/(\n)/).forEach((r) => {
-        if (r === '\n') { uit.push({ breek: true }); return; }
-        r.split(/\s+/).filter(Boolean).forEach((woord) => uit.push({ woord, accent }));
+        if (r === '\n') { uit.push({ breek: true }); spatieErvoor = true; return; }
+        if (!r) return;
+        // "**woord**, rest": geen spatie vóór de komma (het stuk plakt aan het vorige woord).
+        const plak = /^\S/.test(r) && !spatieErvoor && uit.length > 0 && !uit[uit.length - 1].breek;
+        r.split(/\s+/).filter(Boolean).forEach((woord, i) => uit.push({ woord, accent, plak: plak && i === 0 }));
+        spatieErvoor = /\s$/.test(r);
       });
     });
     return uit;
@@ -82,8 +87,9 @@
     for (const w of woorden) {
       if (w.breek) { rij.push(huidig); huidig = []; breedte = 0; continue; }
       const b = ctx.measureText(w.woord).width;
-      if (huidig.length && breedte + sp + b > maxW) { rij.push(huidig); huidig = []; breedte = 0; }
-      huidig.push({ ...w, b }); breedte += (huidig.length > 1 ? sp : 0) + b;
+      const tussen = w.plak ? 0 : sp;
+      if (huidig.length && !w.plak && breedte + tussen + b > maxW) { rij.push(huidig); huidig = []; breedte = 0; }
+      huidig.push({ ...w, b }); breedte += (huidig.length > 1 ? tussen : 0) + b;
     }
     if (huidig.length) rij.push(huidig);
     return rij;
@@ -111,14 +117,14 @@
     let y = o.y;
     const sp = ctx.measureText(' ').width;
     r.forEach((rij) => {
-      const breedte = rij.reduce((a, w, i) => a + w.b + (i ? sp : 0), 0);
+      const breedte = rij.reduce((a, w, i) => a + w.b + (i && !w.plak ? sp : 0), 0);
       let x = o.uitlijn === 'center' ? o.x + (o.maxW - breedte) / 2 : o.x;
       const basis = y + px * 0.86;
       rij.forEach((w, i) => {
-        if (i) x += sp;
+        if (i && !w.plak) x += sp;
         if (w.accent && o.accent === 'marker') {
           ctx.save(); ctx.fillStyle = 'rgba(208,160,80,0.42)';
-          ctx.fillRect(x - px * 0.04, basis - px * 0.24, w.b + px * 0.08 + (i < rij.length - 1 && rij[i + 1].accent ? sp : 0), px * 0.3);
+          ctx.fillRect(x - px * 0.04, basis - px * 0.24, w.b + px * 0.08 + (i < rij.length - 1 && rij[i + 1].accent && !rij[i + 1].plak ? sp : 0), px * 0.3);
           ctx.restore();
           ctx.fillStyle = o.kleur;
         } else {

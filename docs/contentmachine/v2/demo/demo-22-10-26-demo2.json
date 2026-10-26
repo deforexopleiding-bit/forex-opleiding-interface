@@ -1,0 +1,394 @@
+{
+  "slug": "22-10-26-demo2",
+  "datum": "2026-10-22",
+  "soort": "training",
+  "status": "gegenereerd",
+  "format_key": "wat_zou_jij_doen",
+  "input": {
+    "duur": 2700,
+    "kanalen": [
+      "pagina",
+      "nieuwsbrief",
+      "stories",
+      "post",
+      "linkedin"
+    ],
+    "vimeo_id": "1238714790",
+    "vimeo_hash": "4822ada5ee",
+    "start_sec": 600,
+    "vimeo_url": "https://player.vimeo.com/video/1238714790?h=4822ada5ee",
+    "training_datum": "2026-10-22",
+    "trade_info": {
+      "paar": "EUR/USD",
+      "richting": "long",
+      "uitleg": "15M-long na sweep van de 4-uur lows; entry-zone rond het 71-level en het order block.",
+      "resultaat_r": null
+    },
+    "wat_gebeurde": "Live training van 22/10. De dollar (DXY) kantelt van bearish naar bullish: op de 4-uur en 1-uur kondigt een inverse fair value gap een mogelijke trendwissel aan. GBP/USD short als lopende trade. EUR/USD 15M long volledig nagelopen: 4-uur fib met fair value gap als volume, sweep van de 4-uur lows, externe/interne sweep en break, 71-level, order block, bijschalen, risk free en break even. Daarna 10+ paren met wat wel of niet valid is. Ook risicomanagement en journalen.",
+    "nugget": "Een sweep van een low is geen reden om short te gaan: het is vaak de brandstof voor de beweging de andere kant op.",
+    "notities": "Demo-editie 2.0 (fase 6) op basis van de training van 22/10. Niet publiceren.",
+    "gekozen_asset_ids": [
+      "266f71e7-ee79-4fef-a209-eab4e1fa33f7",
+      "ce6b5f12-d602-46ec-85b0-27d3de53bff1",
+      "c0902297-a369-4f49-a157-9e47713fe6ea"
+    ]
+  },
+  "output": {
+    "versie": 2,
+    "format_key": "wat_zou_jij_doen",
+    "kernidee": "Prijs zakt onder de 4-uur lows. Wie dan short gaat, staat vaak aan de verkeerde kant: op 22/10 werd het juist een long op EUR/USD.",
+    "regie": {
+      "format_key": "wat_zou_jij_doen",
+      "kernidee": "Prijs zakt onder de 4-uur lows. Wie dan short gaat, staat vaak aan de verkeerde kant: op 22/10 werd het juist een long op EUR/USD.",
+      "rode_draad": "Eerst zelf kiezen (quiz), dan de replay van het moment, dan de trade stap voor stap, en tot slot rekenen wat één goede trade waard is.",
+      "nugget": "Een sweep van een low is brandstof, geen break: pas een body close voorbij het niveau verlegt de structuur.",
+      "open_lus": "Prijs zakt onder de 4-uur low. Short of wachten? Het antwoord, en de long die volgde, staan in de weekeditie.",
+      "thema": "goud",
+      "hero_variant": "video-poort",
+      "blokken": [
+        {
+          "type": "hero",
+          "variant": "video-poort",
+          "waarom": "De opname is de kern; de poort staat meteen naast de kop."
+        },
+        {
+          "type": "quiz",
+          "waarom": "Eerst zelf beslissen op het moment van de sweep: dat is de open lus van de mail."
+        },
+        {
+          "type": "replay-sweep-bos",
+          "waarom": "Het moment van de week zelf afspelen, kaars per kaars."
+        },
+        {
+          "type": "trade-ontleed",
+          "waarom": "De EUR/USD-long van de training in de DFO-volgorde."
+        },
+        {
+          "type": "mythe-feit",
+          "waarom": "Twee denkfouten die bij deze setup horen."
+        },
+        {
+          "type": "data",
+          "variant": "een",
+          "waarom": "Eén cijfer dat laat zien waarom geduld loont."
+        },
+        {
+          "type": "funded-calculator",
+          "waarom": "Wat hetzelfde rendement betekent op een funded account."
+        },
+        {
+          "type": "citaat",
+          "waarom": "Afsluiten met de regel van de masterclass."
+        },
+        {
+          "type": "cadeau",
+          "waarom": "De volgende stap: een strategiesessie."
+        }
+      ],
+      "beelden": [
+        {
+          "asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7",
+          "waar": "trade-ontleed"
+        },
+        {
+          "asset_id": "ce6b5f12-d602-46ec-85b0-27d3de53bff1",
+          "waar": "social"
+        }
+      ],
+      "motivatie": "De vorige edities waren uitleg- en vooruitblik-zwaar; nu begint de bezoeker zelf met kiezen. Thema goud (warm, anders dan nacht), interactie: quiz + replay + calculator.",
+      "model": "handmatig (demo fase 6)",
+      "herstel": false
+    },
+    "pagina": {
+      "thema": "goud",
+      "seo_titel": "Short of wachten? — Weekeditie 22/10 | De Forex Opleiding",
+      "seo_beschrijving": "Gratis opname van de live training van 22/10: prijs zakt onder de 4-uur lows. Kies zelf, speel de replay af en zie de EUR/USD-long stap voor stap.",
+      "og_titel": "Prijs zakt onder de low. Short of wachten?",
+      "og_beschrijving": "Kies zelf en speel het moment af. De Weekeditie van 22/10.",
+      "blokken": [
+        {
+          "type": "hero",
+          "variant": "video-poort",
+          "props": {
+            "eyebrow": "Gratis opname · Live training 22/10",
+            "titel": "Short of wachten? **Kies zelf.**",
+            "intro": "Op 22/10 zakte prijs onder de **4-uur lows**. Een reflex zegt short. In de live training werd het juist **een long op EUR/USD**, van 4-uur fib tot risk free. Kijk mee en beslis eerst zelf.",
+            "feiten": [
+              "45 min live training",
+              "10+ paren besproken",
+              "Normaal enkel voor studenten"
+            ]
+          }
+        },
+        {
+          "type": "quiz",
+          "props": {
+            "eyebrow": "Wat zou jij doen?",
+            "vraag": "Prijs zakt onder de 4-uur low. Wat doe je?",
+            "chart": {
+              "richting": "short",
+              "soort": "sweep"
+            },
+            "opties": [
+              "Meteen short: de low is weg",
+              "Wachten: is het een sweep of een body close eronder?",
+              "Long, want het is goedkoop"
+            ],
+            "antwoord_index": 1,
+            "uitleg": "Een wick onder een low is liquiditeit ophalen, nog geen break. Pas een body close eronder verlegt de structuur. Op 22/10 schoot prijs terug en volgde een structure shift naar boven op de 15M."
+          }
+        },
+        {
+          "type": "replay-sweep-bos",
+          "props": {
+            "eyebrow": "Speel het zelf af",
+            "titel": "Sweep of break? **Kaars per kaars.**",
+            "intro": "Druk op afspelen en kies op het moment dat prijs onder de low gaat. De onthulling komt pas daarna.",
+            "richting": "long",
+            "scenario": "sweep",
+            "uitleg": "De wick ging onder de low, maar de body sloot erboven en de kaarsen erna bleven erboven. Dat was een sweep: liquiditeit opgehaald, geen break. Daarna verschoof de 15M-structuur naar boven."
+          }
+        },
+        {
+          "type": "trade-ontleed",
+          "props": {
+            "eyebrow": "De trade ontleed",
+            "titel": "EUR/USD long, **in de DFO-volgorde**",
+            "paar": "EUR/USD",
+            "richting": "long",
+            "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7",
+            "stappen": [
+              {
+                "fase": "context",
+                "titel": "De 4-uur bepaalt de richting",
+                "tekst": "Op de 4-uur trekken we de fib over een geldige impuls, met de fair value gap als volume. De 71 is enkel locatie."
+              },
+              {
+                "fase": "liquidity",
+                "titel": "Sweep van de 4-uur lows",
+                "tekst": "Prijs haalt de lows weg met een wick. Geen body close eronder: dit is liquiditeit, geen break."
+              },
+              {
+                "fase": "shift",
+                "titel": "Structure shift op de 15M",
+                "tekst": "Na de externe en interne sweep volgt een break naar boven met een body close. Nu pas is er een 15M-impuls."
+              },
+              {
+                "fase": "entry",
+                "titel": "Entry op de 71 van de 15M",
+                "tekst": "De entry-zone ligt op het 71-level van de nieuwe impuls, samen met het order block. Bijschalen kan op het tweede niveau."
+              },
+              {
+                "fase": "beheer",
+                "titel": "Risk free en break even",
+                "tekst": "Zodra prijs ver genoeg loopt, gaat de stop naar risk free. Zo kan de trade nog enkel winst of nul opleveren."
+              }
+            ]
+          }
+        },
+        {
+          "type": "mythe-feit",
+          "props": {
+            "items": [
+              {
+                "mythe": "Prijs gaat onder de low, dus de trend is gebroken.",
+                "feit": "Een wick onder de low is een sweep. Een structure break vraagt een body close voorbij het niveau, en zelfs dan is het geen automatische entry."
+              },
+              {
+                "mythe": "Hoe sneller je instapt, hoe beter je prijs.",
+                "feit": "Wie wacht op de 15M-bevestiging, mist soms de eerste pips maar vermijdt de trades die nooit geldig waren."
+              }
+            ]
+          }
+        },
+        {
+          "type": "data",
+          "variant": "een",
+          "props": {
+            "eyebrow": "Waarom geduld loont",
+            "titel": "Quitte vanaf **24% winrate**",
+            "cijfers": [
+              {
+                "waarde": 24,
+                "suffix": "%",
+                "label": "winrate waarop je quitte speelt",
+                "context": "Bij een gemiddelde winnende trade van 3,17R, zoals in het journal van onze studenten.",
+                "bron": "feitenbank · journal DFO-platform"
+              }
+            ]
+          }
+        },
+        {
+          "type": "funded-calculator",
+          "props": {
+            "start_account": 100000,
+            "start_rendement": 2,
+            "referentie": {
+              "label": "Mediaanstudent · 4,15%",
+              "rendement": 4.15
+            }
+          }
+        },
+        {
+          "type": "citaat",
+          "props": {
+            "tekst": "Je hoeft geen gelijk te hebben. **Je moet groot winnen als je gelijk hebt.**",
+            "wie": "Uit de masterclass"
+          }
+        },
+        {
+          "type": "cadeau",
+          "props": {}
+        }
+      ],
+      "formulier_titel": "Ontgrendel de volledige training",
+      "formulier_sub": "Vul je naam, e-mail en gsm-nummer in. De video start meteen hier op de pagina.",
+      "knop": "Bekijk de training nu",
+      "ontgrendeld_tekst": "▶ De video start op **10:00**, daar begint de analyse. Veel kijkplezier."
+    },
+    "nieuwsbrief": {
+      "onderwerpen": [
+        "Prijs zakt onder de low. Short?",
+        "De reflex die je deze week geld kost",
+        "Kies zelf: sweep of break"
+      ],
+      "preheader": "Kies eerst zelf, speel daarna het moment van 22/10 af.",
+      "opener": "Hoi, in de live training van 22/10 zakte prijs onder de 4-uur lows. Op dat moment roept alles in je hoofd: short, de low is weg. Toch werd het een long op EUR/USD, van de 4-uur fib tot risk free. **Het verschil zat in één kaars**, en die kaars kan je nu zelf afspelen voordat je ziet wat er gebeurde.",
+      "nugget": {
+        "kicker": "De nugget van de week",
+        "titel": "Een sweep is brandstof, geen break.",
+        "tekst": "Een wick onder een low haalt liquiditeit op. Pas een body close voorbij het niveau verlegt de structuur. Wie op de wick short gaat, levert vaak precies de brandstof voor de beweging naar boven, en ziet zijn stop geraakt worden net voor prijs vertrekt."
+      },
+      "beeld_blok_index": 2,
+      "open_lus": {
+        "kicker": "Wat zou jij doen?",
+        "vraag": "Prijs zakt onder de 4-uur low. Short of wachten?",
+        "tekst": "Kies op de pagina vóór de onthulling. Daarna zie je de long die volgde, stap voor stap."
+      },
+      "ps": "Deze week krijg je er een gratis strategiesessie met Dave bij: t.w.v. €100, nu €0. Je plant hem op de pagina."
+    },
+    "stories": [
+      {
+        "rol": "hook",
+        "variant": "donker",
+        "eyebrow": "Live training 22/10",
+        "titel": "Prijs zakt onder de low. **Short?**",
+        "tekst": "Kies voor je verder tikt."
+      },
+      {
+        "rol": "nugget",
+        "variant": "licht",
+        "eyebrow": "De nugget",
+        "titel": "Een sweep is **brandstof**, geen break.",
+        "tekst": "Pas een body close verlegt de structuur."
+      },
+      {
+        "rol": "bewijs",
+        "variant": "kaart",
+        "eyebrow": "Speel het zelf af",
+        "titel": "Het moment van **22/10**",
+        "tekst": "Kaars per kaars, met de onthulling erna.",
+        "blok_index": 2
+      },
+      {
+        "rol": "cta",
+        "variant": "donker",
+        "eyebrow": "Nu online",
+        "titel": "De volledige **weekeditie**",
+        "tekst": "Opname, replay en de trade ontleed.",
+        "sticker_tekst": "Lees de weekeditie"
+      }
+    ],
+    "post": {
+      "slides": [
+        {
+          "variant": "licht",
+          "eyebrow": "Wat zou jij doen?",
+          "titel": "Prijs zakt onder de low. **Short of wachten?**",
+          "tekst": "Swipe pas als je gekozen hebt."
+        },
+        {
+          "variant": "donker",
+          "eyebrow": "Het moment",
+          "titel": "Een wick onder de 4-uur **lows.**",
+          "tekst": "Geen body close eronder. De reflex zegt toch short."
+        },
+        {
+          "variant": "kaart",
+          "eyebrow": "Sweep of break?",
+          "titel": "Speel het **zelf** af",
+          "tekst": "Op de pagina, kaars per kaars.",
+          "blok_index": 2
+        },
+        {
+          "variant": "foto",
+          "eyebrow": "In de live training",
+          "titel": "Het werd **een long.**",
+          "tekst": "EUR/USD, van de 4-uur fib tot risk free.",
+          "beeld_asset_id": "ce6b5f12-d602-46ec-85b0-27d3de53bff1"
+        },
+        {
+          "variant": "data",
+          "eyebrow": "Waarom geduld loont",
+          "titel": "Quitte vanaf deze **winrate**",
+          "tekst": "Bij gemiddeld 3,17R per winnende trade.",
+          "getal": {
+            "waarde": 24,
+            "suffix": "%",
+            "decimalen": 0,
+            "label": "winrate"
+          }
+        },
+        {
+          "variant": "donker",
+          "eyebrow": "Nu online",
+          "titel": "De volledige **weekeditie.**",
+          "tekst": "Gratis opname, replay en de trade ontleed."
+        }
+      ],
+      "caption": "Prijs zakt onder de 4-uur low. Short of wachten?\n\nIn de live training van 22/10 werd het juist een long op EUR/USD. Het verschil zat in één kaars: een wick onder de low is een sweep, geen break.\n\nKies zelf en speel het moment af in de weekeditie.",
+      "hashtags": [
+        "forex",
+        "trading",
+        "priceaction"
+      ]
+    },
+    "vierkant": {
+      "variant": "licht",
+      "eyebrow": "Weekeditie 22/10",
+      "titel": "Een sweep is **geen break.**",
+      "tekst": "Kies zelf en speel het moment af."
+    },
+    "linkedin": {
+      "tekst": "Prijs zakt onder een belangrijke low. Wat doe je?\n\nIn onze live training van 22/10 was dat precies het moment. De reflex zegt: de low is gebroken, dus short. Toch werd het een long op EUR/USD.\n\nHet verschil zat in één kaars. Een wick onder een low haalt liquiditeit op; pas een body close voorbij het niveau verlegt de structuur. Wie op de wick instapt, levert vaak de brandstof voor de beweging de andere kant op.\n\nDaarom leren we onze studenten eerst te wachten op bevestiging op de 15M, en pas dan te zoeken naar een entry op de 71 van de nieuwe impuls.\n\nIn de weekeditie kan je het moment zelf afspelen en zie je de trade stap voor stap.",
+      "hashtags": [
+        "trading",
+        "forex"
+      ],
+      "beeld": {
+        "variant": "foto",
+        "eyebrow": "De Weekeditie",
+        "titel": "Wachten is ook **een beslissing.**",
+        "tekst": "Het moment van 22/10, stap voor stap.",
+        "beeld_asset_id": "ce6b5f12-d602-46ec-85b0-27d3de53bff1"
+      }
+    },
+    "titel": "Short of wachten? Kies zelf.",
+    "meta": {
+      "model": "handmatig (demo fase 6)",
+      "gegenereerd_op": "2026-10-26T14:00:00.000Z",
+      "verboden_namen": [
+        "Chesney",
+        "Danny",
+        "Jeffrey",
+        "Kjento",
+        "Muddasir",
+        "Ricardo",
+        "Rogier",
+        "Romy",
+        "Seppe"
+      ],
+      "waarschuwingen": []
+    }
+  }
+}
