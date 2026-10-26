@@ -40,6 +40,10 @@ import {
   FUNNEL_VARIANTEN, BENODIGDE_EVENT_TYPES, BOEK_BRON_PER_VARIANT, EVENT_VARIANTEN,
   aggregeerFunnelStats, variantInfo, pct,
 } from './_lib/funnel-stats-compute.js';
+// Canonieke aanmeldingen-telling — dezelfde bron als de KPI "Nieuwe leads" en
+// "Nieuwe leads per bron" (incl. webinar-aanmeldingen en heraanmeldingen). Zie
+// api/display-metrics.js, dat deze functie ook gebruikt.
+import { computeAanmeldingenPerFunnel } from './_lib/aanmeldingen-per-funnel.js';
 
 const PAGINA = 1000;
 const MAX_EVENTS_PER_VARIANT = 25000;
@@ -176,6 +180,43 @@ function landingSessies(perVariantRij) {
   return l ? (l.sessions || 0) : 0;
 }
 
+/**
+ * Canonieke opt-ins per bord-funnel uit de aanmeldingen-tegels
+ * (computeAanmeldingenPerFunnel.tegels). Zo tellen opt-ins ALLE echte
+ * aanmeldingen mee — webinar-aanmeldingen (tegels.webinar) en heraanmeldingen —
+ * net als de KPI "Nieuwe leads". The Lab en Strategie-scan zitten canoniek in
+ * 'overig.delen'; de rest van Overig (training/opstartsessie/overige leads)
+ * komt als 'overig'. Som van alle waarden hier = tegels-totaal = de KPI.
+ * Retourneert null als de tegels ontbreken (dan valt de endpoint terug op de
+ * tracking-telling).
+ */
+export function canoniekeOptins(tegels) {
+  if (!tegels) return null;
+  const n = (t) => (t && Number.isFinite(t.totaal) ? t.totaal : 0);
+  const deel = (tegels.overig && tegels.overig.delen) || {};
+  const lab = deel['the-lab'] || 0;
+  const scan = deel.strategiescan || 0;
+  const overigRest = Math.max(0, n(tegels.overig) - lab - scan);
+  return {
+    mini:          n(tegels.mini),
+    '7-daagse':    n(tegels['7-daagse']),
+    webinar:       n(tegels.webinar),
+    events:        n(tegels.event),
+    'the-lab':     lab,
+    strategiescan: scan,
+    overig:        overigRest,
+  };
+}
+
+async function safeAanmeldingen(db, start, eindExclusief) {
+  try {
+    return await computeAanmeldingenPerFunnel({ supabaseAdmin: db, range: { start, endExclusive: eindExclusief } });
+  } catch (e) {
+    console.error('[display-funnel] aanmeldingen-per-funnel mislukt (soft):', e?.message || e);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -239,10 +280,18 @@ export default async function handler(req, res) {
       start, eindExclusief, trackingActief,
     });
 
-    // 3) Groepeer per familie.
+    // 3) Canonieke opt-ins (zelfde bron als de KPI) voor deze periode. Bezoeken
+    //    blijven uit de tracking; alleen de opt-ins komen hieruit, zodat de som
+    //    van de funnel-opt-ins exact de KPI "Nieuwe leads" is.
+    const aanm = await safeAanmeldingen(db, start, eindExclusief);
+    const canon = canoniekeOptins(aanm && aanm.tegels);   // null → terugval op tracking
+
+    // 4) Groepeer per familie. visits = landing-sessies (tracking),
+    //    calls = geboekte calls (funnelmeting), optins = canonieke aanmeldingen
+    //    (met terugval op de tracking-telling als de canonieke bron wegvalt).
     const perVariant = agg.per_variant || {};
     const funnels = GROEPEN.map((g) => {
-      let visits = 0, optins = 0, calls = 0;
+      let visits = 0, optinsTracked = 0, calls = 0;
       for (const variant of varianten) {
         const info = variantInfo(variant);
         if (!info || !g.groepen.includes(info.groep)) continue;
@@ -250,9 +299,10 @@ export default async function handler(req, res) {
         if (!r) continue;
         visits += landingSessies(r);
         const lr = r.lead_resultaat || {};
-        optins += lr.leads || 0;
+        optinsTracked += lr.leads || 0;
         calls += lr.geboekt || 0;
       }
+      const optins = (canon && canon[g.key] != null) ? canon[g.key] : optinsTracked;
       return {
         key: g.key, label: g.label, color: g.color,
         visits, optins, calls,
@@ -260,6 +310,18 @@ export default async function handler(req, res) {
         book_pct: pct(calls, optins),
       };
     });
+
+    // Overig-rij: de resterende canonieke leads (training/opstartsessie/overige
+    // bronnen, incl. niet-getrackte) die niet in een funnel-rij vallen, zodat de
+    // som van de opt-ins de KPI dekt. Geen tracking-bezoeken. Alleen tonen als er
+    // iets in zit (anders blijft de som gelijk en de tabel schoon).
+    if (canon && canon.overig > 0) {
+      funnels.push({
+        key: 'overig', label: 'Overig', color: 'var(--mut)',
+        visits: 0, optins: canon.overig, calls: 0,
+        optin_pct: null, book_pct: null,
+      });
+    }
 
     const tVisits = funnels.reduce((a, f) => a + f.visits, 0);
     const tOptins = funnels.reduce((a, f) => a + f.optins, 0);
