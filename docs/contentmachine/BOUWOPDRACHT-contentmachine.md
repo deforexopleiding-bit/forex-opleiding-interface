@@ -114,6 +114,26 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
 - Nieuwe drop-leads gaan als contact met de nieuwsbrief-tag naar GHL (zelfde manier als de andere funnels, als die dat al doen).
 - Stats (opens/kliks) uit GHL als de API ze geeft, anders weglaten en melden.
 
+### 3.6b Uitwerking fase 5 (26 okt) — wat de GHL-API toelaat
+Bron: de officiële spec (github.com/GoHighLevel/highlevel-api-docs, apps/emails.json,
+conversations.json, contacts.json).
+- **Kan via de API:** html-template aanmaken (`POST /emails/builder`, type html) en vullen
+  (`POST /emails/builder/data`, editorType html + previewText); campagnes + stats lezen
+  (`GET /emails/schedule?showStats=true`); een e-mail naar één contact (`POST /conversations/messages`,
+  type Email) → testmail; contact zoeken/aanmaken en tags toevoegen.
+- **Kan niet (niet in de officiële spec):** een bulk-/campagneverzending aanmaken of inplannen.
+  → **Route (b):** het CRM zet de nieuwsbrief als template "DFO drop <slug> — <onderwerp>" in GHL,
+  knop **Open in GHL**, en Maxim maakt daar de campagne (template + nieuwsbrief-tag/-lijst) en drukt
+  zelf op versturen. Het CRM verstuurt NOOIT naar de lijst; de enige mail is de testmail naar de
+  ingelogde gebruiker.
+- **Stats:** "Ververs stats" leest de campagnes met dit template; GHL's stat-velden zijn niet
+  gedocumenteerd → defensief gelezen, en zonder cijfers staat er "GHL gaf (nog) geen cijfers".
+- **Leads:** dfo-website zet elke training-/drop-aanmelding als GHL-contact met de nieuwsbrief-tag
+  (`GHL_NIEUWSBRIEF_TAG`, standaard `nieuwsbrief`) + bron-tag; tags worden toegevoegd, nooit vervangen.
+- **Env:** CRM: `GHL_PIT_TOKEN` (scopes emails/builder.write, emails/schedule.readonly,
+  conversations/message.write, contacts.readonly, contacts.write), `GHL_LOCATION_ID`, optioneel
+  `GHL_NIEUWSBRIEF_USER_ID` en `GHL_UITSCHRIJF_TAG` (standaard `{{unsubscribe_link}}`).
+
 ## 4. Fasering (elke fase = eigen PR('s), mergen bij groen, nameten)
 1. **Databank + bibliotheek + invoer**: migraties (zelf draaien), Storage-bucket, module-skelet, scherm Nieuwe drop, upload + AI-beeldbeschrijving, bibliotheek.
 2. **Generator + werkblad**: generator met formats/rotatie/kennis/grenzen, tabbladen met voorbeelden, bewerken, per onderdeel hergenereren, versies. Tests op het JSON-schema en op de verboden woorden.

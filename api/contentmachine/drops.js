@@ -104,7 +104,20 @@ export default async function handler(req, res) {
       const { data, error } = await db.from('content_drops').select(LIJST_KOLOMMEN)
         .order('datum', { ascending: false }).order('aangemaakt_op', { ascending: false }).limit(200);
       if (error) throw error;
-      return res.status(200).json({ drops: (data || []).map(lijstRij) });
+      const drops = (data || []).map(lijstRij);
+      // Nieuwsbrief per drop (laatste GHL-verzending) — fail-soft.
+      if (drops.length) {
+        const { data: vz, error: vErr } = await db.from('nieuwsbrief_verzendingen').select('drop_id,status,stats,aangemaakt_op')
+          .in('drop_id', drops.map((d) => d.id)).order('aangemaakt_op', { ascending: false });
+        if (vErr) console.error('[contentmachine/drops] verzendingen lezen mislukt:', vErr.message);
+        const per = {};
+        for (const x of vz || []) if (!per[x.drop_id]) per[x.drop_id] = x;
+        for (const d of drops) {
+          const x = per[d.id];
+          d.nieuwsbrief = x ? { status: x.status, stats: (x.stats && x.stats.laatste) || null } : null;
+        }
+      }
+      return res.status(200).json({ drops });
     }
 
     const b = body(req);

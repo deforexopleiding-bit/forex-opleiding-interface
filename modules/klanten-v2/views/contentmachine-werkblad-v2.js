@@ -69,6 +69,7 @@
     if (assets) wb.assets = assets;
     if (versies) wb.versies = versies;
     wb.nbHtml = null; wb.nbVoor = null;
+    if (!wb.ghl || wb.ghl.dropId !== drop.id) wb.ghl = { dropId: drop.id, geladen: false, bezig: null, data: null, fout: null };
   }
   window.__cmWbOpen = (id) => { wb.tab = 'pagina'; return laad(id); };
   window.__cmWbSluit = () => {
@@ -407,11 +408,12 @@
     const social = typeof window.__cmSocialPaneel === 'function';
     if (wb.tab === 'pagina') return `${social ? window.__cmSocialPaneel('pagina') : ''}${iframe(paginaHtml(), 900)}`;
     if (wb.tab === 'nieuwsbrief') {
-      if (!wb.nbHtml) { planVoorbeeld(); return '<div style="color:var(--text-3);font-size:12px;padding:10px">Voorbeeld laden…</div>'; }
+      if (!wb.nbHtml) { planVoorbeeld(); return `<div id="cm-wb-ghl">${ghlPaneel()}</div><div style="color:var(--text-3);font-size:12px;padding:10px">Voorbeeld laden…</div>`; }
       const n = o.nieuwsbrief || {};
       return `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${(n.onderwerpen || []).map((x, i) => `<button class="btn btn-sm ${wb.onderwerp === i ? 'btn-primary' : 'btn-ghost'}" style="font-size:11.5px" onclick="__cmWbOnderwerp(${i})" title="${esc(x)}">Variant ${String.fromCharCode(65 + i)}</button>`).join('')}
         <a class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:11.5px" href="javascript:void(0)" onclick="__cmWbDownloadNb()">⬇ HTML</a></div>
-        <div style="font-size:12px;margin-bottom:6px"><b>${esc(wb.nbVoor || '')}</b><div style="color:var(--text-3)">${esc(n.preheader || '')}</div></div>${iframe(wb.nbHtml, 1100)}`;
+        <div style="font-size:12px;margin-bottom:6px"><b>${esc(wb.nbVoor || '')}</b><div style="color:var(--text-3)">${esc(n.preheader || '')}</div></div>${iframe(wb.nbHtml, 1100)}`
+        .replace(/^/, `<div id="cm-wb-ghl">${ghlPaneel()}</div>`);
     }
     if (wb.tab === 'stories' && social) return window.__cmSocialPaneel('stories') + `<div style="font-size:11px;color:var(--text-3);margin-top:6px">Laat onderaan ruimte voor de Instagram-sticker (${(o.stories || []).map((x, i) => `${i + 1}: ${esc(x.sticker)}`).join(' · ')}).</div>`;
     if (wb.tab === 'stories') return `<div class="cm-sv-rij">${(o.stories || []).map(storyKaart).join('')}</div><div style="font-size:11px;color:var(--text-3);margin-top:6px">Ruwe voorvertoning — de definitieve 1080×1920-beelden komen uit de social-rendering.</div>`;
@@ -438,6 +440,60 @@
       <div style="margin-top:10px">${l.beeld === 'slide1' ? `<div class="cm-sv cm-sv-post" style="width:100%">${img(((o.post || {}).slides || [])[0] && o.post.slides[0].beeld_asset_id, 'cm-sv-img')}<div class="cm-sv-t">${esc((((o.post || {}).slides || [])[0] || {}).titel)}</div></div>`
         : `<div class="cm-sv cm-sv-vierkant" style="width:100%">${img((o.vierkant || {}).beeld_asset_id, 'cm-sv-img')}<div class="cm-sv-t">${esc((o.vierkant || {}).titel)}</div><div class="cm-sv-x">${esc((o.vierkant || {}).sub)}</div></div>`}</div>
       <div><a href="javascript:void(0)" onclick="__cmWbKopieerDeel(${esc(JSON.stringify(l.tekst || ''))})">kopieer tekst</a></div></div>`;
+  }
+
+  // ── Nieuwsbrief via GoHighLevel (fase 5) ──────────────────────────────────
+  // Template in GHL zetten, testmail naar jezelf, "Open in GHL", stats verversen.
+  // De campagne naar de lijst maak en verstuur je ZELF in GHL — nooit vanuit het CRM.
+  async function laadGhl() {
+    const g = wb.ghl; if (!g || g.geladen || g.bezig === 'laden') return;
+    g.bezig = 'laden';
+    try { g.data = await api('/api/contentmachine/nieuwsbrief?ghl=1&id=' + encodeURIComponent(wb.drop.id)); g.fout = null; }
+    catch (e) { g.fout = foutTekst(e, 'GHL-status laden mislukt.'); }
+    g.bezig = null; g.geladen = true; teken('cm-wb-ghl', ghlPaneel());
+  }
+  window.__cmWbGhl = async (actie) => {
+    const g = wb.ghl; if (!g || g.bezig) return;
+    if (wb.dirty) { toast('Bewaar eerst je wijzigingen: GHL krijgt de bewaarde versie.'); return; }
+    if (actie === 'naar-ghl' && !window.confirm('De nieuwsbrief als e-mailtemplate in GHL zetten (of het bestaande template van deze drop bijwerken)? Er wordt niets verstuurd.')) return;
+    g.bezig = actie; teken('cm-wb-ghl', ghlPaneel());
+    try {
+      const r = await post('/api/contentmachine/nieuwsbrief', { actie, id: wb.drop.id, onderwerp: wb.onderwerp });
+      g.data = { ...(g.data || {}), verzending: r.verzending || (g.data && g.data.verzending) || null, ...(r.ghl ? { ghl: r.ghl } : {}) };
+      toast(actie === 'naar-ghl' ? 'Template staat in GHL.' : actie === 'test' ? `Testmail verstuurd naar ${r.naar}.` : `Stats ververst (${(r.campagnes || []).length} campagne(s) gevonden).`);
+    } catch (e) { toast(foutTekst(e, 'GHL-actie mislukt.')); g.fout = foutTekst(e, ''); }
+    g.bezig = null; teken('cm-wb-ghl', ghlPaneel());
+  };
+  function ghlPaneel() {
+    const g = wb.ghl;
+    if (!g) return '';
+    if (!g.geladen) { queueMicrotask(laadGhl); return '<div class="cm-wb-groep" style="font-size:12px;color:var(--text-3)">GHL-status laden…</div>'; }
+    const info = (g.data && g.data.ghl) || {};
+    const v = g.data && g.data.verzending;
+    if (!info.gekoppeld) {
+      return `<div class="cm-wb-groep" style="font-size:12px"><b>Nieuwsbrief via GoHighLevel</b><div style="color:var(--amber);margin-top:4px">GHL nog niet gekoppeld — ontbrekende env: ${esc((info.ontbreekt || []).join(', ') || '?')}. De HTML kan je downloaden (⬇ HTML).</div></div>`;
+    }
+    const goed = ['goedgekeurd', 'gepubliceerd'].includes(wb.drop.status);
+    const fmt = (iso) => (iso ? fmtTijd(iso) : '—');
+    const st = v && v.stats && v.stats.laatste;
+    const statsTekst = st ? [st.verstuurd != null ? `${st.verstuurd} verstuurd` : '', st.geopend != null ? `${st.geopend} geopend` : '', st.geklikt != null ? `${st.geklikt} geklikt` : '', st.uitgeschreven != null ? `${st.uitgeschreven} uitgeschreven` : ''].filter(Boolean).join(' · ')
+      : (v && v.stats && v.stats.opgehaald_op ? 'GHL gaf (nog) geen cijfers voor deze campagne.' : '');
+    const knop = (a, label, extra = '') => `<button class="btn btn-sm ${extra}" onclick="__cmWbGhl('${a}')" ${g.bezig ? 'disabled' : ''}>${g.bezig === a ? 'Bezig…' : label}</button>`;
+    return `<div class="cm-wb-groep" style="font-size:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b>Nieuwsbrief via GoHighLevel</b>
+        ${v ? pill(v.status === 'verstuurd' ? 'ok' : v.status === 'ingepland' ? 'warn' : 'accent', { concept: 'Template in GHL', test_verstuurd: 'Test verstuurd', ingepland: 'Ingepland', verstuurd: 'Verstuurd' }[v.status] || v.status) : pill('neutral', 'Nog niet in GHL')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        ${goed ? knop('naar-ghl', v ? 'Template bijwerken in GHL' : 'Zet in GHL', 'btn-primary') : '<button class="btn btn-sm" disabled title="Keur de drop eerst goed">Zet in GHL (eerst goedkeuren)</button>'}
+        ${knop('test', 'Stuur test naar mij')}
+        ${info.links ? `<a class="btn btn-ghost btn-sm" href="${esc(info.links.campagnes)}" target="_blank" rel="noopener">Open in GHL ↗</a>` : ''}
+        ${v ? knop('stats', 'Ververs stats', 'btn-ghost') : ''}
+      </div>
+      ${v ? `<div style="color:var(--text-3);margin-top:6px">Template: <span style="font-family:var(--mono,monospace)">${esc(v.template_id || '—')}</span> · onderwerp: ${esc(v.onderwerp || '—')} · test: ${esc(fmt(v.test_verstuurd_op))}${statsTekst ? `<div style="color:var(--text-2);margin-top:2px">${esc(statsTekst)}</div>` : ''}</div>` : ''}
+      <ol style="margin:8px 0 0 18px;color:var(--text-2);line-height:1.5">
+        <li>Kies hierboven de onderwerp-variant en klik <b>${v ? 'Template bijwerken in GHL' : 'Zet in GHL'}</b>.</li>
+        <li><b>Stuur test naar mij</b> en kijk de mail na (links, beelden, uitschrijflink).</li>
+        <li><b>Open in GHL</b> → nieuwe campagne → template <i>DFO drop ${esc(wb.drop.slug)} …</i> → ontvangers: de nieuwsbrief-tag/-lijst → onderwerp en preheader overnemen → <b>zelf</b> Verstuur of Plan in.</li>
+      </ol></div>`;
   }
 
   window.__cmWbDownloadNb = async () => {
