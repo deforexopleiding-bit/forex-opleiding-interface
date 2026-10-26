@@ -211,6 +211,26 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   ("Datum training", anders uit de Vimeo-titel) → weekdag berekend; een geraden/andere weekdag = grens.
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
+- Eén login voor alle funnels (2026-10-26) — ELKE trial-lead (minicursus, 7-daagse, webinar,
+  site-formulier, The Lab, en elke toekomstige belofte) krijgt een lab-lead (7 dagen) in het echte LMS
+  (dfo-lms `hlms_lab_lead` + rol trial) i.p.v. een account in het oude trial-LMS (`lms_gebruikers`,
+  www.deforexopleiding.nl/lms). De registratie in `leads` blijft exact zoals ze was; alleen toegang wisselt.
+  Schakelaar per product: `app_settings.trial_bestemming` (`{"minicursus":"lab",…}`; `oud` = terug naar
+  dfo-website /api/interne-welkom, zonder deploy; ontbreekt → `lab`). Productregels + herkomst in
+  `api/_lib/trial-product.js` (product uit bron; nieuwe beloftes mogen: elke korte slug). Eén instap
+  `geefLabTrial()` (`api/_lib/lab-trial.js`): rij in `lab_aanmeldingen` (product/bron/variant/
+  toegang_aanvraag_id; zonder migratie als `trial:<product>:<bron>` in landingspagina) → `verwerkLmsEnBerichten`
+  (welkomstmail per belofte, `WELKOM_BELOFTE` in lab-berichten.js). Ingangen: WhatsApp-gate (`belProvisioning`
+  in toegang-provisioning-caller.js, geen tweede WA) en `public-webinar-aanmelding` (waitUntil). Altijd de CRM
+  lead_id. De oude trials lopen uit; NOOIT lms_gebruikers.lead_id backfillen (zou de oude motor laten sturen,
+  zie docs/sql-migrations/2026-10-26-NIET-DRAAIEN-…). Opvolgmotor = `cron-lab-opvolging` (stappen in
+  `api/_lib/lab-opvolging.js`, schakelaar `lab_opvolging_live`, bewerkbaar in Leadsonderhoud › Templates ›
+  Trial-opvolging; WhatsApp enkel met goedgekeurd template, docs/trial-opvolging-whatsapp.md). Overzicht:
+  Leadsonderhoud › The Lab (`api/trial-overzicht.js`, rekenkern `api/_lib/trial-overzicht.js`; bellijst +
+  `trial_belpogingen` via `api/trial-belpoging.js`). Opvolging › Leads bellen leest het LMS-gedrag van nieuwe
+  trials via `api/_lib/lab-trial-stand.js` (video-voortgang = `hlms_lab_lead_gebeurtenis` video_voltooid;
+  hlms_les_voortgang is enkel voor studenten). Afspraak: "Strategiesessie · via <belofte>" (lab-sessie.js
+  `sessieTitel`); de strategie-scan blijft een aparte funnel.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

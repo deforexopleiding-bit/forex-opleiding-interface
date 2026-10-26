@@ -252,7 +252,7 @@ export async function lmsGebruikerUitToken(token) {
   const { data, error } = await c.auth.getUser(token);
   if (error || !data?.user?.id) return null;
   const { data: rij, error: lf } = await c.from('hlms_lab_lead')
-    .select('id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, sessie_geboekt_op, sessie_moment, sessie_afspraak_id, kwalificatie, is_test, beheerd_door_auth_id')
+    .select('id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, sessie_geboekt_op, sessie_moment, sessie_afspraak_id, kwalificatie, is_test, beheerd_door_auth_id, product')
     .eq('auth_id', data.user.id).maybeSingle();
   if (lf) throw new LabAccountFout('lms_fout', 'hlms_lab_lead lezen: ' + lf.message);
   return { authId: data.user.id, email: data.user.email || null, labLead: rij || null };
@@ -262,7 +262,7 @@ export async function lmsGebruikerUitToken(token) {
 export async function leesLabLeadOpId(id) {
   if (!id) return null;
   const { data, error } = await lms().from('hlms_lab_lead')
-    .select('id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, sessie_geboekt_op, sessie_moment, sessie_afspraak_id, kwalificatie, is_test, beheerd_door_auth_id')
+    .select('id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, toegang_tot, sessie_geboekt_op, sessie_moment, sessie_afspraak_id, kwalificatie, is_test, beheerd_door_auth_id, product')
     .eq('id', id).maybeSingle();
   if (error) throw new LabAccountFout('lms_fout', 'hlms_lab_lead lezen: ' + error.message);
   return data || null;

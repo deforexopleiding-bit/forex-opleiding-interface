@@ -249,3 +249,11 @@ test('zonder de CRM-migratie: herhaling na een LMS-storing hergebruikt de misluk
     assert.equal(echt.tabellen.lab_aanmeldingen[0].resultaat, 'nieuw_account');
   } finally { crm = echt; lms = lmsEcht; }
 });
+
+test('agendatitel bij Dave: "Strategiesessie · via <belofte>", The Lab houdt de oude titel', async () => {
+  const { sessieTitel } = await import(url('api/lab-sessie.js'));
+  assert.equal(sessieTitel('minicursus', 'Lien Peeters'), 'Strategiesessie · via Minicursus · Lien Peeters');
+  assert.equal(sessieTitel('7-daagse', 'Lien'), 'Strategiesessie · via 7-daagse · Lien');
+  assert.equal(sessieTitel('the-lab', 'Lien'), 'The Lab · strategiesessie · Lien');
+  assert.equal(sessieTitel(null, 'Lien'), 'The Lab · strategiesessie · Lien');
+});
