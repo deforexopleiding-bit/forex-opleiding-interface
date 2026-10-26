@@ -206,6 +206,9 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `api/contentmachine/nieuwsbrief.js` (naar-ghl enkel na goedkeuren, test, stats) → rij in
   `nieuwsbrief_verzendingen`. Env optioneel: GHL_NIEUWSBRIEF_USER_ID, GHL_UITSCHRIJF_TAG.
   dfo-website tagt aanmeldingen met GHL_NIEUWSBRIEF_TAG (standaard 'nieuwsbrief') + bron.
+  CORRECTIES 26 okt: formuliertitel/-ondertitel/knop/na-ontgrendelen zijn VASTE teksten per soort
+  (`vasteFormulierTeksten`/`metVasteTeksten`, ook bij bewaren en goedkeuren); `input.training_datum`
+  ("Datum training", anders uit de Vimeo-titel) → weekdag berekend; een geraden/andere weekdag = grens.
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle

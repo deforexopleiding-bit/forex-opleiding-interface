@@ -59,7 +59,7 @@
   const KANALEN = [['pagina', 'Pagina'], ['nieuwsbrief', 'Nieuwsbrief'], ['stories', 'Stories'], ['post', 'Instagram-post'], ['linkedin', 'LinkedIn']];
 
   const leegForm = () => ({
-    id: null, slug: null, status: 'concept', datum: vandaag(), vimeo_url: '', start: '', vimeo_meta: null, vimeo_bezig: false, vimeo_fout: null,
+    id: null, slug: null, status: 'concept', datum: vandaag(), vimeo_url: '', start: '', training_datum: '', vimeo_meta: null, vimeo_bezig: false, vimeo_fout: null,
     wat_gebeurde: '', trade_info: { paar: '', richting: '', uitleg: '', resultaat_r: '' }, notities: '',
     gekozen_asset_ids: [], kanalen: KANALEN.map((k) => k[0]),
   });
@@ -133,7 +133,7 @@
     const t = i.trade_info || {};
     st.form = {
       id: d.id, slug: d.slug, status: d.status, datum: d.datum,
-      vimeo_url: i.vimeo_url || '', start: i.start_sec != null ? fmtStart(i.start_sec) : '',
+      vimeo_url: i.vimeo_url || '', start: i.start_sec != null ? fmtStart(i.start_sec) : '', training_datum: i.training_datum || '',
       vimeo_meta: i.vimeo_id ? { titel: i.vimeo_titel, duur: i.duur, thumbnail: i.vimeo_thumbnail } : null,
       vimeo_bezig: false, vimeo_fout: null,
       wat_gebeurde: i.wat_gebeurde || '', notities: i.notities || '',
@@ -210,6 +210,7 @@
     for (let i = 0; i < delen.length - 1; i++) o = o[delen[i]];
     o[delen[delen.length - 1]] = waarde;
     if (pad === 'datum') { const el = document.getElementById('cm-slug'); if (el) el.textContent = slugVan(waarde); }
+    if (pad === 'training_datum') st.form.training_datum_uit_titel = false;
   };
   window.__cmKanaal = (k, aan) => {
     const set = new Set(F().kanalen);
@@ -226,7 +227,10 @@
     try {
       const j = await post('/api/contentmachine/drops', { actie: 'vimeo', url: f.vimeo_url });
       if (!j.ok) f.vimeo_fout = j.fout || 'Geen geldige Vimeo-link.';
-      else { f.vimeo_meta = { titel: j.titel, duur: j.duur, thumbnail: j.thumbnail, waarschuwing: j.waarschuwing || null }; f.vimeo_url = j.vimeo_url; }
+      else {
+        f.vimeo_meta = { titel: j.titel, duur: j.duur, thumbnail: j.thumbnail, waarschuwing: j.waarschuwing || null }; f.vimeo_url = j.vimeo_url;
+        if (!f.training_datum && j.training_datum) { f.training_datum = j.training_datum; f.training_datum_uit_titel = true; }
+      }
     } catch (e) { f.vimeo_fout = foutTekst(e, 'Vimeo-link controleren mislukt.'); }
     f.vimeo_bezig = false; teken('cm-vimeo-info', vimeoInfoHtml());
   };
@@ -239,13 +243,18 @@
     const m = f.vimeo_meta || {};
     return `<div style="display:flex;gap:10px;align-items:center">${m.thumbnail ? `<img src="${esc(m.thumbnail)}" alt="" style="width:96px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">` : ''}
       <div style="font-size:12.5px"><b>${esc(m.titel || 'Vimeo-video')}</b>${m.duur ? ` · ${esc(fmtDuur(m.duur))}` : ''}<div style="color:var(--text-3);font-size:11.5px">Soort: training (formulier → video ontgrendelt → cadeau)</div>
-      ${m.waarschuwing ? `<div style="color:var(--amber);font-size:11.5px">${esc(m.waarschuwing)}</div>` : ''}</div></div>`;
+      ${m.waarschuwing ? `<div style="color:var(--amber);font-size:11.5px">${esc(m.waarschuwing)}</div>` : ''}</div></div>
+      <label class="tk-field" style="margin-top:10px;max-width:420px"><span class="tk-field-l">Datum training</span>
+        <input type="date" class="ib-input" value="${esc(f.training_datum || '')}" oninput="__cmVeld('training_datum',this.value)">
+        <span style="color:${f.training_datum ? 'var(--text-3)' : 'var(--amber)'};font-size:11.5px">${f.training_datum
+          ? (f.training_datum_uit_titel ? 'Uit de Vimeo-titel gehaald — klopt het?' : 'De teksten noemen enkel deze dag.')
+          : 'Vul in wanneer de live training was. Zonder datum noemt de machine geen dag.'}</span></label>`;
   }
 
   function invoerData() {
     const f = F();
     return {
-      vimeo_url: f.vimeo_url, start: f.start,
+      vimeo_url: f.vimeo_url, start: f.start, training_datum: f.training_datum || null,
       vimeo_meta: f.vimeo_meta ? { titel: f.vimeo_meta.titel, duur: f.vimeo_meta.duur, thumbnail: f.vimeo_meta.thumbnail } : null,
       wat_gebeurde: f.wat_gebeurde, trade_info: f.trade_info, notities: f.notities,
       gekozen_asset_ids: f.gekozen_asset_ids, kanalen: f.kanalen,

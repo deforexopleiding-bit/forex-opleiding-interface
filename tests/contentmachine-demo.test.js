@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { valideerOutput, controleerGrenzen, toegelatenFormats, gebruikteAssetIds } from '../api/_lib/contentmachine-generator.js';
+import { valideerOutput, controleerGrenzen, toegelatenFormats, gebruikteAssetIds, grensOpties, metVasteTeksten } from '../api/_lib/contentmachine-generator.js';
 import { renderNieuwsbrief, UITSCHRIJF_TAG } from '../api/_lib/nieuwsbrief-render.js';
 import { SLUG_RE, parseVimeo } from '../api/_lib/contentmachine-core.js';
 
@@ -34,8 +34,13 @@ test('demo: geldige output (schema, rotatie t.o.v. de vooruitblik van 26-10-26, 
   for (const id of gebruikteAssetIds(demo.output)) assert.ok(demo.input.gekozen_asset_ids.includes(id), id);
 });
 
-test('demo: geen grensovertredingen (Dave enkel bij het cadeau, geen namen zonder toestemming)', () => {
-  assert.deepEqual(controleerGrenzen(demo.output, { verbodenNamen: VERBODEN }), []);
+test('demo: geen grensovertredingen (Dave enkel bij het cadeau, geen namen zonder toestemming, juiste weekdag)', () => {
+  assert.deepEqual(controleerGrenzen(demo.output, grensOpties(demo.input, VERBODEN)), []);
+  assert.equal(grensOpties(demo.input).weekdag, 'donderdag');
+});
+
+test('demo: de vaste formulierteksten staan erin', () => {
+  assert.deepEqual(metVasteTeksten(demo.output, { drop: demo, input: demo.input }), demo.output);
 });
 
 test('demo: nieuwsbrief rendert met video-knop en GHL-uitschrijftag', () => {

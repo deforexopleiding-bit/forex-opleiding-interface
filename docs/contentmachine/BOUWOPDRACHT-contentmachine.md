@@ -66,7 +66,7 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
   ```
   output = {
     format_key, kernidee,                           // de rode draad van deze week in één zin
-    pagina:   { hero_kicker, hero_titel, hero_accent, lead, frustraties[3], kaarten[{label,titel,tekst}], paren[], quote, formulier_titel, formulier_sub, ontgrendeld_tekst, og_titel },
+    pagina:   { hero_kicker, hero_titel, hero_accent, lead, frustraties[3], kaarten[{label,titel,tekst}], paren[], quote, og_titel }  (formulier: vaste teksten, zie 3.3b),
     nieuwsbrief: { onderwerpen[3] (A/B-varianten), preheader, blokken[ {type, ...} ], ps },
     stories:  [ {rol:'hook'|'inhoud'|'bewijs'|'cta', kicker, titel, tekst, beeld_asset_id?, sticker:'link'|'poll'|'vraag'|'quiz', sticker_tekst} ] (3–5),
     post:     { slides:[ {titel, tekst, beeld_asset_id?} ] (5–7), caption, hashtags[] },
@@ -94,6 +94,10 @@ Zelfde stijl als de rest van het CRM (vanilla JS, `*-v2.js`, app-shell, permissi
   - Disclaimer onderaan (educatief, geen financieel advies, risico op verlies).
   - Studentnamen enkel bij `toestemming_publiek = true`.
 - **Uniciteit**: naast de rotatie vergelijkt de generator de nieuwe onderwerpregels en hooks met de vorige 6 (eenvoudige tekstgelijkenis) en hergenereert dat onderdeel als het te sterk lijkt.
+
+### 3.3b Correcties na de nameting (26 okt)
+- **Formulier op de pagina is VAST** (`vasteFormulierTeksten` in `api/_lib/contentmachine-generator.js`), niet meer door het model geschreven: de poort vraagt naam, e-mail en gsm-nummer; bij een training start de video meteen op de pagina (nooit een link per mail); bij een update schrijf je je in op de wekelijkse analyse. `metVasteTeksten()` zet ze na elke generatie, bij bewaar-output en bij goedkeuren (oudere drops krijgen ze daar als nieuwe versie). Het werkblad toont ze alleen-lezen. "We sturen je de link" is een grensovertreding.
+- **Echte trainingsdatum**: invoerveld `input.training_datum` ("Datum training", automatisch uit de Vimeo-titel als daar een datum in staat). De prompt krijgt `DATUM TRAINING: donderdag 22 oktober 2026`; de weekdag rekent de code uit. Een andere weekdag in de teksten (of eender welke weekdag als de datum onbekend is) is een grensovertreding → herstelronde, en goedkeuren blokkeert.
 
 ### 3.4 Rendering
 - **Nieuwsbrief-HTML** (server, `api/_lib/nieuwsbrief-render.js`): 600px tabel-layout, inline CSS, werkt in Gmail/Outlook/Apple Mail, donker navy (#0B1E2A, #112B3B) met goud (#D0A050), Inter met Arial-fallback — dezelfde look als training.deforexopleiding.nl (zie `docs/training-prototypes/22-10-26/index.html` en `mail/nieuwsbrief-lt-22-10-26.html` als referentie in dfo-website). Elk bloktype is een eigen render-functie. Beelden via de publieke Storage-URL's. Alle links met `utm_source=nieuwsbrief&utm_medium=email&utm_campaign=drop-<slug>&utm_content=<blok>` en `src=nieuwsbrief` (gewijzigd 23 okt: GHL i.p.v. Brevo). Uitschrijflink = de GHL-uitschrijf-merge-tag. Geanimeerde chart-GIF optioneel (mag later).

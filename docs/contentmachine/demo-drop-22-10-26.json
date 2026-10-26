@@ -9,13 +9,29 @@
     "vimeo_hash": "4822ada5ee",
     "vimeo_titel": null,
     "vimeo_thumbnail": null,
+    "training_datum": "2026-10-22",
     "start_sec": 600,
     "duur": 2700,
-    "kanalen": ["pagina", "nieuwsbrief", "stories", "post", "linkedin"],
+    "kanalen": [
+      "pagina",
+      "nieuwsbrief",
+      "stories",
+      "post",
+      "linkedin"
+    ],
     "wat_gebeurde": "Live training van 22/10. De dollar (DXY) kantelt van bearish naar bullish: op de 4-uur en 1-uur kondigt een inverse fair value gap een mogelijke trendwissel aan, met impuls, correctie en bearish orderflow als context. GBP/USD short als lopende trade. EUR/USD 15M long volledig nagelopen: 4-uur fib met fair value gap als volume, sweep van de 4-uur lows, externe/interne sweep en break, 71-level, order block, bijschalen, risk free en break even. Daarna 10+ paren (EUR/AUD, XAU/USD, USD/CHF, EUR/GBP, AUD/CAD, GBP/NZD, GBP/JPY, USD/JPY) met wat wel of niet valid is. Ook risicomanagement, rollover/spread en journalen.",
     "notities": "Demo-drop (fase 6): handmatig opgebouwd uit de bestaande training van 22/10; 'Alles opnieuw' laat de machine hem zelf maken.",
-    "trade_info": { "paar": "EUR/USD", "richting": "long", "uitleg": "15M-long na sweep van de 4-uur lows; entry-zone rond het 71-level en het order block.", "resultaat_r": null },
-    "gekozen_asset_ids": ["266f71e7-ee79-4fef-a209-eab4e1fa33f7", "ef0b94d7-7916-4c23-aa94-4f8582400467", "ce6b5f12-d602-46ec-85b0-27d3de53bff1"]
+    "trade_info": {
+      "paar": "EUR/USD",
+      "richting": "long",
+      "uitleg": "15M-long na sweep van de 4-uur lows; entry-zone rond het 71-level en het order block.",
+      "resultaat_r": null
+    },
+    "gekozen_asset_ids": [
+      "266f71e7-ee79-4fef-a209-eab4e1fa33f7",
+      "ef0b94d7-7916-4c23-aa94-4f8582400467",
+      "ce6b5f12-d602-46ec-85b0-27d3de53bff1"
+    ]
   },
   "output": {
     "format_key": "trade_ontleed",
@@ -30,9 +46,18 @@
       "hero_accent": "Niets overgeslagen.",
       "lead": "De meeste uitleg over een trade begint bij de entry. Wij beginnen **vier uur hoger**. In deze live training ontleden we een **EUR/USD-long op de 15M** van context tot risk free, terwijl de dollar zelf van richting wisselt.",
       "feiten": [
-        { "icoon": "klok", "tekst": "35 min pure analyse" },
-        { "icoon": "grafiek", "tekst": "10+ paren besproken" },
-        { "icoon": "slot", "tekst": "Normaal enkel voor studenten" }
+        {
+          "icoon": "klok",
+          "tekst": "35 min pure analyse"
+        },
+        {
+          "icoon": "grafiek",
+          "tekst": "10+ paren besproken"
+        },
+        {
+          "icoon": "slot",
+          "tekst": "Normaal enkel voor studenten"
+        }
       ],
       "frustraties_titel": "Herken je dit?",
       "frustraties": [
@@ -43,19 +68,56 @@
       "frustraties_antwoord": "Het probleem is zelden de entry. Het is de volgorde. In deze training zie je die volgorde stap voor stap, op een echte trade.",
       "inhoud_titel": "Wat je te zien krijgt",
       "kaarten": [
-        { "label": "Stap 1 · 4-uur", "titel": "Eerst de context", "tekst": "De 4-uur fib met een fair value gap als volume: waar wil de markt naartoe, en waar zou een long logisch zijn?", "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7" },
-        { "label": "Stap 2-3 · 15M", "titel": "Sweep, dan pas de break", "tekst": "De 4-uur lows worden gesweept, daarna volgt de break. Pas dan kijken we naar een entry.", "beeld_asset_id": null },
-        { "label": "Stap 4-5", "titel": "71-level en order block", "tekst": "Het 71-level geeft de locatie, het order block de reden. Samen vormen ze de entry-zone.", "beeld_asset_id": null },
-        { "label": "Stap 6", "titel": "Bijschalen en risk free", "tekst": "Wanneer je bijschaalt, wanneer je naar break even gaat, en waarom je dat niet op gevoel doet.", "beeld_asset_id": null },
-        { "label": "De grote lijn · DXY", "titel": "De dollar kantelt", "tekst": "Een inverse fair value gap op de 4-uur en 1-uur kondigt een mogelijke trendwissel aan. Dat kleurt alle dollarparen.", "beeld_asset_id": null }
+        {
+          "label": "Stap 1 · 4-uur",
+          "titel": "Eerst de context",
+          "tekst": "De 4-uur fib met een fair value gap als volume: waar wil de markt naartoe, en waar zou een long logisch zijn?",
+          "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7"
+        },
+        {
+          "label": "Stap 2-3 · 15M",
+          "titel": "Sweep, dan pas de break",
+          "tekst": "De 4-uur lows worden gesweept, daarna volgt de break. Pas dan kijken we naar een entry.",
+          "beeld_asset_id": null
+        },
+        {
+          "label": "Stap 4-5",
+          "titel": "71-level en order block",
+          "tekst": "Het 71-level geeft de locatie, het order block de reden. Samen vormen ze de entry-zone.",
+          "beeld_asset_id": null
+        },
+        {
+          "label": "Stap 6",
+          "titel": "Bijschalen en risk free",
+          "tekst": "Wanneer je bijschaalt, wanneer je naar break even gaat, en waarom je dat niet op gevoel doet.",
+          "beeld_asset_id": null
+        },
+        {
+          "label": "De grote lijn · DXY",
+          "titel": "De dollar kantelt",
+          "tekst": "Een inverse fair value gap op de 4-uur en 1-uur kondigt een mogelijke trendwissel aan. Dat kleurt alle dollarparen.",
+          "beeld_asset_id": null
+        }
       ],
-      "paren": ["EUR/USD", "GBP/USD", "DXY", "EUR/AUD", "XAU/USD", "USD/CHF", "EUR/GBP", "AUD/CAD", "GBP/NZD", "GBP/JPY", "USD/JPY"],
+      "paren": [
+        "EUR/USD",
+        "GBP/USD",
+        "DXY",
+        "EUR/AUD",
+        "XAU/USD",
+        "USD/CHF",
+        "EUR/GBP",
+        "AUD/CAD",
+        "GBP/NZD",
+        "GBP/JPY",
+        "USD/JPY"
+      ],
       "quiz": null,
       "quote": "Geen beloftes, geen signalen. **Gewoon elke week dezelfde volgorde, live op de chart.**",
       "formulier_titel": "Ontgrendel de volledige training",
-      "formulier_sub": "Gratis. Je kijkt binnen 10 seconden.",
+      "formulier_sub": "Vul je naam, e-mail en gsm-nummer in. De video start meteen hier op de pagina.",
       "knop": "Bekijk de training nu",
-      "ontgrendeld_tekst": "De video start op **10:00**, daar begint de analyse. De EUR/USD-long zit in het midden; blijf hangen voor de 10+ paren erna."
+      "ontgrendeld_tekst": "▶ De video start op **10:00**, daar begint de analyse. Veel kijkplezier."
     },
     "nieuwsbrief": {
       "onderwerpen": [
@@ -65,44 +127,173 @@
       ],
       "preheader": "We ontleden live een EUR/USD-long op de 15M, van 4-uur context tot risk free. Kijk gratis.",
       "blokken": [
-        { "type": "opener", "titel": "Hoi,", "tekst": "Vraag een trader naar zijn trade en hij begint bij de entry. Wij beginnen **vier uur hoger**. Deze week laten we zien waarom, op één EUR/USD-long die we live volledig hebben ontleed." },
-        { "type": "trade_ontleed", "kicker": "De trade ontleed", "titel": "EUR/USD long op de 15M", "stappen": [
-          { "titel": "4-uur context", "tekst": "Fib op de 4-uur met een fair value gap als volume. Eerst weten waar de markt naartoe wil." },
-          { "titel": "Sweep", "tekst": "De 4-uur lows worden gesweept. Liquiditeit opgehaald, nog geen reden om in te stappen." },
-          { "titel": "Break", "tekst": "Externe en interne structuur breekt. Nu pas wordt een long interessant." },
-          { "titel": "71-level", "tekst": "De locatie. Geen entry op zich, wel de zone waar we gaan kijken." },
-          { "titel": "Order block", "tekst": "De reden binnen die zone. Locatie plus reden is de entry." },
-          { "titel": "Bijschalen en risk free", "tekst": "Bijschalen als de markt het bevestigt, break even op een vast moment. Niet op gevoel." }
-        ] },
-        { "type": "chart", "kicker": "Zo kijken we", "titel": "Eerst de grote lijn", "tekst": "Zo ziet de volgorde eruit op de chart: context, locatie, reden.", "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7" },
-        { "type": "tip_van_de_week", "kicker": "Tip van de week", "titel": "Een sweep is geen signaal", "tekst": "Een sweep van de lows voelt als een kans. Het is pas een kans als de structuur daarna breekt. Wacht op de break, ook als dat betekent dat je de eerste beweging mist." },
-        { "type": "payout", "kicker": "Het bewijs", "titel": "Dezelfde volgorde, elke week", "tekst": "Shani werkt met precies deze volgorde. Dit was haar payout bij FTMO.", "beeld_asset_id": "ef0b94d7-7916-4c23-aa94-4f8582400467" },
-        { "type": "video", "titel": "Bekijk de volledige training", "tekst": "35 minuten analyse: de DXY die kantelt, de EUR/USD-long en 10+ paren met wat wel of niet valid is.", "knop_tekst": "Bekijk gratis" },
-        { "type": "cadeau", "titel": "Deze week: gratis strategiesessie met Dave", "tekst": "Kijk je de training, dan krijg je deze week een strategiesessie met Dave erbij. Normaal €100, nu €0.", "knop_tekst": "Plan je sessie" }
+        {
+          "type": "opener",
+          "titel": "Hoi,",
+          "tekst": "Vraag een trader naar zijn trade en hij begint bij de entry. Wij beginnen **vier uur hoger**. Deze week laten we zien waarom, op één EUR/USD-long die we live volledig hebben ontleed."
+        },
+        {
+          "type": "trade_ontleed",
+          "kicker": "De trade ontleed",
+          "titel": "EUR/USD long op de 15M",
+          "stappen": [
+            {
+              "titel": "4-uur context",
+              "tekst": "Fib op de 4-uur met een fair value gap als volume. Eerst weten waar de markt naartoe wil."
+            },
+            {
+              "titel": "Sweep",
+              "tekst": "De 4-uur lows worden gesweept. Liquiditeit opgehaald, nog geen reden om in te stappen."
+            },
+            {
+              "titel": "Break",
+              "tekst": "Externe en interne structuur breekt. Nu pas wordt een long interessant."
+            },
+            {
+              "titel": "71-level",
+              "tekst": "De locatie. Geen entry op zich, wel de zone waar we gaan kijken."
+            },
+            {
+              "titel": "Order block",
+              "tekst": "De reden binnen die zone. Locatie plus reden is de entry."
+            },
+            {
+              "titel": "Bijschalen en risk free",
+              "tekst": "Bijschalen als de markt het bevestigt, break even op een vast moment. Niet op gevoel."
+            }
+          ]
+        },
+        {
+          "type": "chart",
+          "kicker": "Zo kijken we",
+          "titel": "Eerst de grote lijn",
+          "tekst": "Zo ziet de volgorde eruit op de chart: context, locatie, reden.",
+          "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7"
+        },
+        {
+          "type": "tip_van_de_week",
+          "kicker": "Tip van de week",
+          "titel": "Een sweep is geen signaal",
+          "tekst": "Een sweep van de lows voelt als een kans. Het is pas een kans als de structuur daarna breekt. Wacht op de break, ook als dat betekent dat je de eerste beweging mist."
+        },
+        {
+          "type": "payout",
+          "kicker": "Het bewijs",
+          "titel": "Dezelfde volgorde, elke week",
+          "tekst": "Shani werkt met precies deze volgorde. Dit was haar payout bij FTMO.",
+          "beeld_asset_id": "ef0b94d7-7916-4c23-aa94-4f8582400467"
+        },
+        {
+          "type": "video",
+          "titel": "Bekijk de volledige training",
+          "tekst": "35 minuten analyse: de DXY die kantelt, de EUR/USD-long en 10+ paren met wat wel of niet valid is.",
+          "knop_tekst": "Bekijk gratis"
+        },
+        {
+          "type": "cadeau",
+          "titel": "Deze week: gratis strategiesessie met Dave",
+          "tekst": "Kijk je de training, dan krijg je deze week een strategiesessie met Dave erbij. Normaal €100, nu €0.",
+          "knop_tekst": "Plan je sessie"
+        }
       ],
       "ps": "Blijf in de video hangen na de EUR/USD-long: bij de 10+ paren zie je per paar waarom het wel of net niet valid is. Daar leer je het meest van."
     },
     "stories": [
-      { "rol": "hook", "kicker": "Live training 22/10", "titel": "Waar begint jouw trade?", "tekst": "Bij de entry? Wij beginnen vier uur hoger.", "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7", "sticker": "poll", "sticker_tekst": "Entry of context?" },
-      { "rol": "inhoud", "kicker": "Stap 2 en 3", "titel": "Sweep, dan de break", "tekst": "Een sweep alleen is geen reden. Wacht op de break.", "beeld_asset_id": null, "sticker": "quiz", "sticker_tekst": "Sweep of break?" },
-      { "rol": "inhoud", "kicker": "Stap 4 en 5", "titel": "71 is locatie", "tekst": "Het order block is de reden. Samen: de entry.", "beeld_asset_id": null, "sticker": "vraag", "sticker_tekst": "Stel je vraag" },
-      { "rol": "bewijs", "kicker": "Het bewijs", "titel": "Elke week dezelfde volgorde", "tekst": "Zo werken onze studenten ook.", "beeld_asset_id": "ef0b94d7-7916-4c23-aa94-4f8582400467", "sticker": "vraag", "sticker_tekst": "Hoe doe jij het?" },
-      { "rol": "cta", "kicker": "Gratis opname", "titel": "Bekijk de trade zelf", "tekst": "35 min, van 4-uur tot risk free.", "beeld_asset_id": "ce6b5f12-d602-46ec-85b0-27d3de53bff1", "sticker": "link", "sticker_tekst": "Bekijk gratis" }
+      {
+        "rol": "hook",
+        "kicker": "Live training 22/10",
+        "titel": "Waar begint jouw trade?",
+        "tekst": "Bij de entry? Wij beginnen vier uur hoger.",
+        "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7",
+        "sticker": "poll",
+        "sticker_tekst": "Entry of context?"
+      },
+      {
+        "rol": "inhoud",
+        "kicker": "Stap 2 en 3",
+        "titel": "Sweep, dan de break",
+        "tekst": "Een sweep alleen is geen reden. Wacht op de break.",
+        "beeld_asset_id": null,
+        "sticker": "quiz",
+        "sticker_tekst": "Sweep of break?"
+      },
+      {
+        "rol": "inhoud",
+        "kicker": "Stap 4 en 5",
+        "titel": "71 is locatie",
+        "tekst": "Het order block is de reden. Samen: de entry.",
+        "beeld_asset_id": null,
+        "sticker": "vraag",
+        "sticker_tekst": "Stel je vraag"
+      },
+      {
+        "rol": "bewijs",
+        "kicker": "Het bewijs",
+        "titel": "Elke week dezelfde volgorde",
+        "tekst": "Zo werken onze studenten ook.",
+        "beeld_asset_id": "ef0b94d7-7916-4c23-aa94-4f8582400467",
+        "sticker": "vraag",
+        "sticker_tekst": "Hoe doe jij het?"
+      },
+      {
+        "rol": "cta",
+        "kicker": "Gratis opname",
+        "titel": "Bekijk de trade zelf",
+        "tekst": "35 min, van 4-uur tot risk free.",
+        "beeld_asset_id": "ce6b5f12-d602-46ec-85b0-27d3de53bff1",
+        "sticker": "link",
+        "sticker_tekst": "Bekijk gratis"
+      }
     ],
     "post": {
       "slides": [
-        { "titel": "Eén trade, zes stappen", "tekst": "EUR/USD long op de 15M, live ontleed.", "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7" },
-        { "titel": "1. Eerst de 4-uur", "tekst": "Fib en fair value gap: waar wil de markt naartoe?" },
-        { "titel": "2. De sweep", "tekst": "De lows worden opgehaald. Nog geen reden om in te stappen." },
-        { "titel": "3. De break", "tekst": "Pas als de structuur breekt, wordt de long interessant." },
-        { "titel": "4-5. Locatie en reden", "tekst": "71-level als locatie, order block als reden." },
-        { "titel": "6. Risk free", "tekst": "Bijschalen en break even op een vast moment, niet op gevoel." },
-        { "titel": "Bekijk het zelf", "tekst": "Gratis opname van de live training. Link in bio." }
+        {
+          "titel": "Eén trade, zes stappen",
+          "tekst": "EUR/USD long op de 15M, live ontleed.",
+          "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7"
+        },
+        {
+          "titel": "Eerst de 4-uur",
+          "tekst": "Fib en fair value gap: waar wil de markt naartoe?"
+        },
+        {
+          "titel": "De sweep",
+          "tekst": "De lows worden opgehaald. Nog geen reden om in te stappen."
+        },
+        {
+          "titel": "De break",
+          "tekst": "Pas als de structuur breekt, wordt de long interessant."
+        },
+        {
+          "titel": "Locatie en reden",
+          "tekst": "71-level als locatie, order block als reden."
+        },
+        {
+          "titel": "Risk free",
+          "tekst": "Bijschalen en break even op een vast moment, niet op gevoel."
+        },
+        {
+          "titel": "Bekijk het zelf",
+          "tekst": "Gratis opname van de live training. Link in bio."
+        }
       ],
       "caption": "Waar begint jouw trade? Bij de entry? Wij beginnen vier uur hoger.\n\nIn de live training van 22/10 ontleden we één EUR/USD-long op de 15M: 4-uur context, sweep, break, 71-level, order block en risk free. Plus de DXY die van richting wisselt en 10+ paren met wat wel of niet valid is.\n\nGratis opname: link in bio.",
-      "hashtags": ["forex", "trading", "eurusd", "dxy", "daytrading", "forexopleiding", "priceaction", "tradingnederland"]
+      "hashtags": [
+        "forex",
+        "trading",
+        "eurusd",
+        "dxy",
+        "daytrading",
+        "forexopleiding",
+        "priceaction",
+        "tradingnederland"
+      ]
     },
-    "vierkant": { "titel": "Eén trade, zes stappen", "sub": "Live training 22/10 · gratis opname", "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7" },
+    "vierkant": {
+      "titel": "Eén trade, zes stappen",
+      "sub": "Live training 22/10 · gratis opname",
+      "beeld_asset_id": "266f71e7-ee79-4fef-a209-eab4e1fa33f7"
+    },
     "linkedin": {
       "tekst": "De meeste traders beginnen bij de entry.\nWij beginnen vier uur hoger.\n\nIn onze live training van 22/10 ontleden we één EUR/USD-long op de 15M, in de vaste volgorde die onze studenten elke week gebruiken: 4-uur context, sweep, break, 71-level als locatie, order block als reden, en dan pas bijschalen en risk free.\n\nOndertussen kantelt de dollar zelf van bearish naar bullish. Ook dat zie je in de opname.\n\nGeen beloftes, geen signalen. Gewoon hoe wij naar de markt kijken.\n\nBekijk de opname gratis: training.deforexopleiding.nl/22-10-26-demo",
       "beeld": "vierkant"

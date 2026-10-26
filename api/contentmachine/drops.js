@@ -24,18 +24,23 @@
 import { supabaseAdmin } from '../supabase.js';
 import { poort, fout, body } from '../_lib/contentmachine-http.js';
 import {
-  slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo, SOCIAL_NAAM_RE, socialPad,
+  slugVanDatum, vrijeSlug, normaliseerInput, soortVanInput, parseVimeo, SOCIAL_NAAM_RE, socialPad, datumUitTitel,
 } from '../_lib/contentmachine-core.js';
-import { controleerGrenzen, valideerOutput } from '../_lib/contentmachine-generator.js';
+import { controleerGrenzen, valideerOutput, grensOpties, metVasteTeksten } from '../_lib/contentmachine-generator.js';
 import { bewaarVersie } from '../_lib/contentmachine-opslag.js';
 
-/** Grens-overtredingen van een output (met de namenlijst van bij het genereren). */
-export function grensProblemen(output) {
+/**
+ * Grens-overtredingen van een output (met de namenlijst van bij het genereren en
+ * de weekdag van de training uit de invoer).
+ */
+export function grensProblemen(output, input) {
   if (!output) return [];
   const namen = (output.meta && Array.isArray(output.meta.verboden_namen)) ? output.meta.verboden_namen : [];
   const { meta, ...zonderMeta } = output;
-  return controleerGrenzen(zonderMeta, { verbodenNamen: namen });
+  return controleerGrenzen(zonderMeta, grensOpties(input, namen));
 }
+
+const zelfde = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const LIJST_KOLOMMEN = 'id,slug,datum,soort,status,format_key,versie,aangemaakt_op,gewijzigd_op,gegenereerd_op,goedgekeurd_op,gepubliceerd_op,input,kern:output->>kernidee,titel:output->pagina->>hero_titel';
 const ASSET_KOLOMMEN = 'id,drop_id,soort,storage_path,publieke_url,breedte,hoogte,bijschrift,ai_beschrijving,ai_details,persoon_naam,toestemming_publiek,tags,laatst_gebruikt_op,aangemaakt_op';
@@ -53,6 +58,7 @@ export async function vimeoInfo(url, fetchImpl = fetch) {
     return {
       ok: true, ...v,
       titel: j.title || null,
+      training_datum: datumUitTitel(j.title),
       duur: Number.isFinite(+j.duration) ? +j.duration : null,
       thumbnail: j.thumbnail_url || null,
     };
@@ -182,10 +188,11 @@ export default async function handler(req, res) {
       const o = b.output;
       if (!o || typeof o !== 'object' || Array.isArray(o)) return res.status(400).json({ error: 'output ontbreekt' });
       // Structuur blijft die van de generator; meta en format komen van de server.
-      const output = { ...o, format_key: drop.output.format_key, meta: drop.output.meta || {} };
+      // Het formulier op de pagina is vast (vasteFormulierTeksten).
+      const output = metVasteTeksten({ ...o, format_key: drop.output.format_key, meta: drop.output.meta || {} }, { drop });
       const v = valideerOutput(output, { toegelaten: [output.format_key] });
       if (!v.ok) return res.status(400).json({ error: 'De output klopt niet meer: ' + v.fouten.slice(0, 3).join('; ') });
-      const grens = grensProblemen(output).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
+      const grens = grensProblemen(output, drop.input).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
       output.meta = { ...output.meta, waarschuwingen: [...(output.meta.waarschuwingen || []).filter((w) => w.soort !== 'grens'), ...grens] };
       const bijgewerkt = await bewaarVersie({ db, drop, output, reden: String(b.reden || 'Teksten bewerkt'), userId: p.user.id, patch: { status: 'gegenereerd', goedgekeurd_op: null } });
       return res.status(200).json({ ok: true, drop: bijgewerkt });
@@ -193,8 +200,15 @@ export default async function handler(req, res) {
 
     if (actie === 'goedkeuren') {
       if (drop.status !== 'gegenereerd' || !drop.output) return res.status(409).json({ error: 'Alleen een gegenereerde drop kan je goedkeuren.' });
-      const problemen = grensProblemen(drop.output);
+      const problemen = grensProblemen(drop.output, drop.input);
       if (problemen.length) return res.status(409).json({ error: 'Eerst deze teksten aanpassen: ' + problemen.slice(0, 3).map((x) => `${x.pad} (${x.regel})`).join('; '), code: 'GRENZEN', problemen });
+      // Oudere drops: de vaste formulierteksten erin zetten (als nieuwe versie).
+      const vast = metVasteTeksten(drop.output, { drop });
+      if (!zelfde(vast, drop.output)) {
+        const nu = new Date().toISOString();
+        const bijgewerkt = await bewaarVersie({ db, drop, output: vast, reden: 'Vaste formulierteksten bij goedkeuren', userId: p.user.id, patch: { status: 'goedgekeurd', goedgekeurd_op: nu } });
+        return res.status(200).json({ ok: true, drop: bijgewerkt });
+      }
       const { data, error } = await db.from('content_drops').update({ status: 'goedgekeurd', goedgekeurd_op: new Date().toISOString(), gewijzigd_op: new Date().toISOString() }).eq('id', id).eq('versie', drop.versie).select('*');
       if (error) throw error;
       if (!data || !data.length) return res.status(409).json({ error: 'De drop werd intussen gewijzigd. Herlaad.', code: 'VERSIE_CONFLICT' });
@@ -203,7 +217,7 @@ export default async function handler(req, res) {
 
     if (actie === 'publiceer') {
       if (drop.status !== 'goedgekeurd') return res.status(409).json({ error: 'Keur de drop eerst goed.' });
-      if (grensProblemen(drop.output).length) return res.status(409).json({ error: 'Er staan nog teksten in die niet mogen.', code: 'GRENZEN' });
+      if (grensProblemen(drop.output, drop.input).length) return res.status(409).json({ error: 'Er staan nog teksten in die niet mogen.', code: 'GRENZEN' });
       const kanalen = (drop.input && drop.input.kanalen) || [];
       if (kanalen.length && !kanalen.includes('pagina')) return res.status(409).json({ error: 'Het kanaal Pagina staat uit voor deze drop.' });
       const nu = new Date().toISOString();
