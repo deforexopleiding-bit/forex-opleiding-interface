@@ -15,7 +15,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { poort, fout, body } from '../_lib/contentmachine-http.js';
 import {
-  genereerDrop, genereerOnderdeel, toegelatenFormats, gebruikteAssetIds, ONDERDELEN, controleerGrenzen,
+  genereerDrop, genereerOnderdeel, toegelatenFormats, gebruikteAssetIds, ONDERDELEN, controleerGrenzen, grensOpties,
 } from '../_lib/contentmachine-generator.js';
 import { laadContext, bewaarVersie } from '../_lib/contentmachine-opslag.js';
 import { paginaUrl } from '../_lib/nieuwsbrief-render.js';
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
       const samen = { ...drop.output, ...r.deel };
       // Waarschuwingen opnieuw opbouwen: oude van dit onderdeel weg, nieuwe erbij.
       const vorigeMeta = (drop.output && drop.output.meta) || {};
-      const grens = controleerGrenzen(samen, { verbodenNamen: ctx.verbodenNamen }).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
+      const grens = controleerGrenzen(samen, grensOpties(i, ctx.verbodenNamen)).map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }));
       const overig = (vorigeMeta.waarschuwingen || []).filter((w) => w.soort !== 'grens' && !String(w.tekst).startsWith(onderdeel));
       waarschuwingen = [...overig, ...grens, ...r.waarschuwingen.filter((w) => w.soort !== 'grens')];
       output = { ...samen, meta: { ...vorigeMeta, model, verboden_namen: ctx.verbodenNamen, waarschuwingen, laatst_onderdeel: { onderdeel, instructie: instructie || null, op: new Date().toISOString() } } };

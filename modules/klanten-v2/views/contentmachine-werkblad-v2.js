@@ -273,7 +273,8 @@
     return [
       groep('Hero', veld('pagina.hero_kicker', 'Kicker') + veld('pagina.hero_titel', 'Titel') + veld('pagina.hero_accent', 'Accent (goud)') + veld('pagina.lead', 'Intro', { lang: true, hint: '**vet** mag' })
         + (p.feiten || []).map((f, i) => veld(`pagina.feiten.${i}.tekst`, `Feit ${i + 1} (${f.icoon})`)).join('')),
-      groep('Formulier', veld('pagina.formulier_titel', 'Titel') + veld('pagina.formulier_sub', 'Ondertitel') + veld('pagina.knop', 'Knop') + veld('pagina.ontgrendeld_tekst', update ? 'Na inschrijving' : 'Na ontgrendelen', { lang: true })),
+      groep('Formulier (vast)', `<div style="font-size:12px;color:var(--text-2);line-height:1.5">Deze teksten zijn vast: de bezoeker vult naam, e-mail en gsm-nummer in, ${update ? 'en staat meteen op de lijst voor de wekelijkse analyse' : 'en de video start meteen op de pagina'}. Er wordt nooit een link gemaild.</div>
+        <div style="font-size:12px;margin-top:6px"><b>${esc(p.formulier_titel || '')}</b> · ${esc(p.formulier_sub || '')} · knop „${esc(p.knop || '')}”</div>`),
       groep('Herkenning', veld('pagina.frustraties_titel', 'Titel') + (p.frustraties || []).map((_, i) => veld(`pagina.frustraties.${i}`, `Punt ${i + 1}`)).join('') + veld('pagina.frustraties_antwoord', 'Antwoord', { lang: true })),
       groep('Inhoud', veld('pagina.inhoud_titel', 'Titel') + (p.kaarten || []).map((k, i) => `<div class="cm-wb-sub"><b style="font-size:12px">Kaart ${i + 1}</b>${pijltjes('pagina.kaarten', i, p.kaarten.length)}${veld(`pagina.kaarten.${i}.label`, 'Label')}${veld(`pagina.kaarten.${i}.titel`, 'Titel')}${veld(`pagina.kaarten.${i}.tekst`, 'Tekst', { lang: true })}${beeldVeld(`pagina.kaarten.${i}.beeld_asset_id`)}</div>`).join('')
         + `<label class="tk-field"><span class="tk-field-l">Paren (komma-gescheiden)</span><input class="ib-input cm-mini" value="${esc((p.paren || []).join(', '))}" oninput="__cmWbLijst('pagina.paren',this.value)"></label>`),

@@ -329,3 +329,98 @@ test('bedrading fase 2: werkblad-script geladen, genereer maxDuration 300', () =
   assert.match(lees('modules/klanten-v2/index.html'), /views\/contentmachine-werkblad-v2\.js\?v=\d+/);
   assert.equal(JSON.parse(lees('vercel.json')).functions['api/contentmachine/genereer.js'].maxDuration, 300);
 });
+
+// ── 7. correcties na de nameting (26 okt): vaste formulierteksten + echte trainingsdatum ──
+const C = await import('../api/_lib/contentmachine-core.js');
+
+test('datum training: uit het veld of de Vimeo-titel; weekdag wordt berekend, nooit geraden', () => {
+  const v = new Date('2026-10-26T10:00:00Z');
+  assert.equal(C.datumUitTitel('Live training 22/10/26', v), '2026-10-22');
+  assert.equal(C.datumUitTitel('Live training 22/10', v), '2026-10-22');
+  assert.equal(C.datumUitTitel('22 oktober 2026 — DXY', v), '2026-10-22');
+  assert.equal(C.datumUitTitel('Live 12-12', v), '2025-12-12', 'ver in de toekomst = vorig jaar');
+  assert.equal(C.datumUitTitel('Training 2026', v), null);
+  assert.equal(C.datumUitTitel('31/02', v), null);
+  assert.equal(C.weekdagVan('2026-10-22'), 'donderdag');
+  assert.equal(C.trainingDatum({ training_datum: '2026-10-22', vimeo_titel: 'Live 15/10/26' }), '2026-10-22', 'het veld wint');
+  assert.equal(C.trainingDatum({ vimeo_titel: 'Live training 22-10-2026' }), '2026-10-22');
+  assert.equal(C.trainingDatum({}), null);
+  const vimeo = 'https://player.vimeo.com/video/1238714790?h=4822ada5ee';
+  assert.equal(C.normaliseerInput({ vimeo_url: vimeo, training_datum: '2026-10-22' }).training_datum, '2026-10-22');
+  assert.equal(C.normaliseerInput({ vimeo_url: vimeo, training_datum: '2026-02-31' }).training_datum, null);
+  assert.equal(C.normaliseerInput({ training_datum: '2026-10-22' }).training_datum, null, 'zonder video geen training');
+});
+
+test('prompt: de echte trainingsdatum gaat mee; zonder datum het verbod op een weekdag', () => {
+  const basis = { drop: { slug: '26-10-26', datum: '2026-10-26', soort: 'training' }, vorige: [], toegelaten: ['trade_ontleed'], paginaUrl: 'x' };
+  const met = JSON.stringify(G.gebruikersBericht({ ...basis, input: { vimeo_id: '1', training_datum: '2026-10-22' } }));
+  assert.match(met, /DATUM TRAINING: donderdag 22 oktober 2026 \(kort: 22\/10\)/);
+  assert.match(met, /aangemaakt op 2026-10-26/);
+  assert.match(JSON.stringify(G.gebruikersBericht({ ...basis, input: { vimeo_id: '1' } })), /DATUM TRAINING: onbekend/);
+  assert.match(G.systeemPrompt(), /Raad nooit een weekdag/);
+  assert.match(G.systeemPrompt(), /naam, e-mail en gsm-nummer/);
+});
+
+test('grenzen: een andere weekdag dan die van de training is fout; een link mailen ook', () => {
+  const o = { nieuwsbrief: { blokken: [{ type: 'opener', tekst: 'In de live training van maandag zagen we het.' }] } };
+  assert.equal(G.controleerGrenzen(o, {}).length, 0, 'zonder weekdag-optie geen check');
+  assert.match(G.controleerGrenzen(o, { weekdag: 'donderdag' })[0].regel, /training was op donderdag/);
+  assert.match(G.controleerGrenzen(o, { weekdag: null })[0].regel, /weekdag geraden/);
+  assert.equal(G.controleerGrenzen({ x: 'Elke donderdag live, ook donderdags.' }, { weekdag: 'donderdag' }).length, 0);
+  assert.equal(G.controleerGrenzen({ x: 'De dollar maandag-ochtend.' }, { weekdag: 'donderdag' }).length, 1);
+  assert.match(G.controleerGrenzen({ x: 'Vul je e-mailadres in en we sturen je direct de link.' })[0].regel, /verkeerde flow/);
+  assert.deepEqual(G.grensOpties({ training_datum: '2026-10-22' }, ['Kjento']), { verbodenNamen: ['Kjento'], weekdag: 'donderdag' });
+});
+
+test('formulier: vaste teksten per soort; het model schrijft ze niet', () => {
+  assert.ok(!('formulier_titel' in G.OUTPUT_SCHEMA.properties.pagina.properties));
+  for (const k of G.FORMULIER_VELDEN) assert.ok(!G.OUTPUT_SCHEMA.properties.pagina.required.includes(k), k);
+  const t = G.vasteFormulierTeksten({ soort: 'training', startSec: 600 });
+  assert.match(t.formulier_sub, /naam, e-mail en gsm-nummer/); assert.match(t.formulier_sub, /video start meteen/);
+  assert.match(t.ontgrendeld_tekst, /\*\*10:00\*\*/);
+  assert.doesNotMatch(JSON.stringify(t), /link/);
+  assert.match(G.vasteFormulierTeksten({ soort: 'update' }).knop, /Schrijf je in/);
+  const fout = voorbeeldOutput({ pagina: { ...voorbeeldOutput().pagina, formulier_sub: 'Vul je e-mailadres in en we sturen je direct de link.' } });
+  const goed = G.metVasteTeksten(fout, { drop: { soort: 'training' }, input: { start_sec: 600 } });
+  assert.equal(goed.pagina.formulier_sub, t.formulier_sub);
+  assert.equal(goed.pagina.hero_titel, fout.pagina.hero_titel, 'de rest blijft');
+  assert.equal(G.metVasteTeksten({ linkedin: {} }, { drop: { soort: 'training' } }).pagina, undefined);
+});
+
+test('genereer: vaste formulierteksten erin; weekdag uit de invoer bewaakt', async () => {
+  reset();
+  drop().input.training_datum = '2026-10-22';
+  const o = voorbeeldOutput();
+  delete o.pagina.formulier_titel; o.pagina.formulier_sub = 'we sturen je de link';
+  o.nieuwsbrief.blokken[0].tekst = 'De live training van donderdag. **We zagen het live.**';
+  ai.antwoorden.push(o);
+  const r = await roep(GEN, { body: { id: ID } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal(ai.aanroepen.length, 1, 'donderdag klopt: geen herstelronde');
+  assert.equal(drop().output.pagina.formulier_titel, 'Ontgrendel de volledige training');
+  assert.match(drop().output.pagina.ontgrendeld_tekst, /10:00/);
+  assert.match(JSON.stringify(ai.aanroepen[0].messages), /DATUM TRAINING: donderdag 22 oktober 2026/);
+});
+
+test('goedkeuren: weekdag die niet klopt blokkeert; een oudere drop krijgt de vaste teksten als nieuwe versie', async () => {
+  const oud = voorbeeldOutput(); oud.pagina.formulier_sub = 'Vul je e-mailadres in.';
+  oud.nieuwsbrief.blokken[0].tekst = 'In de live training van maandag kantelde de dollar.';
+  reset({ status: 'gegenereerd', output: { ...oud, meta: { verboden_namen: [] } }, versie: 2 });
+  drop().input.training_datum = '2026-10-22';
+  const g = await roep(D, { body: { actie: 'goedkeuren', id: ID } });
+  assert.equal(g.statusCode, 409); assert.match(g.body.error, /training was op donderdag/);
+  drop().output.nieuwsbrief.blokken[0].tekst = 'In de live training van donderdag kantelde de dollar.';
+  const ok = await roep(D, { body: { actie: 'goedkeuren', id: ID } });
+  assert.equal(ok.statusCode, 200, JSON.stringify(ok.body));
+  assert.equal(drop().status, 'goedgekeurd'); assert.equal(drop().versie, 3);
+  assert.match(drop().output.pagina.formulier_sub, /gsm-nummer/);
+  assert.match(fake.db.tabellen.content_drop_versies.at(-1).reden, /Vaste formulierteksten/);
+});
+
+test('bedrading: invoer heeft "Datum training"; werkblad toont het formulier als vast', () => {
+  const inv = lees('modules/klanten-v2/views/contentmachine-v2.js');
+  assert.match(inv, /Datum training/); assert.match(inv, /training_datum: f\.training_datum/);
+  const wb = lees('modules/klanten-v2/views/contentmachine-werkblad-v2.js');
+  assert.match(wb, /Formulier \(vast\)/); assert.doesNotMatch(wb, /veld\('pagina\.formulier_titel'/);
+  assert.match(lees('api/contentmachine/drops.js'), /training_datum: datumUitTitel\(j\.title\)/);
+});

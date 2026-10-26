@@ -111,6 +111,7 @@ export function normaliseerInput(b = {}) {
     duur: vimeo && Number.isFinite(+meta.duur) ? Math.round(+meta.duur) : null,
     vimeo_titel: vimeo ? tekst(meta.titel, 300) || null : null,
     vimeo_thumbnail: vimeo && /^https:\/\//.test(String(meta.thumbnail || '')) ? String(meta.thumbnail).slice(0, 500) : null,
+    training_datum: vimeo ? geldigeIsoDatum(b.training_datum) : null,
     wat_gebeurde: tekst(b.wat_gebeurde, 8000),
     trade_info: {
       paar: tekst(trade.paar, 20).toUpperCase(),
@@ -122,6 +123,64 @@ export function normaliseerInput(b = {}) {
     gekozen_asset_ids: [...new Set(ids)].slice(0, 30),
     kanalen: kanalen.length ? kanalen : KANALEN.slice(),
   };
+}
+
+// ── Datum van de training ───────────────────────────────────────────────────
+// De generator mag NOOIT een weekdag raden ("de live van maandag" terwijl het
+// donderdag was). De datum komt uit het invoerveld 'training_datum', anders uit
+// de Vimeo-titel; de weekdag wordt hier berekend.
+export const WEEKDAGEN = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+
+function isoVan(j, m, d) {
+  const dt = new Date(Date.UTC(j, m - 1, d));
+  if (dt.getUTCFullYear() !== j || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return `${j}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** 'YYYY-MM-DD' als het een echte datum is, anders null. */
+export function geldigeIsoDatum(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '').trim());
+  return m ? isoVan(+m[1], +m[2], +m[3]) : null;
+}
+
+/**
+ * Datum uit een Vimeo-titel ("Live training 22/10/26", "22-10-2026", "22 oktober").
+ * Zonder jaar: het jaar van `vandaag`, of het jaar ervoor als dat meer dan 30 dagen in de toekomst ligt.
+ */
+export function datumUitTitel(titel, vandaag = new Date()) {
+  const t = String(titel || '').toLowerCase();
+  let d; let m; let j = null;
+  const num = /(?:^|[^0-9])(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{4}|\d{2}))?(?![0-9])/.exec(t);
+  const woord = new RegExp(`(?:^|[^0-9])(\\d{1,2})\\s+(${MAANDEN.join('|')})(?:\\s+(\\d{4}))?`).exec(t);
+  if (num) { d = +num[1]; m = +num[2]; j = num[3] ? +num[3] : null; } else if (woord) { d = +woord[1]; m = MAANDEN.indexOf(woord[2]) + 1; j = woord[3] ? +woord[3] : null; } else return null;
+  if (j != null && j < 100) j += 2000;
+  if (j == null) {
+    j = vandaag.getUTCFullYear();
+    const kand = isoVan(j, m, d);
+    if (kand && Date.parse(kand) - vandaag.getTime() > 30 * 86400000) j -= 1;
+  }
+  return isoVan(j, m, d);
+}
+
+/** De datum van de training (invoerveld, anders uit de Vimeo-titel) of null. */
+export function trainingDatum(input) {
+  const i = input || {};
+  return geldigeIsoDatum(i.training_datum) || (i.vimeo_titel ? datumUitTitel(i.vimeo_titel) : null);
+}
+
+/** 'donderdag' voor '2026-10-22'. */
+export function weekdagVan(iso) {
+  const d = geldigeIsoDatum(iso);
+  return d ? WEEKDAGEN[new Date(d + 'T12:00:00Z').getUTCDay()] : null;
+}
+
+/** 'donderdag 22 oktober 2026' (+ kort '22/10'). */
+export function datumVoluit(iso) {
+  const d = geldigeIsoDatum(iso);
+  if (!d) return null;
+  const [j, m, dag] = d.split('-').map(Number);
+  return { voluit: `${weekdagVan(d)} ${dag} ${MAANDEN[m - 1]} ${j}`, kort: `${String(dag).padStart(2, '0')}/${String(m).padStart(2, '0')}`, weekdag: weekdagVan(d) };
 }
 
 /** Is er een trade van de week ingevuld? */

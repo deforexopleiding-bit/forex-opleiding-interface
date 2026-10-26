@@ -17,6 +17,7 @@
 import { anthropicStructuredOutput } from './anthropic-client.js';
 import { modelKeten } from './contentmachine-ai.js';
 import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
+import { trainingDatum, datumVoluit, weekdagVan } from './contentmachine-core.js';
 
 // ── Formats ─────────────────────────────────────────────────────────────────
 export const FORMATS = [
@@ -69,11 +70,43 @@ const PAGINA_SCHEMA = {
     trade_stappen: ARR({ type: 'object', properties: { titel: S, tekst: S }, required: ['titel', 'tekst'] }, 0, 10),
     quiz: { type: ['object', 'null'], properties: { vraag: S, opties: ARR(S, 2, 4), antwoord_index: { type: 'integer' }, uitleg: S }, description: 'Enkel bij format wat_zou_jij_doen: het antwoord op de quiz uit de nieuwsbrief.' },
     quote: { type: 'string', description: 'Citaat; het deel tussen **…** wordt goud.' },
-    formulier_titel: S, formulier_sub: S, knop: S,
-    ontgrendeld_tekst: S,
   },
-  required: ['seo_titel', 'seo_beschrijving', 'og_titel', 'og_beschrijving', 'hero_kicker', 'hero_titel', 'hero_accent', 'lead', 'feiten', 'frustraties_titel', 'frustraties', 'frustraties_antwoord', 'inhoud_titel', 'kaarten', 'paren', 'quote', 'formulier_titel', 'formulier_sub', 'knop', 'ontgrendeld_tekst'],
+  // formulier_titel / formulier_sub / knop / ontgrendeld_tekst zijn VAST (vasteFormulierTeksten).
+  required: ['seo_titel', 'seo_beschrijving', 'og_titel', 'og_beschrijving', 'hero_kicker', 'hero_titel', 'hero_accent', 'lead', 'feiten', 'frustraties_titel', 'frustraties', 'frustraties_antwoord', 'inhoud_titel', 'kaarten', 'paren', 'quote'],
 };
+
+// ── Vaste formulierteksten ──────────────────────────────────────────────────
+// De poort op de pagina vraagt naam, e-mail en gsm-nummer. Bij een training opent
+// de video meteen op de pagina; bij een update schrijf je je in op de wekelijkse
+// analyse. Er wordt NOOIT een link gemaild. Deze teksten schrijft het model niet.
+export const FORMULIER_VELDEN = ['formulier_titel', 'formulier_sub', 'knop', 'ontgrendeld_tekst'];
+
+/** De vaste teksten voor de poort, per soort. `startSec` = waar de analyse begint. */
+export function vasteFormulierTeksten({ soort, startSec } = {}) {
+  if (soort !== 'training') {
+    return {
+      formulier_titel: 'Krijg elke week onze marktanalyse',
+      formulier_sub: 'Vul je naam, e-mail en gsm-nummer in. Je staat meteen op de lijst.',
+      knop: 'Schrijf je in',
+      ontgrendeld_tekst: 'Je staat op de lijst. **Elke week** onze marktanalyse in je mailbox.',
+    };
+  }
+  const s = Number(startSec) > 0 ? Math.round(Number(startSec)) : 0;
+  const tijd = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  return {
+    formulier_titel: 'Ontgrendel de volledige training',
+    formulier_sub: 'Vul je naam, e-mail en gsm-nummer in. De video start meteen hier op de pagina.',
+    knop: 'Bekijk de training nu',
+    ontgrendeld_tekst: s ? `▶ De video start op **${tijd}**, daar begint de analyse. Veel kijkplezier.` : '▶ **Veel kijkplezier.** De video staat hierboven klaar.',
+  };
+}
+
+/** Output met de vaste formulierteksten (kopie; zonder pagina ongewijzigd). */
+export function metVasteTeksten(o, { drop, input } = {}) {
+  if (!o || !o.pagina || typeof o.pagina !== 'object') return o;
+  const i = input || (drop && drop.input) || {};
+  return { ...o, pagina: { ...o.pagina, ...vasteFormulierTeksten({ soort: drop && drop.soort, startSec: i.start_sec }) } };
+}
 
 const BLOK_SCHEMA = {
   type: 'object',
@@ -266,6 +299,11 @@ export function alleTeksten(o, pad = '', uit = []) {
   return uit;
 }
 
+/** De grens-opties van een drop: welke weekdag mag (die van de training, of geen). */
+export function grensOpties(input, verbodenNamen = []) {
+  return { verbodenNamen, weekdag: weekdagVan(trainingDatum(input)) };
+}
+
 // Woordgrenzen die ook achter een letter met accent werken.
 const W = (s) => new RegExp(`(^|[^\\p{L}\\p{N}])(${s})(?=$|[^\\p{L}\\p{N}])`, 'iu');
 export const VERBODEN = [
@@ -284,15 +322,21 @@ export const VERBODEN = [
   { re: W('swing|swingtrade|swingtrading'), wat: '"swing" naar buiten (gebruik H4-limit)' },
   { re: /\b\d+(?:[.,]\d+)?\s?%\s*(?:winst|rendement)?\s*per\s*(?:maand|week|dag)\b/i, wat: 'rendementsclaim per periode' },
   { re: W('verdien(?:en|t)?\\s+(?:tot\\s+)?€\\s?\\d'), wat: 'verdienclaim' },
+  { re: W('(?:sturen|mailen|e-mailen)\\s+(?:we\\s+)?(?:je|jou|u)\\s+(?:direct\\s+|meteen\\s+|zo\\s+)?(?:de|een)\\s+link'), wat: 'verkeerde flow: de video opent op de pagina, we mailen geen link' },
 ];
+
+const WEEKDAG_RE = /(^|[^\p{L}\p{N}])((?:maan|dins|woens|donder|vrij|zater|zon)dag)(?:s|en)?(?=$|[^\p{L}\p{N}])/giu;
 
 const ONTKENNING = /\b(geen|niet|nooit|zonder|g[eé]{1,2}n beloftes?)\b[^.!?]{0,30}$/i;
 
 /**
  * → [{ pad, regel, fragment }]. `verbodenNamen` = namen die niet mogen (geen
  * toestemming / sprekers); 'Dave' mag enkel in een tekst over het cadeau/de sessie.
+ * `weekdag` (als de sleutel meegegeven wordt): de enige weekdag die mag, de dag van
+ * de training ('donderdag'), of null = geen enkele weekdag (datum onbekend).
  */
-export function controleerGrenzen(o, { verbodenNamen = [] } = {}) {
+export function controleerGrenzen(o, { verbodenNamen = [], weekdag } = {}) {
+  const checkDag = weekdag !== undefined;
   const uit = [];
   for (const { pad, tekst } of alleTeksten(o)) {
     for (const v of VERBODEN) {
@@ -306,6 +350,14 @@ export function controleerGrenzen(o, { verbodenNamen = [] } = {}) {
       // Hoofdlettergevoelig: 'Jan' is een naam, 'jan' een maand.
       const m = new RegExp(`(^|[^\\p{L}\\p{N}])(${naam.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?=$|[^\\p{L}\\p{N}])`, 'u').exec(tekst);
       if (m) uit.push({ pad, regel: `naam zonder toestemming: ${naam}`, fragment: fragment(tekst, m.index) });
+    }
+    if (checkDag) {
+      for (const m of tekst.matchAll(WEEKDAG_RE)) {
+        const dag = m[2].toLowerCase();
+        if (dag === weekdag) continue;
+        uit.push({ pad, regel: weekdag ? `weekdag klopt niet: de training was op ${weekdag}` : 'weekdag geraden (de datum van de training is niet ingevuld)', fragment: fragment(tekst, m.index) });
+        break;
+      }
     }
     const dave = W('dave').exec(tekst);
     if (dave && !/(cadeau|strategiesessie|strategie-sessie|sessie|gesprek|call|€\s?0)/i.test(tekst)) {
@@ -391,6 +443,8 @@ HARDE GRENZEN
 - Geen winstclaims zonder bewijs. Enkel getallen die in de input of op een beeld staan. Geen rendement per maand.
 - Geen verkooppraat: geen "verkoop", "deal", "korting", "aanbieding", "laatste kans", geen meerdere uitroeptekens. Benoem wat er feitelijk gebeurt. Het cadeau mag: "t.w.v. €100, nu €0".
 - Zeg nooit "swing" of "swingtrade" naar buiten; noem het een H4-limit.
+- Datums: noem ENKEL de datum en weekdag van de training die je meekrijgt ("DATUM TRAINING"). Raad nooit een weekdag. Is de datum onbekend, noem dan geen weekdag en geen datum: zeg "deze week" of "in de live training". De datum van de drop is NIET de datum van de training.
+- De poort op de pagina werkt zo: de bezoeker vult naam, e-mail en gsm-nummer in; bij een training start de video METEEN op de pagina (er wordt nooit een link gemaild); daarna komt het cadeau. Bij een update schrijft hij zich in op de wekelijkse marktanalyse. De teksten van dat formulier zijn vast; die schrijf jij niet.
 - Trading-uitleg en tips ENKEL uit de DFO-strategiekennis hieronder. Wat er niet in staat, verzin je niet en vul je niet aan met algemene ICT/SMC-regels.
 - Een disclaimer (educatief, geen financieel advies, risico op verlies) wordt automatisch toegevoegd; schrijf er zelf geen.
 
@@ -439,8 +493,12 @@ export function vorigeSamenvatting(vorige = []) {
 export function gebruikersBericht({ drop, input, beelden = [], vorige = [], toegelaten, paginaUrl, extra = '' }) {
   const i = input || {};
   const t = i.trade_info || {};
+  const td = datumVoluit(trainingDatum(i));
   const regels = [
-    `DROP ${drop.slug} (${drop.datum}) — soort: ${drop.soort === 'training' ? 'training (er is een video-opname)' : 'update (geen video deze week)'}`,
+    `DROP ${drop.slug} (aangemaakt op ${drop.datum}) — soort: ${drop.soort === 'training' ? 'training (er is een video-opname)' : 'update (geen video deze week)'}`,
+    drop.soort === 'training'
+      ? (td ? `DATUM TRAINING: ${td.voluit} (kort: ${td.kort}). Dit is de enige weekdag en datum die je mag noemen.` : 'DATUM TRAINING: onbekend — noem geen weekdag en geen datum van de training.')
+      : 'Geen training deze week — noem geen weekdag.',
     `Pagina: ${paginaUrl}`,
     `Kanalen: ${(i.kanalen || []).join(', ')}`,
     '',
@@ -493,10 +551,12 @@ function herstelTekst(fouten, grenzen) {
 export async function genereerDrop(ctx) {
   const start = Date.now();
   const { toegelaten, assetIds, verbodenNamen = [], vorige = [], tijdBudgetMs = 200000 } = ctx;
+  const opties = grensOpties(ctx.input, verbodenNamen);
   const content = gebruikersBericht(ctx);
   let { resultaat: output, model } = await roepAan({ content, schema: OUTPUT_SCHEMA });
+  output = metVasteTeksten(output, ctx);
   let v = valideerOutput(output, { toegelaten, assetIds });
-  let g = controleerGrenzen(output, { verbodenNamen });
+  let g = controleerGrenzen(output, opties);
   let herstel = false;
   if (!v.ok || g.length) {
     herstel = true;
@@ -505,9 +565,9 @@ export async function genereerDrop(ctx) {
       schema: OUTPUT_SCHEMA,
       temperature: 0.4,
     });
-    output = r.resultaat; model = r.model;
+    output = metVasteTeksten(r.resultaat, ctx); model = r.model;
     v = valideerOutput(output, { toegelaten, assetIds });
-    g = controleerGrenzen(output, { verbodenNamen });
+    g = controleerGrenzen(output, opties);
   }
   const waarschuwingen = [...v.fouten.map((x) => ({ soort: 'schema', tekst: x })), ...g.map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }))];
 
@@ -519,7 +579,7 @@ export async function genereerDrop(ctx) {
     try {
       const bijna = gelijk.filter((x) => x.onderdeel === onderdeel).map((x) => `"${x.nieuw}" lijkt te veel op "${x.oud}" (${x.slug})`).join('; ');
       const r = await genereerOnderdeel({ ...ctx, onderdeel, huidige: output, instructie: `Te gelijkend op vorige drops: ${bijna}. Kies een duidelijk andere invalshoek en andere woorden.` });
-      output = { ...output, ...r.deel };
+      output = metVasteTeksten({ ...output, ...r.deel }, ctx);
     } catch (e) {
       waarschuwingen.push({ soort: 'uniek', tekst: `${onderdeel} opnieuw maken mislukt: ${e?.message || e}` });
     }
@@ -550,19 +610,21 @@ export async function genereerOnderdeel(ctx) {
     JSON.stringify(huidige),
   ].join('\n');
   const content = [...gebruikersBericht(ctx), { type: 'text', text: opdracht }];
+  const opties = grensOpties(ctx.input, verbodenNamen);
   let { resultaat, model } = await roepAan({ content, schema, max_tokens: 8000 });
+  resultaat = metVasteTeksten(resultaat, ctx);
   const onderdelen = onderdeel === 'post' ? ['post'] : [onderdeel];
   const metHuidig = (r) => ({ ...huidige, ...r });
   let v = valideerOutput(metHuidig(resultaat), { assetIds, onderdelen });
-  let g = controleerGrenzen(resultaat, { verbodenNamen });
+  let g = controleerGrenzen(resultaat, opties);
   if (!v.ok || g.length) {
     const r = await roepAan({
       content: [...content, { type: 'text', text: 'VORIGE VERSIE:\n' + JSON.stringify(resultaat) + '\n\n' + herstelTekst(v.fouten, g) }],
       schema, max_tokens: 8000, temperature: 0.4,
     });
-    resultaat = r.resultaat; model = r.model;
+    resultaat = metVasteTeksten(r.resultaat, ctx); model = r.model;
     v = valideerOutput(metHuidig(resultaat), { assetIds, onderdelen });
-    g = controleerGrenzen(resultaat, { verbodenNamen });
+    g = controleerGrenzen(resultaat, opties);
   }
   const deel = onderdeel === 'post' ? { post: resultaat.post, vierkant: resultaat.vierkant } : { [onderdeel]: resultaat[onderdeel] };
   const waarschuwingen = [...v.fouten.map((x) => ({ soort: 'schema', tekst: x })), ...g.map((x) => ({ soort: 'grens', tekst: `${x.pad}: ${x.regel}`, fragment: x.fragment }))];
