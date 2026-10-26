@@ -6,7 +6,7 @@
 -- ----------------------------
 -- Elke trial-lead (minicursus, 7-daagse, webinar, website, The Lab) krijgt nu
 -- een lab-lead in het echte LMS. lab_aanmeldingen wordt daarmee DE lijst van
--- alle trials. Drie dingen:
+-- alle trials. Twee dingen:
 --
 --   1. lab_aanmeldingen krijgt de herkomst: product (de belofte), bron (de
 --      funnel-slug) en variant (split-test-luik), plus toegang_aanvraag_id
@@ -14,28 +14,25 @@
 --   2. app_settings 'trial_bestemming': de schakelaar per product
 --      ('lab' = het echte LMS, 'oud' = het oude trial-LMS). Enkel als de rij
 --      nog niet bestaat; een bestaande waarde blijft staan.
---   3. lms_gebruikers.lead_id: sinds ~5 okt leeg voor bijna alle nieuwe
---      trials (dfo-website gaf hem niet mee). Alleen LEGE waarden worden
---      gevuld, en alleen als er precies één niet-verwijderde lead met dat
---      e-mailadres is. Niets wordt overschreven.
+--   (De lead_id-backfill op lms_gebruikers staat NIET hier: zie
+--    2026-10-26-NIET-DRAAIEN-lms-gebruikers-lead-id-backfill.sql.)
 --
 -- Niet blokkerend: de code leest de kolommen fail-soft (zonder migratie
 -- bewaart api/_lib/lab-trial.js de herkomst als 'trial:<product>:<bron>' in
 -- landingspagina). Additief en herhaalbaar.
 --
--- Rollback (1 en 2; 3 is een vulling van lege waarden):
+-- Rollback:
 --   alter table public.lab_aanmeldingen drop column if exists toegang_aanvraag_id,
 --     drop column if exists variant, drop column if exists bron, drop column if exists product;
 --   delete from public.app_settings where key = 'trial_bestemming';
 
 -- ── Controle VÓÓR ─────────────────────────────────────────────────────────
--- Verwacht: kolommen 0, schakelaar 0, lege_lead_id ±225 (waarvan ±220 vulbaar).
+-- Verwacht: kolommen 0, schakelaar 0.
 select
   (select count(*) from information_schema.columns
     where table_schema = 'public' and table_name = 'lab_aanmeldingen'
       and column_name in ('product', 'bron', 'variant', 'toegang_aanvraag_id')) as kolommen,
-  (select count(*) from public.app_settings where key = 'trial_bestemming') as schakelaar,
-  (select count(*) from public.lms_gebruikers where lead_id is null) as lege_lead_id;
+  (select count(*) from public.app_settings where key = 'trial_bestemming') as schakelaar;
 
 -- ── 1. Herkomst op lab_aanmeldingen ───────────────────────────────────────
 alter table public.lab_aanmeldingen add column if not exists product text;
@@ -58,24 +55,10 @@ values ('trial_bestemming',
         '{"minicursus":"lab","7-daagse":"lab","webinar":"lab","website":"lab","the-lab":"lab"}'::jsonb)
 on conflict (key) do nothing;
 
--- ── 3. lead_id op het oude trial-LMS (alleen lege waarden) ────────────────
-update public.lms_gebruikers g
-   set lead_id = l.id
-  from (
-    select lower(email) as em, (array_agg(id))[1] as id
-      from public.leads
-     where verwijderd_op is null and email is not null
-     group by lower(email)
-    having count(*) = 1
-  ) l
- where g.lead_id is null
-   and lower(g.email) = l.em;
-
 -- ── Controle NA ───────────────────────────────────────────────────────────
--- Verwacht: kolommen 4, schakelaar 1, lege_lead_id ±5 (geen of dubbele lead).
+-- Verwacht: kolommen 4, schakelaar 1.
 select
   (select count(*) from information_schema.columns
     where table_schema = 'public' and table_name = 'lab_aanmeldingen'
       and column_name in ('product', 'bron', 'variant', 'toegang_aanvraag_id')) as kolommen,
-  (select count(*) from public.app_settings where key = 'trial_bestemming') as schakelaar,
-  (select count(*) from public.lms_gebruikers where lead_id is null) as lege_lead_id;
+  (select count(*) from public.app_settings where key = 'trial_bestemming') as schakelaar;

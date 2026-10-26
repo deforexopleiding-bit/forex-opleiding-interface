@@ -43,6 +43,15 @@ async function bewaarAanmelding(rij, herkomst) {
       .select('id').eq('toegang_aanvraag_id', herkomst.toegang_aanvraag_id).limit(1);
     if (!error && al?.[0]) return { id: al[0].id, bewaard: true, hergebruikt: true };
     if (error && !KOLOM_ONTBREEKT(error)) console.warn('[lab-trial] bestaande aanmelding (soft):', error.message);
+    if (error && KOLOM_ONTBREEKT(error)) {
+      // Zonder de migratie: een mislukte poging (lms_fout) van de laatste 72 uur
+      // voor dit adres en deze belofte = dezelfde aanvraag die opnieuw komt.
+      const { data: fout } = await supabaseAdmin.from('lab_aanmeldingen')
+        .select('id').eq('email', rij.email).eq('resultaat', 'lms_fout')
+        .eq('landingspagina', herkomstMarker(herkomst.product, herkomst.bron))
+        .gte('aangemaakt', new Date(Date.now() - 72 * 3600 * 1000).toISOString()).limit(1);
+      if (fout?.[0]) return { id: fout[0].id, bewaard: true, hergebruikt: true };
+    }
   }
   const { error } = await supabaseAdmin.from('lab_aanmeldingen').insert({ ...rij, ...herkomst });
   if (!error) return { id: rij.id, bewaard: true };
