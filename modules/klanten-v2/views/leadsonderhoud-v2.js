@@ -4480,7 +4480,7 @@
   };
   // De gratis strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>'):
   // patroon, dus geen regel per week.
-  const _LS_TRAINING_RE = /^training-(\d{2})-(\d{2})-(\d{2})$/;
+  const _LS_TRAINING_RE = /^(?:training|drop)-(\d{2})-(\d{2})-(\d{2})(?:-\d)?$/;
   function _lsBronChip(slug) {
     const t = _LS_TRAINING_RE.exec(String(slug || ''));
     const c = t ? { tekst: 'Training ' + t[1] + '/' + t[2] + ' · strategiesessie', bg: '#FBF3E2', fg: '#9A6B12' } : _LS_BRON_CHIPS[slug];

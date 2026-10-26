@@ -2252,7 +2252,7 @@
       // een strategiesessie na The Lab, met een Lab-dossier achter de klik.
       // En de strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>'):
       // een gewone chip, zodat Dave ziet uit welke training de call komt.
-      const trn = /^training-(\d{2})-(\d{2})-(\d{2})$/.exec(String(c.bron || ''));
+      const trn = /^(?:training|drop)-(\d{2})-(\d{2})-(\d{2})(?:-\d)?$/.exec(String(c.bron || ''));
       const bron = c.bron === 'the-lab'
         ? ' <span class="tag t-amber" data-bron="the-lab" style="cursor:pointer" role="button" tabindex="0" ' +
           'onclick="window.__opvLabDossierVanCall(' + i + ')" ' +

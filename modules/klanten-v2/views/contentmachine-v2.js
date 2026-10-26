@@ -87,9 +87,17 @@
     const L = st.lijst;
     if (L.loading || (L.fetched && !force)) return;
     L.loading = true; L.error = null; rerender();
+    // Cijfers per drop uit Trainingdrops (bezoekers, leads, calls) — fail-soft:
+    // zonder recht leads.view of bij een fout blijven de kolommen leeg.
+    const cijfers = api('/api/trainingdrops').then((j) => {
+      const m = {};
+      for (const x of (j && Array.isArray(j.drops) ? j.drops : [])) if (x.slug) m[x.slug] = x;
+      return m;
+    }).catch((e) => { console.warn('[contentmachine-v2] trainingdrops-cijfers niet beschikbaar:', e && e.status); return null; });
     try {
       const j = await api('/api/contentmachine/drops');
       L.drops = Array.isArray(j.drops) ? j.drops : []; L.migratie = false;
+      L.cijfers = await cijfers;
     } catch (e) {
       L.migratie = e && e.body && e.body.code === 'MIGRATIE_NODIG';
       L.error = e && e.status === 403 ? 'Geen toegang tot de Contentmachine (recht content.machine).' : foutTekst(e, 'Kon de drops niet laden');
@@ -137,6 +145,13 @@
     st.bezig = [];
   }
 
+  const nl = (n) => (n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n));
+  function cijferCel(d) {
+    const c = st.lijst.cijfers && st.lijst.cijfers[d.slug];
+    if (!c) return `<span style="color:var(--text-3)">${d.status === 'gepubliceerd' ? '0 · 0 · 0' : '—'}</span>`;
+    return `${nl(c.bezoekers)} · <b>${nl(c.leads)}</b> · ${nl(c.calls)}`;
+  }
+
   function overzichtHtml() {
     const L = st.lijst;
     const kop = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap">
@@ -166,11 +181,12 @@
         <td class="cm-mob-weg" style="${td}">${d.soort === 'training' ? pill('accent', 'Training') : pill('neutral', 'Update')}</td>
         <td class="cm-mob-weg" style="${td}">${d.format_key ? esc(FORMATS[d.format_key] || d.format_key) : '<span style="color:var(--text-3)">—</span>'}</td>
         <td style="${td};max-width:420px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titel)}</div></td>
+        <td class="cm-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums" title="bezoekers · leads · calls (Trainingdrops)">${cijferCel(d)}</td>
         <td class="cm-mob-weg" style="${td};white-space:nowrap;color:var(--text-3);font-size:12px">${esc(fmtTijd(d.gewijzigd_op))}</td>
       </tr>`;
     }).join('');
     return `${kop}<div class="card cm-tabel" style="overflow:hidden"><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr><th style="${th}">Drop</th><th style="${th}">Status</th><th class="cm-mob-weg" style="${th}">Soort</th><th class="cm-mob-weg" style="${th}">Format</th><th style="${th}">Titel / kernidee</th><th class="cm-mob-weg" style="${th}">Gewijzigd</th></tr></thead>
+      <thead><tr><th style="${th}">Drop</th><th style="${th}">Status</th><th class="cm-mob-weg" style="${th}">Soort</th><th class="cm-mob-weg" style="${th}">Format</th><th style="${th}">Titel / kernidee</th><th class="cm-mob-weg" style="${th};text-align:right">Bezoekers · leads · calls</th><th class="cm-mob-weg" style="${th}">Gewijzigd</th></tr></thead>
       <tbody>${rijen}</tbody></table></div></div>
       <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Klik op een drop om hem te openen. Bezoekers, leads en calls per drop staan in Groei → Trainingdrops.</div>`;
   }

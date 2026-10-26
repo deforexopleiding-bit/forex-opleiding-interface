@@ -32,7 +32,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bouwTrainingdrops, FASE_TYPES, KANAAL_UITLEG } from './_lib/trainingdrops-compute.js';
-import { isTrainingBron } from './_lib/training-bron.js';
+import { isTrainingBron, TRAINING_BRON_PREFIXEN } from './_lib/training-bron.js';
 
 export const PAGINA = 1000;
 export const MAX_EVENTS = 50000;
@@ -51,21 +51,25 @@ function isOntbrekendeTabel(err) {
 
 async function leesEvents(db, deadline) {
   const rijen = [];
-  let laatsteId = null;
   let afgekapt = false;
-  for (;;) {
-    if (Date.now() > deadline) { afgekapt = true; break; }
-    let q = db.from('funnel_events').select(EVENT_KOLOMMEN)
-      .like('variant', 'training-%')
-      .in('event_type', FASE_TYPES);
-    if (laatsteId != null) q = q.gt('id', laatsteId);
-    const { data, error } = await q.order('id', { ascending: true }).limit(PAGINA);
-    if (error) return { rijen, afgekapt, fout: error };
-    const page = data || [];
-    rijen.push(...page);
-    if (page.length < PAGINA) break;
-    laatsteId = page[page.length - 1].id;
-    if (rijen.length >= MAX_EVENTS) { afgekapt = true; break; }
+  // Per prefix (training-%, drop-%) apart pagineren op id.
+  for (const prefix of TRAINING_BRON_PREFIXEN) {
+    let laatsteId = null;
+    for (;;) {
+      if (Date.now() > deadline) { afgekapt = true; break; }
+      let q = db.from('funnel_events').select(EVENT_KOLOMMEN)
+        .like('variant', prefix + '%')
+        .in('event_type', FASE_TYPES);
+      if (laatsteId != null) q = q.gt('id', laatsteId);
+      const { data, error } = await q.order('id', { ascending: true }).limit(PAGINA);
+      if (error) return { rijen, afgekapt, fout: error };
+      const page = data || [];
+      rijen.push(...page);
+      if (page.length < PAGINA) break;
+      laatsteId = page[page.length - 1].id;
+      if (rijen.length >= MAX_EVENTS) { afgekapt = true; break; }
+    }
+    if (afgekapt) break;
   }
   return { rijen: rijen.filter((e) => isTrainingBron(e.variant)), afgekapt, fout: null };
 }
@@ -87,10 +91,14 @@ async function leesExtraLeads(db, waarden, kolom = 'id') {
  * Fail-soft: een fout hier laat de rest van de drops staan (meta.calls_fout).
  */
 async function leesCalls(db) {
-  const { data, error } = await db.from('follow_up_appointments').select(AFSPRAAK_KOLOMMEN)
-    .like('booking_source', 'training-%').limit(10000);
-  if (error) return { afspraken: [], koppelingen: [], fout: error.message || String(error) };
-  const afspraken = (data || []).filter((a) => isTrainingBron(a.booking_source));
+  const data = [];
+  for (const prefix of TRAINING_BRON_PREFIXEN) {
+    const { data: d, error } = await db.from('follow_up_appointments').select(AFSPRAAK_KOLOMMEN)
+      .like('booking_source', prefix + '%').limit(10000);
+    if (error) return { afspraken: [], koppelingen: [], fout: error.message || String(error) };
+    data.push(...(d || []));
+  }
+  const afspraken = data.filter((a) => isTrainingBron(a.booking_source));
   const koppelingen = [];
   const ids = afspraken.map((a) => a.id);
   for (let i = 0; i < ids.length; i += 200) {
@@ -117,10 +125,19 @@ export default async function handler(req, res) {
   const deadline = Date.now() + TIJDBUDGET_MS;
   try {
     const db = supabaseAdmin;
+    const leesLeads = async () => {
+      const data = [];
+      for (const prefix of TRAINING_BRON_PREFIXEN) {
+        const r = await db.from('leads').select(LEAD_KOLOMMEN)
+          .like('bron', prefix + '%').is('verwijderd_op', null)
+          .order('aangemaakt', { ascending: false }).limit(10000);
+        if (r.error) return { data: null, error: r.error };
+        data.push(...(r.data || []));
+      }
+      return { data, error: null };
+    };
     const [leadsRes, ev, cl] = await Promise.all([
-      db.from('leads').select(LEAD_KOLOMMEN)
-        .like('bron', 'training-%').is('verwijderd_op', null)
-        .order('aangemaakt', { ascending: false }).limit(10000),
+      leesLeads(),
       leesEvents(db, deadline).catch((e) => ({ rijen: [], afgekapt: false, fout: { message: e?.message || String(e) } })),
       leesCalls(db).catch((e) => ({ afspraken: [], koppelingen: [], fout: e?.message || String(e) })),
     ]);

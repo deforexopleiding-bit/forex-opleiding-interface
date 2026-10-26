@@ -131,12 +131,13 @@
   };
   // 2026-10-23: wekelijkse training-drop 'training-<dd-mm-jj>' als PATROON
   // (één regel voor alle weken; zie api/_lib/training-bron.js).
-  const TRAINING_BRON_RE = /^training-(\d{2})-(\d{2})-(\d{2})$/;
+  // Sinds de Contentmachine ook 'drop-<dd-mm-jj>' en '-2' (tweede drop die dag).
+  const TRAINING_BRON_RE = /^(training|drop)-(\d{2})-(\d{2})-(\d{2})(?:-(\d))?$/;
   const bronLabel = (raw) => {
     const key = String(raw || '').trim().toLowerCase();
     if (!key) return 'Website';
     const t = TRAINING_BRON_RE.exec(key);
-    if (t) return 'Live training ' + t[1] + '/' + t[2] + '/' + t[3];
+    if (t) return (t[1] === 'drop' ? 'Drop ' : 'Live training ') + t[2] + '/' + t[3] + '/' + t[4] + (t[5] ? ' (' + t[5] + ')' : '');
     return BRON_LABELS[key] || raw;
   };
 
