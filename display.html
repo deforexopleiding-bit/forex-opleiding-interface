@@ -338,7 +338,9 @@
   function fitBoard(){
     var elb = document.querySelector('.board'); if (!elb) return;
     if (window.innerWidth <= 820) { elb.style.transform = ''; return; }
-    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    var z = parseFloat(new URLSearchParams(location.search).get('zoom'));
+    if (!(z > 0)) z = 1;   // 1 = vult scherm; TV met overscan: &zoom=0.9
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080) * z;
     elb.style.transform = 'scale(' + s + ')';
   }
   window.addEventListener('resize', fitBoard);
