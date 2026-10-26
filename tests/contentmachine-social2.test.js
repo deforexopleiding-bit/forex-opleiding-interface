@@ -235,3 +235,12 @@ test('renderer: formaten en namen; de oude renderer geeft v2-drops door aan soci
   for (const t of ['SWIPE →', 'LINK IN BIO →', '@deforexopleiding.nl', 'story-${i + 1}', 'post-${i + 1}']) assert.ok(s2.includes(t), t);
   void BEELD_FOTO;
 });
+
+test('tekenkit: geen spatie vóór leestekens na een accentwoord ("**brandstof**, geen")', async () => {
+  const w = await browser();
+  w.eval(lees('modules/klanten-v2/views/contentmachine-canvas-v2.js'));
+  const d = JSON.parse(JSON.stringify(w.__cmCanvas.delen('Een sweep is **brandstof**, geen **break.**')));
+  assert.deepEqual(d.map((x) => [x.woord, !!x.accent, !!x.plak]), [
+    ['Een', false, false], ['sweep', false, false], ['is', false, false], ['brandstof', true, false], [',', false, true], ['geen', false, false], ['break.', true, false],
+  ]);
+});

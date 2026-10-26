@@ -247,6 +247,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   v1-drops (zonder blokken) blijven werken. 12 masterclassfoto's in de seed (toestemming publiek, geen namen).
   DEMO (fase 6): `22-10-26-demo` (gegenereerd, niet gepubliceerd; bron docs/contentmachine/demo-drop-22-10-26.json,
   test tests/contentmachine-demo.test.js). `-demo` is geen website-slug.
+  DEMO 2.0 (fase 6, 26 okt): `22-10-26-demo2` (training 22/10 met video; goud · video-poort · quiz+replay+calculator)
+  en `26-10-26-demo` (update zonder video, payouts met toestemming; data · groot-getal · sliders+trechter). Beide
+  'gegenereerd', NIET gepubliceerd; bron docs/contentmachine/v2/demo/*.json (bouw-demo.mjs), test
+  tests/contentmachine-demo2.test.js. Bekijken = werkblad (voorbeeld via voorbeeld_token); beelden via "Opslaan in Storage".
 - Eén login voor alle funnels (2026-10-26) — ELKE trial-lead (minicursus, 7-daagse, webinar,
   site-formulier, The Lab, en elke toekomstige belofte) krijgt een lab-lead (7 dagen) in het echte LMS
   (dfo-lms `hlms_lab_lead` + rol trial) i.p.v. een account in het oude trial-LMS (`lms_gebruikers`,
