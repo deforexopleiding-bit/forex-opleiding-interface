@@ -5,8 +5,18 @@ code van de drie repo's (dfo-website, forex-opleiding-interface = CRM,
 dfo-lms-prototype = LMS) en uit de productie-instellingen op 26 okt 2026. Waar
 iets een instelling is en geen code, staat dat erbij.
 
-Stand op 26 okt: de opvolgmotor staat AAN (`lab_opvolging_live = "true"`),
-alle producten staan op `lab` in `trial_bestemming`.
+Stand op 26 okt: de opvolgmotor staat AAN (`lab_opvolging_live = "true"`).
+De trialflow geldt voor **minicursus, 7-daagse, website en The Lab**.
+
+> **De webinar hoort NIET in de trialflow** (bijsturing Maxim, 26 okt). De webinar
+> heeft een eigen flow (registratie, Zoom-link, eigen herinneringen via
+> `cron-webinar`) en die is ongemoeid. `trial_bestemming.webinar` staat op `oud` en de
+> code geeft een webinar-aanmelding enkel nog een trial als die waarde uitdrukkelijk
+> `lab` is (ontbreekt ze of staat er onzin: geen trial). Op 26 okt kregen 15
+> webinar-aanmeldingen toch een trial (11 nieuwe accounts, 4 al student; 11
+> WhatsApp `trial_welkom`). Die accounts blijven bestaan tot ze verlopen, maar de
+> opvolgmotor en de belmelding slaan ze over, en in Leadsonderhoud › The Lab staan ze
+> apart. Waar hieronder nog "webinar" staat, is dat ter info.
 
 ---
 
@@ -18,8 +28,7 @@ alle producten staan op `lab` in `trial_bestemming`.
 | Minicursus v10 | `/kennismakingscursus-v10` | `kennismakingscursus-v10` | minicursus | `/api/lead` → WhatsApp-gate |
 | 7-daagse v5 | `/7-daagse-v5` | `7-daagse-v5` | 7-daagse | `/api/lead` → WhatsApp-gate |
 | 7-daagse v6 | `/7-daagse-v6` | `7-daagse-v6` | 7-daagse | `/api/lead` → WhatsApp-gate |
-| Webinar v1 | `/webinar-v1` | `webinar-v1` | webinar | `/api/webinar-aanmelding` → CRM `/api/public-webinar-aanmelding` (géén gate) |
-| Webinar v2 | `/webinar-v2` | `webinar-v2` | webinar | idem |
+| Webinar v1 / v2 | `/webinar-v1`, `/webinar-v2` | `webinar-v1/-v2` | — | **Niet in de trialflow**: eigen webinarflow (`/api/webinar-aanmelding` → CRM `/api/public-webinar-aanmelding`) |
 | The Lab v1 | `/the-lab-v1` → `/the-lab-v1/bedankt` | `the-lab-v1` | the-lab | CRM `/api/lab-aanmelding` (géén gate) |
 | The Lab v2 | `/the-lab-v2` → `/the-lab-v2/bedankt` | `the-lab-v2` | the-lab | idem |
 | The Lab site | `/the-lab` → `/the-lab/bedankt` | `the-lab-site` | the-lab | idem |
@@ -150,8 +159,7 @@ rij in `lab_aanmeldingen` (product, bron, variant, toegang_aanvraag_id, CRM-lead
 
 Wanneer:
 - gate-funnels: meteen na het "ja" (via `belProvisioning`);
-- webinar: na de aanmelding, op de achtergrond (`waitUntil`), alleen bij een NIEUWE
-  aanmelding (niet bij "al aangemeld" of "verplaatst");
+- webinar: NIET meer (enkel als `trial_bestemming.webinar` uitdrukkelijk `lab` is);
 - The Lab: meteen bij het formulier.
 
 Wat er aangemaakt wordt (in dfo-lms):
@@ -193,8 +201,8 @@ Gevallen (`beslisAccount`):
 
 Lukt het LMS niet: retry. Gate-funnels via `cron-toegang-aanvragen` (72 u lang,
 max. 7 pogingen, wachttijd `min(60·2^n, 3600)` s; daarna alarmmail naar
-`PROVISIONING_ALARM_EMAIL`). Webinar/The Lab via `cron-lab-opvolging` (`herstel`,
-max. 5 pogingen binnen 72 u, telkens n×10 min later).
+`PROVISIONING_ALARM_EMAIL`). The Lab via `cron-lab-opvolging` (`herstel`, max. 5
+pogingen binnen 72 u, telkens n×10 min later; nooit voor een webinar-aanmelding).
 
 Testleads: e-mail met `+test` / `+labtest`, of `maxim.delombaerde96+…@gmail.com`
 → `is_test`, telt niet mee in de cijfers.
@@ -210,7 +218,7 @@ Code: `api/_lib/lab-berichten.js` → `WELKOM_BELOFTE`.
 |---|---|---|
 | Minicursus | **Je minicursus staat klaar** | "Je minicursus staat voor je klaar. Je krijgt de korte video's waarmee onze studenten zelf begonnen — hoe de markt écht beweegt — en daarna plaats je in The Lab je eerste (simulatie)trade met onze strategie." |
 | 7-daagse | **Je 7 dagen meekijken starten nu** | "Vanaf vandaag kijk je 7 dagen mee in onze leeromgeving. Je ziet de video's die onze studenten krijgen, de opname van een live training, en in The Lab plaats je zelf je eerste (simulatie)trade." |
-| Webinar | **Je toegang staat klaar — alvast vóór het webinar** | "Je plek in het webinar staat vast. Wil je er het maximum uithalen? Dan kan je nu al beginnen: in je leeromgeving staan de video's waar we in het webinar op verder bouwen, en in The Lab plaats je je eerste (simulatie)trade." |
+| Webinar (niet meer in gebruik) | **Je toegang staat klaar — alvast vóór het webinar** | "Je plek in het webinar staat vast. Wil je er het maximum uithalen? Dan kan je nu al beginnen: in je leeromgeving staan de video's waar we in het webinar op verder bouwen, en in The Lab plaats je je eerste (simulatie)trade." |
 | Website | **Je toegang tot de leeromgeving staat klaar** | "Je persoonlijke leeromgeving staat klaar. Je krijgt de video's waarmee onze studenten zelf begonnen, en in The Lab plaats je je eerste (simulatie)trade met onze strategie." |
 | The Lab | **Je toegang tot The Lab staat klaar** | "Je eigen account staat klaar. In The Lab plaats je je eerste trade met onze strategie — stap voor stap, in een echte chart. Reken op een twintigtal minuten." |
 
@@ -224,7 +232,7 @@ Daarna voor iedereen:
 
 WhatsApp op dag 0:
 - gate-funnels: GEEN extra WhatsApp (ze kregen al het "Top <naam>! ✅"-bericht);
-- webinar / The Lab: template `trial_welkom`, enkel met toestemming en een
+- The Lab: template `trial_welkom`, enkel met toestemming en een
   goedgekeurd template — "Hey {{1}}! 👋 Je toegang staat klaar: 7 dagen in de
   leeromgeving van De Forex Opleiding. Begin met de eerste video en plaats daarna je
   eerste (simulatie)trade in The Lab. Log in met één klik: {{2}}" + "Veel succes, het
@@ -399,6 +407,8 @@ die stap gaat wel. De code stuurt precies 2 variabelen: {{1}} voornaam, {{2}} li
   aanmeldingen van de laatste 21 dagen (`VENSTER_DAGEN`).
 - **Stille uren**: niets tussen 21:00 en 08:00 (Europe/Amsterdam).
 - **Max. 1 bericht per lead per 20 uur.**
+- **Nooit voor een webinar-lead** (alle aanmeldingen van die lead = webinar): geen
+  enkel bericht, geen herstelpoging, geen belopdracht voor Dave.
 - **Stopt bij**: geboekte sessie · klant geworden · afgemeld (`lead_mail_voorkeuren`)
   · geen toestemming. Let op: zonder toestemming gaat er ook GEEN mail uit de motor.
 - **Nooit** "je bent nog niet ingelogd" aan wie al inlogde.
@@ -444,13 +454,15 @@ Er is **geen harde uitlog**: de lead kan nog 30 dagen inloggen met dezelfde link
 ### Leadsonderhoud › The Lab
 Tabs **Overzicht** · **Bellijst** · **Ads (The Lab)**. Bron: `api/trial-overzicht.js`.
 
-- **Overzicht**: KPI's per product (Minicursus / 7-daagse / Webinar / Website /
-  The Lab): leads · ingelogd · video gezien · Lab gestart · Lab afgewerkt · sessie
+- **Overzicht**: KPI's per product (Minicursus / 7-daagse / Website / The Lab;
+  **geen webinar**): leads · ingelogd · video gezien · Lab gestart · Lab afgewerkt · sessie
   geboekt · klant (met % van de leads). Filters: Vandaag / 7d / 30d / 90d, product,
   hook, variant. Per lead een dossier met tijdlijn.
 - **Chips per lead**: Klant · Sessie geboekt · <datum> · Ingelogd / Niet ingelogd ·
   Video's · n (titels bij hover) · Lab · stap x/y · Lab afgewerkt · Verlopen ·
   Afgemeld. **Al student** staat in een apart blok, buiten de KPI's en de bellijst.
+  Idem **"Webinar (trial van 26/10, vóór de bijsturing)"**: de webinar-trials van 26
+  okt, apart onderaan, nooit in de KPI's, de bellijst of de productfilter.
 - **Status (labStatus)**: geboekt · afgewerkt · bezig · verlopen · ingelogd ·
   aangemeld · geen_account.
 - **Bellijst**: groepen "Warm, geen sessie" / "Ingelogd, geen sessie" / "Niet
@@ -467,7 +479,7 @@ WhatsApp-template; de schakelaar van de motor.
 Toont de minicursus- en 7-daagse-proefleads ("Minicursus" / "7-daagse · <variant>")
 met hun LMS-gedrag (ingelogd, video's, Lab) uit `api/_lib/lab-trial-stand.js`.
 Warmte 0–45: ingelogd +5, per video +4 (max. 20), Lab gestart +8, afgewerkt +12.
-**Webinar-trials staan NIET in Leads bellen** (die zie je in Leadsonderhoud › The Lab).
+Webinar-leads staan hier niet: die volgen hun eigen webinarflow.
 
 ### Afspraken
 Opvolging-agenda en Kennismakingsgesprekken: chip "via <Belofte>" op de
@@ -479,12 +491,14 @@ strategiesessie.
 
 `app_settings.trial_bestemming` — nu:
 ```json
-{"the-lab":"lab","webinar":"lab","website":"lab","7-daagse":"lab","minicursus":"lab"}
+{"the-lab":"lab","webinar":"oud","website":"lab","7-daagse":"lab","minicursus":"lab"}
 ```
 - `lab` = lab-lead in het echte LMS (alles hierboven).
 - `oud` = terug naar het oude trial-LMS (dfo-website `/api/interne-welkom`, account in
   `lms_gebruikers`, www.deforexopleiding.nl/lms).
 - Ontbreekt een product, staat er onzin, of lukt het lezen niet → `lab`.
+  **Behalve de webinar**: daar is het omgekeerd (`oud`, dus geen trial), zie
+  `BUITEN_TRIALFLOW` / `standaardBestemming` in `api/_lib/trial-product.js`.
 
 **Terugdraaien per product, zonder deploy**: in Supabase (forex-command-center):
 ```sql
@@ -492,14 +506,15 @@ update app_settings
 set value = jsonb_set(value::jsonb, '{minicursus}', '"oud"')
 where key = 'trial_bestemming';
 ```
-(product naar keuze: `minicursus`, `7-daagse`, `website`, `webinar`). Geldt voor
+(product naar keuze: `minicursus`, `7-daagse`, `website`). Geldt voor
 nieuwe aanmeldingen vanaf dan; wie al een lab-lead heeft houdt die.
 
 Kanttekeningen:
 - **De sleutel `the-lab` doet niets**: de Lab-funnel (`/api/lab-aanmelding`) gaat
   altijd naar het LMS en leest de schakelaar niet.
-- Webinar op `oud` = geen trial meer bij een webinar-aanmelding (er bestond geen oud
-  webinar-trial); de webinar-registratie zelf blijft.
+- Webinar staat op `oud` = geen trial bij een webinar-aanmelding (er bestond geen oud
+  webinar-trial); de webinarregistratie zelf loopt zoals vóór 26 okt. Zelfs op `lab`
+  gezet slaan de opvolgmotor en de belmelding webinar-lab-leads over.
 - De opvolgmotor apart stilzetten: `lab_opvolging_live` op `"false"` (of via de knop
   in Trial-opvolging). Alles stil: env `LEADSONDERHOUD_UIT`.
 - NOOIT `lms_gebruikers.lead_id` backfillen (zie
