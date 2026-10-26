@@ -11,6 +11,9 @@
 //     de welkomstmail van de aanmelding) en laatste belpoging;
 //   * wie al student is (resultaat al_toegang, geen lab-account) staat apart
 //     (al_student): niet in de KPI's, niet in de bellijst;
+//   * de webinar hoort NIET in de trialflow (26 okt, Maxim: eigen flow). De
+//     webinar-trials die op 26 okt toch ontstonden staan apart (buiten_flow):
+//     niet in de KPI's, niet in de bellijst;
 //   * de BELLIJST: wie nu het meest waard is om te bellen.
 //       1. warm (Lab afgewerkt of ≥ 2 video's) en geen sessie
 //       2. ingelogd zonder sessie
@@ -19,7 +22,7 @@
 //     Binnen een groep: de hoogste score eerst; wie de laatste 24 uur al gebeld
 //     werd, schuift achteraan.
 
-import { herkomstVanAanmelding, productLabel, PRODUCTEN } from './trial-product.js';
+import { herkomstVanAanmelding, productLabel, PRODUCTEN, isBuitenTrialflow } from './trial-product.js';
 import { isAfgerond, isGestart } from './lab-dossier.js';
 import { labScore } from './lab-trial-stand.js';
 
@@ -114,6 +117,7 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
 
   const rijen = [];
   const alStudent = [];
+  const buitenFlow = [];
   for (const [em, a] of eerste) {
     const st = standPerEmail.get(em) || null;
     const ll = st?.labLead || null;
@@ -167,12 +171,14 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
       score: labScore({ ingelogd, videos, gestart, afgerond }),
     };
     r.chips = statusChips(r);
+    // Webinar: eigen flow — apart, nooit in de KPI's of de bellijst.
+    if (isBuitenTrialflow(product)) { r.bel_groep = null; buitenFlow.push(r); continue; }
     r.bel_groep = belGroep(r);
     rijen.push(r);
   }
 
   // KPI's per product + totaal. Testleads tellen nooit mee.
-  const per = new Map(PRODUCTEN.map((p) => [p, leeg(p, productLabel(p))]));
+  const per = new Map(PRODUCTEN.filter((p) => !isBuitenTrialflow(p)).map((p) => [p, leeg(p, productLabel(p))]));
   const totaal = leeg('totaal', 'Totaal');
   for (const r of rijen) {
     if (r.is_test) continue;
@@ -191,7 +197,8 @@ export function bouwOverzicht({ aanmeldingen = [], standPerEmail = new Map(), le
   rijen.sort((a, b) => String(b.aangemeld).localeCompare(String(a.aangemeld)));
   const bellijst = rijen.filter((r) => r.bel_groep).sort((a, b) => sorteerBellijst(a, b, nu));
   alStudent.sort((a, b) => String(b.aangemeld).localeCompare(String(a.aangemeld)));
-  return { kpi: [...per.values(), totaal], leads: rijen, bellijst, al_student: alStudent };
+  buitenFlow.sort((a, b) => String(b.aangemeld).localeCompare(String(a.aangemeld)));
+  return { kpi: [...per.values(), totaal], leads: rijen, bellijst, al_student: alStudent, buiten_flow: buitenFlow };
 }
 
 /** CSV van de bellijst (puntkomma, voor Excel NL/BE). PURE. */

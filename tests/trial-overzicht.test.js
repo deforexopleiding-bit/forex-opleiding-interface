@@ -22,7 +22,9 @@ function opzet() {
   const aanmeldingen = [
     A('a-warm', 'warm@x.be', { product: 'minicursus', bron: 'kennismakingscursus-v9' }),
     A('a-in', 'in@x.be', { product: '7-daagse', bron: '7-daagse-v6' }),
-    A('a-niet', 'niet@x.be', { landingspagina: 'trial:webinar:webinar-v2' }),
+    A('a-niet', 'niet@x.be', { landingspagina: 'trial:website:website' }),
+    // Webinar-trial van 26 okt (vóór de bijsturing): apart, nooit in KPI of bellijst.
+    A('a-web', 'web@x.be', { landingspagina: 'trial:webinar:webinar-v2' }),
     A('a-geboekt', 'geboekt@x.be', { product: 'minicursus' }),
     A('a-lab', 'lab@x.be', { hook: 'H03' }),
     A('a-test', 'maxim.delombaerde96+t1@gmail.com', { product: 'minicursus', is_test: true }),
@@ -38,6 +40,7 @@ function opzet() {
     ['lab@x.be', stand({ lead: { eerste_login_op: '2026-10-26T11:00:00Z' }, sessie: { stap: 25, stappen: 25, voortgang: 100 } })],
     ['maxim.delombaerde96+t1@gmail.com', stand({ lead: { is_test: true } })],
     ['zonder@x.be', stand()],
+    ['web@x.be', stand({ lead: { product: 'webinar', eerste_login_op: '2026-10-26T11:00:00Z' }, videos: 3 })],
   ]);
   return { aanmeldingen, standPerEmail };
 }
@@ -48,13 +51,23 @@ test('KPI per product: één lead per e-mail, de eerste belofte, testleads telle
   assert.equal(k.totaal.leads, 6);
   assert.equal(k.minicursus.leads, 2, 'warm + geboekt (test telt niet)');
   assert.equal(k['7-daagse'].leads, 2);
-  assert.equal(k.webinar.leads, 1, 'herkomst uit de marker van vóór de migratie');
+  assert.equal(k.website.leads, 1, 'herkomst uit de marker van vóór de migratie');
+  assert.equal(k.webinar, undefined, 'webinar heeft geen KPI-kaart meer');
   assert.equal(k['the-lab'].leads, 1);
   assert.equal(k.totaal.ingelogd, 4);
   assert.equal(k.totaal.video, 2);
   assert.equal(k.totaal.lab_afgewerkt, 1);
   assert.equal(k.totaal.geboekt, 1);
   assert.equal(o.leads.length, 7, 'de test staat wel in de lijst');
+});
+
+test('webinar (buiten de trialflow): apart, niet in de lijst, de KPI of de bellijst — ook al is hij warm', () => {
+  const o = bouwOverzicht({ ...opzet(), nu: NU });
+  assert.deepEqual(o.buiten_flow.map((r) => r.email), ['web@x.be']);
+  assert.equal(o.buiten_flow[0].product_label, 'Webinar');
+  assert.equal(o.buiten_flow[0].bel_groep, null);
+  assert.ok(!o.leads.some((r) => r.email === 'web@x.be'));
+  assert.ok(!o.bellijst.some((r) => r.email === 'web@x.be'));
 });
 
 test('filter per product en hook', () => {

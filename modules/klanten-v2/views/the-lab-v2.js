@@ -500,7 +500,7 @@
 
   function kpiBlok(kpi) {
     const rijen = [['ingelogd', 'Ingelogd'], ['video', 'Video gezien'], ['lab_gestart', 'Lab gestart'], ['lab_afgewerkt', 'Lab afgewerkt'], ['geboekt', 'Sessie geboekt'], ['klant', 'Klant']];
-    const tonen = (kpi || []).filter((k) => k.sleutel === 'totaal' || k.leads > 0 || ['minicursus', '7-daagse', 'webinar', 'the-lab'].includes(k.sleutel));
+    const tonen = (kpi || []).filter((k) => k.sleutel !== 'webinar' && (k.sleutel === 'totaal' || k.leads > 0 || ['minicursus', '7-daagse', 'the-lab'].includes(k.sleutel)));
     return '<div data-trial-kpi style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px">' + tonen.map((k) => {
       const tot = k.sleutel === 'totaal';
       return '<div style="border:1px solid var(--border);border-radius:var(--r-md,12px);padding:12px 14px;background:' + (tot ? 'var(--surface-2,rgba(0,0,0,.02))' : 'var(--surface)') + ';cursor:' + (tot ? 'default' : 'pointer') + '"' + (tot ? '' : ' onclick="window.__trialOvZet(\'product\',\'' + esc(k.sleutel) + '\')"') + '>' +
@@ -551,6 +551,17 @@
         '<td style="padding:6px 10px">' + chips(r.chips) + '</td></tr>').join('') + '</tbody></table></div>';
   }
 
+  /** Webinar-trials van 26 okt (vóór de bijsturing): apart, buiten KPI's en bellijst. */
+  function buitenFlowBlok(lijst) {
+    if (!lijst.length) return '';
+    return '<div style="font-weight:600;margin:18px 0 6px">Webinar (trial van 26/10, vóór de bijsturing) <span style="font-weight:400;color:var(--text-3);font-size:12px">(' + lijst.length + ') — de webinar heeft een eigen flow: geen opvolgberichten, niet in de bellijst, telt niet mee; inloggen kan tot de toegang verloopt</span></div>' +
+      '<div style="overflow-x:auto" data-trial-buiten-flow><table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>' + lijst.map((r) =>
+        '<tr style="border-top:1px solid var(--border)"><td style="padding:6px 10px"><b>' + esc(r.naam) + '</b><div style="font-size:11.5px;color:var(--text-3)">' + esc(r.email) + (r.is_test ? ' · TEST' : '') + '</div></td>' +
+        '<td style="padding:6px 10px">' + productChip(r.product, r.product_label, r.bron) + '</td>' +
+        '<td style="padding:6px 10px;white-space:nowrap">' + esc(datum(r.aangemeld)) + '</td>' +
+        '<td style="padding:6px 10px">' + chips(r.chips) + '</td></tr>').join('') + '</tbody></table></div>';
+  }
+
   const GROEP_LABEL = { warm: 'Warm, geen sessie', ingelogd: 'Ingelogd, geen sessie', niet_ingelogd: 'Niet ingelogd (met toestemming)' };
   function bellijst(d) {
     const lijst = d.bellijst || [];
@@ -582,7 +593,8 @@
   }
 
   function filterBalk(d) {
-    const producten = [['alle', 'Alle'], ['minicursus', 'Minicursus'], ['7-daagse', '7-daagse'], ['webinar', 'Webinar'], ['website', 'Website'], ['the-lab', 'The Lab']];
+    // Geen webinar: die heeft een eigen flow (26 okt) en staat apart onderaan.
+    const producten = [['alle', 'Alle'], ['minicursus', 'Minicursus'], ['7-daagse', '7-daagse'], ['website', 'Website'], ['the-lab', 'The Lab']];
     const hooks = (d && d.hooks) || [];
     return '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">' +
       '<div style="display:flex;gap:4px;flex-wrap:wrap">' + ovKnoppen('preset', [['vandaag', 'Vandaag'], ['7d', '7 dagen'], ['30d', '30 dagen'], ['90d', '90 dagen']]) + '</div>' +
@@ -609,7 +621,7 @@
       const meld = (d.meldingen || []).map((m) => '<div style="margin-bottom:8px;padding:8px 12px;background:var(--amber-soft,#FFF4E0);border-radius:6px;font-size:12px">' + esc(m) + '</div>').join('');
       inhoud = meld + (ov.tab === 'bellijst'
         ? '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div style="font-size:12px;color:var(--text-3)">Eerst warm zonder sessie, dan ingelogd zonder sessie, dan niet ingelogd met toestemming. Binnen een groep de hoogste score eerst; wie vandaag al gebeld werd schuift achteraan.</div><button class="btn btn-sm" onclick="window.__trialBelCsv()">CSV downloaden</button></div>' + bellijst(d)
-        : kpiBlok(d.kpi) + '<div style="font-weight:600;margin:6px 0 8px">Trial-leads <span style="font-weight:400;color:var(--text-3);font-size:12px">— klik voor het dossier · % t.o.v. leads · testleads tellen niet mee in de cijfers</span></div>' + trialLijst(d.leads || []) + alStudentBlok(d.al_student || []));
+        : kpiBlok(d.kpi) + '<div style="font-weight:600;margin:6px 0 8px">Trial-leads <span style="font-weight:400;color:var(--text-3);font-size:12px">— klik voor het dossier · % t.o.v. leads · testleads tellen niet mee in de cijfers</span></div>' + trialLijst(d.leads || []) + alStudentBlok(d.al_student || []) + buitenFlowBlok(d.buiten_flow || []));
     } else inhoud = '';
     return '<div class="card" style="padding:16px 18px">' + tabBalk +
       '<div style="font-weight:700;font-size:15px;margin-bottom:10px">Alle trial-leads · één login, elke belofte</div>' +
