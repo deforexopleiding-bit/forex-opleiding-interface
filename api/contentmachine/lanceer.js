@@ -4,7 +4,9 @@
 //
 // GET  ?id=<uuid>                       → { voorwaarden, test, lancering, beelden, instellingen, ghl, captions? }
 // POST { actie:'test', id, onderwerp }  → testmail van DEZE versie naar de ingelogde gebruiker (via GHL)
-// POST { actie:'lanceer', id, modus:'nu'|'ingepland', ingepland_op?, onderwerp }   (super_admin)
+// POST { actie:'lanceer', id, modus:'nu'|'ingepland', ingepland_op?, onderwerp, doelgroep:'tag'|'alle', bevestiging? }   (super_admin)
+//        doelgroep 'alle' = alle contacten van de GHL-location (zoals de huidige nieuwsbrief), enkel met bevestiging 'VERSTUUR'
+// POST { actie:'ontvangers', doelgroep:'tag'|'alle' } → verwacht aantal ontvangers { totaal, zonder_dnd }
 //        1. goedkeuren (grenzen/editieregels/cijfers) → 2. pagina gepubliceerd
 //        3. nieuwsbrief: workflow bestaat? → (nu) vaste template + onderwerp bijwerken en de
 //           verzendtag zetten in batches (rest via de cron) · (ingepland) de cron doet dat op tijd
@@ -24,7 +26,7 @@ import { laadVoorNieuwsbrief, uitschrijfTag } from './nieuwsbrief.js';
 import { renderNieuwsbrief } from '../_lib/nieuwsbrief-render.js';
 import { metVasteTeksten } from '../_lib/contentmachine-generator.js';
 import { ghlNieuwsbriefConfig, ghlLinks, maakTemplate, vulTemplate, eigenContact, stuurTestmail } from '../_lib/ghl-nieuwsbrief.js';
-import { zoekWorkflow, zetOnderwerp, tagsVanLocatie, telTag, nieuwsbriefKandidaten, STANDAARD } from '../_lib/ghl-weekeditie.js';
+import { zoekWorkflow, zetOnderwerp, tagsVanLocatie, telTag, telOntvangers, nieuwsbriefKandidaten, STANDAARD, ALLE_CONTACTEN } from '../_lib/ghl-weekeditie.js';
 import {
   leesInstellingen, bewaarInstellingen, geldigeTag, kanalenVan, beeldenCheck, voorwaarden, laatsteTest, laatsteLancering,
   paginaCheck, verwachteTitel, verwerkLancering, LANCERING_KOLOMMEN,
@@ -65,11 +67,11 @@ export default async function handler(req, res) {
   const id = String((req.method === 'POST' ? b.id : (req.query || {}).id) || '');
   const superAdmin = p.profiel && p.profiel.role === 'super_admin';
   const cfg = ghlNieuwsbriefConfig();
-  const ACTIES = ['status', 'test', 'lanceer', 'controleer-pagina', 'annuleer', 'ghl-check', 'ghl-instellen', 'instellingen'];
+  const ACTIES = ['status', 'test', 'lanceer', 'controleer-pagina', 'annuleer', 'ghl-check', 'ghl-instellen', 'instellingen', 'ontvangers'];
   if (!ACTIES.includes(actie)) return res.status(400).json({ error: 'Onbekende actie' });
-  const ZONDER_DROP = ['ghl-check', 'ghl-instellen', 'instellingen'];
+  const ZONDER_DROP = ['ghl-check', 'ghl-instellen', 'instellingen', 'ontvangers'];
   if (!ZONDER_DROP.includes(actie) && !/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id ontbreekt' });
-  if (['lanceer', 'annuleer', ...ZONDER_DROP].includes(actie) && !superAdmin) return res.status(403).json({ error: 'Enkel een super_admin kan lanceren en GHL instellen.', code: 'GEEN_SUPER_ADMIN' });
+  if (['lanceer', 'annuleer', 'ghl-check', 'ghl-instellen', 'instellingen'].includes(actie) && !superAdmin) return res.status(403).json({ error: 'Enkel een super_admin kan lanceren en GHL instellen.', code: 'GEEN_SUPER_ADMIN' });
 
   try {
     const inst = await leesInstellingen(db);
@@ -81,6 +83,12 @@ export default async function handler(req, res) {
       if (b.workflow_naam != null) patch.workflow_naam = String(b.workflow_naam).trim().slice(0, 120);
       if (patch.doelgroep_tag && patch.verzend_tag && patch.doelgroep_tag === patch.verzend_tag) return res.status(400).json({ error: 'Doelgroep-tag en verzendtag moeten verschillen.' });
       return res.status(200).json({ ok: true, instellingen: await bewaarInstellingen(db, patch, p.user.id) });
+    }
+    if (actie === 'ontvangers') {
+      if (!cfg.ok) return res.status(503).json({ error: `GHL niet gekoppeld (ontbreekt: ${cfg.ontbreekt.join(', ')})`, code: 'GHL_NIET_GEKOPPELD' });
+      const alle = b.doelgroep === 'alle';
+      const r = await telOntvangers(cfg, alle ? ALLE_CONTACTEN : inst.doelgroep_tag);
+      return res.status(200).json({ ok: true, doelgroep: alle ? 'alle' : 'tag', tag: alle ? null : inst.doelgroep_tag, ...r });
     }
     if (actie === 'ghl-instellen' || actie === 'ghl-check') {
       if (!cfg.ok) return res.status(503).json({ error: `GHL niet gekoppeld (ontbreekt: ${cfg.ontbreekt.join(', ')})`, code: 'GHL_NIET_GEKOPPELD' });
@@ -166,6 +174,8 @@ export default async function handler(req, res) {
       ingeplandOp = t.toISOString();
     }
     const idx = Math.max(0, Math.min(2, parseInt(b.onderwerp, 10) || 0));
+    const alleContacten = b.doelgroep === 'alle';
+    if (alleContacten && b.bevestiging !== 'VERSTUUR') return res.status(400).json({ error: 'Naar alle contacten versturen vraagt een extra bevestiging: typ VERSTUUR.', code: 'BEVESTIGING_NODIG' });
     if (!['gegenereerd', 'goedgekeurd', 'gepubliceerd'].includes(drop.status) || !drop.output) return res.status(409).json({ error: 'Enkel een gegenereerde drop kan je lanceren.' });
     const problemen = [...grensProblemen(drop.output, drop.input), ...await editieProblemen(db, drop)];
     if (problemen.length) return res.status(409).json({ error: 'Eerst deze teksten aanpassen: ' + problemen.slice(0, 3).map((x) => `${x.pad} (${x.regel})`).join('; '), code: 'GRENZEN', problemen });
@@ -202,7 +212,7 @@ export default async function handler(req, res) {
 
     const rij = {
       drop_id: drop.id, drop_versie: drop.versie, modus, ingepland_op: ingeplandOp || nu, onderwerp_index: idx,
-      doelgroep_tag: inst.doelgroep_tag, verzend_tag: inst.verzend_tag, template_id: inst.template_id || null, aangemaakt_door: p.user.id,
+      doelgroep_tag: alleContacten ? ALLE_CONTACTEN : inst.doelgroep_tag, verzend_tag: inst.verzend_tag, template_id: inst.template_id || null, aangemaakt_door: p.user.id,
       status: metMail ? 'ingepland' : 'klaar', totaal: metMail ? null : 0, ...(metMail ? {} : { klaar_op: nu, fout: 'Kanaal nieuwsbrief staat uit.' }),
     };
     const { data: lancering, error: iErr } = await db.from('weekeditie_lanceringen').insert(rij).select(LANCERING_KOLOMMEN).single();

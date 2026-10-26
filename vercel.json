@@ -74,7 +74,7 @@
   "crons": [
     {
       "path": "/api/cron-weekeditie-lancering",
-      "schedule": "*/2 * * * *"
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron-massa-mail",

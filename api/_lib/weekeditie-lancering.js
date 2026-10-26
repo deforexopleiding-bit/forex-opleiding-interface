@@ -18,7 +18,7 @@
 // weekeditie_testmails, weekeditie_lanceringen, weekeditie_lancering_contacten.
 // Instellingen: app_settings 'contentmachine_weekeditie_ghl'.
 
-import { STANDAARD, zoekContactenMetTag, zetTag, magTaggen, TAG_PAUZE_MS } from './ghl-weekeditie.js';
+import { STANDAARD, zoekContactenMetTag, zetTag, magTaggen, TAG_PAUZE_MS, TAG_PARALLEL } from './ghl-weekeditie.js';
 import { isSocialV2 } from './contentmachine-social.js';
 import { isTeaser } from './nieuwsbrief-render.js';
 import { TRAINING_ORIGIN } from './contentmachine-social.js';
@@ -165,7 +165,7 @@ export function voorwaarden({ drop, problemen = [], test = null, cfg = { ok: fal
  * als de tijd op is). Hervatbaar: cursor + tellers in de lancering, elk contact geclaimd
  * vóór het taggen. → bijgewerkte lancering
  */
-export async function verwerkLancering(db, cfg, lancering, { deadline, fetchImpl = fetch, pauze = TAG_PAUZE_MS, slaap = wacht } = {}) {
+export async function verwerkLancering(db, cfg, lancering, { deadline, fetchImpl = fetch, pauze = TAG_PAUZE_MS, parallel = TAG_PARALLEL, slaap = wacht } = {}) {
   const op = typeof deadline === 'function' ? deadline : () => Date.now() > deadline;
   let l = { ...lancering };
   const nu = () => new Date().toISOString();
@@ -184,27 +184,36 @@ export async function verwerkLancering(db, cfg, lancering, { deadline, fetchImpl
     const pagina = await zoekContactenMetTag(cfg, { tag: l.doelgroep_tag, searchAfter: l.cursor || null }, fetchImpl);
     if (l.totaal == null && pagina.totaal != null) await bewaar({ totaal: pagina.totaal });
     let afgebroken = false;
-    for (const c of pagina.contacten) {
+    // Per groep van `parallel`: eerst elk contact claimen (nooit dubbel), dan samen taggen, dan pauzeren.
+    for (let g = 0; g < pagina.contacten.length; g += parallel) {
       if (op()) { afgebroken = true; break; }
-      const m = magTaggen(c, { verzendTag: l.verzend_tag });
-      const claim = await db.from('weekeditie_lancering_contacten').insert({ lancering_id: l.id, contact_id: String(c.id || ''), status: m.ok ? 'bezig' : 'overgeslagen', reden: m.ok ? null : m.reden });
-      if (claim.error) {
-        if (String(claim.error.code) === '23505') continue; // al verwerkt in een vorige run
-        throw claim.error;
+      const start = Date.now();
+      const klaar = [];
+      for (const c of pagina.contacten.slice(g, g + parallel)) {
+        const m = magTaggen(c, { verzendTag: l.verzend_tag });
+        const claim = await db.from('weekeditie_lancering_contacten').insert({ lancering_id: l.id, contact_id: String(c.id || ''), status: m.ok ? 'bezig' : 'overgeslagen', reden: m.ok ? null : m.reden });
+        if (claim.error) {
+          if (String(claim.error.code) === '23505') continue; // al verwerkt in een vorige run
+          throw claim.error;
+        }
+        if (!m.ok) { tel.overgeslagen++; continue; }
+        klaar.push(c);
       }
-      if (!m.ok) { tel.overgeslagen++; continue; }
-      try {
-        await zetTag(cfg, c.id, l.verzend_tag, fetchImpl);
-        tel.getagd++;
-        const { error } = await db.from('weekeditie_lancering_contacten').update({ status: 'getagd', op: nu() }).eq('lancering_id', l.id).eq('contact_id', String(c.id));
-        if (error) console.error('[weekeditie-lancering] status getagd bewaren mislukt:', error.message);
-      } catch (e) {
-        tel.mislukt++;
-        console.error('[weekeditie-lancering] tag zetten mislukt:', c.id, e?.message);
-        const { error } = await db.from('weekeditie_lancering_contacten').update({ status: 'mislukt', reden: String(e?.message || e).slice(0, 300), op: nu() }).eq('lancering_id', l.id).eq('contact_id', String(c.id));
-        if (error) console.error('[weekeditie-lancering] status mislukt bewaren mislukt:', error.message);
-      }
-      if (pauze) await slaap(pauze);
+      await Promise.all(klaar.map(async (c) => {
+        try {
+          await zetTag(cfg, c.id, l.verzend_tag, fetchImpl);
+          tel.getagd++;
+          const { error } = await db.from('weekeditie_lancering_contacten').update({ status: 'getagd', op: nu() }).eq('lancering_id', l.id).eq('contact_id', String(c.id));
+          if (error) console.error('[weekeditie-lancering] status getagd bewaren mislukt:', error.message);
+        } catch (e) {
+          tel.mislukt++;
+          console.error('[weekeditie-lancering] tag zetten mislukt:', c.id, e?.message);
+          const { error } = await db.from('weekeditie_lancering_contacten').update({ status: 'mislukt', reden: String(e?.message || e).slice(0, 300), op: nu() }).eq('lancering_id', l.id).eq('contact_id', String(c.id));
+          if (error) console.error('[weekeditie-lancering] status mislukt bewaren mislukt:', error.message);
+        }
+      }));
+      const rest = pauze - (Date.now() - start);
+      if (klaar.length && rest > 0) await slaap(rest);
     }
     if (afgebroken) return bewaar({ ...tel });
     if (!pagina.volgende) return bewaar({ ...tel, status: 'klaar', klaar_op: nu(), cursor: l.cursor });

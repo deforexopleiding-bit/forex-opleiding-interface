@@ -54,7 +54,7 @@ function resetGhl(over = {}) {
       { id: 'x1', email: 'z@x.nl', tags: ['klant'] },
     ],
     getagd: [], templates: {}, cv: [], workflows: [{ id: 'wf1', name: 'DFO Weekeditie versturen', status: 'published' }],
-    testmails: [], zoekopdrachten: [], fout429: 0, pagina: { status: 200, titel: null },
+    testmails: [], zoekopdrachten: [], fout429: 0, geenDndFilter: false, pagina: { status: 200, titel: null },
     ...over,
   });
 }
@@ -72,8 +72,10 @@ globalThis.fetch = async (url, opt = {}) => {
   if (p === '/contacts/search' && m === 'POST') {
     if (ghl.fout429 > 0) { ghl.fout429--; return json({ message: 'Too many requests' }, 429); }
     ghl.zoekopdrachten.push(body);
-    const tag = body.filters[0].value;
-    const lijst = ghl.contacten.filter((c) => c.tags.includes(tag));
+    const tf = body.filters.find((f) => f.field === 'tags');
+    const df = body.filters.find((f) => f.field === 'dnd');
+    if (df && ghl.geenDndFilter) return json({ message: 'unknown filter dnd' }, 422);
+    const lijst = ghl.contacten.filter((c) => (!tf || c.tags.includes(tf.value)) && (!df || !!c.dnd === df.value));
     const start = body.searchAfter ? body.searchAfter[0] : 0;
     const pagina = lijst.slice(start, start + body.pageLimit).map((c, i) => ({ ...c, searchAfter: [start + i + 1] }));
     return json({ contacts: pagina, total: lijst.length });
@@ -336,7 +338,7 @@ test('data: top-3 blokken (gebruik, dan gezien) en cijfers per drop', () => {
 
 test('bedrading: cron in vercel.json, scripts in de juiste volgorde, Trainingdrops leest via de gedeelde lib', () => {
   const v = JSON.parse(lees('vercel.json'));
-  assert.ok(v.crons.some((c) => c.path === '/api/cron-weekeditie-lancering' && c.schedule === '*/2 * * * *'));
+  assert.ok(v.crons.some((c) => c.path === '/api/cron-weekeditie-lancering' && c.schedule === '* * * * *'));
   assert.equal(v.functions['api/contentmachine/lanceer.js'].maxDuration, 60);
   const idx = lees('modules/klanten-v2/index.html');
   const pos = (n) => idx.indexOf(`views/${n}.js`);
@@ -391,4 +393,80 @@ test('werkblad: knop "Keur goed en lanceer" (super_admin), bevestigingsscherm, s
   html = V();
   assert.ok(!html.includes('🚀 Keur goed en lanceer'));
   assert.ok(html.includes('✓ Goedkeuren') && html.includes('Lanceren: super_admin'));
+});
+
+// ── doelgroep "alle contacten" (zoals de huidige nieuwsbrief in GHL) ────────
+test('alle contacten: zoeken zonder tagfilter; taggen slaat DND/uitgeschreven/zonder e-mail/al getagd over', async () => {
+  reset(); resetGhl();
+  const p1 = await GW.zoekContactenMetTag(CFG, { tag: GW.ALLE_CONTACTEN, limiet: 100 });
+  assert.deepEqual(ghl.zoekopdrachten[0].filters, []);
+  assert.equal(p1.totaal, 8);
+  const l = { ...lancering('LA'), doelgroep_tag: GW.ALLE_CONTACTEN };
+  lanceringen().push({ ...l });
+  const na = await WL.verwerkLancering(await DB(), CFG, l, { deadline: Date.now() + 60000, pauze: 0 });
+  assert.deepEqual([...ghl.getagd].sort(), ['c1', 'c6', 'c7', 'x1']);
+  assert.equal(na.status, 'klaar'); assert.equal(na.totaal, 8); assert.equal(na.getagd, 4); assert.equal(na.overgeslagen, 4);
+  // verwacht aantal ontvangers: met dnd-filter, en terugval zonder als GHL dat filter weigert
+  assert.deepEqual(await GW.telOntvangers(CFG, GW.ALLE_CONTACTEN), { totaal: 8, zonder_dnd: 7 });
+  ghl.geenDndFilter = true;
+  assert.deepEqual(await GW.telOntvangers(CFG, 'nieuwsbrief'), { totaal: 7, zonder_dnd: null });
+});
+
+test('lanceer naar alle contacten: enkel met bevestiging VERSTUUR; ontvangers tellen; tag-modus blijft', async () => {
+  reset(); resetGhl();
+  await instellen();
+  await roep(LANCEER, { body: { actie: 'test', id: ID } });
+  const o = await roep(LANCEER, { body: { actie: 'ontvangers', doelgroep: 'alle' } });
+  assert.equal(o.statusCode, 200); assert.equal(o.body.totaal, 8); assert.equal(o.body.zonder_dnd, 7);
+  assert.equal((await roep(LANCEER, { body: { actie: 'ontvangers', doelgroep: 'tag' } })).body.tag, 'nieuwsbrief');
+  let r = await roep(LANCEER, { body: { actie: 'lanceer', id: ID, modus: 'nu', doelgroep: 'alle' } });
+  assert.equal(r.statusCode, 400); assert.equal(r.body.code, 'BEVESTIGING_NODIG');
+  r = await roep(LANCEER, { body: { actie: 'lanceer', id: ID, modus: 'nu', doelgroep: 'alle', bevestiging: 'verstuur' } });
+  assert.equal(r.body.code, 'BEVESTIGING_NODIG', 'hoofdlettergevoelig');
+  assert.equal(drop().status, 'gegenereerd', 'niets veranderd');
+  assert.equal(ghl.getagd.length, 0);
+  r = await roep(LANCEER, { body: { actie: 'lanceer', id: ID, modus: 'nu', doelgroep: 'alle', bevestiging: 'VERSTUUR' } });
+  assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+  assert.equal(r.body.lancering.doelgroep_tag, GW.ALLE_CONTACTEN);
+  assert.deepEqual([...ghl.getagd].sort(), ['c1', 'c6', 'c7', 'x1']);
+  assert.equal(r.body.lancering.getagd, 4); assert.equal(r.body.lancering.totaal, 8);
+  // de doelgroep-tag kan niet op "alle" gezet worden via de instellingen
+  assert.equal((await roep(LANCEER, { body: { actie: 'instellingen', doelgroep_tag: GW.ALLE_CONTACTEN } })).statusCode, 400);
+});
+
+test('werkblad: keuze tag of alle contacten, verwacht aantal, VERSTUUR-veld houdt de knop dicht', async () => {
+  reset(); resetGhl();
+  await instellen();
+  const { JSDOM } = await import('jsdom');
+  const dom = new JSDOM('<!doctype html><head></head><div id="content"></div>', { runScripts: 'outside-only', url: 'https://crm.test/' });
+  const w = dom.window;
+  const st = await roep(LANCEER, { method: 'GET', query: { id: ID } });
+  const posts = [];
+  const antwoorden = {
+    [`/api/contentmachine/drops?id=${ID}`]: { drop: drop(), assets: [], versies: [] },
+    '/api/contentmachine/assets?bibliotheek=1': { assets: ASSETS },
+    '/api/contentmachine/drops?blokken=1': { blokken: JSON.parse(lees('api/_lib/weekeditie-blokken.json')) },
+    [`/api/contentmachine/lanceer?id=${ID}`]: st.body,
+  };
+  w.DFO = { VIEWS: {}, render() {}, goTab() {} };
+  w.KV = {
+    authedJson: async (u, o) => {
+      if (o && o.method === 'POST') { const b = JSON.parse(o.body); posts.push(b); if (b.actie === 'ontvangers') return b.doelgroep === 'alle' ? { totaal: 14892, zonder_dnd: 9405 } : { totaal: 3, zonder_dnd: 3, tag: 'weekeditie-test' }; }
+      return antwoorden[u] || { html: '<p>x</p>', onderwerp: 'x' };
+    },
+    toast() {},
+  };
+  for (const f of ['contentmachine-v2', 'contentmachine-werkblad-v2', 'weekeditie-chart-v2', 'contentmachine-canvas-v2', 'contentmachine-blokframe-v2', 'contentmachine-social2-v2', 'contentmachine-weekeditie-v2', 'contentmachine-lanceer-v2']) w.eval(lees(`modules/klanten-v2/views/${f}.js`));
+  await w.__cmWbOpen(ID);
+  const V = w.DFO.VIEWS['contentmachine/Overzicht'];
+  V(); await new Promise((ok) => setTimeout(ok, 20));
+  w.__cmLzOpen(); await new Promise((ok) => setTimeout(ok, 30));
+  let html = V();
+  assert.ok(html.includes('Contacten met tag') && html.includes('Alle contacten') && html.includes('verwacht ±3 ontvangers'));
+  w.__cmLzDoelgroep('alle'); await new Promise((ok) => setTimeout(ok, 30));
+  html = V();
+  assert.ok(html.includes('verwacht ±9.405 ontvangers (14.892 contacten, zonder DND)'));
+  assert.ok(html.includes('Typ <b>VERSTUUR</b>'));
+  assert.match(html, /id="cm-lz-knop"[^>]*disabled/);
+  assert.ok(posts.some((p) => p.actie === 'ontvangers' && p.doelgroep === 'alle'));
 });
