@@ -25,7 +25,7 @@ import { grensProblemen, editieProblemen } from './drops.js';
 import { laadVoorNieuwsbrief, uitschrijfTag } from './nieuwsbrief.js';
 import { renderNieuwsbrief } from '../_lib/nieuwsbrief-render.js';
 import { metVasteTeksten } from '../_lib/contentmachine-generator.js';
-import { ghlNieuwsbriefConfig, ghlLinks, maakTemplate, vulTemplate, eigenContact, stuurTestmail } from '../_lib/ghl-nieuwsbrief.js';
+import { ghlNieuwsbriefConfig, tokenDiagnose, ghlLinks, maakTemplate, vulTemplate, eigenContact, stuurTestmail } from '../_lib/ghl-nieuwsbrief.js';
 import { zoekWorkflow, zetOnderwerp, tagsVanLocatie, telTag, telOntvangers, nieuwsbriefKandidaten, STANDAARD, ALLE_CONTACTEN } from '../_lib/ghl-weekeditie.js';
 import {
   leesInstellingen, bewaarInstellingen, geldigeTag, kanalenVan, beeldenCheck, voorwaarden, laatsteTest, laatsteLancering,
@@ -100,7 +100,9 @@ export default async function handler(req, res) {
         patch.custom_value_id = cv.id; patch.custom_value_sleutel = cv.sleutel;
         i = await bewaarInstellingen(db, patch, p.user.id);
       }
-      const rapport = { instellingen: i, links: ghlLinks(cfg.locationId) };
+      // Token-diagnose (gemaskeerd, enkel super_admin): welke env-var deze calls gebruiken. Niets gecachet:
+      // de config wordt per aanvraag uit process.env gelezen en elke check roept GHL opnieuw aan.
+      const rapport = { instellingen: i, links: ghlLinks(cfg.locationId), token: tokenDiagnose() };
       const stap = async (k, f) => { try { rapport[k] = await f(); } catch (e) { rapport[k] = { fout: e.message }; } };
       await stap('workflow', async () => (await zoekWorkflow(cfg, i.workflow_naam)) || { ontbreekt: true });
       await stap('tags', async () => {
