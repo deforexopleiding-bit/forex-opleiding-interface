@@ -4134,7 +4134,7 @@
     if (window.DFO?.render) window.DFO.render();
   };
   window.__lsTplSetSubTab = (v) => {
-    _lsTplTab.subTab = (v === 'meta') ? 'meta' : 'open';
+    _lsTplTab.subTab = (v === 'meta' || v === 'trial') ? v : 'open';
     if (_lsTplTab.subTab === 'meta' && window.KV_V2?.metaTemplates?.init) {
       try { window.KV_V2.metaTemplates.init(); } catch (_) {}
     }
@@ -4297,15 +4297,27 @@
     // secties mag zien; anders val terug op de enige sectie waar 'ie in mag.
     let activeSub = _lsTplTab.subTab || 'open';
     if (activeSub === 'meta' && !canMetaTpl) activeSub = 'open';
-    const showSubTabs = canMetaTpl;
+    // 2026-10-26 — "Trial-opvolging" (de opvolgmotor van elke trial-lead) is
+    // voor iedereen met leads.view zichtbaar, dus de tabbalk staat er altijd.
+    const showSubTabs = true;
+    const trialTab = `<button onclick="window.__lsTplSetSubTab('trial')"
+            style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'trial' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'trial' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'trial' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">Trial-opvolging <span style="font-size:11px;color:var(--text-3);font-weight:400">(motor · alle funnels)</span></button>`;
     const subTabBar = showSubTabs
-      ? `<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px">
+      ? `<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px;flex-wrap:wrap">
           <button onclick="window.__lsTplSetSubTab('open')"
             style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'open' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'open' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'open' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">Open templates <span style="font-size:11px;color:var(--text-3);font-weight:400">(vrij, direct insert)</span></button>
-          <button onclick="window.__lsTplSetSubTab('meta')"
-            style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'meta' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">WhatsApp templates <span style="font-size:11px;color:var(--text-3);font-weight:400">(Meta approval)</span></button>
+          ${canMetaTpl ? `<button onclick="window.__lsTplSetSubTab('meta')"
+            style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'meta' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">WhatsApp templates <span style="font-size:11px;color:var(--text-3);font-weight:400">(Meta approval)</span></button>` : ''}
+          ${trialTab}
         </div>`
       : '';
+
+    if (activeSub === 'trial') {
+      const inhoud = window.DFOTrialOpvolging && typeof window.DFOTrialOpvolging.render === 'function'
+        ? window.DFOTrialOpvolging.render()
+        : '<div style="padding:24px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:13px">⚠ trial-opvolging-v2.js is niet geladen.</div>';
+      return `<div class="pad" style="padding:20px">${subTabBar}${inhoud}</div>`;
+    }
 
     // WhatsApp Meta-templates sub-tab: mount de gedeelde component uit
     // instellingen-v2.js. Component draagt eigen state + handlers.

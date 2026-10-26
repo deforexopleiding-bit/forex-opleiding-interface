@@ -90,7 +90,8 @@ export function minutenInLab(sessie) {
 }
 
 const SESSIE_LICHT = 'sessie_id, auth_id, stap, stappen, voortgang, gestart_op, bijgewerkt_op, afgerond:snapshot->>afgerond, leadscore:snapshot->leadscore';
-const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, utm, toegang_van, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, sessie_moment, is_test, aangemaakt_op';
+// product/bron/variant: hlms_lab_lead_product.sql (26 okt) — de belofte waarmee de lead binnenkwam.
+const LEAD_KOLOMMEN = 'id, auth_id, email, voornaam, achternaam, telefoon, crm_lead_id, hook, utm, toegang_van, toegang_tot, eerste_login_op, laatste_login_op, kwalificatie, sessie_geboekt_op, sessie_moment, is_test, aangemaakt_op, product, bron, variant';
 // Sinds hlms_lab_lead_gebeurtenis.sql (15 okt): de gekozen route. Apart, zodat
 // een LMS zonder die migratie het dossier niet breekt.
 const LEAD_ROUTE_KOLOMMEN = 'route, route_gekozen_op';
