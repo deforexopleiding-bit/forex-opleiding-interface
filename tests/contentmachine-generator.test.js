@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { maakFake, maakRes } from './_contentmachine-fake.js';
-import { voorbeeldOutput, ASSETS, BEELD_CHART, BEELD_PAYOUT, BEELD_ZONDER } from './_contentmachine-voorbeeld.js';
+import { voorbeeldOutput, voorbeeldRegie, voorbeeldEditie, ASSETS, BEELD_CHART, BEELD_PAYOUT, BEELD_ZONDER } from './_contentmachine-voorbeeld.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const lees = (p) => readFileSync(join(ROOT, p), 'utf8');
@@ -197,31 +197,40 @@ test('nieuwsbrief: 600px, UTM per blok, disclaimer, uitschrijflink, naam enkel m
 });
 
 // ── 6. endpoints ────────────────────────────────────────────────────────────
-test('genereer: valide output → versie 2, status gegenereerd, beelden gemarkeerd, rotatie in de prompt', async () => {
+test('genereer (2.0): regie → schrijver → Weekeditie als versie 2, beelden gemarkeerd, rotatie in de prompt', async () => {
   reset();
   fake.db.tabellen.content_drops.push({ id: 'oud', slug: '15-10-26', datum: '2026-10-15', status: 'gepubliceerd', format_key: 'het_bewijs', output: { format_key: 'het_bewijs', kernidee: 'x', nieuwsbrief: { onderwerpen: ['Een payout van 25.016'] } }, aangemaakt_op: '2026-10-15T10:00:00Z' });
-  ai.antwoorden.push(voorbeeldOutput());
+  ai.antwoorden.push(voorbeeldRegie(), voorbeeldEditie());
   const r = await roep(GEN, { body: { id: ID } });
   assert.equal(r.statusCode, 200, JSON.stringify(r.body));
   assert.equal(drop().status, 'gegenereerd'); assert.equal(drop().versie, 2); assert.equal(drop().format_key, 'trade_ontleed');
   assert.equal(fake.db.tabellen.content_drop_versies.length, 1);
-  assert.deepEqual(drop().output.meta.toegelaten_formats.includes('het_bewijs'), false);
-  assert.ok(drop().output.meta.verboden_namen.includes('Kjento'));
-  assert.ok(fake.db.tabellen.content_assets.find((a) => a.id === BEELD_CHART).laatst_gebruikt_op);
+  const o = drop().output;
+  assert.equal(o.versie, 2);
+  assert.equal(o.pagina.thema, 'nacht');
+  assert.equal(o.titel, 'De dollar draait. Wij zagen het live.');
+  assert.equal(o.regie.hero_variant, 'video-poort');
+  assert.deepEqual(r.body.waarschuwingen.filter((w) => ['schema', 'cijfer', 'grens', 'regie'].includes(w.soort)), []);
+  assert.deepEqual(o.meta.toegelaten_formats.includes('het_bewijs'), false);
+  assert.ok(o.meta.verboden_namen.includes('Kjento'));
+  assert.ok(fake.db.tabellen.content_assets.find((a) => a.id === BEELD_PAYOUT).laatst_gebruikt_op > '2026-10-02', 'payout uit de muur gemarkeerd');
+  assert.deepEqual(ai.aanroepen.map((a) => a.tool_name), ['lever_regie', 'lever_editie']);
   const prompt = JSON.stringify(ai.aanroepen[0].messages);
   assert.match(prompt, /TOEGELATEN FORMATS/); assert.match(prompt, /15-10-26 · format het_bewijs/);
   assert.match(prompt, /"type":"image","source":\{"type":"url"/);
-  assert.equal(ai.aanroepen[0].tool_name, 'lever_drop');
+  assert.match(ai.aanroepen[0].system, /FEITENBANK/); assert.match(ai.aanroepen[0].system, /replay-sweep-bos/);
+  assert.match(JSON.stringify(ai.aanroepen[1].messages), /REGIE \(volg die exact\)/);
+  assert.equal(o.pagina.formulier_titel, 'Ontgrendel de volledige training', 'vaste formulierteksten');
 });
 
 test('genereer: grensfout → één herstelronde; nog fout → waarschuwing, goedkeuren geblokkeerd', async () => {
   reset();
-  const slecht = voorbeeldOutput(); slecht.linkedin.tekst = 'Gegarandeerd winst!! Kjento legt uit.';
-  ai.antwoorden.push(slecht, slecht);
+  const slecht = voorbeeldEditie(); slecht.linkedin = { ...slecht.linkedin, tekst: 'Gegarandeerd winst!! Kjento legt uit.' };
+  ai.antwoorden.push(voorbeeldRegie(), slecht, slecht);
   const r = await roep(GEN, { body: { id: ID } });
   assert.equal(r.statusCode, 200);
-  assert.equal(ai.aanroepen.length, 2, 'herstelronde');
-  assert.match(JSON.stringify(ai.aanroepen[1].messages), /VERBETERDE versie/);
+  assert.equal(ai.aanroepen.length, 3, 'regie + schrijver + herstelronde');
+  assert.match(JSON.stringify(ai.aanroepen[2].messages), /VERBETERDE versie/);
   assert.ok(r.body.waarschuwingen.some((w) => w.soort === 'grens'));
   const g = await roep(D, { body: { actie: 'goedkeuren', id: ID } });
   assert.equal(g.statusCode, 409); assert.equal(g.body.code, 'GRENZEN');
@@ -241,12 +250,12 @@ test('genereer: grensfout → één herstelronde; nog fout → waarschuwing, goe
 test('genereer: onbekend model → volgende in de keten; schema-herstel', async () => {
   reset();
   ai.modelFout.add('claude-sonnet-5-5');
-  const kapot = voorbeeldOutput(); kapot.stories = kapot.stories.slice(0, 1);
-  ai.antwoorden.push(kapot, voorbeeldOutput());
+  const kapot = voorbeeldEditie(); kapot.stories = kapot.stories.slice(0, 1);
+  ai.antwoorden.push(voorbeeldRegie(), kapot, voorbeeldEditie());
   const r = await roep(GEN, { body: { id: ID } });
   assert.equal(r.statusCode, 200);
   assert.equal(r.body.model, 'claude-sonnet-4-6');
-  assert.deepEqual(ai.aanroepen.map((a) => a.model), ['claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-6'], 'onbekend model wordt onthouden');
+  assert.deepEqual(ai.aanroepen.map((a) => a.model), ['claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-6'], 'onbekend model wordt onthouden');
   assert.equal(drop().output.stories.length, 3);
 });
 
@@ -390,14 +399,15 @@ test('formulier: vaste teksten per soort; het model schrijft ze niet', () => {
 test('genereer: vaste formulierteksten erin; weekdag uit de invoer bewaakt', async () => {
   reset();
   drop().input.training_datum = '2026-10-22';
-  const o = voorbeeldOutput();
-  delete o.pagina.formulier_titel; o.pagina.formulier_sub = 'we sturen je de link';
-  o.nieuwsbrief.blokken[0].tekst = 'De live training van donderdag. **We zagen het live.**';
-  ai.antwoorden.push(o);
+  const o = voorbeeldEditie();
+  o.pagina.formulier_sub = 'we sturen je de link';
+  o.nieuwsbrief = { ...o.nieuwsbrief, blokken: o.nieuwsbrief.blokken.map((b, i) => (i === 0 ? { ...b, tekst: 'De live training van donderdag. **We zagen het live.**' } : b)) };
+  ai.antwoorden.push(voorbeeldRegie(), o);
   const r = await roep(GEN, { body: { id: ID } });
   assert.equal(r.statusCode, 200, JSON.stringify(r.body));
-  assert.equal(ai.aanroepen.length, 1, 'donderdag klopt: geen herstelronde');
+  assert.equal(ai.aanroepen.length, 2, 'donderdag klopt: geen herstelronde');
   assert.equal(drop().output.pagina.formulier_titel, 'Ontgrendel de volledige training');
+  assert.equal(drop().output.pagina.formulier_sub, 'Vul je naam, e-mail en gsm-nummer in. De video start meteen hier op de pagina.');
   assert.match(drop().output.pagina.ontgrendeld_tekst, /10:00/);
   assert.match(JSON.stringify(ai.aanroepen[0].messages), /DATUM TRAINING: donderdag 22 oktober 2026/);
 });

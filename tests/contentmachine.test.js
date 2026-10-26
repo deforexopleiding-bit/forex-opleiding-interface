@@ -92,7 +92,7 @@ test('invoer opschonen: soort volgt de video, kanalen en trade begrensd', () => 
 test('beeldmaat + type aan de bytes (alle seed-beelden)', () => {
   const map = join(ROOT, 'img/contentmachine/bibliotheek-seed');
   const bestanden = readdirSync(map);
-  assert.equal(bestanden.length, 19);
+  assert.equal(bestanden.length, 31);
   for (const f of bestanden) {
     const b = readFileSync(join(map, f));
     const m = C.beeldMaat(b);
@@ -227,19 +227,23 @@ test('assets: registreer controleert de bytes, leest de maat; geen beeld = weg',
   assert.equal((await roep(A, { method: 'GET', query: { bibliotheek: '1' } })).body.assets.length, 0);
 });
 
-test('assets: seed laadt 19 beelden naar bibliotheek/seed/ en is idempotent', async () => {
+test('assets: seed laadt 31 beelden naar bibliotheek/seed/ en is idempotent', async () => {
   reset();
   const r = await roep(A, { body: { actie: 'seed' } });
   assert.equal(r.statusCode, 200);
-  assert.deepEqual([r.body.totaal, r.body.nieuw, r.body.al_aanwezig, r.body.fouten.length], [19, 19, 0, 0]);
+  assert.deepEqual([r.body.totaal, r.body.nieuw, r.body.al_aanwezig, r.body.fouten.length], [31, 31, 0, 0]);
   const rijen = fake.db.tabellen.content_assets;
   assert.ok(rijen.every((x) => x.storage_path.startsWith('bibliotheek/seed/') && x.drop_id === null && x.breedte > 0));
-  const metToestemming = rijen.filter((x) => x.toestemming_publiek).map((x) => x.persoon_naam);
+  const metToestemming = rijen.filter((x) => x.toestemming_publiek && x.persoon_naam).map((x) => x.persoon_naam);
+  // Contentmachine 2.0: 12 masterclassfoto's met toestemming publiek, zonder namen.
+  const mc = rijen.filter((x) => x.storage_path.startsWith('bibliotheek/seed/masterclass-'));
+  assert.equal(mc.length, 12);
+  assert.ok(mc.every((x) => x.soort === 'masterclass' && x.toestemming_publiek === true && x.persoon_naam === null && /Masterclass op kantoor/.test(x.bijschrift)));
   assert.deepEqual([...new Set(metToestemming)].sort(), ['Karl', 'Leslie', 'Luc', 'Maxim', 'Shani']);
   assert.equal(rijen.filter((x) => x.soort === 'payout').length, 13);
-  assert.equal(Object.keys(fake.db.storage).length, 19);
+  assert.equal(Object.keys(fake.db.storage).length, 31);
   const nog = await roep(A, { body: { actie: 'seed' } });
-  assert.deepEqual([nog.body.nieuw, nog.body.al_aanwezig], [0, 19]);
+  assert.deepEqual([nog.body.nieuw, nog.body.al_aanwezig], [0, 31]);
 });
 
 // ── 4. bedrading ────────────────────────────────────────────────────────────

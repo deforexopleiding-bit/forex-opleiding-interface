@@ -1,0 +1,1482 @@
+{
+  "versie": 1,
+  "bron": "dfo-website lib/weekeditie-blokken.ts (scripts/weekeditie-schema-export.ts) — niet met de hand wijzigen",
+  "themas": [
+    "nacht",
+    "goud",
+    "licht",
+    "data"
+  ],
+  "hero_varianten": [
+    "video-poort",
+    "foto",
+    "groot-getal",
+    "chart"
+  ],
+  "accountgroottes": [
+    10000,
+    25000,
+    50000,
+    100000,
+    200000,
+    400000
+  ],
+  "interactief": [
+    "replay-sweep-bos",
+    "fib-animatie",
+    "trechter",
+    "rr-sliders",
+    "funded-calculator",
+    "quiz"
+  ],
+  "nuggets": [
+    "payout-muur",
+    "data",
+    "tip",
+    "mythe-feit"
+  ],
+  "regels": [
+    "Precies 1 hero, als eerste blok.",
+    "Minstens 2 interactieve blokken (replay-sweep-bos, fib-animatie, trechter, rr-sliders, funded-calculator, quiz).",
+    "Minstens 1 nugget (payout-muur, data, tip, mythe-feit).",
+    "Precies 1 cadeau-blok.",
+    "Met video: precies 1 poort (hero-variant video-poort óf een video-poort-blok), geen inschrijven-blok.",
+    "Zonder video: precies 1 inschrijven-blok, geen video-poort (ook niet als hero-variant).",
+    "Elk bloktype hoogstens 1 keer, behalve data, citaat en verhaal (max 2).",
+    "Tussen 6 en 14 blokken."
+  ],
+  "blokken": [
+    {
+      "type": "hero",
+      "categorie": "opening",
+      "uitleg": "De opening. video-poort = kop + poort naast elkaar (enkel met video); foto = masterclassfoto full-bleed; groot-getal = één echt cijfer dat optelt; chart = chart die zich tekent.",
+      "beweging": "tekent/telt bij laden",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "hero"
+          },
+          "variant": {
+            "type": "string",
+            "enum": [
+              "video-poort",
+              "foto",
+              "groot-getal",
+              "chart"
+            ]
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Hoofdkop van de editie (max ±9 woorden); het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 110
+              },
+              "intro": {
+                "description": "2-3 zinnen; **vet** voor de kern.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 420
+              },
+              "feiten": {
+                "description": "Max 3 korte feit-chips (bv. \"35 min analyse\").",
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                }
+              },
+              "foto_asset_id": {
+                "description": "Enkel bij variant foto: masterclass- of teamfoto (full-bleed met gradient).",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "getal": {
+                "description": "Enkel bij variant groot-getal: het ene grote cijfer dat optelt.",
+                "type": "object",
+                "properties": {
+                  "waarde": {
+                    "description": "Het echte cijfer (uit de feitenbank of de invoer van de week).",
+                    "type": "number"
+                  },
+                  "decimalen": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2
+                  },
+                  "prefix": {
+                    "description": "bv. \"$\", \"€\", \"+\"",
+                    "type": "string",
+                    "maxLength": 4
+                  },
+                  "suffix": {
+                    "description": "bv. \"%\", \"R\", \" trades\"",
+                    "type": "string",
+                    "maxLength": 12
+                  },
+                  "label": {
+                    "description": "Wat het cijfer is, kort.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "context": {
+                    "description": "Eén zin context of nuance.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 220
+                  },
+                  "bron": {
+                    "description": "Waar het cijfer vandaan komt (feitenbank-regel).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "waarde",
+                  "label",
+                  "bron"
+                ],
+                "additionalProperties": false
+              },
+              "chart_richting": {
+                "description": "Enkel bij variant chart: richting van de chart die zich tekent.",
+                "type": "string",
+                "enum": [
+                  "long",
+                  "short"
+                ]
+              },
+              "chart_label": {
+                "description": "Enkel bij variant chart: label op de chart, bv. \"GBP/USD · H4\".",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            },
+            "required": [
+              "titel",
+              "intro"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "variant",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "video-poort",
+      "categorie": "conversie",
+      "uitleg": "Formulier (naam, e-mail, gsm) → de opname opent meteen; cadeau eronder. Enkel bij een editie met video, en niet samen met hero-variant video-poort.",
+      "beweging": "bestaande poort",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "video-poort"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "description": "Waarom kijken; **vet** mag.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "replay-sweep-bos",
+      "categorie": "interactief",
+      "uitleg": "Candles spelen af tot prijs voorbij een niveau gaat; de bezoeker kiest \"sweep of break?\" vóór de onthulling.",
+      "beweging": "replay + keuze + onthulling",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "replay-sweep-bos"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "richting": {
+                "description": "long = koop-scenario, short = verkoop-scenario (de chart wordt gespiegeld).",
+                "type": "string",
+                "enum": [
+                  "long",
+                  "short"
+                ]
+              },
+              "scenario": {
+                "description": "Wat er écht gebeurt na de doorbraak: sweep (prijs schiet terug) of bos (body close voorbij, prijs blijft).",
+                "type": "string",
+                "enum": [
+                  "sweep",
+                  "bos"
+                ]
+              },
+              "paar": {
+                "description": "Label op de chart. Laat leeg: de chart is een oefenscenario uit The Lab, geen live data van een paar.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 24
+              },
+              "vraag": {
+                "description": "De vraag bij de pauze, bv. \"Sweep of break of structure?\"",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 140
+              },
+              "uitleg": {
+                "description": "Wat er gebeurde en waarom (na de onthulling).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "richting",
+              "scenario",
+              "uitleg"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "fib-animatie",
+      "categorie": "interactief",
+      "uitleg": "Impuls → de DFO-fib tekent 1 / 0 / 71 / -27; schakelaar H4 ↔ 15M; uitleg per niveau bij tik.",
+      "beweging": "fib tekent zich",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "fib-animatie"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "richting": {
+                "description": "long = koop-scenario, short = verkoop-scenario (de chart wordt gespiegeld).",
+                "type": "string",
+                "enum": [
+                  "long",
+                  "short"
+                ]
+              },
+              "uitleg_h4": {
+                "description": "Optioneel: eigen uitleg per niveau op H4 (anders de vaste DFO-uitleg: H4 71 = enkel locatie).",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "71",
+                    "-27"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 220
+                }
+              },
+              "uitleg_15m": {
+                "description": "Optioneel: eigen uitleg per niveau op 15M (entry 71, stop 1, risk free 0, target -27).",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "enum": [
+                    "0",
+                    "1",
+                    "71",
+                    "-27"
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 220
+                }
+              }
+            },
+            "required": [
+              "richting"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "trechter",
+      "categorie": "interactief",
+      "uitleg": "De DFO-volgorde als stappen; tik door van H4-context tot target, met voortgangsbalk.",
+      "beweging": "stap voor stap",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "trechter"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "stappen": {
+                "description": "De DFO-volgorde, van H4-context tot target.",
+                "minItems": 3,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "description": "Kort label, bv. \"H4-context\".",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 30
+                    },
+                    "titel": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "tekst": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 320
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "titel",
+                    "tekst"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "stappen"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "rr-sliders",
+      "categorie": "interactief",
+      "uitleg": "Winrate- en risk/reward-slider → resultaat over 100 trades bij 1% risico, met live grafiek (logica van masterclass deel 1).",
+      "beweging": "live grafiek",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "rr-sliders"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "start_winrate": {
+                "description": "Startwaarde winrate in %.",
+                "type": "number",
+                "minimum": 10,
+                "maximum": 80
+              },
+              "start_rr": {
+                "description": "Startwaarde risk/reward (gemiddelde winnende trade in R).",
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 5
+              },
+              "voorinstellingen": {
+                "description": "Knoppen met echte combinaties uit de feitenbank (bv. journal 48,5% · 3,17R).",
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    },
+                    "winrate": {
+                      "type": "number",
+                      "minimum": 10,
+                      "maximum": 80
+                    },
+                    "rr": {
+                      "type": "number",
+                      "minimum": 0.5,
+                      "maximum": 5
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "winrate",
+                    "rr"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "start_winrate",
+              "start_rr"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "funded-calculator",
+      "categorie": "interactief",
+      "uitleg": "Accountgrootte + maandrendement → wat dat waard is op een funded account (80% split), met disclaimer (logica van het salesdeck).",
+      "beweging": "sliders + ladder",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "funded-calculator"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "start_account": {
+                "description": "Startaccount in $: 10000, 25000, 50000, 100000, 200000 of 400000.",
+                "type": "number",
+                "enum": [
+                  10000,
+                  25000,
+                  50000,
+                  100000,
+                  200000,
+                  400000
+                ]
+              },
+              "start_rendement": {
+                "description": "Start-maandrendement in % (rekenvoorbeeld).",
+                "type": "number",
+                "minimum": 0.5,
+                "maximum": 10
+              },
+              "referentie": {
+                "description": "Optioneel: echt referentiecijfer uit de feitenbank (bv. mediaanstudent 4,15%/maand).",
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "rendement": {
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 10
+                  }
+                },
+                "required": [
+                  "label",
+                  "rendement"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "start_account",
+              "start_rendement"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "quiz",
+      "categorie": "interactief",
+      "uitleg": "\"Wat zou jij doen?\" met optioneel een chart, 2-3 keuzes, onthulling met uitleg pas na de klik.",
+      "beweging": "onthulling",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "quiz"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "vraag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "chart": {
+                "description": "Optioneel: de chart bij de vraag.",
+                "type": "object",
+                "properties": {
+                  "richting": {
+                    "description": "long = koop-scenario, short = verkoop-scenario (de chart wordt gespiegeld).",
+                    "type": "string",
+                    "enum": [
+                      "long",
+                      "short"
+                    ]
+                  },
+                  "soort": {
+                    "type": "string",
+                    "enum": [
+                      "sweep",
+                      "bos",
+                      "fib",
+                      "impuls"
+                    ]
+                  }
+                },
+                "required": [
+                  "richting",
+                  "soort"
+                ],
+                "additionalProperties": false
+              },
+              "opties": {
+                "minItems": 2,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 140
+                }
+              },
+              "antwoord_index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "uitleg": {
+                "description": "Waarom dit het antwoord is (onthulling na de klik).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 600
+              }
+            },
+            "required": [
+              "vraag",
+              "opties",
+              "antwoord_index",
+              "uitleg"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "trade-ontleed",
+      "categorie": "inhoud",
+      "uitleg": "Tijdlijn van één trade; elke stap met een mini-chart die verschijnt bij het scrollen.",
+      "beweging": "scroll-animatie",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "trade-ontleed"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "paar": {
+                "description": "Valutapaar of instrument in hoofdletters, bv. \"EUR/USD\", \"XAU/USD\", \"DXY\" of \"NAS100\".",
+                "type": "string",
+                "pattern": "^[A-Z0-9]{2,7}(\\/[A-Z0-9]{2,7})?$"
+              },
+              "richting": {
+                "description": "long = koop-scenario, short = verkoop-scenario (de chart wordt gespiegeld).",
+                "type": "string",
+                "enum": [
+                  "long",
+                  "short"
+                ]
+              },
+              "stappen": {
+                "minItems": 3,
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "fase": {
+                      "type": "string",
+                      "enum": [
+                        "context",
+                        "impuls",
+                        "zone",
+                        "liquidity",
+                        "shift",
+                        "entry",
+                        "beheer",
+                        "target"
+                      ]
+                    },
+                    "titel": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "tekst": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 360
+                    }
+                  },
+                  "required": [
+                    "fase",
+                    "titel",
+                    "tekst"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "resultaat_r": {
+                "description": "Uitkomst in R (enkel als echt gegeven).",
+                "type": "number",
+                "minimum": -1,
+                "maximum": 10
+              },
+              "beeld_asset_id": {
+                "description": "Optioneel: chart-screenshot van de trade.",
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            },
+            "required": [
+              "paar",
+              "richting",
+              "stappen"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "payout-muur",
+      "categorie": "nugget",
+      "uitleg": "Kaarten met echte payouts uit de bibliotheek (enkel met toestemming), bedragen tellen op, lightbox.",
+      "beweging": "count-up + lightbox",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "payout-muur"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "payouts": {
+                "minItems": 1,
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "asset_id": {
+                      "description": "Payout-beeld uit de bibliotheek MET toestemming publiek.",
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "bedrag": {
+                      "description": "Bedrag zoals op het bewijs.",
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "valuta": {
+                      "type": "string",
+                      "enum": [
+                        "$",
+                        "€"
+                      ]
+                    },
+                    "label": {
+                      "description": "bv. \"FTMO · okt 2026\" (naam enkel met toestemming).",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 60
+                    }
+                  },
+                  "required": [
+                    "asset_id",
+                    "bedrag",
+                    "valuta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "payouts"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "data",
+      "categorie": "nugget",
+      "uitleg": "Eén of drie grote echte cijfers uit de feitenbank, met context.",
+      "beweging": "count-up",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "data"
+          },
+          "variant": {
+            "description": "een = één enorm cijfer, drie = drie cijfers naast elkaar.",
+            "type": "string",
+            "enum": [
+              "een",
+              "drie"
+            ]
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "cijfers": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "waarde": {
+                      "description": "Het echte cijfer (uit de feitenbank of de invoer van de week).",
+                      "type": "number"
+                    },
+                    "decimalen": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2
+                    },
+                    "prefix": {
+                      "description": "bv. \"$\", \"€\", \"+\"",
+                      "type": "string",
+                      "maxLength": 4
+                    },
+                    "suffix": {
+                      "description": "bv. \"%\", \"R\", \" trades\"",
+                      "type": "string",
+                      "maxLength": 12
+                    },
+                    "label": {
+                      "description": "Wat het cijfer is, kort.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "context": {
+                      "description": "Eén zin context of nuance.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 220
+                    },
+                    "bron": {
+                      "description": "Waar het cijfer vandaan komt (feitenbank-regel).",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "waarde",
+                    "label",
+                    "bron"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "cijfers"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "variant",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "fotostrip",
+      "categorie": "inhoud",
+      "uitleg": "Achter de schermen: masterclass-/teamfoto's, horizontaal scrollen.",
+      "beweging": "scroll-snap",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "fotostrip"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "fotos": {
+                "minItems": 3,
+                "maxItems": 10,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "asset_id": {
+                      "description": "id van een beeld uit de bibliotheek (content_assets.id).",
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "bijschrift": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "asset_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "fotos"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "tip",
+      "categorie": "nugget",
+      "uitleg": "Tip van de week als kaart: voorkant de tip, achterkant waarom.",
+      "beweging": "flip",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tip"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "voorkant": {
+                "description": "De tip zelf, kort en concreet.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "achterkant": {
+                "description": "Waarom het werkt (uit de strategiekennis).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 420
+              }
+            },
+            "required": [
+              "voorkant",
+              "achterkant"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "mythe-feit",
+      "categorie": "nugget",
+      "uitleg": "Veelgemaakte fout vs hoe het wel zit.",
+      "beweging": "flip",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "mythe-feit"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "items": {
+                "minItems": 1,
+                "maxItems": 3,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "mythe": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "feit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 360
+                    }
+                  },
+                  "required": [
+                    "mythe",
+                    "feit"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "vooruitblik",
+      "categorie": "inhoud",
+      "uitleg": "Watchlist volgende week: paren met bias-pill en één zin, geen zekerheden.",
+      "beweging": "fade",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "vooruitblik"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "paren": {
+                "minItems": 2,
+                "maxItems": 6,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "paar": {
+                      "description": "Valutapaar of instrument in hoofdletters, bv. \"EUR/USD\", \"XAU/USD\", \"DXY\" of \"NAS100\".",
+                      "type": "string",
+                      "pattern": "^[A-Z0-9]{2,7}(\\/[A-Z0-9]{2,7})?$"
+                    },
+                    "bias": {
+                      "type": "string",
+                      "enum": [
+                        "bullish",
+                        "bearish",
+                        "neutraal"
+                      ]
+                    },
+                    "zin": {
+                      "description": "Eén zin, scenario-taal (\"als…, dan…\"), geen zekerheden.",
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "paar",
+                    "bias",
+                    "zin"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "paren"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "citaat",
+      "categorie": "inhoud",
+      "uitleg": "Korte uitspraak uit de training.",
+      "beweging": "fade",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "citaat"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "tekst": {
+                "description": "Korte uitspraak uit de training; **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 260
+              },
+              "wie": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            },
+            "required": [
+              "tekst"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "verhaal",
+      "categorie": "inhoud",
+      "uitleg": "Het verhaal van de week in 2-4 korte alinea's.",
+      "beweging": "fade",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "verhaal"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "tekst": {
+                "description": "2-4 korte alinea's (lege regel ertussen); **vet** mag.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2400
+              }
+            },
+            "required": [
+              "tekst"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "cadeau",
+      "categorie": "conversie",
+      "uitleg": "Gratis strategiesessie met Dave (vaste tekst). Altijd één keer.",
+      "beweging": "fade",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "cadeau"
+          },
+          "props": {
+            "description": "Gratis strategiesessie met Dave (vaste tekst op de website).",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "inschrijven",
+      "categorie": "conversie",
+      "uitleg": "Inschrijving op de wekelijkse analyse. Enkel bij een editie zonder video (dan verplicht).",
+      "beweging": "formulier",
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "inschrijven"
+          },
+          "props": {
+            "type": "object",
+            "properties": {
+              "eyebrow": {
+                "description": "Klein goud label boven de kop (hoofdletters, met lijn), max ±5 woorden.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "titel": {
+                "description": "Kop; het deel tussen **…** wordt goud.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "intro": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "type",
+          "props"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

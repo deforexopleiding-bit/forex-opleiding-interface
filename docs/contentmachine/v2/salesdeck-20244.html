@@ -1,0 +1,514 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>20.244 trades · Salesdeck</title>
+<style>
+/* Layout: 1600×900 podium dat meeschaalt met het venster; lichte en donkere slides wisselen af, goud is het enige accent.
+   Huisstijl overgenomen van de masterclass-decks (navy · goud · papier). Bewust één vaste look, los van het systeemthema. */
+:root{
+  color-scheme:light;
+  --paper:#f7f8f9; --paper-2:#eef1f3; --card:#ffffff;
+  --ink:#1a2f3e; --ink-soft:#41596c; --muted:#70767f; --line:#dde4e9; --line-2:#cdd6dd;
+  --navy:#1a2f3e; --navy-2:#24404f; --deep:#14252f;
+  --gold:#b18b4d; --gold-2:#c19956; --gold-3:#e8d9bd; --gold-wash:#faf5ec;
+  --green:#1f8a5b; --green-2:#5fd39b; --green-wash:#eaf6f0;
+  --red:#c14a3c; --red-2:#f0a99e; --red-wash:#fbeeec;
+  --grey-t:#c9d3da;
+  --r-md:14px; --r-lg:20px; --r-xl:26px;
+  --sh-1:0 1px 2px rgba(26,47,62,.06),0 8px 24px -14px rgba(26,47,62,.18);
+  --sh-2:0 2px 4px rgba(26,47,62,.05),0 24px 60px -28px rgba(26,47,62,.35);
+  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Inter",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#e7ebee;color:var(--ink);font-family:var(--font);-webkit-font-smoothing:antialiased}
+button{font-family:var(--font)}
+.deck{position:fixed;inset:0;overflow:hidden}
+.stage{position:absolute;top:50%;left:50%;width:1600px;height:900px;transform-origin:center center}
+.slide{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;padding:104px 104px 92px;background:var(--paper);overflow:hidden}
+.slide.on{display:flex;animation:enter .45s cubic-bezier(.2,.7,.3,1)}
+@keyframes enter{from{opacity:.0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.slide.dark{background:radial-gradient(1200px 700px at 88% -10%,rgba(177,139,77,.20),transparent 58%),linear-gradient(158deg,#22384a 0%,#1a2f3e 52%,#14252f 100%);color:#eef2f4}
+.slide.center{align-items:center;text-align:center}
+
+/* chrome */
+.brand{position:absolute;top:40px;left:104px;display:flex;align-items:center;gap:16px;z-index:3}
+.brand img{height:40px;display:block}
+.brand .w{display:none}.slide.dark .brand .d{display:none}.slide.dark .brand .w{display:block}
+.brand span{font-size:13px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);padding-left:16px;border-left:1px solid var(--line-2)}
+.slide.dark .brand span{color:#8fa3b1;border-left-color:rgba(255,255,255,.22)}
+.counter{position:absolute;top:50px;right:104px;font-size:14px;letter-spacing:.16em;color:var(--muted);font-weight:700;font-variant-numeric:tabular-nums}
+.slide.dark .counter{color:#7f93a2}
+.foot{position:absolute;left:104px;right:104px;bottom:32px;font-size:14px;line-height:1.4;color:#93a0a9}
+.slide.dark .foot{color:#6f8493}
+.bar{position:fixed;left:0;bottom:0;height:4px;background:var(--gold);transition:width .35s cubic-bezier(.4,0,.2,1);z-index:10}
+
+/* type */
+.eyebrow{font-size:15px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin:0 0 22px;display:flex;align-items:center;gap:14px}
+.eyebrow::after{content:"";height:1px;width:64px;background:currentColor;opacity:.45}
+.center .eyebrow{justify-content:center}
+.slide.dark .eyebrow{color:var(--gold-2)}
+h1{font-size:104px;line-height:.98;letter-spacing:-.045em;font-weight:800;margin:0 0 26px;text-wrap:balance}
+h2{font-size:58px;line-height:1.05;letter-spacing:-.035em;font-weight:800;margin:0 0 18px;max-width:26ch;text-wrap:balance}
+h3{font-size:26px;line-height:1.2;letter-spacing:-.02em;font-weight:700;margin:0 0 8px}
+.slide.dark h1,.slide.dark h2,.slide.dark h3{color:#fff}
+.lead{font-size:27px;line-height:1.45;color:var(--ink-soft);max-width:48ch;margin:0}
+.slide.dark .lead{color:#b9c8d2}
+.sub{font-size:20px;line-height:1.5;color:var(--muted);margin:0}
+.slide.dark .sub{color:#93a7b5}
+.gold{color:var(--gold)}.slide.dark .gold{color:var(--gold-2)}
+.hl{background:linear-gradient(180deg,transparent 58%,rgba(177,139,77,.28) 58%);padding:0 .06em}
+.slide.dark b{color:#fff}
+.num{font-variant-numeric:tabular-nums}
+
+/* blocks */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:26px;box-shadow:var(--sh-1)}
+.slide.dark .card{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.14);box-shadow:none}
+.label{font-size:13px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.slide.dark .label{color:#8fa3b1}
+.label.g{color:var(--gold)}.slide.dark .label.g{color:var(--gold-2)}
+.note{background:var(--gold-wash);border-left:3px solid var(--gold);border-radius:0 var(--r-md) var(--r-md) 0;padding:16px 22px;font-size:20px;line-height:1.45;color:#6b5735;max-width:74ch}
+.slide.dark .note{background:rgba(177,139,77,.14);color:#e3d3b5;border-color:var(--gold-2)}
+.row{display:flex;gap:22px}
+.grid{display:grid;gap:22px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.split{display:grid;grid-template-columns:1fr 1.1fr;gap:60px;align-items:center}
+.kpi .v{font-size:64px;font-weight:800;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .k{font-size:17px;color:var(--muted);margin-top:8px;font-weight:500}
+.slide.dark .kpi .v{color:var(--gold-2)}.slide.dark .kpi .k{color:#8fa3b1}
+
+/* controls */
+.seg{display:inline-flex;background:var(--paper-2);border:1px solid var(--line);border-radius:999px;padding:5px;gap:4px}
+.slide.dark .seg{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.16)}
+.seg button{border:0;background:transparent;border-radius:999px;padding:12px 24px;font-size:18px;font-weight:700;color:var(--ink-soft);cursor:pointer;transition:background .2s,color .2s}
+.slide.dark .seg button{color:#b9c8d2}
+.seg button.on{background:var(--navy);color:#fff;box-shadow:var(--sh-1)}
+.slide.dark .seg button.on{background:var(--gold);color:#14252f}
+.seg button:focus-visible,.chip:focus-visible,.btn:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.chips{display:flex;flex-wrap:wrap;gap:10px}
+.chip{border:1.5px solid var(--line-2);background:#fff;border-radius:999px;padding:11px 20px;font-size:18px;font-weight:700;color:var(--ink-soft);cursor:pointer;transition:all .18s;font-variant-numeric:tabular-nums}
+.chip:hover{border-color:var(--gold)}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn{display:inline-flex;align-items:center;gap:10px;background:var(--navy);color:#fff;border:0;border-radius:999px;padding:14px 26px;font-size:18px;font-weight:700;cursor:pointer;box-shadow:var(--sh-1);transition:transform .12s,background .2s}
+.btn:hover{transform:translateY(-1px);background:var(--navy-2)}
+.btn.g{background:var(--gold);color:#14252f}.btn.g:hover{background:var(--gold-2)}
+.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line-2);box-shadow:none}
+.slide.dark .btn.ghost{color:#fff;border-color:rgba(255,255,255,.3)}
+.slider{width:100%;appearance:none;-webkit-appearance:none;height:8px;border-radius:99px;background:var(--line-2);outline:none;margin:12px 0 4px;cursor:pointer}
+.slider::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;border-radius:50%;background:var(--gold);box-shadow:0 2px 8px rgba(26,47,62,.3);border:3px solid #fff}
+.slider::-moz-range-thumb{width:30px;height:30px;border-radius:50%;background:var(--gold);border:3px solid #fff}
+.slide.dark .slider{background:rgba(255,255,255,.18)}
+.srow{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;color:var(--muted);font-weight:600}
+.slide.dark .srow{color:#8fa3b1}
+.sval{font-size:30px;font-weight:800;color:var(--ink);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.slide.dark .sval{color:#fff}
+
+/* 01 cover */
+.cover-logo{height:84px;margin:0 auto 34px;display:block}
+.mega{font-size:220px;font-weight:800;letter-spacing:-.06em;line-height:.9;color:#fff;font-variant-numeric:tabular-nums}
+.mega small{display:block;font-size:68px;letter-spacing:-.03em;color:var(--gold-2);margin-top:6px}
+
+/* 02 trechter */
+.funnel{display:flex;flex-direction:column;gap:14px;margin-top:34px}
+.frow{display:grid;grid-template-columns:300px 1fr 150px;align-items:center;gap:22px}
+.frow .t{font-size:19px;font-weight:700;color:var(--ink)}
+.frow .t span{display:block;font-size:15px;font-weight:500;color:var(--muted)}
+.track{height:46px;background:var(--paper-2);border-radius:12px;overflow:hidden;position:relative}
+.fill{height:100%;width:0;border-radius:12px;transition:width 1s cubic-bezier(.2,.7,.3,1)}
+.frow .n{font-size:30px;font-weight:800;letter-spacing:-.02em;text-align:right;font-variant-numeric:tabular-nums}
+
+/* 03 toggle */
+.versus{display:grid;grid-template-columns:1.1fr 1fr;gap:70px;align-items:center;margin-top:24px}
+.ring{position:relative;width:420px;height:420px}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .big{font-size:92px;font-weight:800;letter-spacing:-.05em;line-height:1;color:#fff;font-variant-numeric:tabular-nums}
+.ring .cap{font-size:18px;color:#93a7b5;margin-top:8px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}
+.vs-facts{display:grid;gap:14px;margin-top:26px}
+.vs-facts .card{display:flex;justify-content:space-between;align-items:baseline;padding:18px 22px}
+.vs-facts .card .k{font-size:18px;color:#b9c8d2}
+.vs-facts .card .v{font-size:32px;font-weight:800;color:#fff;font-variant-numeric:tabular-nums}
+
+/* 04 quitte */
+.tiles{display:grid;grid-template-columns:repeat(10,1fr);gap:7px;width:470px}
+.tile{aspect-ratio:1;border-radius:7px;background:var(--red-wash);border:1px solid #f0cfc9;transition:background .25s,border-color .25s}
+.tile.w{background:var(--green);border-color:var(--green)}
+.meter{position:relative;height:16px;background:var(--paper-2);border-radius:99px;margin:56px 0 46px}
+.meter .be{position:absolute;left:0;top:0;bottom:0;background:var(--red-wash);border-right:2px solid var(--red);border-radius:99px 0 0 99px;transition:width .3s}
+.meter .pin{position:absolute;top:-10px;width:4px;height:36px;border-radius:3px;background:var(--navy);transition:left .3s}
+.meter .pin.data{background:var(--gold)}
+.meter .tag{position:absolute;transform:translateX(-50%);font-size:14px;font-weight:800;white-space:nowrap;transition:left .3s}
+.result{border-radius:var(--r-lg);padding:24px 28px;border:1px solid var(--line);background:#fff;box-shadow:var(--sh-1);transition:background .3s,border-color .3s}
+.result.ok{background:var(--green-wash);border-color:#c9e6d7}
+.result.no{background:var(--red-wash);border-color:#f0cfc9}
+.result .big{font-size:56px;font-weight:800;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
+.result.ok .big{color:var(--green)}.result.no .big{color:var(--red)}
+.result .cap{font-size:18px;color:var(--ink-soft);margin-top:8px}
+
+/* 05 mediaan */
+.dots{display:grid;grid-template-columns:repeat(12,1fr);gap:12px;width:560px}
+.dot{aspect-ratio:1;border-radius:50%;background:rgba(255,255,255,.12);transform:scale(.6);opacity:.4;transition:all .4s cubic-bezier(.2,.8,.3,1)}
+.dot.on{transform:scale(1);opacity:1;background:var(--green-2)}
+.dot.neg.on{background:rgba(240,169,158,.55)}
+.dot.med.on{background:var(--gold-2);box-shadow:0 0 0 5px rgba(193,153,86,.25)}
+
+/* 06 rekenmachine */
+.calc{display:grid;grid-template-columns:1fr 1.05fr;gap:56px;align-items:start;margin-top:8px}
+.ctl{display:flex;flex-direction:column;gap:24px}
+.out{background:var(--navy);color:#fff;border-radius:var(--r-xl);padding:30px 32px;box-shadow:var(--sh-2)}
+.out .label{color:#8fa3b1}
+.out .money{font-size:84px;font-weight:800;letter-spacing:-.045em;line-height:1;color:var(--gold-2);font-variant-numeric:tabular-nums}
+.out .money.sm{font-size:46px;color:#fff}
+.out .line{display:flex;justify-content:space-between;gap:20px;padding:14px 0;border-top:1px solid rgba(255,255,255,.12);font-size:18px;color:#b9c8d2}
+.out .line b{color:#fff;font-size:22px;font-variant-numeric:tabular-nums}
+.ladder{margin-top:22px;display:flex;flex-direction:column;gap:7px}
+.lrow{display:grid;grid-template-columns:72px 1fr 120px;align-items:center;gap:12px;font-size:15px;font-weight:700;color:#93a7b5;cursor:pointer}
+.lrow .lt{height:16px;background:rgba(255,255,255,.08);border-radius:5px;overflow:hidden}
+.lrow .lf{height:100%;background:rgba(255,255,255,.28);border-radius:5px;transition:width .45s cubic-bezier(.2,.7,.3,1)}
+.lrow .lv{text-align:right;color:#cdd8df;font-variant-numeric:tabular-nums}
+.lrow.on{color:#fff}.lrow.on .lf{background:var(--gold-2)}.lrow.on .lv{color:var(--gold-2)}
+.preset{font-size:15px;font-weight:700;color:var(--gold);background:var(--gold-wash);border:1px solid var(--gold-3);border-radius:999px;padding:7px 14px;cursor:pointer}
+
+/* 07 uitsplitsing */
+.bars{display:flex;flex-direction:column;gap:12px;margin-top:30px}
+.brow{display:grid;grid-template-columns:200px 1fr 340px;align-items:center;gap:20px}
+.brow .t{font-size:20px;font-weight:700;color:var(--ink)}
+.brow .bt{height:38px;background:var(--paper-2);border-radius:10px;position:relative;overflow:hidden}
+.brow .bf{height:100%;border-radius:10px;background:var(--navy);width:0;transition:width .7s cubic-bezier(.2,.7,.3,1)}
+.brow .bf.top{background:var(--gold)}
+.brow .avg{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--red);opacity:.6}
+.brow .v{font-size:18px;white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+.brow .v b{font-size:26px;color:var(--ink);margin-right:8px}
+
+/* notities + overzicht */
+.notes{position:fixed;left:0;right:0;bottom:0;background:#14252f;color:#e6edf1;padding:16px 26px;font-size:17px;line-height:1.45;display:none;z-index:20;border-top:3px solid var(--gold)}
+.notes.on{display:block}.notes b{color:var(--gold-2)}
+.help{position:fixed;right:14px;bottom:10px;font-size:11px;color:#8d9aa3;z-index:15;letter-spacing:.06em}
+.overview{position:fixed;inset:0;background:#eef1f3;overflow:auto;padding:26px;display:none;z-index:30;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;align-content:start}
+.overview.on{display:grid}
+.ovcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;text-align:left;font-family:var(--font)}
+.ovcard:hover{border-color:var(--gold)}
+.ovcard .n{font-size:11px;color:var(--gold);font-weight:800;letter-spacing:.14em}
+.ovcard .t{font-size:16px;font-weight:600;margin-top:5px;color:var(--ink)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="deck"><div class="stage" id="stage">
+
+<!-- 01 -->
+<section class="slide dark center" data-title="20.244 trades" data-notes="<b>Opening.</b> 'Voor we het over jou hebben: dit is wat onze studenten de voorbije twee jaar zelf gelogd hebben. Geen screenshots, gewoon alle data.' Laat de teller lopen.">
+  <img class="cover-logo" src="img/logo-wit.png" alt="De Forex Opleiding">
+  <div class="eyebrow">Wat de data van onze studenten zegt</div>
+  <div class="mega"><span data-count="20244">0</span><small>gelogde trades</small></div>
+  <p class="lead" style="margin:34px auto 0">Van <b>177 studenten</b>, de voorbije twee jaar gelogd in het journal van ons platform. Alles berekend met <b>1% risico per trade</b>.</p>
+</section>
+
+<!-- 02 -->
+<section class="slide" data-title="Wat we gemeten hebben" data-notes="Kort. 'Van die 20.000 hebben er 13.000 een uitkomst. We splitsen ze in twee: backtests en echte journaltrades. Dat verschil is het hele verhaal.' Klik door.">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="eyebrow">De bron</div>
+  <h2>Elke trade die studenten in hun journal zetten</h2>
+  <div class="funnel" data-funnel>
+    <div class="frow"><div class="t">Gelogd<span>alle trades in het journal</span></div><div class="track"><div class="fill" style="background:var(--line-2)" data-w="100"></div></div><div class="n" data-count="20244">0</div></div>
+    <div class="frow"><div class="t">Met uitkomst<span>winner, loser of break-even</span></div><div class="track"><div class="fill" style="background:var(--ink-soft)" data-w="64.3"></div></div><div class="n" data-count="13013">0</div></div>
+    <div class="frow"><div class="t">Journaltrades<span>de echte uitvoering</span></div><div class="track"><div class="fill" style="background:var(--gold)" data-w="34"></div></div><div class="n gold" data-count="6881">0</div></div>
+    <div class="frow"><div class="t">Backtests<span>geoefend op het verleden</span></div><div class="track"><div class="fill" style="background:#9bb0bd" data-w="29.4"></div></div><div class="n" style="color:#7d92a0" data-count="5947">0</div></div>
+  </div>
+  <p class="sub" style="margin-top:30px">De overige 7.231 trades werden geopend maar nooit afgewerkt. Die tellen nergens mee.</p>
+</section>
+
+<!-- 03 -->
+<section class="slide dark" data-title="Backtest tegenover journal" data-notes="<b>Hét moment van de call.</b> Start op Backtest. 'In een backtest wint 79%.' Klik op Journal en laat de ring zakken. 'In het echt, met geld en emotie, is dat 48%. Dat is het verschil tussen weten en doen. Daar zit onze begeleiding.'">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="versus">
+    <div>
+      <div class="eyebrow">Emotieloos tegenover met emotie</div>
+      <h2>Weten hoe het moet is <span class="gold">iets anders</span> dan het doen</h2>
+      <div class="seg" role="tablist" style="margin-top:20px" data-vs>
+        <button class="on" data-k="bt">Backtest</button>
+        <button data-k="live">Journal (echt)</button>
+      </div>
+      <div class="vs-facts">
+        <div class="card"><span class="k">Trades</span><span class="v" data-vs-n>5.947</span></div>
+        <div class="card"><span class="k">Gemiddelde winnende trade</span><span class="v" data-vs-w>4,94R</span></div>
+        <div class="card"><span class="k" data-vs-capk>Echt geld, druk en emotie</span><span class="v" data-vs-cap>Nee</span></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:center">
+      <div class="ring">
+        <svg viewBox="0 0 200 200"><circle cx="100" cy="100" r="86" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="16"/>
+          <circle data-arc cx="100" cy="100" r="86" fill="none" stroke="#9bb0bd" stroke-width="16" stroke-linecap="round" stroke-dasharray="540.35" stroke-dashoffset="540.35" style="transition:stroke-dashoffset .9s cubic-bezier(.2,.7,.3,1),stroke .4s"/></svg>
+        <div class="center"><div class="big" data-vs-wr>0%</div><div class="cap">winrate</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 -->
+<section class="slide" data-title="Waarom 48% genoeg is" data-notes="<b>Laat de klant zelf schuiven.</b> 'Hoeveel denk je dat je moet winnen om geld te verdienen?' Meestal zeggen ze 60 of 70%. Schuif naar 24%: quitte. Klik dan 'Onze studenten': 48,5%. 'Je mag meer dan de helft verliezen en toch winstgevend zijn, als je winners groter zijn dan je losers.'">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="split" style="grid-template-columns:1.15fr 1fr;gap:70px">
+    <div>
+      <div class="eyebrow">Reken zelf mee</div>
+      <h2 style="font-size:52px">Je hoeft niet vaak te winnen. Je winners moeten <span class="hl">groter</span> zijn.</h2>
+      <div style="margin-top:26px">
+        <div class="srow"><span>Winrate</span><span class="sval" data-q-wrv>48,5%</span></div>
+        <input class="slider" id="q-wr" type="range" min="10" max="80" step="0.5" value="48.5" aria-label="Winrate">
+        <div class="srow"><span>10%</span><span>80%</span></div>
+      </div>
+      <div style="margin-top:18px">
+        <div class="srow"><span>Gemiddelde winnende trade</span><span class="sval" data-q-rrv>3,17R</span></div>
+        <input class="slider" id="q-rr" type="range" min="1" max="5" step="0.01" value="3.17" aria-label="Gemiddelde winnende trade">
+        <div class="srow"><span>1R</span><span>5R</span></div>
+      </div>
+      <div class="meter" data-q-meter>
+        <div class="be"></div>
+        <div class="tag" data-q-betag style="top:-34px;color:var(--red)"></div>
+        <div class="pin data"></div><div class="tag" data-q-datatag style="top:30px;color:var(--gold)">onze studenten 48,5%</div>
+        <div class="pin you"></div>
+      </div>
+      <div class="row" style="gap:12px"><button class="btn g" data-q-preset>Onze studenten</button><button class="btn ghost" data-q-quitte>Toon het quittepunt</button></div>
+    </div>
+    <div>
+      <div class="tiles" data-q-tiles></div>
+      <div class="result ok" data-q-res style="margin-top:22px">
+        <div class="label">Over 100 trades, bij 1% risico</div>
+        <div class="big" data-q-out>+102%</div>
+        <div class="cap" data-q-cap>Quitte vanaf 24% winrate</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">Rekenvoorbeeld: winners × gemiddelde winnende trade, min losers × 1R, over 100 gewonnen of verloren trades. Break-evens tellen als 0R.</div>
+</section>
+
+<!-- 05 -->
+<section class="slide dark" data-title="De mediaanstudent" data-notes="'Een totaal zegt weinig, dat zijn veel mensen samen. Dus nemen we de middelste student.' Laat de bolletjes vullen. '41 van de 47 studenten met minstens 30 trades staan in winst. De middelste: +70% over 19 maanden. Gewone mensen, naast hun job.'">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="split" style="grid-template-columns:1fr 1fr">
+    <div>
+      <div class="eyebrow">De middelste student</div>
+      <h2>Geen uitschieter. <span class="gold">De mediaan.</span></h2>
+      <div class="row" style="gap:56px;margin-top:30px;flex-wrap:wrap">
+        <div class="kpi"><div class="v" data-count="70.5" data-dec="1" data-pre="+" data-suf="%">0</div><div class="k">totaal bij 1% risico</div></div>
+        <div class="kpi"><div class="v" data-count="19" data-suf=" mnd">0</div><div class="k">van eerste tot laatste trade</div></div>
+        <div class="kpi"><div class="v" data-count="81">0</div><div class="k">journaltrades</div></div>
+      </div>
+      <p class="lead" style="margin-top:34px">Op een 100K-account is dat <b>+$70.540</b> voor de profit split.</p>
+    </div>
+    <div>
+      <div class="dots" data-dots></div>
+      <p class="sub" style="margin-top:22px"><b style="color:var(--green-2)">41 van de 47</b> studenten met minstens 30 journaltrades staan in totaal in winst. <span style="color:var(--gold-2);font-weight:700">Het gouden bolletje</span> is de mediaan.</p>
+    </div>
+  </div>
+  <div class="foot">Mediaan van de 47 studenten met minstens 30 journaltrades. Resultaat = som van alle trades in R, bij 1% risico = 1% van het startkapitaal, zonder samengestelde groei.</div>
+</section>
+
+<!-- 06 -->
+<section class="slide" data-title="Rekenmachine: kapitaal" data-notes="<b>De rekenmachine.</b> Start op 100K met het mediaanrendement. Klik dan door de bedragen in de ladder: 'Zelfde trader, zelfde percentage. Alleen het kapitaal verschilt.' Zet de periode op 12 maanden. 'Dit kapitaal is niet van jou, het is van de prop firm. Jij moet alleen consistent genoeg zijn om het te krijgen.'">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="eyebrow">Zelfde percentage, ander kapitaal</div>
+  <h2 style="font-size:50px;max-width:none">Wat jouw rendement waard is op een funded account</h2>
+  <div class="calc">
+    <div class="ctl">
+      <div>
+        <div class="srow" style="margin-bottom:12px"><span>Accountgrootte</span><span class="sval" data-c-accv>$100.000</span></div>
+        <div class="chips" data-c-acc>
+          <button class="chip" data-v="10000">10K</button><button class="chip" data-v="25000">25K</button><button class="chip" data-v="50000">50K</button><button class="chip on" data-v="100000">100K</button><button class="chip" data-v="200000">200K</button><button class="chip" data-v="400000">400K</button><button class="chip" data-v="1000000">1M</button>
+        </div>
+      </div>
+      <div>
+        <div class="srow"><span>Rendement per maand <button class="preset" data-c-preset>mediaanstudent: 4,15%</button></span><span class="sval" data-c-pctv>4,15%</span></div>
+        <input class="slider" id="c-pct" type="range" min="0.5" max="10" step="0.05" value="4.15" aria-label="Rendement per maand">
+        <div class="srow"><span>0,5%</span><span>10%</span></div>
+      </div>
+      <div>
+        <div class="srow"><span>Periode</span><span class="sval" data-c-mv>12 maanden</span></div>
+        <input class="slider" id="c-m" type="range" min="1" max="24" step="1" value="12" aria-label="Periode in maanden">
+        <div class="srow"><span>1 maand</span><span>24 maanden</span></div>
+      </div>
+      <div class="row" style="align-items:center;gap:18px">
+        <span class="srow" style="margin:0">Profit split</span>
+        <div class="seg" data-c-split><button class="on" data-v="0.8">80%</button><button data-v="0.9">90%</button></div>
+      </div>
+    </div>
+    <div class="out">
+      <div class="label">Jouw deel per maand</div>
+      <div class="money" data-c-month>$3.320</div>
+      <div class="line" style="margin-top:20px"><span data-c-periodk>Over 12 maanden</span><b data-c-period>$39.840</b></div>
+      <div class="line"><span>Bruto winst op het account per maand</span><b data-c-gross>$4.150</b></div>
+      <div class="ladder" data-c-ladder></div>
+    </div>
+  </div>
+  <div class="foot">Rekenvoorbeeld zonder samengestelde groei: kapitaal × maandrendement × profit split. 4,15% is het mediaanresultaat per maand van onze studenten met minstens 30 journaltrades. Voorwaarden en splits verschillen per prop firm; geen garantie op toekomstig rendement.</div>
+</section>
+
+<!-- 07 -->
+<section class="slide" data-title="Waar de trades vallen" data-notes="Kies het tabblad dat bij de klant past. Iemand met een job: toon Sessie ('Londen en Azië doen het best, dat past voor of na je werk'). Twijfel over richting: Long/short. Tradet hij al: toon Valutapaar.">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="row" style="justify-content:space-between;align-items:flex-end;flex-wrap:wrap">
+    <div><div class="eyebrow">Uitgesplitst · journaltrades</div><h2 style="font-size:50px;margin:0">Waar de trades vallen</h2></div>
+    <div class="seg" data-b-tabs><button class="on" data-k="sess">Sessie</button><button data-k="dir">Richting &amp; type</button><button data-k="dag">Dag</button><button data-k="pair">Beste paren</button></div>
+  </div>
+  <div class="bars" data-bars></div>
+  <p class="sub" style="margin-top:22px">Lengte van de balk = winrate. De rode lijn is het gemiddelde van <b style="color:var(--ink)">48,5%</b>. Rechts: het totaal bij 1% risico.</p>
+</section>
+
+<!-- 08 -->
+<section class="slide dark center" data-title="Wat dit zegt" data-notes="<b>Afronden en doorschakelen.</b> 'Je zag drie dingen: dat de methode werkt, dat het in het echt moeilijker is dan in een backtest, en dat het verschil zit in hoe je uitvoert. Dat laatste is precies waar wij je mee begeleiden.' Dan naar het aanbod.">
+  <div class="brand"><img class="d" src="img/logo.png" alt=""><img class="w" src="img/logo-wit.png" alt=""><span>Datarapport</span></div><div class="counter"></div>
+  <div class="eyebrow">Samengevat</div>
+  <h2 style="margin:0 auto 34px;max-width:28ch">De methode werkt. Het verschil zit in <span class="gold">hoe je ze uitvoert.</span></h2>
+  <div class="grid g3" style="width:100%;text-align:left">
+    <div class="card"><div class="label g">Het systeem</div><h3>3,17R per winnende trade</h3><p class="sub">Quitte vanaf 24% winrate. Onze studenten halen het dubbele.</p></div>
+    <div class="card"><div class="label g">De mens</div><h3>79% → 48,5%</h3><p class="sub">Van backtest naar journal. Discipline en emotie maken het verschil.</p></div>
+    <div class="card"><div class="label g">Het resultaat</div><h3>41 van de 47 in winst</h3><p class="sub">De mediaanstudent: +70,5% over 19 maanden bij 1% risico.</p></div>
+  </div>
+  <div class="foot" style="text-align:left">Bron: 20.244 trades uit het journal van het DFO-platform, opgehaald op 8 oktober 2026. Door studenten zelf gelogd, geen brokerafschriften; demo-, challenge- en funded accounts kunnen erbij zitten. Resultaten uit het verleden zijn geen garantie voor de toekomst. Traden brengt risico op verlies met zich mee.</div>
+</section>
+
+</div></div>
+
+<div class="bar" id="bar"></div>
+<div class="notes" id="notes"></div>
+<div class="overview" id="overview"></div>
+<div class="help">← → bladeren · N notities · O overzicht · F volledig scherm</div>
+
+<script>
+(function(){
+const fmt=(n,d=0)=>n.toLocaleString('nl-BE',{minimumFractionDigits:d,maximumFractionDigits:d});
+const usd=n=>'$'+fmt(Math.round(n));
+const slides=[...document.querySelectorAll('.slide')];
+const stage=document.getElementById('stage'), bar=document.getElementById('bar'), notes=document.getElementById('notes'), ov=document.getElementById('overview');
+let cur=0;
+function fit(){const s=Math.min(innerWidth/1600,innerHeight/900);stage.style.transform=`translate(-50%,-50%) scale(${s})`}
+addEventListener('resize',fit);fit();
+
+function countUp(el){
+  const to=parseFloat(el.dataset.count),dec=+(el.dataset.dec||0),pre=el.dataset.pre||'',suf=el.dataset.suf||'';
+  const t0=performance.now(),dur=1300;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){el.textContent=pre+fmt(to,dec)+suf;return}
+  (function step(t){const p=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-p,3);el.textContent=pre+fmt(to*e,dec)+suf;if(p<1)requestAnimationFrame(step)})(t0);
+}
+const onEnter={};
+function go(i){
+  i=Math.max(0,Math.min(slides.length-1,i));
+  slides[cur].classList.remove('on');cur=i;const s=slides[cur];s.classList.add('on');
+  s.querySelectorAll('.counter').forEach(c=>c.textContent=String(cur+1).padStart(2,'0')+' / '+String(slides.length).padStart(2,'0'));
+  bar.style.width=((cur+1)/slides.length*100)+'%';
+  notes.innerHTML=s.dataset.notes||'';
+  s.querySelectorAll('[data-count]').forEach(countUp);
+  (onEnter[cur]||(()=>{}))(s);
+  try{history.replaceState(null,'','#s'+(cur+1))}catch(e){}
+}
+addEventListener('keydown',e=>{
+  if(e.target.matches('input')&&['ArrowLeft','ArrowRight'].includes(e.key))return;
+  if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();go(cur+1)}
+  else if(['ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();go(cur-1)}
+  else if(e.key==='Home')go(0);else if(e.key==='End')go(slides.length-1);
+  else if(e.key==='n'||e.key==='N')notes.classList.toggle('on');
+  else if(e.key==='o'||e.key==='O')ov.classList.toggle('on');
+  else if(e.key==='f'||e.key==='F'){try{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{})}catch(e){}}
+  else if(e.key==='Escape')ov.classList.remove('on');
+});
+// klik op lege ruimte van een slide = volgende; interactieve elementen niet
+document.querySelector('.deck').addEventListener('click',e=>{
+  if(e.target.closest('button,input,a,.chip,.lrow,.tiles,.dots,.seg'))return;
+  const x=e.clientX/innerWidth; go(x<0.25?cur-1:cur+1);
+});
+slides.forEach((s,i)=>{const b=document.createElement('button');b.className='ovcard';b.innerHTML=`<div class="n">${String(i+1).padStart(2,'0')}</div><div class="t">${s.dataset.title}</div>`;b.onclick=()=>{ov.classList.remove('on');go(i)};ov.appendChild(b)});
+
+/* 02 trechter */
+onEnter[1]=s=>{s.querySelectorAll('.fill').forEach(f=>{f.style.width='0';requestAnimationFrame(()=>requestAnimationFrame(()=>f.style.width=f.dataset.w+'%'))})};
+
+/* 03 backtest vs journal */
+const VS={bt:{wr:78.7,n:'5.947',w:'4,94R',capk:'Echt geld, druk en emotie',cap:'Nee',col:'#9bb0bd'},live:{wr:48.5,n:'6.881',w:'3,17R',capk:'Echt geld, druk en emotie',cap:'Ja',col:'#c19956'}};
+const vs=document.querySelector('[data-vs]'),arc=document.querySelector('[data-arc]'),vwr=document.querySelector('[data-vs-wr]');
+let vsCur=78.7;
+function setVs(k){const d=VS[k];vs.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+  arc.style.stroke=d.col;arc.style.strokeDashoffset=540.35*(1-d.wr/100);
+  document.querySelector('[data-vs-n]').textContent=d.n;document.querySelector('[data-vs-w]').textContent=d.w;
+  document.querySelector('[data-vs-capk]').textContent=d.capk;document.querySelector('[data-vs-cap]').textContent=d.cap;
+  const from=vsCur,to=d.wr,t0=performance.now();vsCur=to;
+  (function st(t){const p=Math.min(1,(t-t0)/900),e=1-Math.pow(1-p,3);vwr.textContent=fmt(from+(to-from)*e,1)+'%';if(p<1)requestAnimationFrame(st)})(t0);}
+vs.addEventListener('click',e=>{const b=e.target.closest('button');if(b)setVs(b.dataset.k)});
+onEnter[2]=()=>{vsCur=0;arc.style.strokeDashoffset=540.35;setTimeout(()=>setVs('bt'),60)};
+
+/* 04 quitte */
+const qwr=document.getElementById('q-wr'),qrr=document.getElementById('q-rr'),tiles=document.querySelector('[data-q-tiles]');
+for(let i=0;i<100;i++){const t=document.createElement('div');t.className='tile';tiles.appendChild(t)}
+const meter=document.querySelector('[data-q-meter]');
+function q(){
+  const wr=+qwr.value,rr=+qrr.value,be=100/(1+rr);
+  const res=(wr/100*rr-(1-wr/100))*100;
+  document.querySelector('[data-q-wrv]').textContent=fmt(wr,1)+'%';
+  document.querySelector('[data-q-rrv]').textContent=fmt(rr,2)+'R';
+  [...tiles.children].forEach((t,i)=>t.classList.toggle('w',i<Math.round(wr)));
+  const pos=v=>((v-10)/70*100);
+  meter.querySelector('.be').style.width=Math.max(0,pos(be))+'%';
+  const bt=document.querySelector('[data-q-betag]');bt.style.left=Math.max(0,pos(be))+'%';bt.textContent='quitte '+fmt(be,0)+'%';
+  meter.querySelector('.pin.data').style.left=pos(48.5)+'%';document.querySelector('[data-q-datatag]').style.left=pos(48.5)+'%';
+  meter.querySelector('.pin.you').style.left=pos(wr)+'%';
+  const r=document.querySelector('[data-q-res]');r.classList.toggle('ok',res>=0);r.classList.toggle('no',res<0);
+  document.querySelector('[data-q-out]').textContent=(res>=0?'+':'−')+fmt(Math.abs(res),0)+'%';
+  document.querySelector('[data-q-cap]').innerHTML=`${Math.round(wr)} winners × ${fmt(rr,2)}R, ${100-Math.round(wr)} losers × −1R. Quitte vanaf <b>${fmt(be,0)}%</b> winrate.`;
+}
+qwr.oninput=qrr.oninput=q;
+function animTo(input,to,cb){const from=+input.value,t0=performance.now();(function st(t){const p=Math.min(1,(t-t0)/700),e=1-Math.pow(1-p,3);input.value=from+(to-from)*e;cb();if(p<1)requestAnimationFrame(st)})(t0)}
+document.querySelector('[data-q-preset]').onclick=()=>{qrr.value=3.17;animTo(qwr,48.5,q)};
+document.querySelector('[data-q-quitte]').onclick=()=>animTo(qwr,100/(1+ +qrr.value),q);
+q();
+
+/* 05 mediaan */
+const dots=document.querySelector('[data-dots]');
+for(let i=0;i<47;i++){const d=document.createElement('div');d.className='dot'+(i>=41?' neg':'')+(i===20?' med':'');dots.appendChild(d)}
+onEnter[4]=()=>{const ds=[...dots.children];ds.forEach(d=>d.classList.remove('on'));ds.forEach((d,i)=>setTimeout(()=>d.classList.add('on'),120+i*28))};
+
+/* 06 rekenmachine */
+const SIZES=[10000,25000,50000,100000,200000,400000,1000000];
+const st={acc:100000,pct:4.15,m:12,split:0.8};
+const lad=document.querySelector('[data-c-ladder]');
+SIZES.forEach(v=>{const r=document.createElement('div');r.className='lrow';r.dataset.v=v;r.innerHTML=`<span>${v>=1e6?'1M':(v/1000)+'K'}</span><div class="lt"><div class="lf"></div></div><span class="lv"></span>`;r.onclick=()=>{st.acc=v;calc()};lad.appendChild(r)});
+let shown=0;
+function calc(){
+  const month=st.acc*st.pct/100*st.split, gross=st.acc*st.pct/100;
+  document.querySelector('[data-c-accv]').textContent=usd(st.acc);
+  document.querySelector('[data-c-pctv]').textContent=fmt(st.pct,2)+'%';
+  document.querySelector('[data-c-mv]').textContent=st.m+(st.m===1?' maand':' maanden');
+  document.querySelector('[data-c-periodk]').textContent='Over '+st.m+(st.m===1?' maand':' maanden');
+  document.querySelector('[data-c-period]').textContent=usd(month*st.m);
+  document.querySelector('[data-c-gross]').textContent=usd(gross);
+  document.querySelectorAll('[data-c-acc] .chip').forEach(c=>c.classList.toggle('on',+c.dataset.v===st.acc));
+  document.querySelectorAll('[data-c-split] button').forEach(b=>b.classList.toggle('on',+b.dataset.v===st.split));
+  const max=1000000*st.pct/100*st.split*st.m;
+  [...lad.children].forEach(r=>{const v=+r.dataset.v,val=v*st.pct/100*st.split*st.m;r.classList.toggle('on',v===st.acc);r.querySelector('.lf').style.width=(val/max*100)+'%';r.querySelector('.lv').textContent=usd(val)});
+  const el=document.querySelector('[data-c-month]'),from=shown,to=month,t0=performance.now();shown=to;
+  (function s(t){const p=Math.min(1,(t-t0)/500),e=1-Math.pow(1-p,3);el.textContent=usd(from+(to-from)*e);if(p<1)requestAnimationFrame(s)})(t0);
+}
+document.querySelector('[data-c-acc]').addEventListener('click',e=>{const c=e.target.closest('.chip');if(c){st.acc=+c.dataset.v;calc()}});
+document.querySelector('[data-c-split]').addEventListener('click',e=>{const b=e.target.closest('button');if(b){st.split=+b.dataset.v;calc()}});
+const cp=document.getElementById('c-pct'),cm=document.getElementById('c-m');
+cp.oninput=()=>{st.pct=+cp.value;calc()};cm.oninput=()=>{st.m=+cm.value;calc()};
+document.querySelector('[data-c-preset]').onclick=()=>{cp.value=4.15;st.pct=4.15;calc()};
+calc();
+onEnter[5]=()=>{shown=0;calc()};
+
+/* 07 uitsplitsing: [label, winrate, totaal R, trades] */
+const B={
+  sess:[['Londen',50.7,1682,1716],['Azië',50.6,834,807],['NVT',47.2,326,466],['New York',45.6,1101,1564]],
+  dir:[['Long',53.8,3382,3260],['Continuation',51.7,2149,2517],['Short',43.3,2182,3471],['Reversal',40.4,575,1015]],
+  dag:[['Maandag',53.1,1294,1258],['Donderdag',49.0,919,976],['Woensdag',47.4,890,1199],['Vrijdag',47.1,576,739],['Dinsdag',45.3,964,1240]],
+  pair:[['CHFJPY',57.5,251,215],['EURCHF',55.0,211,235],['XAUUSD',54.4,113,126],['AUDCHF',53.4,324,312],['EURUSD',52.6,643,687],['USDJPY',51.5,456,417],['EURAUD',51.1,406,425],['GBPCAD',51.1,215,242]]
+};
+const bars=document.querySelector('[data-bars]');
+function drawB(k){
+  document.querySelectorAll('[data-b-tabs] button').forEach(b=>b.classList.toggle('on',b.dataset.k===k));
+  const rows=B[k],SC=65;
+  bars.innerHTML=rows.map((r,i)=>`<div class="brow"><div class="t">${r[0]}</div><div class="bt"><div class="bf${i===0?' top':''}"></div><div class="avg" style="left:${48.5/SC*100}%"></div></div><div class="v"><b>${fmt(r[1],1)}%</b>+${fmt(r[2],0)}% · ${fmt(r[3],0)} trades</div></div>`).join('');
+  requestAnimationFrame(()=>requestAnimationFrame(()=>bars.querySelectorAll('.bf').forEach((f,i)=>f.style.width=(rows[i][1]/SC*100)+'%')));
+}
+document.querySelector('[data-b-tabs]').addEventListener('click',e=>{const b=e.target.closest('button');if(b)drawB(b.dataset.k)});
+onEnter[6]=()=>drawB(document.querySelector('[data-b-tabs] .on').dataset.k);
+
+const h=parseInt((location.hash.match(/^#s(\d+)$/)||[])[1]||'1',10)-1;
+slides[0].classList.add('on');go(isNaN(h)?0:h);
+})();
+</script>
+
+</body></html>

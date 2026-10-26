@@ -189,7 +189,7 @@
         <td style="${td};white-space:nowrap"><b style="font-family:var(--mono,monospace)">${esc(d.slug)}</b><div style="color:var(--text-3);font-size:11.5px">${esc(fmtDag(d.datum))}</div></td>
         <td style="${td}">${pill(c, l)}</td>
         <td class="cm-mob-weg" style="${td}">${d.soort === 'training' ? pill('accent', 'Training') : pill('neutral', 'Update')}</td>
-        <td class="cm-mob-weg" style="${td}">${d.format_key ? esc(FORMATS[d.format_key] || d.format_key) : '<span style="color:var(--text-3)">—</span>'}</td>
+        <td class="cm-mob-weg" style="${td}">${d.format_key ? esc(FORMATS[d.format_key] || d.format_key) : '<span style="color:var(--text-3)">—</span>'}${d.weekeditie ? `<div style="margin-top:3px">${pill('ok', 'Weekeditie · ' + (d.thema || ''))}</div>` : ''}</td>
         <td style="${td};max-width:420px"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(titel)}</div></td>
         <td class="cm-mob-weg" style="${td};text-align:right;font-variant-numeric:tabular-nums" title="bezoekers · leads · calls (Trainingdrops)">${cijferCel(d)}</td>
         <td class="cm-mob-weg" style="${td};white-space:nowrap">${nbCel(d)}</td>

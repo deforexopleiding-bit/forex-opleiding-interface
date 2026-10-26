@@ -18,6 +18,7 @@ import { anthropicStructuredOutput } from './anthropic-client.js';
 import { modelKeten } from './contentmachine-ai.js';
 import { DFO_STRATEGIE_KENNIS } from './dfo-strategie-kennis.js';
 import { trainingDatum, datumVoluit, weekdagVan } from './contentmachine-core.js';
+import { editieFouten, editieTitel, isWeekeditie } from './weekeditie.js';
 
 // ── Formats ─────────────────────────────────────────────────────────────────
 export const FORMATS = [
@@ -49,7 +50,7 @@ const S = { type: 'string' };
 const SN = { type: ['string', 'null'] };
 const ARR = (items, min, max) => ({ type: 'array', items, ...(min != null ? { minItems: min } : {}), ...(max != null ? { maxItems: max } : {}) });
 
-const PAGINA_SCHEMA = {
+export const PAGINA_SCHEMA = {
   type: 'object',
   description: 'De webpagina van de drop (training.deforexopleiding.nl/<slug>). **vet** mag in lead, ontgrendeld_tekst en quote.',
   properties: {
@@ -134,7 +135,7 @@ const BLOK_SCHEMA = {
   required: ['type'],
 };
 
-const NIEUWSBRIEF_SCHEMA = {
+export const NIEUWSBRIEF_SCHEMA = {
   type: 'object',
   properties: {
     onderwerpen: { ...ARR(S, 3, 3), description: 'Drie A/B-varianten voor de onderwerpregel (max 60 tekens elk), elk een andere invalshoek.' },
@@ -145,7 +146,7 @@ const NIEUWSBRIEF_SCHEMA = {
   required: ['onderwerpen', 'preheader', 'blokken', 'ps'],
 };
 
-const STORIES_SCHEMA = {
+export const STORIES_SCHEMA = {
   ...ARR({
     type: 'object',
     properties: {
@@ -157,7 +158,7 @@ const STORIES_SCHEMA = {
   description: 'Instagram-stories 1080x1920: begin met hook, eindig met cta (linksticker naar de pagina).',
 };
 
-const POST_SCHEMA = {
+export const POST_SCHEMA = {
   type: 'object',
   properties: {
     slides: ARR({ type: 'object', properties: { titel: { type: 'string', description: 'Titel ZONDER nummer ervoor (geen "1." of "4-5."): het slidenummer staat al groot op de slide.' }, tekst: S, beeld_asset_id: SN }, required: ['titel', 'tekst'] }, 5, 7),
@@ -166,8 +167,8 @@ const POST_SCHEMA = {
   },
   required: ['slides', 'caption', 'hashtags'],
 };
-const VIERKANT_SCHEMA = { type: 'object', properties: { titel: S, sub: S, beeld_asset_id: SN }, required: ['titel', 'sub'] };
-const LINKEDIN_SCHEMA = {
+export const VIERKANT_SCHEMA = { type: 'object', properties: { titel: S, sub: S, beeld_asset_id: SN }, required: ['titel', 'sub'] };
+export const LINKEDIN_SCHEMA = {
   type: 'object',
   properties: {
     tekst: { type: 'string', description: 'LinkedIn-post: zakelijker, eerste 2 regels zijn de hook, korte alinea\'s, eindigt met de link-tekst.' },
@@ -205,7 +206,7 @@ const isTekst = (v) => typeof v === 'string' && v.trim().length > 0;
  * Schema + logica. → { ok, fouten:[string] }. `toegelaten` = format-keys die
  * mochten; `assetIds` = beeld-id's die de generator mocht gebruiken.
  */
-export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, onderdelen = null } = {}) {
+export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, onderdelen = null, metVideo = null } = {}) {
   const fouten = [];
   const f = (m) => fouten.push(m);
   if (!o || typeof o !== 'object') return { ok: false, fouten: ['output is geen object'] };
@@ -221,7 +222,16 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
     if (!isTekst(o.kernidee)) f('kernidee ontbreekt');
   }
 
-  if (check('pagina')) {
+  if (check('pagina') && isWeekeditie(o.pagina)) {
+    // Weekeditie (Contentmachine 2.0): blokken volgens de schema's van de website.
+    const p = o.pagina;
+    const video = metVideo != null ? metVideo : p.blokken.some((b) => b && (b.type === 'video-poort' || (b.type === 'hero' && b.variant === 'video-poort')));
+    editieFouten(p, { metVideo: video }).forEach(f);
+    for (const b of p.blokken) {
+      const q = (b && b.props) || {};
+      [q.foto_asset_id, q.beeld_asset_id, ...(q.payouts || []).map((x) => x && x.asset_id), ...(q.fotos || []).map((x) => x && x.asset_id)].forEach((id) => beeld(id, `pagina.blokken (${b.type})`));
+    }
+  } else if (check('pagina')) {
     const p = o.pagina;
     if (!p || typeof p !== 'object') f('pagina ontbreekt');
     else {
@@ -255,7 +265,8 @@ export function valideerOutput(o, { toegelaten = FORMAT_KEYS, assetIds = null, o
         if (['payout', 'chart'].includes(x.type) && !x.beeld_asset_id) f(`nieuwsbrief.blokken[${i}]: ${x.type} zonder beeld`);
       });
       const quiz = b.some((x) => x && x.type === 'quiz');
-      if (quiz && !onderdelen && !(o.pagina && o.pagina.quiz)) f('nieuwsbrief heeft een quiz maar pagina.quiz (het antwoord) ontbreekt');
+      const antwoordOpPagina = o.pagina && (o.pagina.quiz || (isWeekeditie(o.pagina) && o.pagina.blokken.some((x) => x && ['quiz', 'replay-sweep-bos'].includes(x.type))));
+      if (quiz && !onderdelen && !antwoordOpPagina) f('nieuwsbrief heeft een quiz maar het antwoord (pagina.quiz of een quiz-/replay-blok) ontbreekt');
       if (!isTekst(n.ps)) f('nieuwsbrief.ps ontbreekt');
     }
   }
@@ -304,7 +315,7 @@ export function alleTeksten(o, pad = '', uit = []) {
   if (Array.isArray(o)) { o.forEach((x, i) => alleTeksten(x, `${pad}[${i}]`, uit)); return uit; }
   if (typeof o === 'object') {
     for (const [k, v] of Object.entries(o)) {
-      if (/(_asset_id|asset_id|^format_key|^icoon|^type|^rol|^sticker$|^beeld$|^meta$|^waarschuwingen$)/.test(k)) continue;
+      if (/(_asset_id|asset_id|^format_key|^icoon|^type|^rol|^sticker$|^beeld$|^meta$|^waarschuwingen$|^regie$|^variant$|^thema$)/.test(k)) continue;
       alleTeksten(v, pad ? `${pad}.${k}` : k, uit);
     }
   }
@@ -409,7 +420,7 @@ export function hooksVan(o) {
   return {
     onderwerpen: (n.onderwerpen || []).filter(isTekst),
     hooks: [
-      o.pagina && [o.pagina.hero_titel, o.pagina.hero_accent].filter(Boolean).join(' '),
+      o.pagina && (isWeekeditie(o.pagina) ? editieTitel(o.pagina) : [o.pagina.hero_titel, o.pagina.hero_accent].filter(Boolean).join(' ')),
       Array.isArray(o.stories) && o.stories[0] && o.stories[0].titel,
       o.post && Array.isArray(o.post.slides) && o.post.slides[0] && o.post.slides[0].titel,
       o.linkedin && String(o.linkedin.tekst || '').split('\n')[0],
@@ -651,12 +662,31 @@ export function gebruikteAssetIds(o) {
     if (!x || typeof x !== 'object') return;
     if (Array.isArray(x)) { x.forEach(loop); return; }
     for (const [k, v] of Object.entries(x)) {
-      if ((k === 'beeld_asset_id' || k === 'asset_id') && typeof v === 'string' && v) ids.add(v);
+      if (/(^|_)asset_id$/.test(k) && typeof v === 'string' && v) ids.add(v);
       else loop(v);
     }
   };
   loop(o);
   return [...ids];
+}
+
+/**
+ * Weekeditie (2.0): meer keuze voor de regisseur — 3 payouts met toestemming,
+ * 3 masterclass/team (voor een foto-hero of fotostrip), 1 chart. Minst recent gebruikt eerst.
+ */
+export function kiesBibliotheekV2(assets = [], aantal = 8) {
+  const op = (a, b) => ((a.laatst_gebruikt_op || '') < (b.laatst_gebruikt_op || '') ? -1 : (a.laatst_gebruikt_op || '') > (b.laatst_gebruikt_op || '') ? 1 : 0);
+  const sorted = assets.slice().sort(op);
+  const neem = (pred, n) => sorted.filter(pred).slice(0, n);
+  const keuze = [
+    ...neem((a) => a.soort === 'payout' && a.toestemming_publiek, 3),
+    ...neem((a) => a.soort === 'masterclass', 2),
+    ...neem((a) => a.soort === 'team', 1),
+    ...neem((a) => a.soort === 'chart' || a.soort === 'trade', 1),
+  ];
+  const ids = new Set(keuze.map((a) => a.id));
+  for (const a of sorted) { if (keuze.length >= aantal) break; if (!ids.has(a.id)) { keuze.push(a); ids.add(a.id); } }
+  return keuze.slice(0, aantal);
 }
 
 /**
