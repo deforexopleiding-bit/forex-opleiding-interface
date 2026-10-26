@@ -40,7 +40,7 @@ function isTestEmail(e) {
  */
 export async function computeLeadsByTraject({ supabaseAdmin, range = null, skipAllLabels = false, heraanmeldingen = false }) {
   let qy = supabaseAdmin.from('leads')
-    .select('id, traject, email, afwijzer').is('verwijderd_op', null).limit(50000);
+    .select('id, traject, email, afwijzer, bron').is('verwijderd_op', null).limit(50000);
   if (range) {
     qy = qy.gte('aangemaakt', range.start.toISOString())
            .lt('aangemaakt', range.endExclusive.toISOString());
@@ -60,6 +60,8 @@ export async function computeLeadsByTraject({ supabaseAdmin, range = null, skipA
   let excTest = 0, excAfwijzer = 0, excBoth = 0;
 
   for (const row of rows) {
+    // GHL-import (2026-10-26): geen echte aanmelding → telt niet in de traject-tellingen.
+    if (row && (row.bron === 'Import' || row.bron === 'Import-telefoon')) continue;
     const t = (row && row.traject != null) ? String(row.traject) : '';
     const em = row?.email || '';
     const isTest = isTestEmail(em);

@@ -152,6 +152,17 @@
       });
     } catch { return '—'; }
   };
+  // GHL-import (2026-10-26): bron Import / Import-telefoon. Hun 'aangemaakt' is
+  // bewust oud (import staat achteraan); de echte GHL-datum staat in ghl_created.
+  const IMPORT_BRONNEN = ['Import', 'Import-telefoon'];
+  const isImport = (l) => IMPORT_BRONNEN.includes(String(l?.bron || ''));
+  const datumCel = (l) => {
+    if (!isImport(l)) return `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`;
+    const regels = ['import' + (l.import_batch ? ' · batch ' + l.import_batch : '')];
+    if (l.ghl_created) regels.push('GHL ' + dstr(l.ghl_created));
+    const uitg = l.uitgenodigd_op ? `<br><span style="color:var(--emerald,#1f9d6b)">uitgenodigd ${esc(dstr(l.uitgenodigd_op))}</span>` : '';
+    return `<span class="mono" style="font-size:12px;color:var(--text-3)" title="GHL-import: de sorteerdatum is bewust oud, zodat de import achteraan staat.">${regels.map(esc).join('<br>')}${uitg}</span>`;
+  };
   const dstrLong = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } };
   const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
   const esc  = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -521,6 +532,7 @@
       bron: F('lead-bron', ''), status: F('lead-st', ''),
       kennismaking: afspr === 'ja' ? 'ooit' : (afspr === 'nee' ? 'geen' : ''),
       q: String(_act.search || '').trim(),
+      import_batch: F('lead-batch', ''), uitgenodigd: F('lead-batch', '') ? F('lead-uitg', '') : '',
     };
   }
   window.__leadSelToggle = () => { _msel.aan = !_msel.aan; if (!_msel.aan) { _msel.ids.clear(); _msel.alles = false; } window.DFO.render(); };
@@ -547,6 +559,81 @@
       leadIds: handmatig ? [..._msel.ids] : [],
       onKlaar: () => { _msel.ids.clear(); _msel.alles = false; _msel.aan = false; window.DFO.render(); },
     });
+  };
+
+  // ── GHL-import (2026-10-26) ─────────────────────────────────────────────
+  // Upload → proefrun (niets geschreven) → importeren. Endpoint api/leads-import-ghl.js.
+  window.__leadGhlImport = () => {
+    const bestaand = document.getElementById('ghl-import-ov');
+    if (bestaand) bestaand.remove();
+    const ov = document.createElement('div');
+    ov.id = 'ghl-import-ov';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(10,20,30,.45);display:flex;align-items:flex-start;justify-content:center;padding:6vh 14px;overflow:auto';
+    ov.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text);border-radius:14px;max-width:640px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b style="font-size:16px">GHL-contacten importeren</b>
+        <button class="btn btn-ghost btn-sm" data-ghl="sluit">✕</button></div>
+      <p style="font-size:13px;color:var(--text-2);margin:8px 0 12px">Kolommen: batch, voornaam, achternaam, email, telefoon (E.164), tag, created. Bestaande leads (zelfde e-mail, of bij telefoon-only hetzelfde nummer) worden <b>overgeslagen, nooit overschreven</b>. Er gaat niets naar Meta. Eerst een proefrun.</p>
+      <div style="display:grid;gap:10px">
+        <label style="font-size:12.5px">Bestand <input type="file" accept=".csv,text/csv" data-ghl="bestand" style="display:block;margin-top:4px"></label>
+        <label style="font-size:12.5px">Soort <select class="ld-filter-sel" data-ghl="soort" style="display:block;margin-top:4px">
+          <option value="mail">Mailbaar (bron Import)</option><option value="telefoon">Alleen telefoon (bron Import-telefoon)</option></select></label>
+        <div style="display:flex;gap:8px"><button class="btn btn-sm" data-ghl="proef">Proefrun</button>
+          <button class="btn btn-sm btn-primary" data-ghl="importeer" disabled>Importeren</button></div>
+        <div data-ghl="uit" style="font-size:12.5px"></div>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const q = (k) => ov.querySelector('[data-ghl="' + k + '"]');
+    const uit = q('uit');
+    let laatste = null;
+    const toon = (r) => {
+      const pb = Object.entries(r.per_batch || {}).sort((a, b) => (Number(a[0]) || 999) - (Number(b[0]) || 999))
+        .map(([k, v]) => `<tr><td>${esc(k)}</td><td style="text-align:right">${v.nieuw}</td><td style="text-align:right">${v.bestaand}</td></tr>`).join('');
+      uit.innerHTML = `<div style="padding:10px 12px;border-radius:10px;background:var(--surface-2,#f6f8fa)">
+        <b>${r.proefrun ? 'Proefrun (er is niets geschreven)' : 'Import uitgevoerd'}</b><br>
+        ${r.rijen} rijen · <b>${r.nieuw} nieuw</b> · ${r.bestaand} bestaan al (overgeslagen) · ${r.ongeldig} ongeldig · ${r.dubbel_in_bestand} dubbel in het bestand${r.telefoon_ongeldig ? ' · ' + r.telefoon_ongeldig + ' zonder geldig nummer (alleen e-mail)' : ''}
+        ${r.proefrun ? '' : '<br><b>' + r.ingevoegd + ' ingevoegd</b>' + (r.conflict_bij_invoegen ? ' · ' + r.conflict_bij_invoegen + ' bleken al te bestaan' : '') + (r.nog_te_doen ? ' · <b>' + r.nog_te_doen + ' nog te doen</b>' : '')}
+        ${r.melding ? '<br>' + esc(r.melding) : ''}${r.error ? '<br><span style="color:var(--danger,#c33)">' + esc(r.error) + '</span>' : ''}
+        <br><span style="color:var(--text-3)">Sorteerdatum import: ${esc(dstr(r.sorteer_tot))} t/m ${esc(dstr(r.sorteer_van))} (oudste bestaande lead: ${esc(dstr(r.oudste_bestaande_lead))})</span></div>
+        <table style="width:100%;margin-top:8px;font-size:12px"><thead><tr><th style="text-align:left">Batch</th><th style="text-align:right">Nieuw</th><th style="text-align:right">Bestaat al</th></tr></thead><tbody>${pb}</tbody></table>
+        ${(r.ongeldig_voorbeelden || []).length ? '<details style="margin-top:6px"><summary>Ongeldige regels (eerste ' + r.ongeldig_voorbeelden.length + ')</summary>' + r.ongeldig_voorbeelden.map((o) => 'regel ' + o.regel + ': ' + esc(o.reden)).join('<br>') + '</details>' : ''}
+        ${r.proefrun && (r.bestaand_lijst || []).length ? '<button class="btn btn-ghost btn-sm" data-ghl="dl" style="margin-top:6px">Download de ' + r.bestaand_lijst.length + ' bestaande adressen (CSV)</button>' : ''}`;
+      const dl = q('dl');
+      if (dl) dl.onclick = () => {
+        const csv = 'regel,email,telefoon,batch\n' + r.bestaand_lijst.map((x) => [x.regel, x.email || '', x.telefoon || '', x.import_batch || ''].join(',')).join('\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+        a.download = 'ghl-import-bestaand.csv';
+        a.click();
+      };
+    };
+    const stuur = async (bevestig) => {
+      const f = q('bestand').files && q('bestand').files[0];
+      if (!f) { uit.textContent = 'Kies eerst een CSV-bestand.'; return; }
+      const knoppen = [q('proef'), q('importeer')];
+      knoppen.forEach((k) => { k.disabled = true; });
+      uit.textContent = bevestig ? 'Bezig met importeren… (kan een paar minuten duren)' : 'Proefrun…';
+      try {
+        const csv = await f.text();
+        const r = await tryPost('leads-import-ghl', '/api/leads-import-ghl', { csv, soort: q('soort').value, bevestig }, 300000);
+        laatste = r;
+        toon(r);
+        if (!bevestig && r.nieuw > 0) q('importeer').disabled = false;
+        if (bevestig) { _act.data = null; fetchActief(); }
+      } catch (e) {
+        uit.innerHTML = '<span style="color:var(--danger,#c33)">' + esc(e?.message || String(e)) + '</span>';
+      } finally {
+        q('proef').disabled = false;
+      }
+    };
+    q('sluit').onclick = () => ov.remove();
+    q('proef').onclick = () => stuur(false);
+    q('importeer').onclick = () => {
+      if (!laatste || !laatste.proefrun) return;
+      if (!confirm(laatste.nieuw + ' nieuwe leads importeren als bron ' + (q('soort').value === 'telefoon' ? 'Import-telefoon' : 'Import') + '? Bestaande leads blijven ongemoeid.')) return;
+      stuur(true);
+    };
+    q('bestand').onchange = () => { laatste = null; q('importeer').disabled = true; uit.textContent = ''; };
+    q('soort').onchange = q('bestand').onchange;
   };
 
   window.__leadSort = (by) => {
@@ -586,6 +673,8 @@
     if (bron)    p.set('bron', bron);
     if (st)      p.set('status', st);
     if (afspr)   p.set('afspraak', afspr);
+    const batch = F('lead-batch', '');
+    if (batch) { p.set('import_batch', batch); const uitg = F('lead-uitg', ''); if (uitg) p.set('uitgenodigd', uitg); }
     if (q)       p.set('q', q);
     p.set('archief', '0');
     p.set('limit', String(_act.pageSize || 50));
@@ -650,6 +739,8 @@
     const fBron    = F('lead-bron', '');
     const fStatus  = F('lead-st', '');
     const fAfspr   = F('lead-afspr', '');
+    const fBatch   = F('lead-batch', '');
+    const fUitg    = F('lead-uitg', '');
     let items = (_act.data?.items || []).slice();
     const total = _act.data?.total ?? null;
     const s = _act.stats || {};
@@ -740,6 +831,8 @@
           <option value="funnel"                  ${fBron === 'funnel' ? 'selected' : ''}>funnel</option>
           <option value="meta"                    ${fBron === 'meta' ? 'selected' : ''}>meta</option>
           <option value="handmatig"               ${fBron === 'handmatig' ? 'selected' : ''}>handmatig</option>
+          <option value="Import"                  ${fBron === 'Import' ? 'selected' : ''}>Import (GHL)</option>
+          <option value="Import-telefoon"         ${fBron === 'Import-telefoon' ? 'selected' : ''}>Import-telefoon (GHL)</option>
         </select>`,
         `<select class="ld-filter-sel" onchange="DFO.setF('lead-st', this.value)">
           <option value="" ${fStatus === '' ? 'selected' : ''}>Status: alle</option>
@@ -753,10 +846,20 @@
           <option value="ja"  ${fAfspr === 'ja'  ? 'selected' : ''}>Call gepland: ja</option>
           <option value="nee" ${fAfspr === 'nee' ? 'selected' : ''}>Call gepland: nee</option>
         </select>`,
+        `<select class="ld-filter-sel" onchange="DFO.setF('lead-batch', this.value)" title="GHL-import: weekbatch voor de webinar-uitnodigingen">
+          <option value="" ${fBatch === '' ? 'selected' : ''}>Importbatch: alle</option>
+          ${Array.from({ length: 24 }, (_, i) => String(i + 1)).map((b) => `<option value="${b}" ${fBatch === b ? 'selected' : ''}>Importbatch ${b}</option>`).join('')}
+        </select>`,
+        ...(fBatch ? [`<select class="ld-filter-sel" onchange="DFO.setF('lead-uitg', this.value)">
+          <option value="" ${fUitg === '' ? 'selected' : ''}>Uitgenodigd: alle</option>
+          <option value="nee" ${fUitg === 'nee' ? 'selected' : ''}>Nog niet uitgenodigd</option>
+          <option value="ja" ${fUitg === 'ja' ? 'selected' : ''}>Al uitgenodigd</option>
+        </select>`] : []),
         H.stableSearch('leads-act', 'Zoek naam / e-mail / telefoon…'),
         `<div class="tb-right">
           <button class="btn btn-sm" onclick="__leadSort('aangemaakt')" title="Sorteer op aanmaakdatum">Datum${sortIcon('aangemaakt')}</button>
           <button class="btn btn-sm" onclick="__leadSort('score')" title="Sorteer op score">Score${sortIcon('score')}</button>
+          ${['super_admin', 'admin', 'manager'].includes(String((window.DFO.S || {}).role || '').toLowerCase()) ? `<button class="btn btn-sm" onclick="__leadGhlImport()" title="GHL-contacten importeren (proefrun eerst)">GHL importeren</button>` : ''}
           <button class="btn btn-sm" onclick="__leadSelToggle()" title="Vinkjes per rij om leads te kiezen voor een massabericht">${_msel.aan ? 'Selectie uit' : 'Selecteren'}</button>
           <button class="btn btn-sm" onclick="__leadMassa()" title="E-mail aan een groep leads (uitgebreide filters, wachtrij, afmeldlink)">${svg(I.mail || I.send, 'width:14px;height:14px')}Massabericht</button>
           <button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button>
@@ -820,7 +923,7 @@
             H.pill(c, pl),
             `<span class="mono strong" style="color:${scColor}">${scLabel}</span>`,
             kwalBadge(l),
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
+            datumCel(l),
             `<div style="display:inline-flex;gap:4px;justify-content:flex-end">
               <button class="icon-btn" title="Wijzig lead" onclick="event.stopPropagation();__leadRowEdit('${l.id}')">${svg(I.settings)}</button>
               <button class="icon-btn" title="Verwijder (archiveer)" onclick="event.stopPropagation();__leadRowDelete('${l.id}', '${nameEsc}')" style="color:var(--danger, var(--warn))">${svg(I.x || I.warn)}</button>
@@ -1005,7 +1108,7 @@
             `<span class="pill pill-neutral" title="${esc(l.bron || '')}">${esc(bLabel)}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
+            datumCel(l),
           ];
         })
       )}
