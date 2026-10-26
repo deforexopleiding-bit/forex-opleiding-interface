@@ -185,6 +185,8 @@
     const t = r.tags || {};
     return `<div class="card" style="margin-bottom:10px"><div class="card-head"><div class="card-title">GHL — nieuwsbrief-instellingen</div><a href="javascript:void(0)" style="font-size:12px" onclick="__cmLzGhlSluit()">sluiten</a></div>
       <div class="card-body" style="font-size:12.5px;line-height:1.6">
+        ${r.token ? `<div style="margin-bottom:6px;padding:6px 8px;background:var(--surface-2);border-radius:8px;font-size:12px">Token voor deze calls: <b>${h.esc(r.token.gebruikt || '—')}</b> <code>${h.esc(r.token.vingerafdruk || '—')}</code>${r.token.location ? ` · location <code>${h.esc(r.token.location)}</code>` : ''}
+          <div style="color:var(--text-3)">In de env: ${(r.token.alle || []).map((x) => `${h.esc(x.env)} ${x.vingerafdruk ? `<code>${h.esc(x.vingerafdruk)}</code>` : '<i>leeg</i>'}`).join(' · ')}</div></div>` : ''}
         <div>${vink(!!i.template_id)} Vaste template "${h.esc(i.template_naam)}": ${i.template_id ? `<code>${h.esc(i.template_id)}</code>` : 'nog niet aangemaakt'}</div>
         <div>${vink(!!i.custom_value_id)} Onderwerp (custom value): ${i.custom_value_sleutel ? `<code>${h.esc(i.custom_value_sleutel)}</code>` : 'nog niet aangemaakt'}</div>
         <div>${vink(!!wf.id)} Workflow "${h.esc(i.workflow_naam)}": ${wf.id ? `bestaat (${h.esc(wf.status || '?')})` : wf.fout ? h.esc(wf.fout) : 'bestaat nog niet — maak hem in GHL: trigger <i>tag toegevoegd</i> <code>' + h.esc(i.verzend_tag) + '</code> → e-mail met de template, onderwerp ' + h.esc(i.custom_value_sleutel || '{{ custom_values.weekeditie_onderwerp }}') + ' → tag verwijderen'}</div>

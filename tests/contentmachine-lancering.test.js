@@ -470,3 +470,22 @@ test('werkblad: keuze tag of alle contacten, verwacht aantal, VERSTUUR-veld houd
   assert.match(html, /id="cm-lz-knop"[^>]*disabled/);
   assert.ok(posts.some((p) => p.actie === 'ontvangers' && p.doelgroep === 'alle'));
 });
+
+test('token-diagnose: welke env-var, gemaskeerd (eerste 8 + laatste 4), enkel in het super_admin-paneel', async () => {
+  const NB = await import('../api/_lib/ghl-nieuwsbrief.js');
+  assert.equal(NB.vingerafdruk('pit-3367abcdefghijklmnopa11d'), 'pit-3367…a11d');
+  assert.equal(NB.vingerafdruk('kort'), '(te kort om te tonen)');
+  assert.equal(NB.vingerafdruk(''), null);
+  const d = NB.tokenDiagnose({ GHL_PIT_TOKEN: 'pit-cbfa1111222233334444af53', GHL_API_KEY: 'pit-3367555566667777aaaaa11d', GHL_LOCATION_ID: 'loc123456789' });
+  assert.equal(d.gebruikt, 'GHL_PIT_TOKEN'); assert.equal(d.vingerafdruk, 'pit-cbfa…af53');
+  assert.deepEqual(d.alle.map((x) => [x.env, x.vingerafdruk]), [['GHL_PIT_TOKEN', 'pit-cbfa…af53'], ['GHL_API_KEY', 'pit-3367…a11d'], ['GHL_EVENTS_PIT_TOKEN', null]]);
+  assert.equal(NB.tokenDiagnose({ GHL_API_KEY: 'pit-3367555566667777aaaaa11d' }).gebruikt, 'GHL_API_KEY');
+  const json = JSON.stringify(d);
+  assert.ok(!json.includes('1111222233334444') && !json.includes('555566667777'), 'nooit meer dan 8+4 tekens');
+  reset(); resetGhl();
+  const r = await roep(LANCEER, { body: { actie: 'ghl-check' } });
+  assert.equal(r.body.rapport.token.gebruikt, 'GHL_PIT_TOKEN');
+  assert.equal(r.body.rapport.token.vingerafdruk, '(te kort om te tonen)', 'testtoken "tok"');
+  reset({ rol: 'manager' });
+  assert.equal((await roep(LANCEER, { body: { actie: 'ghl-check' } })).statusCode, 403, 'enkel super_admin');
+});

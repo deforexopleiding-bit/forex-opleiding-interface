@@ -32,13 +32,31 @@ export class GhlNieuwsbriefFout extends Error {
 
 /** Config uit env, of null met de ontbrekende namen. */
 export function ghlNieuwsbriefConfig(env = process.env) {
-  const token = env.GHL_PIT_TOKEN || env.GHL_API_KEY || '';
+  const bron = env.GHL_PIT_TOKEN ? 'GHL_PIT_TOKEN' : env.GHL_API_KEY ? 'GHL_API_KEY' : null;
+  const token = bron ? env[bron] : '';
   const locationId = env.GHL_LOCATION_ID || env.GHL_DEFAULT_LOCATION_ID || '';
   const userId = env.GHL_NIEUWSBRIEF_USER_ID || env.GHL_DAVE_USER_ID || '';
   const ontbreekt = [];
   if (!token) ontbreekt.push('GHL_PIT_TOKEN');
   if (!locationId) ontbreekt.push('GHL_LOCATION_ID');
-  return { ok: ontbreekt.length === 0, ontbreekt, token, locationId, userId };
+  return { ok: ontbreekt.length === 0, ontbreekt, token, bron, locationId, userId };
+}
+
+/** Gemaskeerde vingerafdruk van een token: eerste 8 + laatste 4 tekens, nooit meer. */
+export function vingerafdruk(t) {
+  const s = String(t || '');
+  if (!s) return null;
+  return s.length < 16 ? '(te kort om te tonen)' : `${s.slice(0, 8)}…${s.slice(-4)}`;
+}
+
+/** Welke GHL-tokens er in de env staan (gemaskeerd) en welke deze calls gebruiken. Enkel voor super_admin. */
+export function tokenDiagnose(env = process.env) {
+  const cfg = ghlNieuwsbriefConfig(env);
+  return {
+    gebruikt: cfg.bron, vingerafdruk: vingerafdruk(cfg.token),
+    alle: ['GHL_PIT_TOKEN', 'GHL_API_KEY', 'GHL_EVENTS_PIT_TOKEN'].map((k) => ({ env: k, vingerafdruk: vingerafdruk(env[k]) })),
+    location: vingerafdruk(cfg.locationId) && `${String(cfg.locationId).slice(0, 4)}…${String(cfg.locationId).slice(-4)}`,
+  };
 }
 
 /** Links naar het e-mailgedeelte van GHL (de campagne maken en versturen gebeurt daar). */
