@@ -1,5 +1,9 @@
 {
   "functions": {
+    "api/leads-import-ghl.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "api/cron-finance-sync.js": {
       "maxDuration": 300,
       "memory": 1024

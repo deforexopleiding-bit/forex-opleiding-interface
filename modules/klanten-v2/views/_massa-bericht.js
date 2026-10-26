@@ -83,6 +83,9 @@
     for (const k of ['status', 'bron', 'soort', 'traject']) if (f[k]) uit[k] = [f[k]];
     if (f.massa_modus) uit.massa = { modus: f.massa_modus, dagen: Number(f.massa_dagen) || 30, campagne_id: f.massa_campagne || '' };
     if (f.lead_ids && f.lead_ids.length) uit.lead_ids = f.lead_ids;
+    // GHL-import (2026-10-26): één batch + wel/niet al uitgenodigd.
+    if (f.import_batch) uit.import_batch = [Number(f.import_batch)];
+    if (f.import_batch && f.uitgenodigd) uit.uitgenodigd = f.uitgenodigd;
     return uit;
   }
   function datum(iso) {
@@ -141,8 +144,11 @@
       ${sel('massa_modus', [['', 'niet filteren'], ['nooit', 'uitsluiten: ooit gehad'], ['dagen', 'uitsluiten: laatste N dagen'], ['campagne', 'uitsluiten: in campagne…'], ['alleen_gehad', 'alleen wie er al één kreeg']], f.massa_modus, 'Al massabericht gehad')}
       ${f.massa_modus === 'dagen' ? `<label style="display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--text-3)">Aantal dagen
         <input type="number" min="1" max="3650" class="ib-input" data-mb-f="massa_dagen" value="${esc(f.massa_dagen || 30)}" style="font-size:12.5px"></label>` : ''}
+      ${sel('import_batch', [['', 'geen (zonder import-leads)'], ...Array.from({ length: 24 }, (_, i) => [String(i + 1), 'batch ' + (i + 1)])], f.import_batch, 'Importbatch (GHL)')}
+      ${f.import_batch ? sel('uitgenodigd', [['', 'alle'], ['nee', 'nog niet uitgenodigd'], ['ja', 'al uitgenodigd']], f.uitgenodigd, 'Webinar-uitnodiging') : ''}
       ${f.massa_modus === 'campagne' ? sel('massa_campagne', [['', '— kies campagne —'], ...(st.campagnes || []).map((c) => [c.id, c.naam + ' · ' + datum(c.aangemaakt_op)])], f.massa_campagne, 'Campagne') : ''}
     </div>
+    ${f.import_batch && f.toestemming === 'ja' ? `<div style="margin-top:8px;font-size:12px;padding:6px 10px;border-radius:8px;background:var(--amber-soft,#fff4e0);color:var(--text-2)">Import-leads hebben geen toestemmingsvinkje uit een aanmeldformulier. Met <b>Toestemming (aanmelding) = ja</b> vallen ze allemaal weg; zet dat filter op <b>alle</b> als je deze batch wilt uitnodigen.</div>` : ''}
     ${f.lead_ids && f.lead_ids.length ? `<div style="margin-top:8px;font-size:12px;padding:6px 10px;border-radius:8px;background:var(--surface-2,#f6f8fa);display:inline-flex;gap:8px;align-items:center">Alleen je eigen selectie (${f.lead_ids.length} leads) <button type="button" class="btn btn-ghost btn-sm" data-mb-actie="selectie-los" style="padding:0 6px">✕ alle leads</button></div>` : ''}
     <div style="margin-top:6px"><button type="button" class="btn btn-ghost btn-sm" data-mb-actie="filters-wis">Filters terugzetten</button></div>`;
   }

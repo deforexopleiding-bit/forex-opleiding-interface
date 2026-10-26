@@ -111,7 +111,8 @@ export function telAanmeldingen({
   funnelEvents = [], nieuweLeads = [], eventAanmeldingen = [], eventInzendingen = [],
   webinarAanmeldingen = [], labAanmeldingen = [],
 } = {}) {
-  const leads = (nieuweLeads || []).filter((l) => l && l.id && !isTestEmail(l.email));
+  // GHL-import (bron Import / Import-telefoon, 2026-10-26) is geen aanmelding.
+  const leads = (nieuweLeads || []).filter((l) => l && l.id && !isTestEmail(l.email) && l.bron !== 'Import' && l.bron !== 'Import-telefoon');
   const sMap = sessies(funnelEvents);
   const tegels = {};
 

@@ -10,6 +10,10 @@
 //   status         'nieuw' | 'opgevolgd' | 'gewonnen' | 'verloren'
 //   afspraak       'ja' (afspraak_op gezet) | 'nee' (leeg) — "Call gepland"-filter
 //   q              zoek op naam OR email (ilike)
+//   import_batch   1..99 — GHL-importbatch (2026-10-26). Leest dan uit de TABEL
+//                  leads (de view kent de importkolommen niet); geeft per rij ook
+//                  import_batch, ghl_tag, ghl_created, uitgenodigd_op.
+//   uitgenodigd    'ja' | 'nee' — alleen samen met import_batch
 //   limit          default 50, clamp [1..500]
 //   offset         default 0
 //
@@ -60,6 +64,10 @@ export default async function handler(req, res) {
   const trajectIn = trajectInRaw
     ? trajectInRaw.split(',').map(s => s.trim()).filter(Boolean)
     : [];
+  // GHL-importbatch (+ uitgenodigd ja/nee).
+  const importBatchRaw = Number(q.import_batch);
+  const importBatch = Number.isInteger(importBatchRaw) && importBatchRaw >= 1 && importBatchRaw <= 99 ? importBatchRaw : null;
+  const uitgenodigd = ['ja', 'nee'].includes(String(q.uitgenodigd || '')) ? String(q.uitgenodigd) : null;
   // Soft-delete: standaard alleen actieve leads; ?archief=1 toont het archief.
   const archief = q.archief === '1' || q.archief === 'true';
 
@@ -68,6 +76,9 @@ export default async function handler(req, res) {
   const canDelete = await requirePermission(req, 'leads.delete');
 
   try {
+    if (importBatch != null) {
+      return res.status(200).json(await importBatchLijst({ importBatch, uitgenodigd, archief, search, status, limit, offset, canDelete }));
+    }
     let qy = supabaseAdmin
       .from('leads_overzicht')
       .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
@@ -121,4 +132,37 @@ export default async function handler(req, res) {
     console.error('[leads-list]', e.message);
     return res.status(500).json({ error: e.message });
   }
+}
+
+/**
+ * Lijst van één GHL-importbatch, rechtstreeks uit de tabel leads (de view
+ * leads_overzicht kent de importkolommen niet). Zelfde vorm als de gewone lijst,
+ * plus de importvelden. Fout 42703 = migratie 2026-10-26-leads-ghl-import.sql niet gedraaid.
+ */
+async function importBatchLijst({ importBatch, uitgenodigd, archief, search, status, limit, offset, canDelete }) {
+  let qy = supabaseAdmin
+    .from('leads')
+    .select('id, voornaam, achternaam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, afspraak_op, import_batch, ghl_tag, ghl_created, uitgenodigd_op, uitgenodigd_campagne', { count: 'exact' })
+    .eq('import_batch', importBatch)
+    .order('aangemaakt', { ascending: false })
+    .range(offset, offset + limit - 1);
+  qy = archief ? qy.not('verwijderd_op', 'is', null) : qy.is('verwijderd_op', null);
+  if (uitgenodigd === 'ja') qy = qy.not('uitgenodigd_op', 'is', null);
+  else if (uitgenodigd === 'nee') qy = qy.is('uitgenodigd_op', null);
+  if (status) qy = qy.eq('status', status);
+  if (search) {
+    const like = `%${search.replace(/[%_]/g, m => '\\' + m)}%`;
+    qy = qy.or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like}`);
+  }
+  const { data, error, count } = await qy;
+  if (error) {
+    if (['42703', 'PGRST204'].includes(String(error.code))) throw new Error('Importkolommen ontbreken: draai eerst 2026-10-26-leads-ghl-import.sql');
+    throw new Error('leads (import): ' + error.message);
+  }
+  const items = (data || []).map((l) => ({
+    ...l,
+    naam: [l.voornaam, l.achternaam].filter(Boolean).join(' ') || null,
+    tag: null,
+  }));
+  return { items, total: count || items.length, has_more: (offset + items.length) < (count || 0), limit, offset, can_delete: canDelete, archief, import_batch: importBatch };
 }

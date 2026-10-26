@@ -45,6 +45,11 @@ import { WEBSITE_URL, nieuwToken, voorkeurenUrl, afmeldUrl, magOntvangen, zorgVo
 export { WEBSITE_URL, nieuwToken, voorkeurenUrl, afmeldUrl, magOntvangen, zorgVoorkeur };
 
 export const MIGRATIE = '2026-10-10-massa-mail-fase2a.sql';
+// GHL-import (2026-10-26): import-leads (bron Import / Import-telefoon) doen ALLEEN
+// mee met een importbatch-filter of als je de bron expliciet kiest; anders zou
+// elke selectie ~12.000 extra leads laden. Na een verzonden mail krijgt een
+// import-lead uitgenodigd_op + uitgenodigd_campagne (markeerUitgenodigd).
+export const IMPORT_BRONNEN = Object.freeze(['Import', 'Import-telefoon']);
 export const MIGRATIE_2B = '2026-10-11-massa-whatsapp-fase2b.sql';
 export const MIGRATIE_BOUWER = '2026-10-11-mail-bouwer.sql';
 export const MASSA_SOORTEN = Object.freeze({
@@ -105,6 +110,8 @@ export function normaliseerFilter(raw = {}) {
       campagne_id: UUID_RE.test(String(m.campagne_id || '')) ? String(m.campagne_id) : '',
     },
     lead_ids: lijst(r.lead_ids).filter((id) => UUID_RE.test(id)).slice(0, MAX_ONTVANGERS),
+    import_batch: lijst(r.import_batch).map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 99),
+    uitgenodigd: keuze(r.uitgenodigd, ['ja', 'nee']),
   };
 }
 
@@ -168,10 +175,30 @@ export function leadVoldoet(l, f, nuMs = Date.now()) {
   if (m.modus === 'alleen_gehad' && !l.laatst_massa_op) return false;
   if (m.modus === 'dagen' && l.laatst_massa_op && Date.parse(l.laatst_massa_op) >= nuMs - m.dagen * 86400000) return false;
   if (m.modus === 'campagne' && m.campagne_id && (l.massa_campagnes || []).includes(m.campagne_id)) return false;
+  if (f.import_batch.length && !f.import_batch.includes(Number(l.import_batch))) return false;
+  if (f.uitgenodigd === 'ja' && !l.uitgenodigd_op) return false;
+  if (f.uitgenodigd === 'nee' && l.uitgenodigd_op) return false;
   return true;
 }
 
 // ── Segment (DB) ─────────────────────────────────────────────────────────────
+
+/**
+ * GHL-import: na een verzonden mail de import-lead markeren (alleen de eerste
+ * keer; gewone leads raakt dit niet). Fail-soft: zonder migratie of bij een
+ * fout alleen een waarschuwing — de verzending zelf is al gebeurd.
+ */
+export async function markeerUitgenodigd(sb, leadId, campagneId, op = new Date()) {
+  if (!leadId) return;
+  try {
+    const { error } = await sb.from('leads')
+      .update({ uitgenodigd_op: op.toISOString(), uitgenodigd_campagne: campagneId || null })
+      .eq('id', leadId).not('import_batch', 'is', null).is('uitgenodigd_op', null);
+    if (error && !['42703', 'PGRST204'].includes(String(error.code))) console.warn('[massa-mail] uitgenodigd_op (soft):', error.message);
+  } catch (e) {
+    console.warn('[massa-mail] uitgenodigd_op exception (soft):', e?.message || e);
+  }
+}
 
 async function inBlokken(ids, maak, blok = 200) {
   const uit = [];
@@ -183,13 +210,23 @@ async function inBlokken(ids, maak, blok = 200) {
   return { data: uit, error: null };
 }
 
-async function alleLeads(sb, ids = null) {
+async function alleLeads(sb, ids = null, f = null) {
   if (ids && ids.length) {
     return inBlokken(ids, (d) => sb.from('leads').select(LEAD_VELDEN).in('id', d).is('verwijderd_op', null));
   }
+  // Importbatch gekozen → alleen die batch (met de importvelden). Anders de
+  // import-leads eruit, tenzij de bron Import(-telefoon) expliciet gekozen is.
+  const batches = f?.import_batch || [];
+  const importBron = (f?.bron || []).some((b) => IMPORT_BRONNEN.includes(b));
+  const basis = () => {
+    if (batches.length) return sb.from('leads').select(LEAD_VELDEN + ', import_batch, uitgenodigd_op').in('import_batch', batches);
+    let q = sb.from('leads').select(LEAD_VELDEN);
+    if (!importBron) q = q.or('bron.is.null,bron.not.in.(' + IMPORT_BRONNEN.join(',') + ')');
+    return q;
+  };
   const uit = [];
   for (let van = 0; van < 50000; van += 1000) {
-    const { data, error } = await sb.from('leads').select(LEAD_VELDEN).is('verwijderd_op', null)
+    const { data, error } = await basis().is('verwijderd_op', null)
       .order('aangemaakt', { ascending: false }).range(van, van + 999);
     if (error) return { data: uit, error };
     uit.push(...(data || []));
@@ -205,8 +242,11 @@ async function alleLeads(sb, ids = null) {
 export async function zoekSegment(sb, filterRaw, { nu = new Date() } = {}) {
   const f = normaliseerFilter(filterRaw);
   const nuMs = nu.getTime();
-  const { data: leads, error } = await alleLeads(sb, f.lead_ids.length ? f.lead_ids : null);
-  if (error) throw new Error('leads lezen: ' + error.message);
+  const { data: leads, error } = await alleLeads(sb, f.lead_ids.length ? f.lead_ids : null, f);
+  if (error) {
+    if (f.import_batch.length && ['42703', 'PGRST204'].includes(String(error.code))) throw new Error('Importkolommen ontbreken: draai eerst 2026-10-26-leads-ghl-import.sql');
+    throw new Error('leads lezen: ' + error.message);
+  }
   const ids = leads.map((l) => l.id);
 
   // Categorie (wanbetaler/onboarding/klant/…): dezelfde berekening als de inbox.
@@ -267,7 +307,8 @@ export async function zoekSegment(sb, filterRaw, { nu = new Date() } = {}) {
   const gefilterd = verrijkt.filter((l) => leadVoldoet(l, f, nuMs))
     .sort((a, b) => String(b.aangemaakt || '').localeCompare(String(a.aangemaakt || '')));
   const uniek = (k) => [...new Set(verrijkt.map((l) => l[k]).filter(Boolean))].sort((x, y) => String(x).localeCompare(String(y)));
-  const opties = { bron: uniek('bron'), soort: uniek('soort'), traject: [...new Set(verrijkt.map((l) => String(l.traject || '').toLowerCase()).filter(Boolean))].sort() };
+  // Import-bronnen altijd kiesbaar (ze zitten standaard niet in de selectie).
+  const opties = { bron: [...new Set([...uniek('bron'), ...IMPORT_BRONNEN])].sort((x, y) => String(x).localeCompare(String(y))), soort: uniek('soort'), traject: [...new Set(verrijkt.map((l) => String(l.traject || '').toLowerCase()).filter(Boolean))].sort() };
   return { items: gefilterd, totaal: gefilterd.length, filter: f, opties, tabel_ontbreekt: tabelOntbreektVlag };
 }
 
@@ -773,6 +814,7 @@ export async function verwerkWachtrij(sb, {
                 massa: { voorkeurenUrl: voorkeurenUrl(vk.token), afmeldUrl: afmeldUrl(vk.token), campagneId: c.id },
               });
               await zetItem(sb, it.id, { status: 'sent', verzonden_op: nu().toISOString(), extern_id: r?.messageId || null, email, fout: r?.in_draad === false ? 'verstuurd, maar niet in de draad gelogd' : null });
+              await markeerUitgenodigd(sb, lead.id, c.id, nu());
             } else {
               const tel = String(lead.telefoon_e164 || '').trim();
               if (!E164_RE.test(tel)) { await zetItem(sb, it.id, { status: 'skipped', reden: 'geen_geldig_nummer' }); telOver(); continue; }
