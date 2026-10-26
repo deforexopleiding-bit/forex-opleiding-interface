@@ -196,6 +196,7 @@
     delen.push(['LINKEDIN', (o.linkedin || {}).tekst].join('\n'));
     return delen.join('\n\n────────\n\n');
   }
+  window.__cmWbAlleTeksten = () => (wb.drop && wb.output ? alleTeksten() : '');
   window.__cmWbKopieer = async () => {
     try { await navigator.clipboard.writeText(alleTeksten()); toast('Alle teksten gekopieerd.'); }
     catch (_) { toast('Kopiëren lukte niet (browser).'); }
@@ -403,7 +404,8 @@
 
   function voorbeeldHtml() {
     const o = wb.output || {};
-    if (wb.tab === 'pagina') return iframe(paginaHtml(), 900);
+    const social = typeof window.__cmSocialPaneel === 'function';
+    if (wb.tab === 'pagina') return `${social ? window.__cmSocialPaneel('pagina') : ''}${iframe(paginaHtml(), 900)}`;
     if (wb.tab === 'nieuwsbrief') {
       if (!wb.nbHtml) { planVoorbeeld(); return '<div style="color:var(--text-3);font-size:12px;padding:10px">Voorbeeld laden…</div>'; }
       const n = o.nieuwsbrief || {};
@@ -411,15 +413,26 @@
         <a class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:11.5px" href="javascript:void(0)" onclick="__cmWbDownloadNb()">⬇ HTML</a></div>
         <div style="font-size:12px;margin-bottom:6px"><b>${esc(wb.nbVoor || '')}</b><div style="color:var(--text-3)">${esc(n.preheader || '')}</div></div>${iframe(wb.nbHtml, 1100)}`;
     }
+    if (wb.tab === 'stories' && social) return window.__cmSocialPaneel('stories') + `<div style="font-size:11px;color:var(--text-3);margin-top:6px">Laat onderaan ruimte voor de Instagram-sticker (${(o.stories || []).map((x, i) => `${i + 1}: ${esc(x.sticker)}`).join(' · ')}).</div>`;
     if (wb.tab === 'stories') return `<div class="cm-sv-rij">${(o.stories || []).map(storyKaart).join('')}</div><div style="font-size:11px;color:var(--text-3);margin-top:6px">Ruwe voorvertoning — de definitieve 1080×1920-beelden komen uit de social-rendering.</div>`;
     if (wb.tab === 'post') {
       const p = o.post || {}; const v = o.vierkant || {};
+      if (social) {
+        const tags = (p.hashtags || []).map((h) => (h.startsWith('#') ? h : '#' + h)).join(' ');
+        return `${window.__cmSocialPaneel('post')}<div style="font-size:12.5px;white-space:pre-wrap;background:var(--surface-2);border-radius:10px;padding:10px;margin-top:10px">${esc(p.caption)}\n\n<span style="color:var(--brand,#0A7490)">${esc(tags)}</span>
+          <div><a href="javascript:void(0)" onclick="__cmWbKopieerDeel(${esc(JSON.stringify(p.caption + '\n\n' + tags))})">kopieer caption</a></div></div>`;
+      }
       return `<div class="cm-sv-rij">${(p.slides || []).map((s, i) => `<div class="cm-sv cm-sv-post">${img(s.beeld_asset_id, 'cm-sv-img')}<div class="cm-sv-k">${i + 1}/${p.slides.length}</div><div class="cm-sv-t">${esc(s.titel)}</div><div class="cm-sv-x">${esc(s.tekst)}</div></div>`).join('')}</div>
         <div style="display:flex;gap:12px;margin-top:12px;flex-wrap:wrap"><div class="cm-sv cm-sv-vierkant">${img(v.beeld_asset_id, 'cm-sv-img')}<div class="cm-sv-t">${esc(v.titel)}</div><div class="cm-sv-x">${esc(v.sub)}</div></div>
         <div style="flex:1;min-width:220px;font-size:12.5px;white-space:pre-wrap;background:var(--surface-2);border-radius:10px;padding:10px">${esc(p.caption)}\n\n<span style="color:var(--brand,#0A7490)">${esc((p.hashtags || []).map((h) => (h.startsWith('#') ? h : '#' + h)).join(' '))}</span>
         <div><a href="javascript:void(0)" onclick="__cmWbKopieerDeel(${esc(JSON.stringify(p.caption + '\n\n' + (p.hashtags || []).map((h) => (h.startsWith('#') ? h : '#' + h)).join(' ')))})">kopieer caption</a></div></div></div>`;
     }
     const l = o.linkedin || {};
+    if (social) {
+      return `<div style="max-width:520px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">
+        <div style="font-weight:700;font-size:13px">De Forex Opleiding</div><div style="font-size:13px;white-space:pre-wrap;margin-top:8px">${esc(l.tekst)}</div>
+        <div><a href="javascript:void(0)" onclick="__cmWbKopieerDeel(${esc(JSON.stringify(l.tekst || ''))})">kopieer tekst</a></div></div>${window.__cmSocialPaneel('linkedin')}`;
+    }
     return `<div style="max-width:520px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px;padding:14px">
       <div style="font-weight:700;font-size:13px">De Forex Opleiding</div><div style="font-size:13px;white-space:pre-wrap;margin-top:8px">${esc(l.tekst)}</div>
       <div style="margin-top:10px">${l.beeld === 'slide1' ? `<div class="cm-sv cm-sv-post" style="width:100%">${img(((o.post || {}).slides || [])[0] && o.post.slides[0].beeld_asset_id, 'cm-sv-img')}<div class="cm-sv-t">${esc((((o.post || {}).slides || [])[0] || {}).titel)}</div></div>`

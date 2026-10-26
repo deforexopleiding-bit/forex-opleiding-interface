@@ -13,6 +13,8 @@
 // POST { actie:'bijwerken', id, …velden }            → bijschrift/persoon/toestemming/soort/tags
 // POST { actie:'naar-bibliotheek', id }              → drop-beeld ook in de bibliotheek (drop_id NULL)
 // POST { actie:'verwijder', id }                     → verbergen (verwijderd_op); bestand blijft
+// POST { actie:'social-upload-url', drop_id, naam }   → signed upload (upsert) voor een
+//      gerenderd social-beeld: drops/<slug>/social/<naam>.png (fase 3; geen asset-rij)
 // POST { actie:'seed' }                              → de 19 masterclass-beelden uit
 //      img/contentmachine/bibliotheek-seed/ eenmalig naar bibliotheek/seed/ (idempotent).
 
@@ -23,7 +25,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { poort, fout, body } from '../_lib/contentmachine-http.js';
 import {
   BUCKET, MAX_BEELD_BYTES, ASSET_SOORTEN, beeldType, typeUitBytes, beeldMaat, assetPad, isEigenPad,
-  normaliseerAssetPatch, seedMetadata, SLUG_RE,
+  normaliseerAssetPatch, seedMetadata, SLUG_RE, socialPad,
 } from '../_lib/contentmachine-core.js';
 import { beschrijfBeeld } from '../_lib/contentmachine-ai.js';
 
@@ -109,6 +111,18 @@ export default async function handler(req, res) {
         throw error;
       }
       return res.status(200).json({ ok: true, pad, token: data.token, bucket: BUCKET });
+    }
+
+    if (actie === 'social-upload-url') {
+      if (!isUuid(b.drop_id)) return res.status(400).json({ error: 'drop_id ontbreekt' });
+      const { data: drop, error: dErr } = await db.from('content_drops').select('id,slug').eq('id', b.drop_id).maybeSingle();
+      if (dErr) throw dErr;
+      if (!drop) return res.status(404).json({ error: 'Drop niet gevonden' });
+      const pad = socialPad(drop.slug, b.naam);
+      if (!pad) return res.status(400).json({ error: 'Ongeldige naam voor een social-beeld.' });
+      const { data, error } = await db.storage.from(BUCKET).createSignedUploadUrl(pad, { upsert: true });
+      if (error) throw error;
+      return res.status(200).json({ ok: true, pad, token: data.token, bucket: BUCKET, publieke_url: publiekeUrl(pad) });
     }
 
     if (actie === 'registreer') {
