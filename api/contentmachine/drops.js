@@ -269,7 +269,12 @@ export default async function handler(req, res) {
         bestanden[naam] = { url: v.url.slice(0, 600), breedte: Number(v.breedte) || null, hoogte: Number(v.hoogte) || null };
       }
       if (!Object.keys(bestanden).length) return res.status(400).json({ error: 'Geen geldige bestanden.' });
-      const social = { stijl: Number.isInteger(b.stijl) ? b.stijl % 3 : 0, bestanden, opgeslagen_op: new Date().toISOString() };
+      // samenvoegen: enkel deze bestanden bijwerken (bv. het mailbeeld). Anders vervangt de social-set
+      // alles, behalve het mailbeeld (dat hoort bij de nieuwsbrief, niet bij de social-set).
+      const oud = (drop.output.social && drop.output.social.bestanden) || {};
+      const behoud = b.samenvoegen === true ? oud : (oud.nieuwsbrief ? { nieuwsbrief: oud.nieuwsbrief } : {});
+      const vorigeStijl = drop.output.social && Number.isInteger(drop.output.social.stijl) ? drop.output.social.stijl : 0;
+      const social = { ...(drop.output.social || {}), stijl: Number.isInteger(b.stijl) ? b.stijl % 3 : vorigeStijl, bestanden: { ...behoud, ...bestanden }, opgeslagen_op: new Date().toISOString() };
       const { data, error } = await db.from('content_drops').update({ output: { ...drop.output, social } }).eq('id', id).select('id').single();
       if (error) throw error;
       return res.status(200).json({ ok: true, social, id: data.id });

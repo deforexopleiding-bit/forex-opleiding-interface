@@ -128,11 +128,140 @@ export const BLOKKEN = {
   },
 };
 
+// ── Contentmachine 2.0: de teaser naar de Weekeditie ───────────────────────
+// Kort (±150-220 woorden), één nugget, één beeld (frame van het interactieve blok,
+// gerenderd in het CRM: output.social.bestanden.nieuwsbrief), een open lus en één
+// hoofdknop "Lees de volledige weekeditie". Echt logo in de kop.
+export const LOGO_WIT = 'https://www.deforexopleiding.nl/weekeditie/logo-wit.png';
+export const KNOP_WEEKEDITIE = 'Lees de volledige weekeditie';
+
+/** Is dit een nieuwsbrief van Contentmachine 2.0 (teaser)? */
+export const isTeaser = (n) => !!(n && typeof n === 'object' && typeof n.opener === 'string' && n.nugget);
+
+/** Woorden van de teaser (opener + nugget + open lus + ps), voor de lengtecontrole. */
+export function teaserWoorden(n) {
+  if (!isTeaser(n)) return 0;
+  const t = [n.opener, n.nugget && n.nugget.titel, n.nugget && n.nugget.tekst, n.open_lus && n.open_lus.vraag, n.open_lus && n.open_lus.tekst, n.ps].filter(Boolean).join(' ');
+  return t.replace(/\*\*/g, '').split(/\s+/).filter(Boolean).length;
+}
+
+export const TEASER_WOORDEN = [130, 240];
+
+/**
+ * Controle van een teaser (Contentmachine 2.0). `pagina` = de Weekeditie (voor het beeld-blok).
+ * → [string]
+ */
+export function teaserFouten(n, pagina) {
+  const f = [];
+  const tekst = (x) => typeof x === 'string' && x.trim().length > 0;
+  if (!isTeaser(n)) return ['nieuwsbrief: opener en nugget ontbreken'];
+  const o = Array.isArray(n.onderwerpen) ? n.onderwerpen : [];
+  if (o.length !== 3 || !o.every(tekst)) f.push('nieuwsbrief.onderwerpen: precies 3');
+  else if (new Set(o.map((x) => x.trim().toLowerCase())).size !== 3) f.push('nieuwsbrief.onderwerpen: 3 verschillende varianten');
+  o.forEach((x, i) => { if (tekst(x) && x.length > 70) f.push(`nieuwsbrief.onderwerpen[${i}] te lang (max 70)`); });
+  if (!tekst(n.preheader)) f.push('nieuwsbrief.preheader ontbreekt');
+  else if (n.preheader.length > 120) f.push('nieuwsbrief.preheader te lang (max 120)');
+  if (!tekst(n.opener)) f.push('nieuwsbrief.opener ontbreekt');
+  if (!n.nugget || !tekst(n.nugget.titel) || !tekst(n.nugget.tekst)) f.push('nieuwsbrief.nugget: titel en tekst');
+  if (!n.open_lus || !tekst(n.open_lus.vraag)) f.push('nieuwsbrief.open_lus.vraag ontbreekt');
+  if (!tekst(n.ps)) f.push('nieuwsbrief.ps ontbreekt (het cadeau)');
+  else if (!/(sessie|cadeau|dave|€\s?0)/i.test(n.ps)) f.push('nieuwsbrief.ps: noem het cadeau (gratis strategiesessie)');
+  const bl = (pagina && pagina.blokken) || [];
+  if (bl.length && (!Number.isInteger(n.beeld_blok_index) || !bl[n.beeld_blok_index] || bl[n.beeld_blok_index].type === 'cadeau')) f.push('nieuwsbrief.beeld_blok_index: wijs een blok van de pagina aan (bij voorkeur interactief)');
+  const w = teaserWoorden(n);
+  if (w < TEASER_WOORDEN[0] || w > TEASER_WOORDEN[1]) f.push(`nieuwsbrief: ${w} woorden — hou het kort (${TEASER_WOORDEN[0]}–${TEASER_WOORDEN[1]})`);
+  return f;
+}
+
+export function renderTeaser({ drop, output, onderwerpIndex = 0, uitschrijfLink = UITSCHRIJF_TAG }) {
+  const n = output.nieuwsbrief;
+  const slug = drop.slug;
+  const bestanden = (output.social && output.social.bestanden) || {};
+  const beeldUrl = bestanden.nieuwsbrief && /^https:\/\//.test(bestanden.nieuwsbrief.url || '') ? bestanden.nieuwsbrief.url : null;
+  const onderwerp = (n.onderwerpen || [])[onderwerpIndex] || (n.onderwerpen || [])[0] || 'De Weekeditie';
+  const preheader = n.preheader || '';
+  const datumKort = (() => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(drop.datum || ''); return m ? `${m[3]}/${m[2]}` : ''; })();
+  const knopUrl = link(slug, 'knop');
+  const beeldHtml = beeldUrl ? rij(`<a href="${esc(link(slug, 'beeld'))}" style="text-decoration:none;display:block;">
+      <img src="${esc(beeldUrl)}" width="528" alt="${esc((n.open_lus && n.open_lus.vraag) || 'Speel het af in de weekeditie')}" style="display:block;width:100%;max-width:528px;height:auto;border:0;border-radius:14px;">
+      <div style="font-family:${FONT};font-size:14px;font-weight:800;color:${C.goud};margin-top:10px;">&#9654; Speel het zelf af in de weekeditie</div></a>`, '22px 36px 0 36px') : '';
+  const lus = n.open_lus || {};
+  const nugget = n.nugget || {};
+  const html = `<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>${esc(onderwerp)}</title>
+<style>
+  body{margin:0;padding:0;background:${C.bg}}
+  a{color:${C.goud}}
+  @media (max-width:620px){
+    .w{width:100%!important}
+    .p{padding-left:22px!important;padding-right:22px!important}
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:${C.bg};">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:${C.bg};">${esc(preheader)}${'&#8199;&#847;'.repeat(20)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${C.bg};">
+<tr><td align="center" style="padding:28px 12px;">
+<table role="presentation" class="w" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;">
+
+  <tr><td class="p" style="padding:0 36px 22px 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td><a href="https://www.deforexopleiding.nl" style="text-decoration:none;"><img src="${LOGO_WIT}" width="112" height="56" alt="De Forex Opleiding" style="display:block;width:112px;height:auto;border:0;"></a></td>
+      <td align="right" style="font-family:${FONT};font-size:12px;font-weight:800;letter-spacing:2px;color:${C.goud};text-transform:uppercase;">De Weekeditie${datumKort ? ' · ' + datumKort : ''}</td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td style="background:${C.kaart};border:1px solid ${C.rand};border-radius:20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+${rij(`<div style="font-size:16px;line-height:25px;color:${C.tekst};">${opmaak(n.opener)}</div>`, '32px 36px 0 36px')}
+${rij(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:20px 22px;border-left:3px solid ${C.goud};background:${C.bg};border-radius:0 14px 14px 0;font-family:${FONT};">
+      ${kicker(nugget.kicker || 'De nugget van de week')}${titel(nugget.titel, 22)}${alinea(nugget.tekst, 8)}</td></tr></table>`)}
+${beeldHtml}
+${rij(`${kicker(lus.kicker || 'Wat zou jij doen?')}${titel(lus.vraag, 22)}${alinea(lus.tekst, 8)}${knop(knopUrl, KNOP_WEEKEDITIE)}`)}
+${n.ps ? rij(`<div style="font-size:15px;line-height:23px;color:${C.tekst};border-top:1px solid ${C.rand};padding-top:18px;"><b style="color:${C.goud};">PS</b> ${opmaak(n.ps)}</div>`, '26px 36px 32px 36px') : rij('', '0 0 32px 0')}
+    </table>
+  </td></tr>
+
+  <tr><td class="p" style="padding:26px 36px 0 36px;font-family:${FONT};text-align:center;">
+    <div style="font-size:14px;color:${C.zacht};">Maxim · De Forex Opleiding</div>
+  </td></tr>
+
+  <tr><td class="p" style="padding:22px 36px 10px 36px;font-family:${FONT};font-size:12px;line-height:19px;color:${C.zacht};text-align:center;">
+    Je ontvangt deze mail omdat je je hebt ingeschreven voor een training of de wekelijkse marktanalyse van De Forex Opleiding.<br>
+    ${esc(DISCLAIMER)} Rekenvoorbeelden zijn geen beloftes.<br><br>
+    <a href="${esc(uitschrijfLink)}" style="color:${C.zacht};text-decoration:underline;">Uitschrijven</a> &nbsp;·&nbsp; <a href="https://deforexopleiding.nl" style="color:${C.zacht};text-decoration:underline;">deforexopleiding.nl</a>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+  const tekst = [
+    onderwerp, '', n.opener, '',
+    [nugget.kicker || 'De nugget van de week', nugget.titel, nugget.tekst].filter(Boolean).join('\n'), '',
+    [lus.vraag, lus.tekst].filter(Boolean).join('\n'), '',
+    `${KNOP_WEEKEDITIE}: ${knopUrl}`, '',
+    n.ps ? 'PS ' + n.ps : '',
+    '', DISCLAIMER, `Uitschrijven: ${uitschrijfLink}`,
+  ].filter((x) => x !== '').join('\n\n').replace(/\*\*/g, '');
+  return { html, onderwerp, preheader, tekst, beeld: !!beeldUrl };
+}
+
 /**
  * → { html, onderwerp, preheader, tekst }
  * ctx: { drop:{slug,datum,soort,input}, output, assets:[…] | {id:asset}, onderwerpIndex, uitschrijfLink }
+ * Een teaser (Contentmachine 2.0) gaat naar renderTeaser; anders de blokken-nieuwsbrief (v1).
  */
 export function renderNieuwsbrief({ drop, output, assets = [], onderwerpIndex = 0, uitschrijfLink = UITSCHRIJF_TAG }) {
+  if (output && isTeaser(output.nieuwsbrief)) return renderTeaser({ drop, output, onderwerpIndex, uitschrijfLink });
   const n = (output && output.nieuwsbrief) || {};
   const p = (output && output.pagina) || {};
   const slug = drop.slug;

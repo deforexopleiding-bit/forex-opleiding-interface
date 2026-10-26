@@ -271,6 +271,69 @@
     return regels.join('\n');
   };
 
+  // ── nieuwsbrief = teaser (fase 3) ─────────────────────────────────────────
+  function woorden(n) {
+    const t = [n.opener, n.nugget && n.nugget.titel, n.nugget && n.nugget.tekst, n.open_lus && n.open_lus.vraag, n.open_lus && n.open_lus.tekst, n.ps].filter(Boolean).join(' ');
+    return t.replace(/\*\*/g, '').split(/\s+/).filter(Boolean).length;
+  }
+  window.__cmWeBeeldBlok = (v) => { H().zetPad('nieuwsbrief.beeld_blok_index', Number(v)); H().markeer(); st.mailCanvas = null; H().teken('cm-we-beeld', beeldInhoud()); };
+  window.__cmWeNbEditor = function () {
+    const h = H(); const esc = h.esc;
+    const o = wb().output; const n = o.nieuwsbrief || {}; const bl = (o.pagina && o.pagina.blokken) || [];
+    const w = woorden(n);
+    const kl = w >= 130 && w <= 240 ? 'var(--emerald,#1f8a64)' : 'var(--rose)';
+    return [
+      h.groep('Onderwerp (A/B/C) en preheader', [0, 1, 2].map((i) => h.veld(`nieuwsbrief.onderwerpen.${i}`, `Onderwerp ${String.fromCharCode(65 + i)}`)).join('') + h.veld('nieuwsbrief.preheader', 'Preheader')),
+      h.groep('Opener (Maxim)', h.veld('nieuwsbrief.opener', 'Opener', { lang: true, rijen: 4, hint: '**vet** mag' })),
+      h.groep('De nugget', h.veld('nieuwsbrief.nugget.kicker', 'Kicker') + h.veld('nieuwsbrief.nugget.titel', 'Titel') + h.veld('nieuwsbrief.nugget.tekst', 'Tekst', { lang: true })),
+      h.groep('Beeld', `<label class="tk-field" style="margin-bottom:6px"><span class="tk-field-l">Frame van welk blok?</span><select class="ib-input cm-mini" onchange="__cmWeBeeldBlok(this.value)">${bl.map((b, i) => (b.type === 'cadeau' ? '' : `<option value="${i}" ${n.beeld_blok_index === i ? 'selected' : ''}>${String(i + 1).padStart(2, '0')} · ${esc(NAAM[b.type] || b.type)}</option>`)).join('')}</select></label>
+        <div style="font-size:11.5px;color:var(--text-3)">Het beeld zelf render je rechts (Beeld voor de mail).</div>`),
+      h.groep('Open lus', h.veld('nieuwsbrief.open_lus.kicker', 'Kicker') + h.veld('nieuwsbrief.open_lus.vraag', 'Vraag') + h.veld('nieuwsbrief.open_lus.tekst', 'Tekst', { lang: true })),
+      h.groep('PS (cadeau)', h.veld('nieuwsbrief.ps', 'PS', { lang: true })),
+      `<div style="font-size:12px;margin:-2px 0 10px">Lengte: <b style="color:${kl}">${w} woorden</b> (doel 150–220) · Knop: <b>Lees de volledige weekeditie</b> (vast) → pagina met src=nieuwsbrief</div>`,
+    ].join('');
+  };
+
+  function beeldInhoud() {
+    const o = wb().output; const esc = H().esc;
+    const opgeslagen = o.social && o.social.bestanden && o.social.bestanden.nieuwsbrief;
+    const bezig = st.bezig === 'mailbeeld';
+    return `<div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:0 0 240px">${opgeslagen ? `<img src="${esc(opgeslagen.url)}" alt="" style="width:240px;border-radius:8px;border:1px solid var(--border)">` : '<div style="width:240px;aspect-ratio:1200/750;border-radius:8px;border:1px dashed var(--border);display:grid;place-items:center;font-size:12px;color:var(--text-3)">nog geen beeld</div>'}</div>
+      <div style="flex:1;min-width:180px;font-size:12px;color:var(--text-2)">
+        <div>Frame van het gekozen blok, zoals op de pagina en vóór de onthulling (de open lus). 1200×750, in de mail 528 px breed.</div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-primary" onclick="__cmWeMailBeeld()" ${bezig ? 'disabled' : ''}>${bezig ? 'Bezig…' : (opgeslagen ? '↻ Opnieuw renderen en bewaren' : 'Render en bewaar')}</button>
+          ${opgeslagen ? `<a class="btn btn-sm btn-ghost" href="${esc(opgeslagen.url)}" target="_blank" rel="noopener">Bekijk ↗</a>` : ''}</div>
+        ${opgeslagen ? '' : '<div style="margin-top:6px;color:var(--amber,#b7791f)">Zonder beeld kan de nieuwsbrief niet naar GHL.</div>'}
+      </div></div>`;
+  }
+  window.__cmWeBeeldPaneel = function () {
+    if (!wb().output || !wb().output.nieuwsbrief || typeof wb().output.nieuwsbrief.opener !== 'string') return '';
+    return `<div class="card" style="margin-bottom:10px"><div class="card-head"><div class="card-title">Beeld voor de mail</div></div><div class="card-body" id="cm-we-beeld">${beeldInhoud()}</div></div>`;
+  };
+  window.__cmWeMailBeeld = async () => {
+    if (st.bezig || !window.__cmBlokFrame) return;
+    st.bezig = 'mailbeeld'; H().teken('cm-we-beeld', beeldInhoud());
+    try {
+      const o = wb().output;
+      const assets = H().assetMap();
+      const cv = await window.__cmBlokFrame.renderMail({ pagina: o.pagina, blokIndex: (o.nieuwsbrief || {}).beeld_blok_index, assets });
+      const blob = await window.__cmCanvas.naarBlob(cv);
+      const u = await H().post('/api/contentmachine/assets', { actie: 'social-upload-url', drop_id: wb().drop.id, naam: 'nieuwsbrief' });
+      const up = await window.supabase.storage.from(u.bucket || 'content').uploadToSignedUrl(u.pad, u.token, blob, { contentType: 'image/png', upsert: true });
+      if (up.error) throw new Error(up.error.message || 'upload');
+      const r = await H().post('/api/contentmachine/drops', { actie: 'social', id: wb().drop.id, samenvoegen: true, bestanden: { nieuwsbrief: { url: u.publieke_url + '?v=' + Date.now(), breedte: cv.width, hoogte: cv.height } } });
+      o.social = r.social; if (wb().drop.output) wb().drop.output.social = r.social;
+      H().toast('Beeld voor de mail bewaard.');
+      if (typeof H().laadNbVoorbeeld === 'function') H().laadNbVoorbeeld();
+    } catch (e) {
+      H().toast('Beeld bewaren mislukt: ' + H().foutTekst(e, String(e && e.message || e)));
+      console.error('[contentmachine-weekeditie] mailbeeld mislukt:', e);
+    }
+    st.bezig = null; H().teken('cm-we-beeld', beeldInhoud());
+  };
+
   // Stijl
   if (!document.getElementById('cm-we-css')) {
     const css = document.createElement('style'); css.id = 'cm-we-css';

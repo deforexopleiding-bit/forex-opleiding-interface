@@ -103,13 +103,14 @@ export default async function handler(req, res) {
       waarschuwingen = r.waarschuwingen;
       output = { ...r.output, meta: { model, herstel: r.herstel, duur_ms: r.duur_ms, gegenereerd_op: new Date().toISOString(), toegelaten_formats: toegelaten, beelden: ctx.beelden.map((a) => a.id), verboden_namen: ctx.verbodenNamen, waarschuwingen } };
       reden = 'Weekeditie gegenereerd' + (instructie ? ` — ${instructie}` : '');
-    } else if (onderdeel === 'pagina' && isWeekeditie(drop.output.pagina) && drop.output.regie) {
-      const r = await schrijf(basis, drop.output.regie, { onderdelen: ['pagina'], huidige: drop.output, instructie });
+    } else if (['pagina', 'nieuwsbrief'].includes(onderdeel) && isWeekeditie(drop.output.pagina) && drop.output.regie) {
+      // 2.0: de schrijver met dezelfde regie (pagina-blokken of de teaser).
+      const r = await schrijf(basis, drop.output.regie, { onderdelen: [onderdeel], huidige: drop.output, instructie });
       model = r.model;
       output = { ...drop.output, ...r.output };
       waarschuwingen = herbereken(output, { input: i, ctx, metVideo, behoud: (vorigeMeta.waarschuwingen || []).filter((w) => !['schema', 'cijfer', 'grens'].includes(w.soort)) });
       output.meta = { ...vorigeMeta, model, waarschuwingen, laatst_onderdeel: { onderdeel, instructie: instructie || null, op: new Date().toISOString() } };
-      reden = 'pagina opnieuw geschreven' + (instructie ? ` — ${instructie}` : '');
+      reden = `${onderdeel} opnieuw geschreven` + (instructie ? ` — ${instructie}` : '');
     } else {
       const r = await genereerOnderdeel({ ...basis, onderdeel, huidige: drop.output, instructie });
       model = r.model;

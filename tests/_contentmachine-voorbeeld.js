@@ -104,6 +104,19 @@ export function voorbeeldRegie(over = {}) {
   };
 }
 
+export function voorbeeldTeaser(over = {}) {
+  return {
+    onderwerpen: ['Sweep of break? Jij beslist.', 'De dollar draait. Wij zagen het live.', 'Eén regel die je deze week geld bespaart'],
+    preheader: 'Speel de replay af en kies op het moment zelf.',
+    opener: 'Hoi, deze week kantelde de dollar en we bouwden er in de live training een short op GBP/USD uit, van H4-context tot target. **Eén moment** maakte het verschil tussen een goede trade en een gemiste kans, en dat moment kan je nu zelf afspelen, kaars per kaars, zonder dat je weet wat er daarna komt.',
+    nugget: { kicker: 'De nugget van de week', titel: 'Een wick door een niveau is geen break.', tekst: 'Pas een body close voorbij het niveau verlegt de structuur. Alles daarvoor is een sweep: liquiditeit ophalen, niet meer. Wie op de wick instapt, staat vaak aan de verkeerde kant van de beweging, en ziet zijn stop geraakt worden net voor prijs de andere kant op gaat.' },
+    beeld_blok_index: 1,
+    open_lus: { kicker: 'Wat zou jij doen?', vraag: 'Prijs zakt onder de low. Sweep of break?', tekst: 'Speel de replay af en kies vóór de onthulling. Het antwoord, en de volledige short, staan in de weekeditie.' },
+    ps: 'Deze week krijg je er een gratis strategiesessie met Dave bij: t.w.v. €100, nu €0. Je plant hem op de pagina.',
+    ...over,
+  };
+}
+
 export function voorbeeldEditie(over = {}) {
   const v1 = voorbeeldOutput();
   return {
@@ -122,7 +135,7 @@ export function voorbeeldEditie(over = {}) {
         { type: 'cadeau', props: {} },
       ],
     },
-    nieuwsbrief: v1.nieuwsbrief, stories: v1.stories, post: v1.post, vierkant: v1.vierkant, linkedin: v1.linkedin,
+    nieuwsbrief: voorbeeldTeaser(), stories: v1.stories, post: v1.post, vierkant: v1.vierkant, linkedin: v1.linkedin,
     ...over,
   };
 }
