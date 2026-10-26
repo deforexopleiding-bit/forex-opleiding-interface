@@ -50,6 +50,14 @@
   function waVoorbeeld(body, voornaam, param2) {
     return String(body || '').replace(/\{\{(\d+)\}\}/g, (m, n) => (n === '1' ? (voornaam || 'daar') : n === '2' ? (String(param2 || '').trim() || m) : m));
   }
+  /** Heeft de template snelle-antwoordknoppen ("Ja, stuur maar" / "Nu even niet")? */
+  const heeftKnoppen = (t) => !!(t && (t.knoppen || []).some((k) => String(k.type || '').toUpperCase() === 'QUICK_REPLY'));
+  const VERVOLG_JA = 'Top, {{voornaam}}! Hier is alles over het gratis webinar: {{link}} Je kunt je daar direct aanmelden. Tot dan!';
+  const VERVOLG_NEE = 'Helemaal goed, {{voornaam}}. We sturen je hierover niets meer. Fijne dag!';
+  /** Vervolgtekst invullen voor het voorbeeld. PURE. */
+  function vervolgVoorbeeld(tekst, voornaam, link) {
+    return String(tekst || '').replace(/\{\{\s*voornaam\s*\}\}/gi, voornaam || '').replace(/\{\{\s*link\s*\}\}/gi, String(link || '').trim() || '[link]');
+  }
   /** Wat ontbreekt er nog in stap 2? '' = niets. waTemplates = de geladen lijst. */
   function berichtFout(b, html, waTemplates) {
     if (!String(b.naam || '').trim()) return 'Geef de campagne een naam.';
@@ -59,6 +67,11 @@
       const t = waTemplateVan(b, waTemplates);
       if (t && t.aantal_vars >= 2 && !String(b.wa_param2 || '').trim()) return 'Vul de tekst voor {{2}} in.';
       if (/[\n\r\t]| {4,}/.test(String(b.wa_param2 || ''))) return 'De tekst voor {{2}} mag geen enters, tabs of 4+ spaties bevatten.';
+      if (heeftKnoppen(t)) {
+        const link = String(b.wa_vervolg_ja_link || '').trim();
+        if (/\{\{\s*link\s*\}\}/i.test(String(b.wa_vervolg_ja || '')) && !link) return 'Vul de link in voor het antwoord na "Ja" (of haal {{link}} uit de tekst).';
+        if (link && !/^https:\/\/\S+\.\S+$/i.test(link)) return 'De link moet een volledige https://-link zijn.';
+      }
     }
     if (kanaal === 'whatsapp') return '';
     if (!SOORTEN[b.soort]) return 'Kies het soort mail.';
@@ -94,7 +107,7 @@
     return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
   }
   const KANAAL_LABEL = { email: 'E-mail', whatsapp: 'WhatsApp', beide: 'E-mail + WhatsApp' };
-  const REDENEN = { geen_geldig_nummer: 'geen geldig telefoonnummer (WhatsApp)', dubbel_nummer: 'dubbel telefoonnummer (WhatsApp)', geen_geldig_email: 'geen geldig e-mailadres', afgemeld: 'afgemeld', voorkeur_uit: 'wil dit soort mail niet', dubbel_email: 'dubbel e-mailadres', lead_niet_gevonden: 'lead niet (meer) gevonden', lead_verwijderd: 'lead verwijderd', geannuleerd: 'geannuleerd' };
+  const REDENEN = { geen_geldig_nummer: 'geen geldig telefoonnummer (WhatsApp)', dubbel_nummer: 'dubbel telefoonnummer (WhatsApp)', nu_niet: 'zei eerder "Nu even niet" (WhatsApp)',geen_geldig_email: 'geen geldig e-mailadres', afgemeld: 'afgemeld', voorkeur_uit: 'wil dit soort mail niet', dubbel_email: 'dubbel e-mailadres', lead_niet_gevonden: 'lead niet (meer) gevonden', lead_verwijderd: 'lead verwijderd', geannuleerd: 'geannuleerd' };
 
   function toast(msg, ok) {
     try { if (window.KV && typeof window.KV.toast === 'function') window.KV.toast(msg, { duration: ok ? 4500 : 9000 }); } catch (_) { /* noop */ }
@@ -220,7 +233,31 @@
           <div data-mb-wapreview style="white-space:pre-wrap;background:#dcf8c6;color:#111;border-radius:10px 10px 2px 10px;padding:10px 12px;font-size:13.5px;line-height:1.45;box-shadow:0 1px 1px rgba(0,0,0,.08)">${esc(waVoorbeeld(t.body, eersteVoornaam(), b.wa_param2))}</div>
           ${t.footer ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px">${esc(t.footer)}</div>` : ''}
           ${(t.knoppen || []).length ? `<div style="display:flex;flex-direction:column;gap:4px;margin-top:6px">${t.knoppen.map((k) => `<div style="text-align:center;background:#fff;border:1px solid var(--border);border-radius:8px;padding:6px;font-size:12.5px;color:#0a7cff">${esc(k.text)}</div>`).join('')}</div>` : ''}
-        </div></div>` : ''}`;
+        </div></div>` : ''}
+      ${heeftKnoppen(t) ? vervolgHtml(b) : ''}`;
+  }
+  function vervolgHtml(b) {
+    const ta = (veld, rijen, ph) => `<textarea class="ib-input" data-mb-b="${veld}" rows="${rijen}" maxlength="${veld === 'wa_vervolg_ja' ? 1000 : 500}" placeholder="${esc(ph)}" style="width:100%;margin-top:3px;resize:vertical">${esc(b[veld] || '')}</textarea>`;
+    return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-weight:600;font-size:13px">Automatisch antwoord op de knoppen</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin:2px 0 8px">Gaat direct terug zodra iemand op een knop tikt (binnen het 24-uursvenster, dus als gewone tekst). Iedereen krijgt het maar één keer. Leeg laten = niets terugsturen (de reactie wordt wel bijgehouden). <span class="mono">{{voornaam}}</span> = voornaam, <span class="mono">{{link}}</span> = de link hieronder.</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px">
+        <div>
+          <label style="display:block;font-size:12px;color:var(--text-3)">Na "Ja"${ta('wa_vervolg_ja', 3, VERVOLG_JA)}</label>
+          <label style="display:block;font-size:12px;color:var(--text-3);margin-top:8px">Link (bv. webinar-aanmelding)
+            <input class="ib-input" data-mb-b="wa_vervolg_ja_link" value="${esc(b.wa_vervolg_ja_link || '')}" placeholder="https://" style="width:100%;margin-top:3px"></label>
+          <label style="display:block;font-size:12px;color:var(--text-3);margin-top:8px">Na "Nu even niet" (de lead krijgt daarna geen massa-WhatsApps meer)${ta('wa_vervolg_nee', 2, VERVOLG_NEE)}</label>
+        </div>
+        <div data-mb-vervolgpreview>${vervolgPreviewHtml(b, eersteVoornaam())}</div>
+      </div></div>`;
+  }
+  function vervolgPreviewHtml(b, vn) {
+    const bubbel = (tekst) => `<div style="white-space:pre-wrap;background:#dcf8c6;color:#111;border-radius:10px 10px 2px 10px;padding:8px 10px;font-size:13px;line-height:1.4;margin-top:3px">${esc(tekst)}</div>`;
+    const leeg = '<div style="font-size:12px;color:var(--text-3);font-style:italic;margin-top:3px">niets terugsturen</div>';
+    const ja = String(b.wa_vervolg_ja || '').trim();
+    const nee = String(b.wa_vervolg_nee || '').trim();
+    return `<div style="font-size:12px;color:var(--text-3)">Voorbeeld na "Ja"</div>${ja ? bubbel(vervolgVoorbeeld(ja, vn, b.wa_vervolg_ja_link)) : leeg}
+      <div style="font-size:12px;color:var(--text-3);margin-top:10px">Voorbeeld na "Nu even niet"</div>${nee ? bubbel(vervolgVoorbeeld(nee, vn, '')) : leeg}`;
   }
   function berichtHtml() {
     const b = st.bericht;
@@ -297,6 +334,7 @@
         <span><b>${c.aantal_mislukt || 0}</b> mislukt</span><span><b>${c.aantal_overgeslagen || 0}</b> overgeslagen</span>
       </div>
       ${c.per_kanaal && Object.keys(c.per_kanaal).length > 1 || (c.per_kanaal && c.per_kanaal.whatsapp) ? `<div data-mb-voortgang-kanaal style="font-size:12px;color:var(--text-3);margin:-4px 0 12px">${Object.entries(c.per_kanaal).map(([k, v]) => `${esc(KANAAL_LABEL[k] || k)}: ${v.sent} verstuurd · ${v.queued} in de wachtrij · ${v.failed} mislukt · ${v.skipped} overgeslagen`).join('<br>')}</div>` : ''}
+      ${c.per_kanaal && c.per_kanaal.whatsapp && c.per_kanaal.whatsapp.reacties ? ((r) => `<div data-mb-reacties style="font-size:12.5px;margin:-4px 0 12px;display:flex;gap:14px;flex-wrap:wrap"><span>Reacties WhatsApp:</span><span><b>${r.ja}</b> ja</span><span><b>${r.nee}</b> nu even niet</span>${r.stop ? `<span><b>${r.stop}</b> stop</span>` : ''}<span><b>${r.geen}</b> geen reactie</span><span style="color:var(--text-3)">${r.vervolg_verstuurd} automatisch antwoord${r.vervolg_verstuurd === 1 ? '' : 'en'} verstuurd</span></div>`)(c.per_kanaal.whatsapp.reacties) : ''}
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${kan(['wachtrij', 'bezig']) ? `<button class="btn btn-primary btn-sm" data-mb-actie="verwerk" ${st.bezig ? 'disabled' : ''}>${st.bezig ? 'Bezig…' : 'Nu een portie versturen'}</button><button class="btn btn-ghost btn-sm" data-mb-actie="pauzeer" ${st.bezig ? 'disabled' : ''}>Pauzeren</button>` : ''}
         ${kan(['gepauzeerd']) ? `<button class="btn btn-primary btn-sm" data-mb-actie="hervat" ${st.bezig ? 'disabled' : ''}>Hervatten</button>` : ''}
@@ -445,6 +483,9 @@
     if (kanaal !== 'email') {
       const [naam, taal] = String(b.wa_template || '').split('|');
       Object.assign(body, { wa_template: naam || '', wa_taal: taal || 'nl', wa_param2: String(b.wa_param2 || '').trim() });
+      if (heeftKnoppen(waTemplateVan(b, st.wa.templates))) {
+        Object.assign(body, { wa_vervolg_ja: String(b.wa_vervolg_ja || '').trim(), wa_vervolg_ja_link: String(b.wa_vervolg_ja_link || '').trim(), wa_vervolg_nee: String(b.wa_vervolg_nee || '').trim() });
+      }
     }
     return JSON.stringify(body);
   }
@@ -585,6 +626,12 @@
     }
     const b = el.getAttribute && el.getAttribute('data-mb-b');
     if (b === 'wa_param2') { st.bericht.wa_param2 = el.value; repaintWaPreview(); repaintVoet(); return; }
+    if (b === 'wa_vervolg_ja' || b === 'wa_vervolg_ja_link' || b === 'wa_vervolg_nee') {
+      st.bericht[b] = el.value;
+      const pv = root() && root().querySelector('[data-mb-vervolgpreview]');
+      if (pv) pv.innerHTML = vervolgPreviewHtml(st.bericht, eersteVoornaam());
+      repaintVoet(); return;
+    }
     if (b && !['sjabloon', 'soort', 'kanaal', 'wa_template'].includes(b)) { st.bericht[b] = el.value; repaintVoet(); return; }
     if (el.matches && el.matches('[data-mb-editor]')) { bewaarEditor(); repaintVoet(); }
   }
@@ -648,7 +695,7 @@
       tab: 'nieuw', stap: 'selectie', vraag: 0,
       filter: { ...STANDAARD_FILTER, ...(o.filter || {}), lead_ids: Array.isArray(o.leadIds) ? o.leadIds.slice(0, 5000) : [] },
       items: [], gekozen: new Set(), opties: null, campagnes: [], laden: true, laadFout: null, tabelOntbreekt: false,
-      bericht: { naam: '', kanaal: 'email', soort: '', onderwerp: '', html: '', blokken: null, sjabloonNaam: null, portie: 100, sjabloon_id: null, wa_template: '', wa_param2: '' },
+      bericht: { naam: '', kanaal: 'email', soort: '', onderwerp: '', html: '', blokken: null, sjabloonNaam: null, portie: 100, sjabloon_id: null, wa_template: '', wa_param2: '', wa_vervolg_ja: VERVOLG_JA, wa_vervolg_ja_link: '', wa_vervolg_nee: VERVOLG_NEE },
       wa: { laden: false, geladen: false, fout: null, templates: [], waba: null, portie: null, dagMax: null },
       sj: { laden: false, geladen: false, fout: null, lijst: [] },
       preview: { laden: false, fout: null, data: null },

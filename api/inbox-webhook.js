@@ -46,6 +46,7 @@ import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
 import { createNotification } from './_lib/notify.js';
 import { waitUntil } from '@vercel/functions';
 import { opvolgingMetaInbound, opvolgingMetaFailed } from './_lib/opvolging-meta.js';
+import { verwerkMassaReactie } from './_lib/massa-wa-reactie.js';
 
 // Vercel-eis: bodyParser uit zodat we de raw body kunnen lezen voor HMAC.
 export const config = {
@@ -1418,6 +1419,22 @@ export async function verwerkWhatsAppWebhookBody(req, body, ctx = {}) {
                 tekst: insRes.body, mediaType: msg.type,
                 tijdstipIso: tsDate.toISOString(),
               });
+
+              // Additief (massa-WhatsApp): knopantwoord op een massa-template
+              // ("Ja, stuur maar" / "Nu even niet") → reactie loggen +
+              // vervolgbericht van de campagne. Alleen knoppen met context
+              // (= wamid van de massa-template). Fail-soft (gooit nooit).
+              if ((msg.type === 'button' || msg.type === 'interactive') && msg.context?.id) {
+                const _mr = await verwerkMassaReactie(supabaseAdmin, {
+                  contextWamid: msg.context.id,
+                  tekst: insRes.body,
+                  payload: msg.button?.payload || msg.interactive?.button_reply?.id || null,
+                  telefoon: phoneE164Plus,
+                  phoneNumberId: recvPhoneNumberId,
+                  ontvangenOp: tsDate,
+                });
+                if (_mr.verwerkt) console.log('[inbox-webhook] massa-reactie:', { reactie: _mr.reactie, vervolg: _mr.vervolg_status });
+              }
 
               const traceBase = {
                 ts: _tsIso,
