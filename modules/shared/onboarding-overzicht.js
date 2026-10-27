@@ -678,7 +678,9 @@
 
   async function copyLink(token, btn) {
     if (!token) { toast('Geen token op deze onboarding', 'error'); return; }
-    const url = location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(token);
+    // De link die de klant krijgt (portal achter de vlag) komt van de server.
+    const rij = (Array.isArray(_rows) ? _rows : []).find((r) => r && r.token === token);
+    const url = (rij && rij.persoonlijke_link) || (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(token));
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url);
@@ -1481,7 +1483,7 @@
       if (r.status === 403) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Geen rechten (onboarding.admin).</div>`; return; }
       if (!r.ok) { bd.innerHTML = `<div class="empty-state" style="color:#b91c1c">Ophalen mislukt: ${esc(d?.error || ('HTTP ' + r.status))}</div>`; return; }
       const o = d?.onboarding || {};
-      const link = (o.token) ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(o.token)) : null;
+      const link = o.portal?.persoonlijke_link || ((o.token) ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(o.token)) : null);
       const answersJson = (o.answers && typeof o.answers === 'object')
         ? JSON.stringify(o.answers, null, 2)
         : null;

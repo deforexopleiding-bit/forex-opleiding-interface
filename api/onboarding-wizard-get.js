@@ -27,6 +27,8 @@ import {
   DEFAULT_WIZARD_STRUCTURE,
   resolveFlowType,
 } from './_lib/onboarding-wizard-default.js';
+import { portalLive, portalLink } from './_lib/onboarding-link.js';
+import { kenStartcodeToe } from './_lib/onboarding-startcode.js';
 
 const UUID_RE        = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STORAGE_BUCKET = 'onboarding-files';
@@ -168,7 +170,20 @@ export default async function handler(req, res) {
     // zodat we het in-memory default-object niet vervuilen tussen requests.
     const pagesOut = await attachSignedFileUrls(pagesIn);
 
+    // DE PORTAL (27 okt 2026): staat de vlag onboarding_portal_live aan, dan
+    // stuurt modules/onboarding.html door naar de portal op de website met de
+    // startcode van deze onboarding (zo werken oude mails en de WhatsApp-
+    // template met een vaste basis-URL ook). ?klassiek=1 blijft de oude wizard
+    // tonen. Faalzacht: bij een fout geen portal_url → de oude wizard.
+    let portalUrl = null;
+    try {
+      if (await portalLive(supabaseAdmin)) portalUrl = portalLink(await kenStartcodeToe(supabaseAdmin, ob.id));
+    } catch (e) {
+      console.warn('[onboarding-wizard-get] portal-link (soft):', e?.message || e);
+    }
+
     return res.status(200).json({
+      portal_url          : portalUrl,
       customer_first_name : firstName,
       status              : ob.status,
       current_step        : (ob.current_step == null) ? null : Number(ob.current_step),

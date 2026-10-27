@@ -312,6 +312,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   "Automation" in Opvolging; "Wat nu?": Call inplannen / Gesprek gehad / Geen interesse meer / Later terugbellen.
   MOEITE_NVT kent de drie afsluitcodes (geen vals "te weinig pogingen"); wacht-check houdt de reden.
   Migratie docs/sql-migrations/2026-10-27-opvolging-automation-interesse.sql. Geen WA/mail naar de klant.
+  LINKS + VLAG: elke persoonlijke onboarding-link gaat via `api/_lib/onboarding-link.js` (`linkVoorOnboarding`,
+  `persoonlijkeLink`, `portalLive` leest app_settings `onboarding_portal_live`, 30 s cache, onleesbaar = UIT). AAN →
+  `${ONBOARDING_PORTAL_URL}?code=XXXX-XXXX` (env, standaard www.deforexopleiding.nl/onboarding); UIT → klassieke wizard.
+  Templatevariabele `{{onboarding.startcode}}` (+ browserkopie in finance-instellingen.js). modules/onboarding.html stuurt
+  achter de vlag door naar de portal (`portal_url` uit onboarding-wizard-get); `?klassiek=1` = oude wizard. Automation-
+  mailstap: een regel `{{onboarding.startcode}}` = code groot, een regel `[knop: Label]` = knop (onboarding-mail-opmaak.js);
+  zonder die regels exact de oude platte mail. WhatsApp `welkom_onboarding` heeft de link als variabele {{2}} → geen Meta-wijziging.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

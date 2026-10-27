@@ -34,6 +34,7 @@ import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboardi
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 import { kenStartcodeToe } from './_lib/onboarding-startcode.js';
+import { linkVoorOnboarding } from './_lib/onboarding-link.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -279,7 +280,12 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok         : true,
       onboarding : inserted,
+      // `link` blijft het relatieve pad van de klassieke wizard (de schermen
+      // plakken er location.origin voor). `persoonlijke_link` is de link die de
+      // klant krijgt: achter de vlag onboarding_portal_live de portal met de
+      // startcode, anders de klassieke wizard (api/_lib/onboarding-link.js).
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
+      persoonlijke_link: (await linkVoorOnboarding(supabaseAdmin, inserted)).link,
       provision  : provision,
       dfo_lms    : dfoLms,
       dfo_lms_uitnodiging: dfoLmsUitnodiging,

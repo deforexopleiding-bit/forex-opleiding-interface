@@ -32,6 +32,9 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendOnboardingTemplateGeneric } from './onboarding-template-send.js';
 import { sendMail, sendOnboardingMail } from '../mailer.js';
+import { linkVoorOnboarding } from './onboarding-link.js';
+import { formatteer as formatteerStartcode } from './onboarding-startcode.js';
+import { heeftOpmaak, bouwOpmaakMail } from './onboarding-mail-opmaak.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -545,16 +548,31 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
           const to = cust?.email;
           if (!to) return { ok: false, error: 'geen e-mailadres', skipped: true };
           try {
-            // Simple variable-resolve: {{klant.voornaam}}, {{onboarding.wizard_link}}
-            const wizardLink = onboarding.token
-              ? `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(onboarding.token)}`
-              : '';
+            // Simple variable-resolve: {{klant.voornaam}}, {{onboarding.wizard_link}}, …
+            // De persoonlijke link gaat via één helper: achter de vlag
+            // onboarding_portal_live de portal op de website met de startcode,
+            // anders de klassieke wizard (api/_lib/onboarding-link.js).
+            const persoonlijk = await linkVoorOnboarding(supabaseAdmin, onboarding);
+            const wizardLink = onboarding.token ? persoonlijk.link : '';
             const replacements = {
               '{{klant.voornaam}}':         String(cust?.first_name || '').trim(),
               '{{klant.achternaam}}':        String(cust?.last_name  || '').trim(),
               '{{klant.email}}':             String(cust?.email      || '').trim(),
               '{{onboarding.wizard_link}}':  wizardLink,
+              '{{onboarding.persoonlijke_link}}': wizardLink,
+              '{{onboarding.startcode}}':    formatteerStartcode(persoonlijk.startcode),
             };
+            // Opmaak (27 okt 2026): een regel {{onboarding.startcode}} = de code
+            // groot in een kader, een regel [knop: …] = een knop naar de link.
+            // Zonder die regels exact de oude platte mail.
+            if (heeftOpmaak(body)) {
+              const opmaak = bouwOpmaakMail({ subject, body, waarden: replacements, link: wizardLink });
+              let subjO = String(subject);
+              for (const [k, v] of Object.entries(replacements)) subjO = subjO.split(k).join(v);
+              const resO = await sendOnboardingMail({ to, subject: subjO, text: opmaak.text, html: opmaak.html });
+              if (resO && resO.ok === false) return { ok: false, error: resO.error || 'mail failed' };
+              return { ok: true, to };
+            }
             let subj = String(subject), bod = String(body);
             for (const [k, v] of Object.entries(replacements)) {
               subj = subj.split(k).join(v);

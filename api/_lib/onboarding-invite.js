@@ -34,6 +34,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { buildMetaVariablesFromMapping } from './template-variables.js';
+import { linkVoorOnboarding } from './onboarding-link.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { mailFallbackAan, waRouteOnboarding, vulTemplateTekst, stuurOnboardingMail } from './onboarding-mail-fallback.js';
@@ -182,10 +183,15 @@ export async function sendOnboardingInvite({
     const bodyMapping = (tplRow.meta_param_mapping && typeof tplRow.meta_param_mapping === 'object')
       ? (tplRow.meta_param_mapping.body || tplRow.meta_param_mapping)
       : null;
+    // De persoonlijke link + startcode: achter de vlag onboarding_portal_live
+    // de portal op de website, anders de klassieke wizard (onboarding-link.js).
+    const persoonlijk = await linkVoorOnboarding(supabaseAdmin, ob);
     const onboardingCtx = {
       token:         ob.token,
       status:        ob.status,
       traject_label: ob.traject?.label || null,
+      startcode:     persoonlijk.startcode,
+      persoonlijke_link: persoonlijk.link,
     };
     const ctx = { customer, onboarding: onboardingCtx, moduleContext };
     let resolved = {};
@@ -223,7 +229,7 @@ export async function sendOnboardingInvite({
       }
       return {
         sent: true, kanaal: 'email', template_name: templateName, mail_message_id: mail.messageId,
-        wizard_link: `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(ob.token)}`,
+        wizard_link: persoonlijk.link,
       };
     }
 
@@ -337,7 +343,7 @@ export async function sendOnboardingInvite({
 
     return {
       sent          : true,
-      wizard_link   : `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(ob.token)}`,
+      wizard_link   : persoonlijk.link,
       template_name : templateName,
       message_id    : insertedId,
       meta_wamid    : wamid,
