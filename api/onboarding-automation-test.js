@@ -33,6 +33,7 @@
 
 import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { kenStartcodeToe } from './_lib/onboarding-startcode.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -153,6 +154,9 @@ export default async function handler(req, res) {
         .single();
       if (obErr) throw new Error('test-onboarding insert: ' + obErr.message);
       onbId = ob.id;
+      // Startcode, net als bij een echte aanmelding — zo kan de testmail de
+      // portal-link en de code tonen. Faalzacht (null zonder migratie).
+      await kenStartcodeToe(supabaseAdmin, onbId);
     } catch (e) {
       // Cleanup customer zodat we geen orphan TEST-rij achterlaten.
       try { await supabaseAdmin.from('customers').delete().eq('id', cust.id); }

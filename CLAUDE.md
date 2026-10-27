@@ -287,6 +287,18 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   trials via `api/_lib/lab-trial-stand.js` (video-voortgang = `hlms_lab_lead_gebeurtenis` video_voltooid;
   hlms_les_voortgang is enkel voor studenten). Afspraak: "Strategiesessie · via <belofte>" (lab-sessie.js
   `sessieTitel`); de strategie-scan blijft een aparte funnel.
+- Onboarding-portal (2026-10-27) — de klant opent zijn onboarding op www.deforexopleiding.nl/onboarding
+  (dfo-website) met een STARTCODE (`onboardings.startcode`, 8 tekens uit ABCDEFGHJKLMNPQRSTUVWXYZ23456789,
+  opgeslagen zonder streepje, getoond XXXX-XXXX; `api/_lib/onboarding-startcode.js`, toegekend in
+  onboarding-create + het testpad). Publieke API `api/onboarding-portal.js` (POST, action open/save/complete,
+  CORS via env ONBOARDING_PORTAL_ORIGINS, rate limit open 10/min + 40/uur). Sessie = het bestaande
+  onboardings.token. Whitelist van answers-sleutels (dezelfde als de klassieke wizard) in
+  `api/_lib/onboarding-portal.js`. Afronden = `rondWizardAf()` in `api/_lib/onboarding-afronden.js`, GEDEELD
+  met api/onboarding-complete.js (nooit kopiëren). Klassieke wizard modules/onboarding.html blijft = rollback.
+  BEDENKTIJD: "afstand gedaan" komt uit de wizard-waiver ÓF uit het LMS-vinkje in de voorwaardenpoort
+  (dfo-lms `hlms_akkoord.afstand_bedenktijd`, `combineerWaiver`/`leesLmsAfstand` in onboarding-bedenktijd.js).
+  Migratie docs/sql-migrations/2026-10-27-onboarding-portal.sql (+ automation_interesse-kolommen + vlag
+  app_settings `onboarding_portal_live`, default false).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

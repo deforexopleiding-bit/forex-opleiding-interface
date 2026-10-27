@@ -45,6 +45,8 @@ const DUMP = {
   ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261016-testaccount.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
   // Na hlms_lab_lead_product.sql ("Eén login voor alle funnels": de belofte op de lab-lead).
   ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261026-product.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
+  // De voorwaardenpoort: afstand van bedenktijd (onboarding-bedenktijd.js, 27 okt).
+  ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261027-akkoord.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
 };
 
 // VERWACHT, NIET GEMETEN — tabellen die nog niet in de meting staan (nieuw uit

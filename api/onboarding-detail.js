@@ -17,7 +17,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 // DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
 // deze functie, en die waren NIET identiek — zie de toelichting daar.
-import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
+import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -268,7 +269,13 @@ export default async function handler(req, res) {
     const custPhone = contact.phone;
     const { waiver, availability } = wizard;
     const { intake_status, planned_call_at, last_completed_at, last_noshow_at } = intakeChain;
-    const bedenktijd = computeBedenktijd(waiver, offerteOp);
+    // Afstand van bedenktijd in de LMS-voorwaardenpoort telt ook (portal-klanten
+    // hebben geen wizard-waiver). Faalzacht: lege map = oud gedrag.
+    const lmsAfstand = row.dfo_lms_student_id
+      ? ((await leesLmsAfstand([row.dfo_lms_student_id], getDfoLmsClient())).get(String(row.dfo_lms_student_id)) || null)
+      : null;
+    const waiverEff = combineerWaiver(waiver, lmsAfstand);
+    const bedenktijd = computeBedenktijd(waiverEff, offerteOp);
 
     const t = row.traject || null;
     return res.status(200).json({
@@ -291,7 +298,7 @@ export default async function handler(req, res) {
         answers        : row.answers || null,
         paid,
         factuur,
-        waiver,
+        waiver         : waiverEff,
         bedenktijd,
         availability,
         token          : row.token,

@@ -19,15 +19,13 @@
 // (GEEN Bubble-call — provisioning komt in Fase 2.)
 
 import { supabaseAdmin } from './supabase.js';
-import { createNotification } from './_lib/notify.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
 import {
   DEFAULT_WIZARD_STRUCTURE,
   validateRequired,
   resolveFlowType,
 } from './_lib/onboarding-wizard-default.js';
-import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
-import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { rondWizardAf } from './_lib/onboarding-afronden.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -120,49 +118,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const nowIso = new Date().toISOString();
-    const { error: updErr } = await supabaseAdmin
-      .from('onboardings')
-      .update({
-        status       : 'afgerond',
-        completed_at : nowIso,
-        updated_at   : nowIso,
-      })
-      .eq('id', ob.id);
-    if (updErr) {
-      console.error('[onboarding-complete] update:', updErr.message);
-      return res.status(500).json({ error: 'Afronden mislukt.' });
-    }
-
-    // Fase 1 onboarding-automations — fire-and-forget hook voor
-    // 'on_wizard_completed'. NIET awaited; cron-poll vangt missers op.
-    Promise.resolve(
-      enrollOnboardingAutomations({
-        onboardingId: ob.id,
-        triggerType:  'on_wizard_completed',
-      }),
-    ).catch((e) => {
-      console.error('[onboarding-complete] automation enroll fail:', e?.message || e);
-    });
-
-    // Dual-write naar unified notifications-tabel (fail-soft) — alleen bij
-    // de daadwerkelijke transitie naar 'afgerond' (idempotente al-afgerond-
-    // 200 hierboven return't al eerder). Mentor krijgt bericht dat de
-    // student de intake heeft afgerond.
-    if (ob.mentor_user_id) {
-      createNotification({
-        toUserId:   ob.mentor_user_id,
-        type:       'onboarding.intake_done',
-        title:      'Intake afgerond' + (ob.customer_name ? (' · ' + ob.customer_name) : ''),
-        body:       ob.customer_name || null,
-        linkUrl:    '/modules/mentor-onboarding.html',
-        entityType: 'onboarding',
-        entityId:   ob.id,
-      }).catch(() => {});
-    }
-
-    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
-    await spiegelNaActie(ob.id, 'onboarding-complete');
+    // De neveneffecten (status, automations, mentormelding, LMS-spiegel) staan
+    // in één gedeelde functie: de nieuwe portal (api/onboarding-portal.js)
+    // roept precies dezelfde aan, zodat beide paden identiek blijven.
+    const af = await rondWizardAf(ob, { bron: 'onboarding-complete' });
+    if (!af.ok) return res.status(500).json({ error: af.error });
 
     return res.status(200).json({ ok: true });
   } catch (e) {

@@ -27,7 +27,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 // DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
 // deze functie, en die waren NIET identiek — zie de toelichting daar.
-import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
+import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -84,7 +85,7 @@ export default async function handler(req, res) {
       .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
                status, current_step, answers, started_at, completed_at, assigned_at,
                start_date,
-               archived_at, created_at, token,
+               archived_at, created_at, token, dfo_lms_student_id,
                traject:onboarding_trajecten(label, type, calls)`)
       // Sortering (2026-08-04): eerstvolgende startdatum bovenaan zodat
       // de mentor-workflow "wie moet ik als eerste voorbereiden" direct
@@ -205,12 +206,16 @@ export default async function handler(req, res) {
       }
     }
 
+    // Afstand van bedenktijd in de LMS-voorwaardenpoort — bron voor portal-
+    // klanten (zonder wizard-waiver). Faalzacht: lege map = oud gedrag.
+    const lmsAfstandByStudent = await leesLmsAfstand(list.map((r) => r.dfo_lms_student_id), getDfoLmsClient());
+
     const out = list.map((r) => {
       const t = r.traject || null;
       const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
-      const waiver = waiverKey
+      const waiver = combineerWaiver(waiverKey
         ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
-        : null;
+        : null, r.dfo_lms_student_id ? (lmsAfstandByStudent.get(String(r.dfo_lms_student_id)) || null) : null);
       const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
       const dealRow = r.customer_id ? (dealByCust[r.customer_id] || null) : null;
       const offerteOp = dealRow ? (dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null) : null;
