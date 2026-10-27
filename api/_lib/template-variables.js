@@ -20,6 +20,7 @@
 // deadline één definitie heeft.
 import { geenGehoorDeadline, formatDeadlineNl } from './geen-gehoor-deadline.js';
 import { formatteer as formatteerStartcode } from './onboarding-startcode.js';
+import { linkVoorOnboarding } from './onboarding-link.js';
 // Tweede pure import: _lib/plek-bezet.js heeft zelf geen enkele import en raakt
 // geen databank. Bewust NIET via event-registration.js — dat bouwt op
 // module-niveau een Supabase-client op, en dat is precies wat dit bestand niet
@@ -666,18 +667,21 @@ function getOnboardingValue(onboarding, key) {
  *   const ctx = { customer, invoice, openInvoices, onboarding };
  *   const out = resolveVariables(text, mapping, ctx);
  *
- * Selecteert alle kolommen die onboarding.*-resolvers gebruiken
- * (token, start_date, traject_label, mentor_name, status). Sorteert op
- * created_at desc + limit 1. Fail-soft: bij geen klant, DB-fout of geen
- * rij returnt null — callers hoeven niet te try/catchen, resolveVariables
- * geeft dan zelf '' voor onboarding.*-keys.
+ * Leest alleen kolommen die echt bestaan: traject_label komt uit de join op
+ * onboarding_trajecten, mentor_name uit team_members (fallback
+ * profiles.full_name) via mentor_user_id, en de persoonlijke link + startcode
+ * via linkVoorOnboarding (achter de vlag onboarding_portal_live de portal).
+ * Sorteert op created_at desc + limit 1. Fail-soft: bij geen klant, DB-fout of
+ * geen rij returnt null — callers hoeven niet te try/catchen, resolveVariables
+ * geeft dan zelf '' voor onboarding.*-keys. Een mislukte mentor- of
+ * linklookup laat alleen dat veld leeg.
  */
 export async function loadOnboardingForCustomer(supabaseClient, customerId) {
   if (!supabaseClient || !customerId) return null;
   try {
     const { data, error } = await supabaseClient
       .from('onboardings')
-      .select('id, token, start_date, traject_label, mentor_name, status, created_at')
+      .select('id, token, startcode, start_date, status, mentor_user_id, created_at, traject:onboarding_trajecten(label)')
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -686,7 +690,31 @@ export async function loadOnboardingForCustomer(supabaseClient, customerId) {
       console.warn('[template-variables] loadOnboardingForCustomer:', error.message);
       return null;
     }
-    return data || null;
+    if (!data) return null;
+    const { traject, ...ob } = data;
+    const uit = { ...ob, traject_label: traject?.label || null, mentor_name: null };
+    if (ob.mentor_user_id) {
+      try {
+        const { data: tm } = await supabaseClient
+          .from('team_members').select('name').eq('user_id', ob.mentor_user_id).limit(1).maybeSingle();
+        uit.mentor_name = tm?.name || null;
+        if (!uit.mentor_name) {
+          const { data: pr } = await supabaseClient
+            .from('profiles').select('full_name').eq('id', ob.mentor_user_id).maybeSingle();
+          uit.mentor_name = pr?.full_name || null;
+        }
+      } catch (e) {
+        console.warn('[template-variables] loadOnboardingForCustomer mentor:', e?.message || e);
+      }
+    }
+    try {
+      const p = await linkVoorOnboarding(supabaseClient, ob);
+      uit.persoonlijke_link = p.link;
+      uit.startcode = p.startcode;
+    } catch (e) {
+      console.warn('[template-variables] loadOnboardingForCustomer link:', e?.message || e);
+    }
+    return uit;
   } catch (e) {
     console.warn('[template-variables] loadOnboardingForCustomer fout:', e?.message || e);
     return null;
