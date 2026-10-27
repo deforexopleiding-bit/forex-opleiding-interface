@@ -149,6 +149,17 @@ test('sync: ja → één kaart; nog een keer ja → GEEN tweede kaart (idempoten
   assert.match(k.notitie, /avond, voormiddag/);
 });
 
+test('sync: een testonboarding (is_test) krijgt NOOIT een kaart en leest niets', async () => {
+  const db = nepDb();
+  for (const robot_interesse of ['ja_interesse', 'nee', 'ja_interesse']) {
+    const r = await syncAutomationKaart(db, { onboarding: { ...OB, is_test: true }, answers: { robot_interesse, robot_belmoment: ['avond'] }, nu: NU });
+    assert.deepEqual(r, { actie: 'niets', waarom: 'testonboarding', taak_id: null });
+  }
+  assert.equal((db.tabellen.opvolging_taken || []).length, 0);
+  // De portal geeft is_test van de onboarding mee aan de sync.
+  assert.match(lees('api/onboarding-portal.js'), /is_test/);
+});
+
 test('sync: gelijktijdige save (unieke index botst) is geen fout', async () => {
   const db = nepDb({ kaarten: [] });
   // Simuleer: de lees-query ziet nog niets, maar de insert botst op de index.
