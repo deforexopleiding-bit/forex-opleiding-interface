@@ -22,6 +22,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { deriveIntakeStatus, intakeStatusRank } from './intake-status.js';
 import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './onboarding-bedenktijd.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
+import { automationPerOnboarding } from './onboarding-portal-stand.js';
 import { factuurstandPerKlant } from './factuurstand-spiegel.js';
 import {
   findAvailabilityBlock,
@@ -105,6 +106,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       annuleringByOb,
       studentNaamById,
       lmsAfstandByStudent,
+      automationByOb,
     ] = await Promise.all([
       // ── 2) Mentor-naam per uniek mentor_user_id ─────────────────────────
       (async () => {
@@ -278,6 +280,9 @@ export async function bouwOverzichtRijen(opts = {}) {
       // ── 13) Afstand van bedenktijd in de LMS-voorwaardenpoort (27 okt
       //     2026) — de bron voor portal-klanten. Faalzacht (lege map).
       leesLmsAfstand(list.map((r) => r.dfo_lms_student_id), getDfoLmsClient()),
+      // ── 14) Automation-interesse uit de onboarding + de stand van Daves kaart
+      //     (27 okt 2026) — voor de KPI-tegel en het icoontje. Faalzacht.
+      automationPerOnboarding(supabaseAdmin, list),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -424,6 +429,7 @@ export async function bouwOverzichtRijen(opts = {}) {
         bubble_user_id:        bu,
         // Het LMS-student-id (dfo-lms): de brug voor het LMS-overzicht.
         dfo_lms_student_id:    r.dfo_lms_student_id || null,
+        automation:            automationByOb.get(r.id) || null,
         // Intake (Fase 1+ + Fase A nog_geen_mentor):
         mentor_intake_status: r.mentor_intake_status || null,
         intake_status:        intake,

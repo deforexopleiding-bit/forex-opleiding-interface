@@ -19,6 +19,7 @@ import { getOnboardingScope } from './_lib/onboardingScope.js';
 // deze functie, en die waren NIET identiek — zie de toelichting daar.
 import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
+import { leesPortalStand } from './_lib/onboarding-portal-stand.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -275,6 +276,9 @@ export default async function handler(req, res) {
       ? ((await leesLmsAfstand([row.dfo_lms_student_id], getDfoLmsClient())).get(String(row.dfo_lms_student_id)) || null)
       : null;
     const waiverEff = combineerWaiver(waiver, lmsAfstand);
+    // Startcode, portal-link en de automation-interesse met de stand van Daves
+    // kaart (tab "Onboarding"). Faalzacht: nulls i.p.v. een 500.
+    const portal = await leesPortalStand(supabaseAdmin, row);
     const bedenktijd = computeBedenktijd(waiverEff, offerteOp);
 
     const t = row.traject || null;
@@ -300,6 +304,7 @@ export default async function handler(req, res) {
         factuur,
         waiver         : waiverEff,
         bedenktijd,
+        portal,
         availability,
         token          : row.token,
         started_at     : row.started_at,

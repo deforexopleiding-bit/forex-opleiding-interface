@@ -7,7 +7,8 @@
 //   2. Account & LMS — invite-send en de koppeling met het LMS (dfo-lms /
 //      hlms_student), incl. 'LMS-uitnodiging opnieuw sturen'. Sinds
 //      9 okt 2026 zonder Bubble.
-//   3. Vragenlijst — beschikbaarheid + answers-jsonb.
+//   3. Onboarding — startcode + portal-link, antwoorden leesbaar, beschikbaarheid
+//      als raster, automation-interesse + de stand van Daves kaart (27 okt 2026).
 //   4. Tijdlijn — mentor_updates + status-events.
 //
 // Endpoints:
@@ -176,7 +177,7 @@ function renderTabs() {
   const items = [
     { k: 'overzicht',  l: 'Overzicht' },
     { k: 'account',    l: 'Account & LMS' },
-    { k: 'vragenlijst', l: 'Vragenlijst' },
+    { k: 'vragenlijst', l: 'Onboarding' },
     { k: 'tijdlijn',   l: 'Tijdlijn' },
   ];
   return `<div class="kv-onb-tabs">
@@ -433,24 +434,117 @@ function renderDfoLmsSection(o) {
     </div>`;
 }
 
-// ── Sub-tab 3: Vragenlijst ─────────────────────────────────────────────────
+// ── Sub-tab 3: Onboarding (was "Vragenlijst", 27 okt 2026) ─────────────────
+// Bovenaan de startcode + portal-link (www.deforexopleiding.nl/onboarding),
+// dan de antwoorden leesbaar, de beschikbaarheid als raster en het blok
+// Automation met de stand van Daves Opvolging-kaart. De klassieke wizard
+// gebruikt dezelfde sleutels, dus oude antwoorden staan hier ook.
+const PORTAL_LABELS = {
+  coaching_locatie_voorkeur: { bootcamp_dan_online: 'Bootcamp op kantoor, daarna online', zoveel_mogelijk_kantoor: 'Zoveel mogelijk op kantoor', enkel_online: 'Volledig online' },
+  ervaring_trading: { geen: 'Nog nooit getradet', beginner: 'Minder dan 1 jaar', gemiddeld: '1 – 3 jaar', middelbaar: '1 – 3 jaar', gevorderd: 'Meer dan 3 jaar' },
+  motivatie_primair: { extra_inkomen: 'Extra inkomen', fulltime_trader: 'Fulltime trader worden', vermogen_groeien: 'Vermogen laten groeien', leren_voor_jezelf: 'De vaardigheid leren', anders: 'Iets anders' },
+  robot_belmoment: { voormiddag: 'Voormiddag', namiddag: 'Namiddag', avond: 'Avond', weekend: 'Zaterdag' },
+};
+const RASTER_DAGEN = [['ma', 'Ma'], ['di', 'Di'], ['wo', 'Wo'], ['do', 'Do'], ['vr', 'Vr'], ['za', 'Za'], ['zo', 'Zo']];
+const RASTER_DELEN = [['ochtend', 'Ocht.'], ['middag', 'Midd.'], ['namiddag', 'Nam.'], ['avond', 'Avond']];
+
+function portalLabel(sleutel, waarde) {
+  if (waarde == null || waarde === '') return '<span style="color:var(--text-3)">—</span>';
+  const m = PORTAL_LABELS[sleutel] || {};
+  return esc(m[waarde] || humanizeAnswerLeaf(waarde));
+}
+function urenLabel(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '<span style="color:var(--text-3)">—</span>';
+  return esc((n >= 10 ? '10+' : String(n)) + ' uur per week');
+}
+function beschikbaarheidRaster(b) {
+  const bw = (b && typeof b === 'object' && !Array.isArray(b)) ? b : {};
+  const n = Object.values(bw).reduce((t, d) => t + (Array.isArray(d) ? d.length : 0), 0);
+  if (!n) return '<div class="kv-onb-empty">Geen beschikbaarheid opgegeven.</div>';
+  const cel = (aan, titel) => `<span title="${esc(titel)}" style="display:block;height:18px;border-radius:5px;${aan ? 'background:#C98B2E' : 'background:var(--surface-2,#eef1f4)'}"></span>`;
+  return `<div style="display:grid;grid-template-columns:34px repeat(4,minmax(34px,1fr));gap:4px;max-width:340px;font-size:11px">
+      <span></span>${RASTER_DELEN.map(([, l]) => `<span style="text-align:center;color:var(--text-3)">${esc(l)}</span>`).join('')}
+      ${RASTER_DAGEN.map(([d, dl]) => `<span style="font-weight:600;color:var(--text-2)">${esc(dl)}</span>` +
+        RASTER_DELEN.map(([p, pl]) => cel((bw[d] || []).includes(p), dl + ' ' + pl)).join('')).join('')}
+    </div>
+    <div class="kv-onb-hint" style="margin-top:6px">${n} ${n === 1 ? 'moment' : 'momenten'} aangeduid.</div>`;
+}
+function kaartStandTekst(k) {
+  if (!k) return 'Nog geen kaart in Opvolging.';
+  if (k.stand === 'ingepland') return 'Gesprek ingepland' + (k.ingepland_op ? ' op ' + fmtDT(k.ingepland_op) : '') + '.';
+  if (k.stand === 'afgesloten') {
+    const r = k.reden_code === 'klant_trok_interesse_in' ? 'de klant trok zijn interesse in' : (k.archief_reden || 'afgesloten');
+    return 'Afgesloten' + (k.gearchiveerd_at ? ' op ' + fmtDate(k.gearchiveerd_at) : '') + ' — ' + r + '.';
+  }
+  const pog = k.belpogingen ? k.belpogingen + '× gebeld' : 'nog niet gebeld';
+  return (k.stand === 'wacht_inplanning' ? 'Agenda doorgestuurd, wacht op inplanning' : 'Open bij Dave') + ' · ' + pog + (k.due ? ' · staat op ' + fmtDate(k.due) : '') + '.';
+}
 function renderVragenlijstTab() {
   const o = state.data;
-  const av = o.availability || null;
-  const ans = o.answers || null;
-  const days = av && Array.isArray(av.days) ? av.days : [];
-  const avHtml = days.length
-    ? `<ul class="kv-onb-av-list">${days.map((d) => `<li><b>${esc(d.label || '—')}:</b> ${(d.dayparts || []).map(esc).join(', ') || '—'}</li>`).join('')}</ul>`
-    : '<div class="kv-onb-empty">Geen beschikbaarheid opgegeven.</div>';
+  const p = o.portal || {};
+  const ans = (o.answers && typeof o.answers === 'object') ? o.answers : {};
+  const a = p.automation || {};
+  const k = a.kaart || null;
+  const rij = (l, v) => `<dt style="font-weight:600;font-size:12.5px;color:var(--text-2)">${esc(l)}</dt><dd style="margin:0;font-size:13px">${v}</dd>`;
+  const startcode = p.startcode_fmt
+    ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+        <span class="mono" style="font-size:22px;font-weight:600;letter-spacing:.12em">${esc(p.startcode_fmt)}</span>
+        <button type="button" class="btn btn-ghost btn-sm" data-kv-onb-copy="code">Kopieer code</button>
+        ${p.portal_link ? '<button type="button" class="btn btn-ghost btn-sm" data-kv-onb-copy="link">Portal-link kopiëren</button>' : ''}
+      </div>
+      ${p.portal_link ? `<div class="kv-onb-hint" style="margin-top:6px;word-break:break-all">${esc(p.portal_link)}</div>` : ''}`
+    : '<div class="kv-onb-empty">Nog geen startcode. Die krijgt elke nieuwe onboarding automatisch.</div>';
+  const interesse = a.interesse === 'ja' ? '<b style="color:#6D3FD4">Ja, wil gebeld worden</b>'
+    : a.interesse === 'nee' ? 'Nee' : '<span style="color:var(--text-3)">Nog niet beantwoord</span>';
+  const bm = Array.isArray(a.belmoment) && a.belmoment.length
+    ? a.belmoment.map((b) => portalLabel('robot_belmoment', b)).join(', ') : '<span style="color:var(--text-3)">geen voorkeur</span>';
   return `
     <div class="kv-onb-section">
-      <div class="kv-onb-section-title">Beschikbaarheid</div>
-      ${avHtml}
+      <div class="kv-onb-section-title">Startcode</div>
+      ${startcode}
     </div>
     <div class="kv-onb-section">
-      <div class="kv-onb-section-title">Antwoorden (wizard)</div>
+      <div class="kv-onb-section-title">Antwoorden</div>
+      <dl style="display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:6px 14px;margin:0 0 12px">
+        ${rij('Coachingvoorkeur', portalLabel('coaching_locatie_voorkeur', ans.coaching_locatie_voorkeur))}
+        ${rij('Ervaring', portalLabel('ervaring_trading', ans.ervaring_trading))}
+        ${rij('Motivatie', portalLabel('motivatie_primair', ans.motivatie_primair))}
+        ${rij('Tijd', urenLabel(ans.commitment_uren_per_week))}
+      </dl>
+      <div style="font-weight:600;font-size:12.5px;color:var(--text-2);margin-bottom:6px">Beschikbaarheid</div>
+      ${beschikbaarheidRaster(ans.beschikbaarheid)}
+    </div>
+    <div class="kv-onb-section" style="border-left:3px solid #6D3FD4;padding-left:12px">
+      <div class="kv-onb-section-title">Automation</div>
+      <dl style="display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:6px 14px;margin:0">
+        ${rij('Interesse', interesse)}
+        ${a.op ? rij('Wanneer', esc(fmtDT(a.op))) : ''}
+        ${a.interesse === 'ja' ? rij('Voorkeur belmoment', bm) : ''}
+        ${(a.interesse === 'ja' || k) ? rij('Kaart van Dave', esc(kaartStandTekst(k)) +
+          (k ? ' <button type="button" class="btn btn-ghost btn-sm" style="margin-left:6px" data-kv-onb-naar-kaart="' + (k.stand === 'afgesloten' ? 'Afgerond' : 'Vandaag') + '">Open in Opvolging &rarr;</button>' : '')) : ''}
+      </dl>
+    </div>
+    <details class="kv-onb-section">
+      <summary class="kv-onb-section-title" style="cursor:pointer">Alle antwoorden (ook uit de klassieke wizard)</summary>
       ${renderAnswersList(ans)}
-    </div>`;
+    </details>`;
+}
+
+async function kopieer(wat) {
+  const p = state?.data?.portal || {};
+  const tekst = wat === 'link' ? p.portal_link : p.startcode_fmt;
+  if (!tekst) return;
+  try {
+    await navigator.clipboard.writeText(tekst);
+    K().toast(wat === 'link' ? 'Portal-link gekopieerd' : 'Startcode gekopieerd');
+  } catch {
+    window.prompt('Kopieer:', tekst);
+  }
+}
+function naarKaart(tab) {
+  try { D().closeModal(); } catch { /* al dicht */ }
+  try { D().goMod('opvolging'); if (typeof D().goTab === 'function') D().goTab(tab || 'Vandaag'); } catch (e) { console.warn('[onb-detail] naar Opvolging:', e?.message); }
 }
 
 // Fix ronde-6 (P3): humanize answers-jsonb (was raw JSON.stringify).
@@ -908,6 +1002,8 @@ function wire() {
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
   box.querySelector('[data-kv-onb-dfolms]')?.addEventListener('click', actDfoLms);
   box.querySelector('[data-kv-onb-lmsinvite]')?.addEventListener('click', actLmsInvite);
+  box.querySelectorAll('[data-kv-onb-copy]').forEach((b) => b.addEventListener('click', () => kopieer(b.getAttribute('data-kv-onb-copy'))));
+  box.querySelector('[data-kv-onb-naar-kaart]')?.addEventListener('click', (e) => naarKaart(e.currentTarget.getAttribute('data-kv-onb-naar-kaart')));
 }
 function rerender() {
   D().openModal({ head: renderHead(), body: renderBody(), foot: renderFoot() });
