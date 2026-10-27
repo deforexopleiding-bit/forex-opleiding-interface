@@ -86,7 +86,11 @@ test('CONTRACT: alle elf schrijfpunten spiegelen via de helper', () => {
     'api/onboarding-archive.js',
     'api/mentor-future-student-update.js',
     'api/onboarding-step-save.js',
-    'api/onboarding-complete.js',
+    // De wizard afronden: sinds 27-10-2026 in één lib, gedeeld door de
+    // klassieke wizard (api/onboarding-complete.js) en de nieuwe portal op de
+    // website (api/onboarding-portal.js, die ook zelf spiegelt na een save).
+    'api/_lib/onboarding-afronden.js',
+    'api/onboarding-portal.js',
     // De annulering: sinds 6-10-2026 in één lib, gedeeld door de CRM-knop
     // (api/onboarding-cancel.js) en de LMS-knop (api/lms-onboarding-annuleren.js).
     'api/_lib/onboarding-annuleren.js',

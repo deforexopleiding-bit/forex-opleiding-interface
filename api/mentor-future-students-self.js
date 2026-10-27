@@ -25,7 +25,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 // DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
 // deze functie, en die waren NIET identiek — zie de toelichting daar.
-import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
+import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -236,14 +237,17 @@ export default async function handler(req, res) {
       }
     }
 
+    // Afstand van bedenktijd in de LMS-voorwaardenpoort (zie onboarding-bedenktijd.js).
+    const lmsAfstandByStudent = await leesLmsAfstand(list.map((r) => r.dfo_lms_student_id), getDfoLmsClient());
+
     const students = list.map((r) => {
       const ans = (r.answers && typeof r.answers === 'object') ? r.answers : {};
       const availability = availabilityBlock ? buildAvailabilityView(availabilityBlock, ans) : null;
       const t = r.traject || null;
       const cust = customerMap.get(r.customer_id) || null;
-      const waiver = waiverKey
+      const waiver = combineerWaiver(waiverKey
         ? { agreed: ans[waiverKey] === true, at: ans[waiverKey + '_at'] || null }
-        : null;
+        : null, r.dfo_lms_student_id ? (lmsAfstandByStudent.get(String(r.dfo_lms_student_id)) || null) : null);
       const dealRow = r.customer_id ? (dealByCust[r.customer_id] || null) : null;
       const offerteOp = dealRow ? (dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null) : null;
       const bedenktijd = computeBedenktijd(waiver, offerteOp);

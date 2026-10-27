@@ -47,6 +47,7 @@ import { telAlsBetaald } from './factuur-betaald.js';
 import { spiegelFactuurstandNaWijziging } from './factuurstand-spiegel.js';
 import {
   computeBedenktijd, findWaiverConsentKey, leesWaiver, leesOfferteMoment,
+  combineerWaiver, leesLmsAfstand,
 } from './onboarding-bedenktijd.js';
 import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
@@ -196,7 +197,7 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // geschreven is. Zo bestaat een halve rij niet.
     // Het traject wordt ÉÉN keer gelezen; zowel de waiver-sleutel als het
     // aantal stappen komen uit dezelfde structuur.
-    const [betaald, wizard, dealRow, mentor, tel] = await Promise.all([
+    const [betaald, wizard, dealRow, mentor, tel, lmsAfstand] = await Promise.all([
       leesEersteFactuurBetaald(ob.customer_id),
       leesWizardStructuur(),
       leesOfferteDeal(ob.customer_id),
@@ -204,10 +205,14 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // Het nummer is GEEN feit dat de rij mag tegenhouden: de afleiding
       // gooit nooit (een bron die faalt valt weg), en leeg is een uitkomst.
       telefoonVoorOnboarding(supabaseAdmin, ob),
+      // Afstand van bedenktijd in de LMS-voorwaardenpoort (27 okt 2026) —
+      // faalzacht: een lege map laat alleen de wizard-waiver tellen.
+      leesLmsAfstand([ob.dfo_lms_student_id], lms),
     ]);
     const structure = wizard.structure;
 
-    const waiver = leesWaiver(ob.answers, findWaiverConsentKey(structure));
+    const waiver = combineerWaiver(leesWaiver(ob.answers, findWaiverConsentKey(structure)),
+      lmsAfstand.get(String(ob.dfo_lms_student_id)) || null);
     const bedenktijdInfo = computeBedenktijd(
       waiver, leesOfferteMoment(dealRow), opties.nu);
     const stappenTotaal = telStappen(structure);
@@ -463,7 +468,10 @@ export async function intakeExtras(ob, nu) {
   try {
     const [wizard, dealRow] = await Promise.all([leesWizardStructuur(), leesOfferteDeal(ob.customer_id)]);
     if (!wizard.fout) {
-      const waiver = leesWaiver(ob.answers, findWaiverConsentKey(wizard.structure));
+      const lmsAfstand = ob.dfo_lms_student_id
+        ? ((await leesLmsAfstand([ob.dfo_lms_student_id], getDfoLmsClient())).get(String(ob.dfo_lms_student_id)) || null)
+        : null;
+      const waiver = combineerWaiver(leesWaiver(ob.answers, findWaiverConsentKey(wizard.structure)), lmsAfstand);
       const b = computeBedenktijd(waiver, leesOfferteMoment(dealRow), nu);
       uit.bedenktijd_status = b.status;
       uit.bedenktijd_vervalt_op = b.vervalt_op;

@@ -33,6 +33,7 @@ import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { kenStartcodeToe } from './_lib/onboarding-startcode.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -188,6 +189,12 @@ export default async function handler(req, res) {
       }
     }
     if (insErr) throw new Error('onboarding insert: ' + insErr.message);
+
+    // Startcode voor de portal op de website (XXXX-XXXX in de welkomstmail).
+    // Meteen na de insert, vóór de uitnodiging en de automations: die mails
+    // tonen de code. Faalzacht — zonder kolom (migratie nog niet gedraaid)
+    // blijft hij null en gaat de aanmelding gewoon door.
+    inserted.startcode = await kenStartcodeToe(supabaseAdmin, inserted.id);
 
     // Trial-site-toegang (alleen bij het lms_provision-vinkje). Fail-soft.
     let provision = { ok: true, skipped: true };

@@ -68,6 +68,8 @@ export function computeBedenktijd(waiver, offerteOp, nu = Date.now()) {
     return {
       status: 'vervallen', reason: 'afstand',
       waived_at: waiver.at || null,
+      // 'wizard' of 'lms' (de voorwaardenpoort) — zie combineerWaiver().
+      waived_bron: waiver.bron || 'wizard',
       offerte_op: offerteOp || null, vervalt_op: vervaltOp,
     };
   }
@@ -132,4 +134,62 @@ export function leesWaiver(answers, waiverKey) {
 export function leesOfferteMoment(dealRow) {
   if (!dealRow) return null;
   return dealRow.tl_quotation_signed_at || dealRow.tl_quotation_accepted_at || null;
+}
+
+// ── DE LMS-VOORWAARDENPOORT ALS BRON (27 okt 2026) ─────────────────────────
+// Tot nu toe kwam "afstand gedaan" ALLEEN uit de wizard: het file_download-blok
+// met consent `waiver_bedenktijd_digitaal` (zie findWaiverConsentKey/leesWaiver).
+// De nieuwe portal op de website heeft geen downloads en geen waiver meer.
+// Beslissing Maxim: de bedenktijd vervalt juridisch op het moment dat de klant
+// bij zijn eerste LMS-login in de voorwaardenpoort het vinkje "afstand van
+// bedenktijd" aanzet. Het LMS legt dat vast in `hlms_akkoord`
+// (afstand_bedenktijd = true, aangemaakt_op = het moment; student_id =
+// hlms_student.id = onboardings.dfo_lms_student_id).
+//
+// Zonder deze bron bleef de kolom Bedenktijd bij elke portal-klant op "Loopt"
+// staan tot de veertien dagen om waren. Beide bronnen tellen: de wizard-waiver
+// wint als die er is (oud pad, ongewijzigd), anders het LMS-vinkje.
+
+/**
+ * De waiver om aan computeBedenktijd te geven: wizard of LMS.
+ * @param {{agreed:boolean, at:string|null}|null} wizardWaiver uit leesWaiver()
+ * @param {string|null} lmsAfstandOp moment van het LMS-vinkje, of null
+ */
+export function combineerWaiver(wizardWaiver, lmsAfstandOp) {
+  if (wizardWaiver && wizardWaiver.agreed === true) return { ...wizardWaiver, bron: 'wizard' };
+  if (lmsAfstandOp) return { agreed: true, at: lmsAfstandOp, bron: 'lms' };
+  return wizardWaiver || null;
+}
+
+/**
+ * Per LMS-student het (eerste) moment van "afstand van bedenktijd" in de
+ * voorwaardenpoort. Faalzacht: bij een fout of zonder LMS-client een LEGE map
+ * — dan valt alles terug op het oude gedrag (alleen de wizard-waiver).
+ *
+ * @param {Array<string|null>} studentIds onboardings.dfo_lms_student_id
+ * @param {object|null} lms dfo-lms supabase-client
+ * @returns {Promise<Map<string, string>>} student_id → ISO-moment
+ */
+export async function leesLmsAfstand(studentIds, lms) {
+  const uniek = [...new Set((studentIds || []).filter(Boolean).map(String))];
+  const kaart = new Map();
+  if (!uniek.length || !lms) return kaart;
+  try {
+    for (let i = 0; i < uniek.length; i += 200) {
+      const { data, error } = await lms.from('hlms_akkoord')
+        .select('student_id, aangemaakt_op')
+        .eq('afstand_bedenktijd', true)
+        .in('student_id', uniek.slice(i, i + 200))
+        .order('aangemaakt_op', { ascending: true });
+      if (error) throw new Error(error.message);
+      for (const r of data || []) {
+        const k = String(r.student_id);
+        if (!kaart.has(k) && r.aangemaakt_op) kaart.set(k, r.aangemaakt_op);
+      }
+    }
+  } catch (e) {
+    console.warn('[onboarding-bedenktijd] LMS-voorwaardenpoort lezen (soft):', e?.message || e);
+    return new Map();
+  }
+  return kaart;
 }

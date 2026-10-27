@@ -1,0 +1,4 @@
+{
+  "_bron": "information_schema.columns op dfo-lms (absicpdidnoblirngiia), gemeten 27 okt 2026: hlms_akkoord (de voorwaardenpoort bij de eerste LMS-login) — bron voor 'afstand van bedenktijd' in api/_lib/onboarding-bedenktijd.js",
+  "hlms_akkoord": "id,student_id,auth_id,document,versie,tekst_hash,akkoord_voorwaarden,afstand_bedenktijd,bedenktijd_liep,bedenktijd_vervalt_op,ip,ip_prefix,user_agent,land,regio,stad,aangemaakt_op"
+}
