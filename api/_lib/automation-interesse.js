@@ -157,6 +157,9 @@ export async function syncAutomationKaart(db, { onboarding, answers, nu = new Da
   const verslag = { actie: 'niets', waarom: null, taak_id: null };
   try {
     if (!db || !onboarding?.id) return { ...verslag, waarom: 'geen onboarding' };
+    // Testonboardings (is_test) krijgen NOOIT een kaart: Dave mag geen
+    // testkaarten in zijn Opvolging zien. Interesse staat wel op de onboarding.
+    if (onboarding.is_test === true) return { ...verslag, waarom: 'testonboarding' };
     const interesse = answers?.robot_interesse;
     const belmoment = Array.isArray(answers?.robot_belmoment) ? answers.robot_belmoment : [];
     const nuMs = nu.getTime();
