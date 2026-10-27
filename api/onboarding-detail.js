@@ -20,6 +20,7 @@ import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { leesPortalStand } from './_lib/onboarding-portal-stand.js';
+import { resolveFlowType } from './_lib/onboarding-wizard-default.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -150,7 +151,7 @@ export default async function handler(req, res) {
           const { data: wiz, error: wizErr } = await supabaseAdmin
             .from('onboarding_wizard')
             .select('published_structure')
-            .eq('id', 1)
+            .eq('flow_type', resolveFlowType(row.traject?.type))
             .maybeSingle();
           if (wizErr) {
             console.warn('[onboarding-detail] wizard config fetch:', wizErr.message);

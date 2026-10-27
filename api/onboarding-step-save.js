@@ -10,7 +10,8 @@
 //
 // Gedrag:
 //   - status='afgerond'   → 409 (al afgerond, geen edits meer).
-//   - status='gearchiveerd' → 409 (gesloten).
+//   - status='gearchiveerd' / 'geannuleerd' of archived_at → 409 (gesloten),
+//     dezelfde lijst als de portal (AFGESLOTEN in _lib/onboarding-portal.js).
 //   - answers worden SHALLOW gemerged per key in onboardings.answers.
 //   - current_step wordt overschreven (integer, >=0).
 //   - status='aangemeld' → bumpt naar 'bezig' + started_at=now() bij eerste save.
@@ -21,6 +22,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { AFGESLOTEN } from './_lib/onboarding-portal.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -61,7 +63,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, status, started_at, answers')
+      .select('id, status, started_at, answers, archived_at')
       .eq('token', token)
       .maybeSingle();
     if (obErr) {
@@ -73,7 +75,7 @@ export default async function handler(req, res) {
     if (ob.status === 'afgerond') {
       return res.status(409).json({ error: 'Onboarding is al afgerond.' });
     }
-    if (ob.status === 'gearchiveerd') {
+    if (AFGESLOTEN.includes(ob.status) || ob.archived_at) {
       return res.status(409).json({ error: 'Onboarding is gesloten.' });
     }
 
