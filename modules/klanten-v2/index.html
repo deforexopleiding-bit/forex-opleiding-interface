@@ -166,7 +166,7 @@
 
   <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
   <script src="../shared/design-system/icons.js?v=1b2"></script>
-  <script src="../shared/design-system/app-shell.js?v=1e9"></script>
+  <script src="../shared/design-system/app-shell.js?v=1ea"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
   <!-- belvenster-kern VOOR de softphone: die leest window.BelvensterKern. -->
   <script src="../shared/belvenster-kern.js?v=2"></script>
@@ -227,7 +227,7 @@
   <script src="views/events-v2.js?v=64"></script>
   <!-- 2026-10-09 webinar: eigen module "Webinar" (sidebar onder Events; api/webinar-admin.js). -->
   <script src="views/webinar-v2.js?v=5"></script>
-  <script src="views/onboarding-v2.js?v=21"></script>
+  <script src="views/onboarding-v2.js?v=22"></script>
   <script src="views/mentoren-v2.js?v=5"></script>
   <!-- 2026-10-22 commissie-cockpit: Mentoren → Commissies (api/commissie-*.js). -->
   <script src="views/commissies-v2.js?v=4"></script>
@@ -264,11 +264,14 @@
   <script src="../iris/spraak.js?v=1"></script>
   <script src="views/wanbetalers-v2.js?v=69"></script>
   <script src="views/setter-payout-v2.js?v=10"></script>
-  <script src="views/opvolging-v2.js?v=80"></script>
+  <script src="views/opvolging-v2.js?v=81"></script>
   <!-- Opvolging → tab Leads bellen (proefleads minicursus / 7-daagse). Eigen
        bestand; hergebruikt window.__opvGedeeld uit opvolging-v2.js, dus NA dat
        bestand. -->
   <script src="views/opvolging-leads-v2.js?v=8"></script>
+  <!-- Sectie Automation (27 okt 2026): automation-interesse uit de onboarding.
+       Hergebruikt de vensters van opvolging-v2.js (window.__opvGedeeld), dus NA dat bestand. -->
+  <script src="views/automation-v2.js?v=1"></script>
   <!-- Opvolging → tab Call-rapport (per closer en per setter, per dag). Eigen
        bestand naast opvolging-v2.js; leest labels en kleuren uit
        window.CallUitkomstCategorie hierboven. Na opvolging-v2.js. -->
@@ -307,7 +310,7 @@
   <script src="support-alarm.js?v=1"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
-  <script type="module" src="klanten-v2.js?v=1fb"></script>
+  <script type="module" src="klanten-v2.js?v=1fc"></script>
 
   <!-- #snapshot-B — Logboek auto-snapshots. Self-hosted html2canvas 1.4.1
        (geen CDN — supply-chain-veiligheid). Hook patcht window.fetch en

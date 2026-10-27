@@ -61,7 +61,7 @@
 
   window.__onbOpen = async (id) => {
     try {
-      const mod = await import('./modals/onboarding-detail.js?v=3');
+      const mod = await import('./modals/onboarding-detail.js?v=4');
       mod.openOnboardingDetailModal({ onboardingId: id, onSuccess: refetchAll });
     } catch (e) { console.error('[onb-v2] detail-modal load fail:', e); window.KV?.toast?.('Kon detail niet laden'); }
   };
@@ -459,18 +459,16 @@
       : st === 'gearchiveerd' ? ' — afgehandeld door Dave' : ' — Dave belt');
     return ` <span class="kv-onb-auto" title="${esc(titel)}" aria-label="${esc(titel)}">&#10227;</span>`;
   }
-  window.__onbAutoFilter = () => {
-    DFO.setF('onb-auto', F('onb-auto', '') === 'ja' ? '' : 'ja');
-    _page.active = 1;
+  // De tegel opent de sectie Automation (27 okt 2026): daar staan de kaarten
+  // met belpogingen, inplannen en afsluiten; hier alleen het icoontje per rij.
+  window.__onbNaarAutomation = () => {
+    try { DFO.goMod('automation'); if (typeof DFO.goTab === 'function') DFO.goTab('Te bellen'); }
+    catch (e) { console.warn('[onboarding] naar Automation:', e?.message); }
   };
-  function autoFilter(rows) {
-    return F('onb-auto', '') === 'ja' ? asArr(rows).filter(heeftAutoInteresse) : null;
-  }
 
   function kpisActive(rows) {
     const list = asArr(rows);
     const autoN = list.filter(autoOpen).length;
-    const autoAan = F('onb-auto', '') === 'ja';
     const noMentor = list.filter((r) => !r.mentor_user_id).length;
     const started  = list.filter((r) => r.status === 'bezig').length;
     const today    = list.filter((r) => r.start_date && new Date(r.start_date).toDateString() === new Date().toDateString()).length;
@@ -479,8 +477,8 @@
       { c: 'amber',   icon: I.alert,  label: 'Zonder mentor',       val: String(noMentor),                    sub: 'nog toe te wijzen' },
       { c: 'emerald', icon: I.tick,   label: 'Bezig',               val: String(started),                     sub: 'wizard gestart' },
       { c: 'violet',  icon: I.clock,  label: 'Start vandaag',       val: String(today) },
-      { c: 'violet',  icon: I.phone || I.bell || I.clock, label: 'Automation-interesse', val: String(autoN), hi: autoAan ? 1 : 0,
-        sub: autoAan ? '&#10003; filter aan — klik om te wissen' : 'Dave belt nog · klik om te filteren', click: 'window.__onbAutoFilter()' },
+      { c: 'violet',  icon: I.phone || I.bell || I.clock, label: 'Automation-interesse', val: String(autoN),
+        sub: 'Dave belt nog · open Automation &rarr;', click: 'window.__onbNaarAutomation()' },
     ]);
   }
   function kpisArchive(rows) {
@@ -708,9 +706,7 @@
     if (!st.rows && !st.loading && !st.error) queueMicrotask(() => fetchScope('active'));
     const raw = asArr(st.rows);
     // Filter-pipeline: startgroep-tabs (enige primaire filter) → sort → pagineren.
-    // Automation-filter (KPI-tegel) gaat vóór de startgroep-tabs: dan wil je
-    // élke klant met interesse zien, ook buiten 'binnenkort'.
-    const afterStart  = autoFilter(raw) || startFilter(raw);
+    const afterStart  = startFilter(raw);
     const sorted      = sortRows(afterStart, 'active');
     const pageMeta    = paginate(sorted, 'active');
     _rowsForClick.active = pageMeta.slice;

@@ -18,12 +18,25 @@
 // filter hier op één plek, en zoekt tests/opvolging-lijstfilter.test.js elke
 // select op opvolging_taken in api/ af naar dit filter.
 //
+// SINDS 27 OKTOBER 2026 een derde lijst:
+//
+//   lijst = 'automation' — de automation-interesse uit de onboarding (reden
+//                      'automation_interesse'). Eigen sectie "Automation" in het
+//                      CRM (views/automation-v2.js, api/automation-overzicht.js).
+//                      Daves daglijst en Leads bellen zien ze niet: die filteren
+//                      al op hun eigen lijst. Vóór de migratie
+//                      (docs/sql-migrations/2026-10-27-automation-lijst.sql) kan
+//                      een automation-kaart nog in 'dag' staan; daarom leest
+//                      alleenAutomationlijst() beide.
+//
 // Wat bewust BEIDE lijsten leest (wacht-check, doorrol, de brug-nummers, de
 // webhook, de softphone-koppeling, taak-update, agenda, poging) staat in de
 // whitelist van die test, met de reden erbij.
 
 export const LIJST_DAG = 'dag';
 export const LIJST_LEADS = 'leads';
+export const LIJST_AUTOMATION = 'automation';
+export const AUTOMATION_REDEN = 'automation_interesse';
 
 /** Alleen Daves daglijst. Op een postgrest-query: `alleenDaglijst(q)`. */
 export function alleenDaglijst(q) {
@@ -33,6 +46,19 @@ export function alleenDaglijst(q) {
 /** Alleen de leadkaarten van 'Leads bellen'. */
 export function alleenLeadlijst(q) {
   return q.eq('lijst', LIJST_LEADS);
+}
+
+/**
+ * Alleen de automation-kaarten: reden 'automation_interesse', in lijst
+ * 'automation' of — vóór de migratie — nog in 'dag'.
+ */
+export function alleenAutomationlijst(q) {
+  return q.eq('reden', AUTOMATION_REDEN).in('lijst', [LIJST_AUTOMATION, LIJST_DAG]);
+}
+
+/** Is dit een automation-kaart (eigen lijst, of de reden vóór de migratie)? */
+export function isAutomationkaart(taak) {
+  return !!taak && (String(taak.lijst || '') === LIJST_AUTOMATION || taak.reden === AUTOMATION_REDEN);
 }
 
 /**
