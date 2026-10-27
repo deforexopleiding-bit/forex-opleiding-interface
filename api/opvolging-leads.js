@@ -4,6 +4,11 @@
 //
 // Query: ?pot=terugbellen|verlopen|bezig|nieuw|wacht|later|ingepland|afgerond
 //        ?pot=telling  → alleen aantallen per pot + dag- en weekstatistiek
+//        ?pot=lijst&lijst=<uuid> → één APARTE LIJST: items = wie nu aan de
+//                      beurt is, secties = de rest per pot, lijst = kop + telling
+//
+// Elke response draagt aparte_lijsten { beschikbaar, actief:[…], archief:[…] }
+// voor de chips. De kaarten van een aparte lijst tellen nergens anders mee.
 //
 // Response 200:
 //   { pot, vandaag, items:[...], aantallen:{pot:n}, badge, nieuw_heet,
@@ -18,6 +23,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { laadLeadsOverzicht } from './_lib/opvolging-leads-data.js';
 import { POTTEN } from './_lib/opvolging-leads-pot.js';
+import { isLijstId } from './_lib/opvolging-leads-lijsten.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -34,12 +40,14 @@ export default async function handler(req, res) {
 
   const q = req.query || {};
   const pot = String(q.pot || 'telling');
-  if (pot !== 'telling' && !POTTEN.includes(pot)) {
+  if (pot !== 'telling' && pot !== 'lijst' && !POTTEN.includes(pot)) {
     return res.status(400).json({ error: 'onbekende pot', potten: POTTEN });
   }
+  const lijstId = pot === 'lijst' ? String(q.lijst || '') : null;
+  if (pot === 'lijst' && !isLijstId(lijstId)) return res.status(400).json({ error: 'onbekende lijst' });
 
   try {
-    const o = await laadLeadsOverzicht(supabaseAdmin, Date.now());
+    const o = await laadLeadsOverzicht(supabaseAdmin, Date.now(), { lijstId });
     const basis = {
       pot,
       vandaag: o.vandaag,
@@ -55,8 +63,14 @@ export default async function handler(req, res) {
       dag: o.dag,
       week: o.week,
       meldingen: o.meldingen,
+      aparte_lijsten: o.aparte_lijsten,
     };
     if (pot === 'telling') return res.status(200).json(basis);
+    if (pot === 'lijst') {
+      const w = o.lijst_weergave;
+      if (!w) return res.status(404).json({ error: 'Deze lijst bestaat niet (meer).' });
+      return res.status(200).json({ ...basis, lijst: w.lijst, items: w.items, secties: w.secties, lijst_belrij: w.belrij });
+    }
     return res.status(200).json({ ...basis, items: o.potten[pot] || [] });
   } catch (e) {
     console.error('[opvolging-leads]', pot, e?.message || e);

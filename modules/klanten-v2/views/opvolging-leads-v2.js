@@ -20,6 +20,11 @@
 // met de taak_id. Zo blijft de privacylijst van de WhatsApp-brug klein.
 //
 // Vensters van deze tab sluiten ALLEEN via het kruisje (huisregel).
+//
+// APARTE LIJSTEN (27 okt): 'Lijst opladen' kan ook een eigen lijst maken. Die
+// krijgt een chip achter de potten (pot = 'lijst:<id>'), toont alleen zijn
+// eigen leads met dezelfde rijen en knoppen, en telt nergens anders mee.
+// Archiveren haalt de chip weg; terug te vinden onder 'Gearchiveerd'.
 
 (function () {
   if (!window.DFO) return;
@@ -73,6 +78,7 @@
     gesprek: null,                   // { sleutel, taakId, gezienActief, sinds }
     logboek: { dag: null, laden: false, data: null, fout: null },
     logTab: 'tijdlijn',
+    archiefOpen: false,              // 'Gearchiveerd' (aparte lijsten) open
   };
   const NIEUW_ZICHTBAAR = 12;
 
@@ -103,11 +109,14 @@
     if (j.__error) st.fout = j.__error; else st.data = j;
     teken();
   }
+  const isLijstPot = (code) => String(code || '').startsWith('lijst:');
   async function laadPot(code) {
     const st = _ld.potten[code] = _ld.potten[code] || { laden: false, data: null, fout: null };
     if (st.laden) return;
     st.laden = true; st.fout = null;
-    const j = await haal('/api/opvolging-leads?pot=' + encodeURIComponent(code));
+    const j = await haal(isLijstPot(code)
+      ? '/api/opvolging-leads?pot=lijst&lijst=' + encodeURIComponent(code.slice(6))
+      : '/api/opvolging-leads?pot=' + encodeURIComponent(code));
     st.laden = false;
     if (j.__error) st.fout = j.__error;
     else {
@@ -115,8 +124,16 @@
       // De telling komt met elke pot mee; zo blijven de tellers vers.
       _ld.telling.data = j;
       for (const r of j.items || []) _ld.rijen.set(sleutel(r), r);
+      // Een aparte lijst heeft ook rijen buiten 'Nu aan de beurt'.
+      for (const lijst of Object.values(j.secties || {})) for (const r of lijst || []) _ld.rijen.set(sleutel(r), r);
     }
     teken();
+  }
+
+  /** De belrij van waar Dave nu werkt: de aparte lijst die open staat, anders Nu bellen. */
+  function huidigeBelrij() {
+    const code = isLijstPot(_ld.pot) ? _ld.pot : 'belrij';
+    return ((_ld.potten[code] || {}).data) || {};
   }
   async function laadInst() {
     const st = _ld.inst;
@@ -212,12 +229,13 @@
       const n = p.code === 'belrij' && t.data && t.data.belrij ? t.data.belrij.dringend : (aantallen ? aantallen[p.code] : null);
       return '<button class="lb-pot' + (p.code === pot ? ' on' : '') + '" style="--pk:' + p.kleur + '" onclick="window.__opvLb.kiesPot(\'' + p.code + '\')">' +
         esc(p.label) + '<span class="n">' + (n == null ? '&middot;' : esc(n)) + '</span></button>';
-    }).join('') + '</div>';
+    }).join('') + lijstChips(t.data && t.data.aparte_lijsten, pot) + '</div>';
+    if (_ld.archiefOpen) h += archiefBlok(t.data && t.data.aparte_lijsten);
 
     if (!pot) h += '<div class="agleeg">Laden&hellip;</div>';
     else if (ps && ps.fout) h += '<div class="warn">' + esc(ps.fout) + ' <button class="obtn" onclick="window.__opvLb.herlaad()">Opnieuw</button></div>';
     else if (!ps || !ps.data) h += '<div class="agleeg">Laden&hellip;</div>';
-    else h += potInhoud(pot, ps.data);
+    else h += isLijstPot(pot) ? lijstInhoud(ps.data) : potInhoud(pot, ps.data);
 
     h += logboekBlok();
     h += beheerBlok();
@@ -440,6 +458,95 @@
       '<button class="obtn" onclick="window.__opvLb.stopRonde()">Stop</button></div></div>';
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // APARTE LIJSTEN
+  // ═════════════════════════════════════════════════════════════════════════
+  // De rest van een lijst, onder 'Nu aan de beurt'. Codes = de potten.
+  const LIJST_REST = [
+    ['terugbellen', 'Terugbelafspraken', 'Afgesproken dag nog niet bereikt. Op die dag staat hij hierboven.'],
+    ['verlopen', 'Termijn verlopen', 'Agenda gekregen, niets ingepland; wacht op de volgende ronde.'],
+    ['bezig', 'In belronde', 'Al geprobeerd; komt terug op het moment van zijn volgende ronde.'],
+    ['wacht', 'Wacht op inplanning', 'Agenda doorgestuurd; ze kiezen zelf. Na 48 uur zonder afspraak komen ze terug.'],
+    ['later', 'Komt later', 'Staat op een latere dag.'],
+    ['ingepland', 'Ingepland', 'Gelukt.'],
+    ['afgerond', 'Afgerond', 'Weggegooid, met de moeite die ervoor gedaan is.'],
+  ];
+
+  /** De chips van de actieve aparte lijsten, achter de potten. */
+  function lijstChips(a, pot) {
+    if (!a) return '';
+    const heeft = (a.actief || []).length || (a.archief || []).length;
+    let h = heeft ? '<span class="lb-sep"></span>' : '';
+    h += (a.actief || []).map((l) => {
+      const code = 'lijst:' + l.id;
+      const t = l.telling || {};
+      return '<button class="lb-pot lb-lijst' + (code === pot ? ' on' : '') + '" title="Aparte lijst &middot; ' +
+        esc(t.open || 0) + ' open &middot; ' + esc(t.afgewerkt || 0) + ' afgewerkt" onclick="window.__opvLb.kiesPot(\'' + esc(code) + '\')">' +
+        '&#128203; ' + esc(l.naam) + '<span class="n">' + esc(t.open || 0) + '</span>' +
+        (t.afgewerkt ? '<span class="af">&#10003;&nbsp;' + esc(t.afgewerkt) + '</span>' : '') + '</button>';
+    }).join('');
+    if ((a.archief || []).length) {
+      h += '<button class="lb-pot lb-arch' + (_ld.archiefOpen ? ' on' : '') + '" onclick="window.__opvLb.archief()" title="Gearchiveerde aparte lijsten">' +
+        '&#128451; Gearchiveerd<span class="n">' + esc(a.archief.length) + '</span></button>';
+    }
+    return h;
+  }
+
+  /** De gearchiveerde lijsten: de historiek blijft, klik = bekijken. */
+  function archiefBlok(a) {
+    const lijst = (a && a.archief) || [];
+    if (!lijst.length) return '';
+    return '<div class="lb-archief"><b>Gearchiveerde lijsten</b>' + lijst.map((l) => {
+      const t = l.telling || {};
+      return '<button class="obtn" onclick="window.__opvLb.kiesPot(\'lijst:' + esc(l.id) + '\')">&#128203; ' + esc(l.naam) +
+        ' <span class="zacht">&middot; ' + esc(t.afgewerkt || 0) + '/' + esc(t.totaal || 0) + ' afgewerkt' +
+        (l.gearchiveerd_at ? ' &middot; gearchiveerd ' + esc(datumNl(String(l.gearchiveerd_at).slice(0, 10))) : '') + '</span></button>';
+    }).join('') + '</div>';
+  }
+
+  function lijstInhoud(d) {
+    const l = d.lijst || {};
+    const t = l.telling || {};
+    const gearch = l.status === 'gearchiveerd';
+    const b = d.lijst_belrij || {};
+    let h = '<div class="lb-lijstkop"><div><div class="nm">&#128203; ' + esc(l.naam) + ' <span class="tag t-teal">aparte lijst</span>' +
+      (gearch ? ' <span class="tag t-amber">gearchiveerd' + (l.gearchiveerd_at ? ' op ' + esc(datumNl(String(l.gearchiveerd_at).slice(0, 10))) : '') + '</span>' : '') + '</div>' +
+      '<div class="lb-som"><span><b>' + esc(t.open || 0) + '</b> open</span><span><b>' + esc(l.nu || 0) + '</b> nu aan de beurt</span>' +
+      '<span><b>' + esc(t.ingepland || 0) + '</b> ingepland</span><span><b>' + esc(t.afgerond || 0) + '</b> afgerond</span>' +
+      '<span class="zacht">' + esc(t.totaal || 0) + ' in totaal</span></div></div>' +
+      (gearch
+        ? '<button class="obtn p" ' + (_ld.bezig ? 'disabled ' : '') + 'onclick="window.__opvLb.lijstTerug(\'' + esc(l.id) + '\')">&#8634; Terugzetten</button>'
+        : '<button class="obtn" ' + (_ld.bezig ? 'disabled ' : '') + 'onclick="window.__opvLb.lijstArchiveer(\'' + esc(l.id) + '\')">&#128451; Archiveer lijst</button>') +
+      '</div>';
+    h += '<div class="ronde">Deze leads staan alleen in deze lijst, niet in Nu bellen of de andere potten. ' +
+      'Terugbelafspraken en de belrondes werken zoals altijd, binnen de lijst. Werk van boven naar onder.</div>';
+
+    const items = belrijItems(d);
+    h += '<div class="lb-lh">Nu aan de beurt <span class="n">' + esc(items.length) + '</span></div>';
+    if (b.wacht_op_ronde) {
+      h += '<div class="lb-weg">&#9203; ' + esc(b.wacht_op_ronde) + ' wacht' + (b.wacht_op_ronde === 1 ? '' : 'en') + ' op hun volgende belronde' +
+        (b.eerstvolgende_tekst ? ' &middot; eerstvolgende <b>' + esc(b.eerstvolgende_tekst) + '</b>' : '') + '</div>';
+    }
+    if (!gearch) h += rondeBalk(items);
+    if (!items.length) h += '<div class="agleeg">Niemand uit deze lijst is nu aan de beurt.</div>';
+    for (const [code, label, uitleg] of SECTIES) {
+      const rijen = items.filter((r) => r.sectie === code);
+      if (!rijen.length) continue;
+      h += '<div class="lb-sectie lb-s-' + code + '"><div class="lb-skop"><b>' + esc(label) + '</b> <span class="n">' + esc(rijen.length) +
+        '</span><span class="lb-suitleg">' + esc(uitleg) + '</span></div>' + rijen.map((r) => leadRij(r, r.pot)).join('') + '</div>';
+    }
+
+    const sec = d.secties || {};
+    for (const [code, label, uitleg] of LIJST_REST) {
+      const rijen = sec[code] || [];
+      if (!rijen.length) continue;
+      h += '<div class="lb-sectie lb-r-' + code + '"><div class="lb-skop"><b>' + esc(label) + '</b> <span class="n">' + esc(rijen.length) +
+        '</span><span class="lb-suitleg">' + esc(uitleg) + '</span></div>' +
+        (code === 'afgerond' ? afgerondTabel(rijen) : rijen.map((r) => leadRij(r, code)).join('')) + '</div>';
+    }
+    return h;
+  }
+
   function uitlegBlok() {
     return '<div class="lb-uitleg">' +
       '<h4>Hoe werkt Leads bellen?</h4>' +
@@ -611,7 +718,7 @@
     if (m.soort === 'na') {
       const p = m.plan || k.plan || null;
       const geenWa = !(Number(k.wa_totaal) > 0);
-      const volgende = _ld.ronde ? belrijItems(((_ld.potten.belrij || {}).data) || {})[0] : null;
+      const volgende = _ld.ronde ? belrijItems(huidigeBelrij())[0] : null;
       const body =
         '<div class="ronde">' + (m.uitkomst === 'voicemail' ? '&#128252; Voicemail genoteerd.' : '&#128245; Geen gehoor genoteerd.') + ' ' +
         (p ? (p.uitgebeld ? 'Dit was ronde ' + esc(p.rondes) + ': <b>uitgebeld</b>. Stuur een laatste bericht of rond af.'
@@ -678,15 +785,28 @@
   // CSV met naam, telefoon, email (opt.), notitie (opt.) + één label voor de
   // hele lijst. Eerst een voorvertoning (er wordt niets geschreven), dan
   // bevestigen. Gedoseerd: max N per werkdag (standaard 10).
+  // Of: een NIEUWE APARTE LIJST met een eigen chip, zonder dosering.
   function importVenster(m) {
     const vv = m.vv;
+    const apart = m.modus === 'aparte_lijst';
+    const keuze = (waarde, titel, sub) =>
+      '<label class="lb-keuze' + ((m.modus || 'pot') === waarde ? ' on' : '') + '"><input type="radio" name="lb-imp-modus" value="' + waarde + '"' +
+      ((m.modus || 'pot') === waarde ? ' checked' : '') + ' onchange="window.__opvLb.impModus(\'' + waarde + '\')">' +
+      '<span><b>' + titel + '</b><span>' + sub + '</span></span></label>';
     let body =
       '<div class="ronde">Kopregel met <code>naam</code> en <code>telefoon</code> (verplicht), <code>email</code> en <code>notitie</code> (mag). ' +
       'Scheiding met ; of ,. Plak de lijst of kies een bestand.</div>' +
-      '<label class="lb-l">Label voor deze lijst (verplicht)</label>' +
-      '<input id="lb-imp-label" maxlength="60" placeholder="bv. Geannuleerd voorjaar" value="' + esc(m.label || '') + '" oninput="window.__opvLb.impVeld(\'label\', this.value)">' +
-      '<label class="lb-l">Maximaal per werkdag</label>' +
-      '<input id="lb-imp-dag" type="number" min="1" max="100" value="' + esc(m.perDag || 10) + '" oninput="window.__opvLb.impVeld(\'perDag\', this.value)">' +
+      '<label class="lb-l">Waar komen ze terecht?</label><div class="lb-keuzes">' +
+      keuze('pot', 'Toevoegen aan algemene pot (zoals nu)', 'Gedoseerd: ze komen op hun dag vanzelf in Nu bellen.') +
+      keuze('aparte_lijst', 'Nieuwe aparte lijst', 'Eigen chip bovenaan, alles meteen zichtbaar. Telt niet mee in Nu bellen of de andere potten.') +
+      '</div>' +
+      (apart
+        ? '<label class="lb-l">Naam van de lijst (verplicht)</label>' +
+          '<input id="lb-imp-naam" maxlength="60" placeholder="bv. Webinar september" value="' + esc(m.lijstNaam || '') + '" oninput="window.__opvLb.impVeld(\'lijstNaam\', this.value)">'
+        : '<label class="lb-l">Label voor deze lijst (verplicht)</label>' +
+          '<input id="lb-imp-label" maxlength="60" placeholder="bv. Geannuleerd voorjaar" value="' + esc(m.label || '') + '" oninput="window.__opvLb.impVeld(\'label\', this.value)">' +
+          '<label class="lb-l">Maximaal per werkdag</label>' +
+          '<input id="lb-imp-dag" type="number" min="1" max="100" value="' + esc(m.perDag || 10) + '" oninput="window.__opvLb.impVeld(\'perDag\', this.value)">') +
       '<label class="lb-l">CSV</label>' +
       '<input type="file" accept=".csv,text/csv,text/plain" onchange="window.__opvLb.impBestand(this)">' +
       '<textarea id="lb-imp-csv" rows="6" style="margin-top:6px" oninput="window.__opvLb.impVeld(\'csv\', this.value)" placeholder="naam;telefoon;email;notitie">' + esc(m.csv || '') + '</textarea>';
@@ -695,7 +815,7 @@
     if (vv) {
       body += '<div class="lb-som"><span><b>' + esc(vv.aantallen.geldig) + '</b> geldig</span><span><b>' + esc(vv.aantallen.dubbel) +
         '</b> dubbel</span><span><b>' + esc(vv.aantallen.ongeldig) + '</b> ongeldig nummer of naam</span></div>' +
-        '<div class="ronde">' + esc(vv.samenvatting) + ' (max ' + esc(vv.per_dag) + ' per werkdag).</div>' +
+        '<div class="ronde">' + esc(vv.samenvatting) + (vv.dosering === false || vv.per_dag == null ? '' : ' (max ' + esc(vv.per_dag) + ' per werkdag)') + '.</div>' +
         '<div class="lb-tabel" style="max-height:240px;overflow:auto"><table><thead><tr><th>Regel</th><th>Naam</th><th>Telefoon</th><th>Status</th><th>Dag</th></tr></thead><tbody>' +
         vv.rijen.slice(0, 200).map((r) => '<tr><td>' + esc(r.regel) + '</td><td>' + esc(r.naam) + '</td><td>' + esc(r.telefoon || r.telefoon_ruw) +
           '</td><td>' + (r.status === 'geldig' ? '&#10003; geldig' : esc(r.status + (r.reden ? ' — ' + r.reden : ''))) + '</td><td>' + esc(r.due || '') + '</td></tr>').join('') +
@@ -705,24 +825,44 @@
     body += '<div style="display:flex;gap:8px;margin-top:12px">' +
       '<button class="obtn" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impVoor()">Voorvertoning</button>' +
       (vv && vv.aantallen.geldig && !m.klaar ? '<button class="obtn p" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impBevestig()">Bevestigen: ' +
+        (apart ? 'lijst &ldquo;' + esc(String(m.lijstNaam || '').trim()) + '&rdquo; met ' : '') +
         esc(vv.aantallen.geldig) + ' kaart' + (vv.aantallen.geldig === 1 ? '' : 'en') + ' maken</button>' : '') + '</div>';
-    return venster('Lijst opladen', 'Oude leads in Leads bellen, gedoseerd.', body);
+    return venster('Lijst opladen', apart ? 'Een nieuwe aparte lijst in Leads bellen, met eigen chip.' : 'Oude leads in Leads bellen, gedoseerd.', body);
   }
 
   async function impPost(bevestig) {
     const m = _ld.modal; if (!m || m.soort !== 'import' || _ld.bezig) return;
-    if (!String(m.label || '').trim()) { m.fout = 'Geef de lijst een label.'; teken(); return; }
+    const apart = m.modus === 'aparte_lijst';
+    if (apart && !String(m.lijstNaam || '').trim()) { m.fout = 'Geef de aparte lijst een naam.'; teken(); return; }
+    if (!apart && !String(m.label || '').trim()) { m.fout = 'Geef de lijst een label.'; teken(); return; }
     if (!String(m.csv || '').trim()) { m.fout = 'Plak een lijst of kies een bestand.'; teken(); return; }
     _ld.bezig = true; m.fout = null; teken();
     try {
-      const j = await post('/api/opvolging-leads-import', { csv: m.csv, label: m.label, per_dag: Number(m.perDag) || 10, bevestig });
+      const body = apart
+        ? { csv: m.csv, modus: 'aparte_lijst', lijst_naam: m.lijstNaam, bevestig }
+        : { csv: m.csv, label: m.label, per_dag: Number(m.perDag) || 10, bevestig };
+      const j = await post('/api/opvolging-leads-import', body);
       m.vv = j;
       if (bevestig) {
         m.klaar = j.gemaakt + ' kaart' + (j.gemaakt === 1 ? '' : 'en') + ' gemaakt — ' + j.samenvatting + '.' +
-          ((j.fouten || []).length ? ' ' + j.fouten.length + ' rij(en) mislukt.' : '');
+          ((j.fouten || []).length ? ' ' + j.fouten.length + ' rij(en) mislukt.' : '') +
+          (j.lijst ? ' De lijst staat als eigen chip bovenaan.' : '');
+        // Na sluiten meteen in de nieuwe lijst.
+        if (j.lijst && j.lijst.id) _ld.pot = 'lijst:' + j.lijst.id;
         _ld.vuil = true;
       }
     } catch (e) { m.fout = e.message || 'Niet gelukt'; } finally { _ld.bezig = false; teken(); }
+  }
+
+  async function lijstActie(id, actie) {
+    if (_ld.bezig) return;
+    _ld.bezig = true; teken();
+    try {
+      await post('/api/opvolging-leads-lijst', { lijst_id: id, actie });
+      if (actie === 'archiveer') { _ld.pot = 'belrij'; toast('Lijst gearchiveerd. Terug te vinden onder Gearchiveerd.'); }
+      else toast('Lijst teruggezet.');
+      herlaadAlles();
+    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); } finally { _ld.bezig = false; teken(); }
   }
 
   /** Tweeling van beoordeelAfronden() in api/_lib/opvolging-leads-pot.js. */
@@ -824,7 +964,17 @@
   }
 
   window.__opvLb = {
-    import: () => { _ld.modal = { soort: 'import', label: '', perDag: 10, csv: '', vv: null, fout: null, klaar: null }; teken(); },
+    import: () => { _ld.modal = { soort: 'import', modus: 'pot', label: '', lijstNaam: '', perDag: 10, csv: '', vv: null, fout: null, klaar: null }; teken(); },
+    impModus: (v) => {
+      const m = _ld.modal; if (!m || m.soort !== 'import') return;
+      m.modus = v === 'aparte_lijst' ? 'aparte_lijst' : 'pot'; m.vv = null; m.klaar = null; m.fout = null; teken();
+    },
+    archief: () => { _ld.archiefOpen = !_ld.archiefOpen; teken(); },
+    lijstArchiveer: (id) => {
+      if (typeof confirm === 'function' && !confirm('Lijst archiveren? De chip verdwijnt; de leads en hun historiek blijven bewaard en de lijst is terug te zetten via Gearchiveerd.')) return;
+      lijstActie(id, 'archiveer');
+    },
+    lijstTerug: (id) => lijstActie(id, 'terugzetten'),
     impVeld: (veld, v) => { const m = _ld.modal; if (!m || m.soort !== 'import') return; m[veld] = v; m.vv = null; m.klaar = null; },
     impBestand: (el) => {
       const f = el && el.files && el.files[0]; if (!f) return;
@@ -849,8 +999,8 @@
     toonAlles: (code) => { _ld.toonAlles[code] = true; teken(); },
     startRonde: () => {
       _ld.ronde = { gebeld: 0, gestart: Date.now(), overgeslagen: new Set() };
-      const d = _ld.potten.belrij && _ld.potten.belrij.data;
-      const eerste = d ? belrijItems(d)[0] : null;
+      const d = huidigeBelrij();
+      const eerste = d.items ? belrijItems(d)[0] : null;
       if (eerste) window.__opvLb.bel(sleutel(eerste)); else teken();
     },
     stopRonde: () => { _ld.ronde = null; teken(); },
@@ -982,6 +1132,23 @@
 .opv.lb .lb-pot{border:0;background:transparent;border-radius:9px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer;color:var(--o-ink);display:inline-flex;gap:7px;align-items:center}
 .opv.lb .lb-pot .n{font-size:11.5px;font-weight:700;color:var(--pk)}
 .opv.lb .lb-pot.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);font-weight:650}
+.opv.lb .lb-pot.lb-lijst{--pk:#0e7490;border:1px dashed #67b7c9;background:#ecf8fb;color:#0b4f60}
+.opv.lb .lb-pot.lb-lijst.on{background:#fff;border-style:solid;border-color:#0e7490}
+.opv.lb .lb-sep{width:1px;align-self:stretch;background:#d1d5db;margin:4px 4px}
+.opv.lb .lb-pot .af{font-size:11px;color:#06603b}
+.opv.lb .lb-pot.lb-arch{color:var(--o-muted)}
+.opv.lb .lb-archief{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 12px;font-size:12.5px}
+.opv.lb .lb-lijstkop{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;background:#ecf8fb;border:1px solid #b6e0ea;border-radius:12px;padding:10px 14px;margin:0 0 10px}
+.opv.lb .lb-lijstkop .nm{font-size:15px;font-weight:700;margin:0 0 4px}
+.opv.lb .lb-lh{font-size:14px;font-weight:700;margin:6px 0 8px}
+.opv.lb .lb-lh .n{font-size:12px;font-weight:700;background:#eef0f3;border-radius:999px;padding:0 8px}
+.opv .tag.t-teal{background:#d9f1f6;color:#0b4f60}
+.opv .lb-keuzes{display:flex;flex-direction:column;gap:6px;margin:0 0 6px}
+.opv .lb-keuze{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--o-line);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:13px}
+.opv .lb-keuze.on{border-color:#0e7490;background:#f3fbfd}
+.opv .lb-keuze input{margin-top:3px}
+.opv .lb-keuze b{display:block}
+.opv .lb-keuze span span{display:block;font-size:12px;color:var(--o-muted)}
 .opv.lb .lb-opener{font-size:12.5px;color:#374151;margin:2px 0 4px}
 .opv.lb .lb-chip{display:inline-block;font-size:11.5px;border-radius:999px;padding:2px 8px;margin:0 4px 3px 0;background:#f1f2f4;color:#374151}
 .opv.lb .lb-chip.goed{background:var(--o-grns);color:#06603b}

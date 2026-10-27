@@ -14,7 +14,11 @@ import { alleenDaglijst, alleenLeadlijst } from './opvolging-lijst.js';
 import {
   POT_MAX_DAGEN, normaliseerTrial, stelPottenSamen, staart9, telefoonVan,
   beoordeelCalls, afspraakHoortBij, berekenWarmte, dagInZone,
+  dagstatistiek, weekstatistiek,
 } from './opvolging-leads-pot.js';
+import {
+  leesLijsten, splitsKaarten, aparteStaarten, lijstWeergave, lijstKop, LIJST_STATUS_ACTIEF,
+} from './opvolging-leads-lijsten.js';
 import { telPogingen } from './opvolging-poging-telling.js';
 import { haalWaRegelsVanaf, volledigeHistorie } from './opvolging-call-wa.js';
 import { WACHT_UREN } from './opvolging-doorrol.js';
@@ -163,16 +167,41 @@ export async function leesTellingen(db, kaarten, nuMs, meldingen) {
   return tel;
 }
 
+/** De aparte lijsten; een leesfout is een melding, geen dood scherm. */
+async function leesLijstenZacht(db, meldingen) {
+  try {
+    const r = await leesLijsten(db);
+    if (r.fout) {
+      console.warn('[opvolging-leads] aparte lijsten lezen (soft):', r.fout);
+      meldingen.push('De aparte lijsten waren niet te lezen; hun leads staan nu nergens (ook niet in de algemene pot).');
+    }
+    return r;
+  } catch (e) {
+    console.warn('[opvolging-leads] aparte lijsten lezen (soft):', e?.message || e);
+    meldingen.push('De aparte lijsten waren niet te lezen; hun leads staan nu nergens (ook niet in de algemene pot).');
+    return { beschikbaar: true, lijsten: [], fout: String(e?.message || e) };
+  }
+}
+
 /**
  * Alles voor het scherm in één keer.
- * @returns {Promise<object>} uitvoer van stelPottenSamen() + meldingen
+ *
+ * De kaarten van een APARTE LIJST (bron_ref.aparte_lijst_id) tellen niet mee
+ * in de algemene potten, de belrij of de badge: per lijst rekent
+ * stelPottenSamen() apart. De dag- en weekstatistiek blijven over ALLE
+ * leadkaarten gaan (dat is wat er gebeld werd, zoals voorheen).
+ *
+ * @param {object} [opties]
+ * @param {string} [opties.lijstId] ook de volledige weergave van deze lijst
+ * @returns {Promise<object>} uitvoer van stelPottenSamen() + meldingen + lijsten
  */
-export async function laadLeadsOverzicht(db, nuMs = Date.now()) {
+export async function laadLeadsOverzicht(db, nuMs = Date.now(), { lijstId = null } = {}) {
   const meldingen = [];
-  const [leads, kaarten, daglijstTelefoons] = await Promise.all([
+  const [leads, kaarten, daglijstTelefoons, lijstInfo] = await Promise.all([
     leesKandidaten(db, nuMs),
     leesLeadkaarten(db),
     leesDaglijstTelefoons(db),
+    leesLijstenZacht(db, meldingen),
   ]);
   const afspraken = await leesAfspraken(db, nuMs, meldingen);
 
@@ -191,11 +220,40 @@ export async function laadLeadsOverzicht(db, nuMs = Date.now()) {
   const trialPerLead = await leesTrials(db, [...leads, ...extraLeads], meldingen);
   const telPerKaart = await leesTellingen(db, kaarten, nuMs, meldingen);
 
+  const { algemeen, perLijst } = splitsKaarten(kaarten);
+  const actieveIds = lijstInfo.lijsten.filter((l) => l.status === LIJST_STATUS_ACTIEF).map((l) => l.id);
+
   const uit = stelPottenSamen({
-    leads, extraLeads, kaarten, daglijstTelefoons, afspraken,
+    leads, extraLeads, kaarten: algemeen, daglijstTelefoons, afspraken,
     trialPerLead, telPerKaart, nuMs, wachtUren: WACHT_UREN,
+    aparteStaarten: aparteStaarten(perLijst, actieveIds),
   });
-  return { ...uit, meldingen, kandidaten: leads.length };
+  // Zoals vóór de aparte lijsten: wat er vandaag/deze week gebeurde, overal.
+  uit.dag = dagstatistiek(kaarten, telPerKaart, uit.vandaag);
+  uit.week = weekstatistiek(kaarten, telPerKaart, nuMs);
+
+  const perLijstUit = (l) => {
+    const eigen = perLijst.get(l.id) || [];
+    const o = stelPottenSamen({ kaarten: eigen, telPerKaart, nuMs, wachtUren: WACHT_UREN, zonderVenster: true });
+    return { eigen, o };
+  };
+  const lijsten = [];
+  const lijstenArchief = [];
+  let lijstWeer = null;
+  for (const l of lijstInfo.lijsten) {
+    const actief = l.status === LIJST_STATUS_ACTIEF;
+    // Een gearchiveerde lijst hoeft geen belrij; alleen de telling.
+    const { eigen, o } = actief || l.id === lijstId ? perLijstUit(l) : { eigen: perLijst.get(l.id) || [], o: null };
+    (actief ? lijsten : lijstenArchief).push(lijstKop(l, eigen, o ? o.belrij : null));
+    if (l.id === lijstId) lijstWeer = lijstWeergave({ lijst: l, uit: o, kaarten: eigen });
+  }
+  lijstenArchief.sort((a, b) => String(b.gearchiveerd_at || '').localeCompare(String(a.gearchiveerd_at || '')));
+
+  return {
+    ...uit, meldingen, kandidaten: leads.length,
+    aparte_lijsten: { beschikbaar: lijstInfo.beschikbaar, actief: lijsten, archief: lijstenArchief },
+    lijst_weergave: lijstWeer,
+  };
 }
 
 /**

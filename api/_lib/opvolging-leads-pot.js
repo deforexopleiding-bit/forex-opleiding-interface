@@ -52,6 +52,7 @@ export const UITSLUITREDENEN = Object.freeze({
   komende_call : 'heeft een geplande call',
   call_uitkomst: 'had al een call met uitkomst (zit in je gewone flow)',
   op_daglijst  : 'staat al op je daglijst',
+  in_aparte_lijst: 'staat al in een aparte lijst',
 });
 
 // Warmtegrenzen.
@@ -355,7 +356,7 @@ export function gespreksopener({ trial, calls, vandaag }) {
  * @param {Set<string>} p.daglijstStaarten laatste 9 cijfers van open/wacht-kaarten op de daglijst
  * @returns {{ in: true } | { in: false, reden: string }}
  */
-export function beslisKandidaat({ lead, calls, kaart, daglijstStaarten }) {
+export function beslisKandidaat({ lead, calls, kaart, daglijstStaarten, aparteStaarten }) {
   const tel = telefoonVan(lead);
   if (!tel) return { in: false, reden: 'geen_telefoon' };
   if (lead.customer_id) return { in: false, reden: 'al_klant' };
@@ -366,6 +367,8 @@ export function beslisKandidaat({ lead, calls, kaart, daglijstStaarten }) {
   if (c.met_uitkomst) return { in: false, reden: 'call_uitkomst' };
   const s = staart9(tel);
   if (s && daglijstStaarten && daglijstStaarten.has(s)) return { in: false, reden: 'op_daglijst' };
+  // Al op een lopende kaart in een aparte lijst: die lijst staat volledig apart.
+  if (s && aparteStaarten && aparteStaarten.has(s)) return { in: false, reden: 'in_aparte_lijst' };
   return { in: true };
 }
 
@@ -392,8 +395,11 @@ export function sorteerPot(a, b) {
  * @param {object} kaart rij uit opvolging_taken (lijst 'leads')
  * @param {string} vandaag YYYY-MM-DD (Amsterdam)
  * @param {number} nuMs
+ * @param {object} [opties]
+ * @param {boolean} [opties.zonderVenster] ingepland/afgerond zonder termijn
+ *   (een aparte lijst toont zijn hele historiek)
  */
-export function potVoorKaart(kaart, vandaag, nuMs = Date.now()) {
+export function potVoorKaart(kaart, vandaag, nuMs = Date.now(), { zonderVenster = false } = {}) {
   if (!kaart) return null;
   const st = String(kaart.status || '');
   const due = String(kaart.due || '');
@@ -410,10 +416,12 @@ export function potVoorKaart(kaart, vandaag, nuMs = Date.now()) {
   if (st === 'wacht_inplanning') return 'wacht';
   if (st === 'ingepland') {
     const op = Date.parse(kaart.afspraak_gevonden_at || kaart.updated_at || '');
+    if (zonderVenster) return 'ingepland';
     return Number.isFinite(op) && nuMs - op <= INGEPLAND_DAGEN * DAG_MS ? 'ingepland' : null;
   }
   if (st === 'gearchiveerd') {
     const op = Date.parse(kaart.gearchiveerd_at || '');
+    if (zonderVenster) return 'afgerond';
     return Number.isFinite(op) && nuMs - op <= AFGEROND_DAGEN * DAG_MS ? 'afgerond' : null;
   }
   return null;
@@ -834,10 +842,13 @@ export function waaromTekst(r, nuMs) {
  * @param {Map<string,object>} p.trialPerLead lead_id → normaliseerTrial()-uitvoer
  * @param {Map<string,object>} p.telPerKaart  taak_id → telPogingen()-uitvoer (met pogingen)
  * @param {number}   p.nuMs
+ * @param {Set<string>} [p.aparteStaarten] laatste 9 cijfers van lopende kaarten in een aparte lijst
+ * @param {boolean}  [p.zonderVenster] ingepland/afgerond zonder termijn (voor een aparte lijst)
  */
 export function stelPottenSamen({
   leads = [], extraLeads = [], kaarten = [], daglijstTelefoons = [], afspraken = [],
   trialPerLead = new Map(), telPerKaart = new Map(), nuMs = Date.now(), wachtUren = 48,
+  aparteStaarten = new Set(), zonderVenster = false,
 }) {
   const vandaag = dagInZone(nuMs);
   const daglijstStaarten = new Set(daglijstTelefoons.map(staart9).filter(Boolean));
@@ -895,7 +906,7 @@ export function stelPottenSamen({
     if (!lead || !lead.id || !isProefLead(lead)) continue;
     const kaart = kaartPerLead.get(lead.id) || null;
     const rij = leadRij(lead);
-    const besluit = beslisKandidaat({ lead, calls: rij._calls, kaart, daglijstStaarten });
+    const besluit = beslisKandidaat({ lead, calls: rij._calls, kaart, daglijstStaarten, aparteStaarten });
     if (!besluit.in) { telling[besluit.reden] = (telling[besluit.reden] || 0) + 1; continue; }
     delete rij._calls;
     potten.nieuw.push({ ...rij, kaart: null });
@@ -905,7 +916,7 @@ export function stelPottenSamen({
   // ── De kaarten ──────────────────────────────────────────────────────────
   const leadOpId = new Map([...extraLeads, ...leads].filter((l) => l && l.id).map((l) => [l.id, l]));
   for (const k of kaarten) {
-    const pot = potVoorKaart(k, vandaag, nuMs);
+    const pot = potVoorKaart(k, vandaag, nuMs, { zonderVenster });
     if (!pot) continue;
     const lead = k.lead_id ? leadOpId.get(k.lead_id) : null;
     const basis = lead ? leadRij(lead) : kaartAlsLead(k, vandaag);
