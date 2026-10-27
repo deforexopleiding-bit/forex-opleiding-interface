@@ -67,7 +67,7 @@ test('kaart: reden, koppeling naar de onboarding, notitie met traject/start/belm
   assert.equal(rij.reden, AUTOMATION_REDEN);
   assert.equal(rij.naam, 'Wim Peeters');
   assert.equal(rij.status, 'open');
-  assert.equal(rij.lijst, 'dag');
+  assert.equal(rij.lijst, 'automation');      // eigen lijst sinds 27 okt (niet in Daves daglijst)
   assert.equal(rij.due, '2026-10-27');
   assert.equal(rij.eigenaar_id, null);
   assert.equal(rij.is_test, true);
@@ -255,7 +255,8 @@ test('Wat nu? → gesprek gehad / geen interesse: taak-update zet reden_code + c
   const v = lees('modules/klanten-v2/views/opvolging-v2.js');
   assert.match(v, /automation_interesse: \['Automation', 't-auto'\]/);
   assert.match(v, /#6D3FD4/);
-  assert.match(v, /data-opv-filter="automation"/);
+  // De filterchip in de daglijst is weg: de kaarten staan in de sectie Automation.
+  assert.doesNotMatch(v, /data-opv-filter="automation"|__opvAutoFilter/);
   assert.match(v, /'Call inplannen'/);
   assert.match(v, /'Gesprek gehad'/);
   assert.match(v, /'Geen interesse meer'/);

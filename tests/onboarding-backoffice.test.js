@@ -161,7 +161,8 @@ test('tab "Onboarding": startcode + kopieerknoppen, leesbare antwoorden, raster,
   assert.match(html, /Ja, wil gebeld worden/);
   assert.match(html, /Avond, Zaterdag/);
   assert.match(html, /Open bij Dave · 2× gebeld/);
-  assert.match(html, /Open in Opvolging/);
+  assert.match(html, /Open in Automation/);
+  assert.match(html, /data-kv-onb-naar-kaart="Te bellen"/);
 });
 
 test('tab "Onboarding": zonder startcode, zonder antwoorden, kaart dicht door de klant', async () => {
@@ -174,15 +175,16 @@ test('tab "Onboarding": zonder startcode, zonder antwoorden, kaart dicht door de
   assert.match(html, /de klant trok zijn interesse in/);
 });
 
-test('lijst: KPI-tegel Automation-interesse die filtert, violet icoontje, cache-busters opgehoogd', () => {
+test('lijst: KPI-tegel Automation-interesse opent de sectie Automation, violet icoontje, cache-busters opgehoogd', () => {
   const v = lees('modules/klanten-v2/views/onboarding-v2.js');
   assert.match(v, /label: 'Automation-interesse'/);
-  assert.match(v, /click: 'window\.__onbAutoFilter\(\)'/);
-  assert.match(v, /autoFilter\(raw\) \|\| startFilter\(raw\)/);
+  assert.match(v, /click: 'window\.__onbNaarAutomation\(\)'/);
+  assert.match(v, /DFO\.goMod\('automation'\)/);
   assert.match(v, /class="kv-onb-auto"/);
-  assert.match(v, /import\('\.\/modals\/onboarding-detail\.js\?v=3'\)/);
+  assert.match(v, /import\('\.\/modals\/onboarding-detail\.js\?v=4'\)/);
+  assert.match(lees('modules/klanten-v2/views/modals/onboarding-detail.js'), /D\(\)\.goMod\('automation'\)/);
   assert.match(lees('modules/klanten-v2/klanten-v2.css'), /\.kv-onb-auto \{[^}]*#6D3FD4/);
   const idx = lees('modules/klanten-v2/index.html');
-  assert.match(idx, /views\/onboarding-v2\.js\?v=21/);
+  assert.match(idx, /views\/onboarding-v2\.js\?v=22/);
   assert.match(idx, /klanten-v2\.css\?v=1r15/);
 });

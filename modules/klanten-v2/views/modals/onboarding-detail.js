@@ -437,7 +437,7 @@ function renderDfoLmsSection(o) {
 // ── Sub-tab 3: Onboarding (was "Vragenlijst", 27 okt 2026) ─────────────────
 // Bovenaan de startcode + portal-link (www.deforexopleiding.nl/onboarding),
 // dan de antwoorden leesbaar, de beschikbaarheid als raster en het blok
-// Automation met de stand van Daves Opvolging-kaart. De klassieke wizard
+// Automation met de stand van de kaart in de sectie Automation. De klassieke wizard
 // gebruikt dezelfde sleutels, dus oude antwoorden staan hier ook.
 const PORTAL_LABELS = {
   coaching_locatie_voorkeur: { bootcamp_dan_online: 'Bootcamp op kantoor, daarna online', zoveel_mogelijk_kantoor: 'Zoveel mogelijk op kantoor', enkel_online: 'Volledig online' },
@@ -471,7 +471,7 @@ function beschikbaarheidRaster(b) {
     <div class="kv-onb-hint" style="margin-top:6px">${n} ${n === 1 ? 'moment' : 'momenten'} aangeduid.</div>`;
 }
 function kaartStandTekst(k) {
-  if (!k) return 'Nog geen kaart in Opvolging.';
+  if (!k) return 'Nog geen kaart in Automation.';
   if (k.stand === 'ingepland') return 'Gesprek ingepland' + (k.ingepland_op ? ' op ' + fmtDT(k.ingepland_op) : '') + '.';
   if (k.stand === 'afgesloten') {
     const r = k.reden_code === 'klant_trok_interesse_in' ? 'de klant trok zijn interesse in' : (k.archief_reden || 'afgesloten');
@@ -522,7 +522,7 @@ function renderVragenlijstTab() {
         ${a.op ? rij('Wanneer', esc(fmtDT(a.op))) : ''}
         ${a.interesse === 'ja' ? rij('Voorkeur belmoment', bm) : ''}
         ${(a.interesse === 'ja' || k) ? rij('Kaart van Dave', esc(kaartStandTekst(k)) +
-          (k ? ' <button type="button" class="btn btn-ghost btn-sm" style="margin-left:6px" data-kv-onb-naar-kaart="' + (k.stand === 'afgesloten' ? 'Afgerond' : 'Vandaag') + '">Open in Opvolging &rarr;</button>' : '')) : ''}
+          (k ? ' <button type="button" class="btn btn-ghost btn-sm" style="margin-left:6px" data-kv-onb-naar-kaart="' + (k.stand === 'afgesloten' ? 'Afgerond' : k.stand === 'ingepland' ? 'Ingepland' : 'Te bellen') + '">Open in Automation &rarr;</button>' : '')) : ''}
       </dl>
     </div>
     <details class="kv-onb-section">
@@ -544,7 +544,7 @@ async function kopieer(wat) {
 }
 function naarKaart(tab) {
   try { D().closeModal(); } catch { /* al dicht */ }
-  try { D().goMod('opvolging'); if (typeof D().goTab === 'function') D().goTab(tab || 'Vandaag'); } catch (e) { console.warn('[onb-detail] naar Opvolging:', e?.message); }
+  try { D().goMod('automation'); if (typeof D().goTab === 'function') D().goTab(tab || 'Te bellen'); } catch (e) { console.warn('[onb-detail] naar Automation:', e?.message); }
 }
 
 // Fix ronde-6 (P3): humanize answers-jsonb (was raw JSON.stringify).
