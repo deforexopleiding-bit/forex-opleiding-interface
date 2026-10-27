@@ -204,6 +204,10 @@
   /** De HTML van de view die nu in beeld staat, of null als dat er geen is. */
   function huidigeViewHtml() {
     const S = window.DFO && window.DFO.S;
+    // Alleen als Opvolging zelf in beeld is. De sectie Automation gebruikt
+    // dezelfde vensters en heeft ook een tab 'Afgerond' — zonder deze check
+    // zou de vingerafdruk van opvolging/Afgerond daar een hertekening tegenhouden.
+    if (S && S.mod && S.mod !== 'opvolging') return null;
     const tab = (S && S.tab) || '';
     const fn = window.DFO && window.DFO.VIEWS && window.DFO.VIEWS['opvolging/' + tab];
     if (typeof fn !== 'function') return null;
@@ -1241,6 +1245,10 @@
     if (typeof window.__opvLeadsVerander === 'function') {
       try { window.__opvLeadsVerander(); } catch (_) { /* tab niet geladen */ }
     }
+    // Idem voor de sectie Automation.
+    if (typeof window.__opvAutomationVerander === 'function') {
+      try { window.__opvAutomationVerander(); } catch (_) { /* sectie niet geladen */ }
+    }
   };
 
   /**
@@ -1402,7 +1410,7 @@
 .opv .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
 .opv .t-blue{background:var(--o-accs);color:#1a49c4}.opv .t-amber{background:var(--o-ambs);color:#9a5d00}
 .opv .t-red{background:var(--o-reds);color:#b32b2f}.opv .t-green{background:var(--o-grns);color:#08794a}
-.opv .t-purple{background:var(--o-purs);color:#5a2fd6}.opv .t-auto{background:#efe9fc;color:#6D3FD4}.opv .autochip{display:inline-flex;align-items:center;gap:6px;margin:0 0 10px;padding:5px 12px;border-radius:999px;border:1px solid #d9cdf7;background:#fff;color:#6D3FD4;font-size:12.5px;font-weight:650;cursor:pointer}.opv .autochip.aan{background:#6D3FD4;border-color:#6D3FD4;color:#fff}.opv .t-grey{background:#f0f1f4;color:#5b6472}
+.opv .t-purple{background:var(--o-purs);color:#5a2fd6}.opv .t-auto{background:#efe9fc;color:#6D3FD4}.opv .t-grey{background:#f0f1f4;color:#5b6472}
 .opv .pil{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:650;border:1px solid #e4e7ec;background:#fff;color:#7a828f}
 .opv .pil.aan{background:#0f1420;border-color:#0f1420;color:#fff}
 .opv .pil.wa{background:var(--o-grn);border-color:var(--o-grn);color:#fff}
@@ -3393,11 +3401,9 @@
     // dat is geen archief, want morgen staat hij gewoon terug.
     const aanmeldingen = alles.filter((t) => isAanmelding(t) && !klaarVoorVandaag(t));
     const klaar        = alles.filter((t) => isAanmelding(t) && klaarVoorVandaag(t));
-    const restAlles    = alles.filter((t) => !isAanmelding(t) && !isLabBel(t));
-    // Filter 'Automation': Dave ziet al zijn automation-kaarten apart.
-    const nAuto        = restAlles.filter(isAutomation).length;
-    if (!nAuto) _ui.alleenAutomation = false;
-    const rest         = _ui.alleenAutomation ? restAlles.filter(isAutomation) : restAlles;
+    // Automation-kaarten hebben sinds 27 okt 2026 een eigen sectie (lijst
+    // 'automation', views/automation-v2.js); de filterchip hier is weg.
+    const rest         = alles.filter((t) => !isAanmelding(t) && !isLabBel(t));
     const r1 = rest.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
     const r2 = rest.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
     const wacht = st.data.wacht || [];
@@ -3410,11 +3416,6 @@
     h += aanmeldBlok(aanmeldingen, dag);
 
     h += '<div class="sh"><div class="ic" style="background:#eef0f3">&#9776;</div><h3>Werklijst</h3><span class="n">' + r1.length + '</span></div>';
-    if (nAuto) {
-      h += '<button type="button" class="autochip' + (_ui.alleenAutomation ? ' aan' : '') + '" data-opv-filter="automation" ' +
-        'aria-pressed="' + (_ui.alleenAutomation ? 'true' : 'false') + '" onclick="window.__opvAutoFilter()">' +
-        (_ui.alleenAutomation ? '&#10003; ' : '') + 'Automation &middot; ' + nAuto + '</button>';
-    }
     h += '<div class="ronde">Elke naam die je aanraakt verlaat deze lijst. Wil je er later vandaag nog eens achter, dan zakt hij naar de tweede ronde — zo wordt deze lijst alleen maar korter. <b>Wat je vandaag niet afwerkt, staat morgen vanzelf terug</b> met de melding "bleef liggen"; doorschuiven naar morgen hoef je niet te doen.</div>';
     h += r1.length ? r1.map((t) => taakKaart(t, dag)).join('')
       : '<div class="empty">Eerste ronde afgewerkt.' + (r2.length ? ' Wat overblijft staat in de tweede ronde.' : '') + '</div>';
@@ -4492,6 +4493,10 @@
     if (typeof window.__opvLeadsZoek === 'function') {
       try { const l = window.__opvLeadsZoek(id); if (l) return l; } catch (_) { /* tab niet geladen */ }
     }
+    // Automation-kaarten van de eigen sectie (views/automation-v2.js).
+    if (typeof window.__opvAutomationZoek === 'function') {
+      try { const a = window.__opvAutomationZoek(id); if (a) return a; } catch (_) { /* sectie niet geladen */ }
+    }
     return null;
   }
 
@@ -4645,8 +4650,8 @@
     }
   };
 
-  // ── Automation-kaart: filter en de twee afsluitingen met notitie ─────────
-  window.__opvAutoFilter = () => { _ui.alleenAutomation = !_ui.alleenAutomation; render(); };
+  // ── Automation-kaart: de twee afsluitingen met notitie ───────────────────
+  // (vensters gedeeld met de sectie Automation, views/automation-v2.js)
   window.__opvAutoAfsluit = (uitkomst) => {
     const m = _ui.modal; if (!m) return;
     _ui.modal = { soort: 'auto-afsluit', taakId: m.taakId, uitkomst }; render();
@@ -5579,6 +5584,7 @@
     _door.open = false;
     if (wasVerstuurd) leegTakenCache();
     if (typeof window.__opvLeadsVerander === 'function') { try { window.__opvLeadsVerander(); } catch (_) { /* tab niet geladen */ } }
+    if (typeof window.__opvAutomationVerander === 'function') { try { window.__opvAutomationVerander(); } catch (_) { /* sectie niet geladen */ } }
     render();
   };
 

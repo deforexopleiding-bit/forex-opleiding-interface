@@ -15,7 +15,7 @@
 
 import { formatteer } from './onboarding-startcode.js';
 import { portalLink, portalLive, persoonlijkeLink } from './onboarding-link.js';
-import { alleenDaglijst } from './opvolging-lijst.js';
+import { alleenAutomationlijst } from './opvolging-lijst.js';
 import { isMoeite } from './opvolging-poging-telling.js';
 
 const REDEN = 'automation_interesse';
@@ -79,7 +79,7 @@ export async function leesPortalStand(db, ob) {
   uit.portal_live = await portalLive(db);
   uit.persoonlijke_link = persoonlijkeLink({ token: ob.token, startcode: uit.startcode, live: uit.portal_live }) || null;
   try {
-    const { data: kaarten, error } = await alleenDaglijst(db.from('opvolging_taken')
+    const { data: kaarten, error } = await alleenAutomationlijst(db.from('opvolging_taken')
       .select('id, status, due, afspraak_ref, archief_reden, reden_code, gearchiveerd_at'))
       .eq('reden', REDEN).eq('bron_ref->>onboarding_id', ob.id).limit(1);
     if (error) throw new Error(error.message);
@@ -120,7 +120,7 @@ export async function automationPerOnboarding(db, rijen) {
   try {
     const ja = ids.filter((id) => interesse.get(id) === 'ja');
     for (let i = 0; i < ja.length; i += 200) {
-      const { data, error } = await alleenDaglijst(db.from('opvolging_taken').select('status, bron_ref'))
+      const { data, error } = await alleenAutomationlijst(db.from('opvolging_taken').select('status, bron_ref'))
         .eq('reden', REDEN).in('bron_ref->>onboarding_id', ja.slice(i, i + 200));
       if (error) throw new Error(error.message);
       for (const t of data || []) if (t.bron_ref?.onboarding_id) status.set(t.bron_ref.onboarding_id, t.status);

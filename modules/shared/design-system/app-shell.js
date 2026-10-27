@@ -121,6 +121,11 @@
     // `nav: false` weghalen. Opvolging (hieronder) is de opvolger en blijft staan.
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', nav: false, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
     { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Leads bellen', 'Dashboard', 'Afgerond', 'Rapport', 'Call-rapport'] },
+    // Automation (2026-10-27, Maxim): de automation-interesse uit de onboarding
+    // ("Ja, bel mij") — eigen lijst in opvolging_taken, NIET in Daves daglijst.
+    // Rollen super_admin/admin/manager/sales + permKey automation.view
+    // (role_permissions, migratie 2026-10-27-automation-lijst.sql).
+    { g: 'Klanten & communicatie', id: 'automation',       naam: 'Automation',        icon: I.rocket,   color: 'violet',  roles: ['super_admin', 'admin', 'manager', 'sales'], permKey: 'automation.view', tabs: ['Te bellen', 'Ingepland', 'Afgerond', 'Alle'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },

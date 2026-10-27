@@ -312,6 +312,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   "Automation" in Opvolging; "Wat nu?": Call inplannen / Gesprek gehad / Geen interesse meer / Later terugbellen.
   MOEITE_NVT kent de drie afsluitcodes (geen vals "te weinig pogingen"); wacht-check houdt de reden.
   Migratie docs/sql-migrations/2026-10-27-opvolging-automation-interesse.sql. Geen WA/mail naar de klant.
+  SECTIE AUTOMATION (27 okt, Maxim): de kaarten staan NIET meer in Daves daglijst maar in lijst
+  `automation` (opvolging_taken.lijst; `alleenAutomationlijst`/`isAutomationkaart` in opvolging-lijst.js,
+  leest ook 'dag' voor vóór de migratie; insert valt bij CHECK-23514 terug op 'dag'). Eigen MODS-item
+  "Automation" (rollen super_admin/admin/manager/sales + permKey `automation.view`), view
+  `views/automation-v2.js` (Te bellen · Ingepland · Afgerond · Alle + KPI), data `GET /api/automation-overzicht`
+  (rekenkern `api/_lib/automation-overzicht.js`). Acties = de vensters van opvolging-v2.js via
+  `__opvGedeeld` + haken `__opvAutomationZoek`/`__opvAutomationVerander` (zoals Leads bellen), dus dezelfde
+  endpoints met hun eigen Opvolging-rechten (geen kopie, geen verruiming). Testonboardings krijgen geen kaart.
+  Migratie docs/sql-migrations/2026-10-27-automation-lijst.sql (CHECK + verhuizen + recht).
   LINKS + VLAG: elke persoonlijke onboarding-link gaat via `api/_lib/onboarding-link.js` (`linkVoorOnboarding`,
   `persoonlijkeLink`, `portalLive` leest app_settings `onboarding_portal_live`, 30 s cache, onleesbaar = UIT). AAN →
   `${ONBOARDING_PORTAL_URL}?code=XXXX-XXXX` (env, standaard www.deforexopleiding.nl/onboarding); UIT → klassieke wizard.

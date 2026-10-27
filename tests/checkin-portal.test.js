@@ -450,7 +450,7 @@ test('kaart: ja → één kaart met eigen sleutel; nog eens → bijwerken, geen 
   assert.equal(k.bron_ref.bron, 'checkin');
   assert.equal(k.bron_ref.onboarding_id, undefined);
   assert.equal(k.naam, 'Lotte Peeters');
-  assert.equal(k.lijst, 'dag');
+  assert.equal(k.lijst, 'automation'); // de eigen sectie Automation (#1904)
   assert.match(k.notitie, /studentencheck-in/);
 });
 

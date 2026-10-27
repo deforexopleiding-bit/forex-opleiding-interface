@@ -4,8 +4,9 @@
 //
 // Kiest een klant in de onboarding-portal (www.deforexopleiding.nl/onboarding)
 // "Ja, bel mij" bij de laatste vraag (answers.robot_interesse = 'ja_interesse'),
-// dan staat er METEEN — bij de save, niet pas bij afronden — één kaart in Daves
-// Opvolging met reden 'automation_interesse'. Dave belt, en plant een gesprek in
+// dan staat er METEEN — bij de save, niet pas bij afronden — één kaart in de
+// sectie Automation (lijst 'automation', sinds 27 okt 2026 NIET meer in Daves
+// daglijst) met reden 'automation_interesse'. Dave belt, en plant een gesprek in
 // (booking_source 'automation', zie api/opvolging-agenda.js).
 //
 // REGELS (Maxim, 27 okt 2026):
@@ -28,9 +29,9 @@
 
 import { isContact } from './opvolging-poging-telling.js';
 import { telefoonNlBe } from './phone-e164.js';
-import { alleenDaglijst } from './opvolging-lijst.js';
+import { alleenAutomationlijst, AUTOMATION_REDEN, LIJST_AUTOMATION, LIJST_DAG } from './opvolging-lijst.js';
 
-export const AUTOMATION_REDEN = 'automation_interesse';
+export { AUTOMATION_REDEN };
 /** archief_reden (en reden_code) wanneer de klant zelf terug op nee zet. */
 export const TROK_IN = 'klant_trok_interesse_in';
 /** reden_code bij Daves eigen afsluitingen vanuit "Wat nu?". */
@@ -102,7 +103,7 @@ export function kaartRij({ onboarding, klant, trajectLabel, belmoment, nuMs }) {
     due: dueVoor(nuMs),
     later: false,
     status: 'open',
-    lijst: 'dag',
+    lijst: LIJST_AUTOMATION,
     notitie: kaartNotitie({ trajectLabel, startDatum: onboarding.start_date, belmoment }),
     is_test: onboarding.is_test === true,
     eigenaar_id: null,
@@ -188,11 +189,12 @@ export async function syncAutomationKaart(db, { onboarding, answers, nu = new Da
 //
 // Dezelfde vraag ("Mogen we je er vrijblijvend over bellen?") staat in "Jouw
 // DFO-check-in" voor bestaande studenten (www.deforexopleiding.nl/checkin,
-// api/checkin-portal.js). Dezelfde regels als hierboven — één kaart, nee vóór
-// contact sluit, na contact verandert er niets — met een EIGEN
-// idempotentiesleutel: bron_ref.checkin_toewijzing_id (partiële unieke index in
-// docs/sql-migrations/2026-10-27-studentencheck-in.sql). De student staat in het
-// LMS (hlms_student), niet in customers: naam, e-mail en telefoon komen daarvandaan.
+// api/checkin-portal.js). Dezelfde regels als hierboven — één kaart in de
+// sectie Automation, nee vóór contact sluit, na contact verandert er niets —
+// met een EIGEN idempotentiesleutel: bron_ref.checkin_toewijzing_id (partiële
+// unieke index in docs/sql-migrations/2026-10-27-studentencheck-in.sql). De
+// student staat in het LMS (hlms_student), niet in customers: naam, e-mail en
+// telefoon komen daarvandaan.
 
 /** De notitie op een check-in-kaart. PURE. */
 export function checkinKaartNotitie({ trajectLabel, belmoment }) {
@@ -225,7 +227,7 @@ export function checkinKaartRij({ toewijzing, student, trajectLabel, belmoment, 
     due: dueVoor(nuMs),
     later: false,
     status: 'open',
-    lijst: 'dag',
+    lijst: LIJST_AUTOMATION,
     notitie: checkinKaartNotitie({ trajectLabel, belmoment }),
     is_test: toewijzing.is_test === true,
     eigenaar_id: null,
@@ -266,10 +268,9 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
     const nuMs = nu.getTime();
     const nuIso = nu.toISOString();
 
-    // Een automation-kaart staat altijd in de daglijst (lijst 'dag').
-    const { data: kaarten, error: kErr } = await alleenDaglijst(db.from('opvolging_taken')
+    // Een automation-kaart staat in lijst 'automation' (vóór de migratie nog 'dag').
+    const { data: kaarten, error: kErr } = await alleenAutomationlijst(db.from('opvolging_taken')
       .select('id, status, archief_reden, notitie, bron_ref, uitkomst_log'))
-      .eq('reden', AUTOMATION_REDEN)
       .eq(`bron_ref->>${sleutel}`, bronId)
       .limit(1);
     if (kErr) throw new Error('kaart lezen: ' + kErr.message);
@@ -292,7 +293,13 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
     if (besluit.actie === 'maak') {
       const rij = nieuweRij(ctx, belmoment, nuMs);
       rij.telefoon = telefoonNlBe(rij.telefoon, { bron: 'automation-interesse' });
-      const { data: nieuw, error } = await db.from('opvolging_taken').insert(rij).select('id').maybeSingle();
+      let { data: nieuw, error } = await db.from('opvolging_taken').insert(rij).select('id').maybeSingle();
+      // Vóór de migratie 2026-10-27-automation-lijst.sql kent de CHECK de lijst
+      // 'automation' nog niet (23514): dan zoals vroeger in de daglijst.
+      if (error && String(error.code) === '23514' && /lijst/.test(String(error.message || ''))) {
+        console.warn('[automation-interesse] lijst automation nog niet in de CHECK — kaart in lijst dag');
+        ({ data: nieuw, error } = await db.from('opvolging_taken').insert({ ...rij, lijst: LIJST_DAG }).select('id').maybeSingle());
+      }
       if (error) {
         // Twee saves tegelijk: de andere was eerst. Idempotent, geen fout.
         if (String(error.code) === '23505') return { ...verslag, actie: 'niets', waarom: 'bestond al (gelijktijdig)' };
