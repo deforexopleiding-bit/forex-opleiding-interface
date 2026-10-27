@@ -812,7 +812,24 @@
       '<textarea id="lb-imp-csv" rows="6" style="margin-top:6px" oninput="window.__opvLb.impVeld(\'csv\', this.value)" placeholder="naam;telefoon;email;notitie">' + esc(m.csv || '') + '</textarea>';
     if (m.fout) body += '<div class="warn">' + esc(m.fout) + '</div>';
     if (m.klaar) body += '<div class="ronde"><b>&#10003; ' + esc(m.klaar) + '</b></div>';
-    if (vv) {
+    // Aparte lijst: nieuw / verhuisd uit de pot / overgeslagen (met reden).
+    const vvApart = !!(vv && apart && vv.aantallen && vv.aantallen.verhuis != null);
+    if (vvApart) {
+      const a = vv.aantallen;
+      const STATUS = { geldig: '&#10003; nieuw', verhuis: '&#8618; verhuisd uit de pot' };
+      body += '<div class="lb-som"><span><b>' + esc(a.geldig) + '</b> nieuw</span><span><b>' + esc(a.verhuis) +
+        '</b> verhuisd uit de pot</span><span><b>' + esc(a.overgeslagen) + '</b> overgeslagen</span></div>' +
+        ((vv.overgeslagen_redenen || []).length ? '<div class="lb-weg">Overgeslagen: ' + vv.overgeslagen_redenen.map((x) =>
+          esc(x.aantal) + ' ' + esc(x.tekst)).join(' &middot; ') + '</div>' : '') +
+        (a.verhuis ? '<div class="ronde">Verhuizen = dezelfde kaart met zijn historiek, pogingen en terugbelafspraak; hij verdwijnt uit Nu bellen en staat voortaan in deze lijst.</div>' : '') +
+        '<div class="ronde">' + esc(vv.samenvatting) + '.</div>' +
+        '<div class="lb-tabel" style="max-height:240px;overflow:auto"><table><thead><tr><th>Regel</th><th>Naam</th><th>Telefoon</th><th>Wat gebeurt er</th></tr></thead><tbody>' +
+        vv.rijen.slice(0, 200).map((r) => '<tr><td>' + esc(r.regel) + '</td><td>' + esc(r.naam) + '</td><td>' + esc(r.telefoon || r.telefoon_ruw) +
+          '</td><td>' + (STATUS[r.status] || esc('overgeslagen' + (r.reden ? ' — ' + r.reden : ''))) +
+          (r.status === 'verhuis' && r.kaart && r.kaart.badge_label ? ' <span class="zacht">(' + esc(r.kaart.badge_label) + ')</span>' : '') +
+          '</td></tr>').join('') +
+        '</tbody></table></div>';
+    } else if (vv) {
       body += '<div class="lb-som"><span><b>' + esc(vv.aantallen.geldig) + '</b> geldig</span><span><b>' + esc(vv.aantallen.dubbel) +
         '</b> dubbel</span><span><b>' + esc(vv.aantallen.ongeldig) + '</b> ongeldig nummer of naam</span></div>' +
         '<div class="ronde">' + esc(vv.samenvatting) + (vv.dosering === false || vv.per_dag == null ? '' : ' (max ' + esc(vv.per_dag) + ' per werkdag)') + '.</div>' +
@@ -822,10 +839,14 @@
         '</tbody></table></div>';
     }
     const kan = !_ld.bezig;
+    const nApart = vvApart ? (Number(vv.aantallen.geldig) || 0) + (Number(vv.aantallen.verhuis) || 0) : 0;
     body += '<div style="display:flex;gap:8px;margin-top:12px">' +
       '<button class="obtn" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impVoor()">Voorvertoning</button>' +
-      (vv && vv.aantallen.geldig && !m.klaar ? '<button class="obtn p" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impBevestig()">Bevestigen: ' +
-        (apart ? 'lijst &ldquo;' + esc(String(m.lijstNaam || '').trim()) + '&rdquo; met ' : '') +
+      (vvApart && nApart && !m.klaar ? '<button class="obtn p" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impBevestig()">Bevestigen: lijst &ldquo;' +
+        esc(String(m.lijstNaam || '').trim()) + '&rdquo; met ' +
+        [vv.aantallen.geldig ? esc(vv.aantallen.geldig) + ' nieuw' : '', vv.aantallen.verhuis ? esc(vv.aantallen.verhuis) + ' verhuisd' : ''].filter(Boolean).join(' + ') +
+        '</button>' : '') +
+      (!vvApart && vv && vv.aantallen.geldig && !m.klaar ? '<button class="obtn p" ' + (kan ? '' : 'disabled ') + 'onclick="window.__opvLb.impBevestig()">Bevestigen: ' +
         esc(vv.aantallen.geldig) + ' kaart' + (vv.aantallen.geldig === 1 ? '' : 'en') + ' maken</button>' : '') + '</div>';
     return venster('Lijst opladen', apart ? 'Een nieuwe aparte lijst in Leads bellen, met eigen chip.' : 'Oude leads in Leads bellen, gedoseerd.', body);
   }
@@ -844,7 +865,8 @@
       const j = await post('/api/opvolging-leads-import', body);
       m.vv = j;
       if (bevestig) {
-        m.klaar = j.gemaakt + ' kaart' + (j.gemaakt === 1 ? '' : 'en') + ' gemaakt — ' + j.samenvatting + '.' +
+        m.klaar = j.gemaakt + ' kaart' + (j.gemaakt === 1 ? '' : 'en') + ' gemaakt' +
+          (j.verhuisd ? ', ' + j.verhuisd + ' verhuisd uit de pot' : '') + ' — ' + j.samenvatting + '.' +
           ((j.fouten || []).length ? ' ' + j.fouten.length + ' rij(en) mislukt.' : '') +
           (j.lijst ? ' De lijst staat als eigen chip bovenaan.' : '');
         // Na sluiten meteen in de nieuwe lijst.

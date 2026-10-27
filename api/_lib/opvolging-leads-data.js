@@ -17,7 +17,7 @@ import {
   dagstatistiek, weekstatistiek,
 } from './opvolging-leads-pot.js';
 import {
-  leesLijsten, splitsKaarten, aparteStaarten, lijstWeergave, lijstKop, LIJST_STATUS_ACTIEF,
+  leesLijsten, splitsKaarten, aparteStaarten, aparteLeadIds, lijstWeergave, lijstKop, LIJST_STATUS_ACTIEF,
 } from './opvolging-leads-lijsten.js';
 import { telPogingen } from './opvolging-poging-telling.js';
 import { haalWaRegelsVanaf, volledigeHistorie } from './opvolging-call-wa.js';
@@ -227,6 +227,7 @@ export async function laadLeadsOverzicht(db, nuMs = Date.now(), { lijstId = null
     leads, extraLeads, kaarten: algemeen, daglijstTelefoons, afspraken,
     trialPerLead, telPerKaart, nuMs, wachtUren: WACHT_UREN,
     aparteStaarten: aparteStaarten(perLijst, actieveIds),
+    aparteLeadIds: aparteLeadIds(perLijst),
   });
   // Zoals vóór de aparte lijsten: wat er vandaag/deze week gebeurde, overal.
   uit.dag = dagstatistiek(kaarten, telPerKaart, uit.vandaag);
@@ -234,7 +235,12 @@ export async function laadLeadsOverzicht(db, nuMs = Date.now(), { lijstId = null
 
   const perLijstUit = (l) => {
     const eigen = perLijst.get(l.id) || [];
-    const o = stelPottenSamen({ kaarten: eigen, telPerKaart, nuMs, wachtUren: WACHT_UREN, zonderVenster: true });
+    // leads: [] (geen berekende pot Nieuw in een lijst); de leads zelf wel als
+    // extraLeads, zodat een verhuisde leadkaart zijn warmte en opener houdt.
+    const o = stelPottenSamen({
+      kaarten: eigen, extraLeads: [...extraLeads, ...leads], afspraken, trialPerLead,
+      telPerKaart, nuMs, wachtUren: WACHT_UREN, zonderVenster: true, zonderDosering: true,
+    });
     return { eigen, o };
   };
   const lijsten = [];

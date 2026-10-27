@@ -20,9 +20,15 @@
 // zonder dosering (alles op vandaag) en met bron_ref.aparte_lijst_id. Die
 // kaarten staan dan alleen in de chip van hun lijst
 // (zie opvolging-leads-lijsten.js).
+//
+// VERHUIZEN (27 okt, na de eerste echte lijst): wie al als OPEN kaart in de
+// algemene pot staat, wordt bij een aparte lijst niet geweigerd maar
+// verhuisd: dezelfde kaart (historiek, pogingen, terugbelafspraak) krijgt
+// alleen bron_ref.aparte_lijst_id erbij. Zie maakAparteVoorvertoning().
 
 import { normaliseerNlBe } from './phone-e164.js';
-import { staart9 } from './opvolging-leads-pot.js';
+import { staart9, telefoonVan } from './opvolging-leads-pot.js';
+import { aparteLijstVan } from './opvolging-leads-lijsten.js';
 
 export const MAX_RIJEN = 2000;
 export const STANDAARD_PER_DAG = 10;
@@ -154,7 +160,9 @@ export function importKaart({ rij, label, nuIso, aparteLijst = null }) {
   if (aparteLijst) { ref.aparte_lijst_id = aparteLijst.id; ref.aparte_lijst_naam = aparteLijst.naam; }
   return {
     lijst: 'leads',
-    lead_id: null,
+    // Een aparte lijst koppelt een lead uit de berekende pot Nieuw aan zijn
+    // kaart; de algemene pot laat lead_id leeg zoals altijd.
+    lead_id: rij.lead_id || null,
     reden: 'lead_bellen',
     bron: 'import',
     status: 'open',
@@ -167,4 +175,133 @@ export function importKaart({ rij, label, nuIso, aparteLijst = null }) {
     notitie: [String(nuIso).slice(0, 10) + ' · Opgeladen in Leads bellen (' + waar + ').', rij.notitie].filter(Boolean).join('\n\n'),
     bron_ref: ref,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// APARTE LIJST — nieuw / verhuisd uit de pot / overgeslagen
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Waarom een rij bij een aparte lijst overgeslagen wordt. */
+export const OVERSLAAN = Object.freeze({
+  ongeldig           : 'ongeldig nummer of naam',
+  dubbel_in_lijst    : 'twee keer in deze lijst',
+  andere_lijst       : 'al in een andere aparte lijst',
+  wacht              : 'wacht op inplanning (agenda gestuurd)',
+  gearchiveerde_lijst: 'in een gearchiveerde aparte lijst',
+  ingepland          : 'al ingepland',
+  afgerond           : 'eerder afgerond',
+  daglijst           : 'staat op de daglijst',
+});
+
+const LOPEND = new Set(['open', 'wacht_inplanning', 'wacht_verplaatsing']);
+
+/**
+ * De voorvertoning van een NIEUWE APARTE LIJST. Per rij:
+ *   geldig       — nieuw: er komt een kaart in de lijst (due = vandaag). Stond
+ *                  hij als lead in de berekende pot Nieuw, dan krijgt de kaart
+ *                  zijn lead_id (en verdwijnt hij uit Nieuw).
+ *   verhuis      — staat als OPEN kaart in de algemene pot: die kaart(en)
+ *                  verhuizen naar de lijst (verhuis_ids), er komt geen tweede.
+ *   overgeslagen — met soort + reden (OVERSLAAN).
+ *
+ * @param {object}   p
+ * @param {object[]} p.rijen       uit leesCsv()
+ * @param {object[]} p.kaarten     alle leadkaarten: { id, telefoon, status, lead_id, bron_ref, naam, badge_label }
+ * @param {string[]} p.daglijstTelefoons telefoons van lopende daglijstkaarten
+ * @param {object[]} p.kandidaten  leads van de berekende pot (leesKandidaten)
+ * @param {string[]} p.actieveLijstIds
+ * @param {string}   p.vandaag     YYYY-MM-DD
+ */
+export function maakAparteVoorvertoning({ rijen, kaarten = [], daglijstTelefoons = [], kandidaten = [], actieveLijstIds = [], vandaag }) {
+  const actief = new Set(actieveLijstIds);
+  const daglijst = new Set(daglijstTelefoons.map(staart9).filter(Boolean));
+
+  // Telefoon → kaarten. Ook via de lead: een leadkaart zonder (of met een
+  // anders geschreven) nummer hoort toch bij het nummer van zijn lead.
+  const perStaart = new Map();
+  const erbij = (s, k) => {
+    if (!s) return;
+    if (!perStaart.has(s)) perStaart.set(s, new Set());
+    perStaart.get(s).add(k);
+  };
+  const kaartenPerLead = new Map();
+  for (const k of kaarten) {
+    if (!k) continue;
+    erbij(staart9(k.telefoon), k);
+    if (k.lead_id) {
+      if (!kaartenPerLead.has(k.lead_id)) kaartenPerLead.set(k.lead_id, []);
+      kaartenPerLead.get(k.lead_id).push(k);
+    }
+  }
+  const kandidaatPerStaart = new Map();
+  for (const l of kandidaten) {
+    const s = staart9(telefoonVan(l));
+    if (!s || !l || !l.id) continue;
+    if (!kandidaatPerStaart.has(s)) kandidaatPerStaart.set(s, l);
+    for (const k of kaartenPerLead.get(l.id) || []) erbij(s, k);
+  }
+
+  const inLijst = new Set();
+  const uit = [];
+  const over = (r, soort, extra = {}) => uit.push({ ...r, ...extra, status: 'overgeslagen', soort, reden: OVERSLAAN[soort] });
+  for (const r of rijen) {
+    const norm = normaliseerNlBe(r.telefoon_ruw);
+    const s = staart9(norm.telefoon || r.telefoon_ruw);
+    if (!r.naam || !norm.e164 || !s) {
+      uit.push({ ...r, status: 'overgeslagen', soort: 'ongeldig',
+        reden: !r.naam ? 'geen naam' : 'ongeldig nummer' + (norm.reden ? ' (' + norm.reden + ')' : '') });
+      continue;
+    }
+    const tel = norm.e164;
+    if (inLijst.has(s)) { over(r, 'dubbel_in_lijst', { telefoon: tel }); continue; }
+    inLijst.add(s);
+
+    const ks = [...(perStaart.get(s) || [])];
+    const lijstVan = (k) => aparteLijstVan(k);
+    const verhuis = ks.filter((k) => k.status === 'open' && !lijstVan(k));
+    if (verhuis.length) {
+      const k = verhuis[0];
+      uit.push({ ...r, telefoon: tel, status: 'verhuis', verhuis_ids: verhuis.map((x) => x.id),
+        kaart: { naam: k.naam || null, badge_label: k.badge_label || null } });
+      continue;
+    }
+    const lopend = ks.filter((k) => LOPEND.has(String(k.status || '')));
+    if (lopend.some((k) => lijstVan(k) && actief.has(lijstVan(k)))) { over(r, 'andere_lijst', { telefoon: tel }); continue; }
+    if (lopend.some((k) => !lijstVan(k))) { over(r, 'wacht', { telefoon: tel }); continue; }
+    if (lopend.length) { over(r, 'gearchiveerde_lijst', { telefoon: tel }); continue; }
+    if (ks.some((k) => k.status === 'ingepland')) { over(r, 'ingepland', { telefoon: tel }); continue; }
+    if (ks.some((k) => k.status === 'gearchiveerd')) { over(r, 'afgerond', { telefoon: tel }); continue; }
+    if (daglijst.has(s)) { over(r, 'daglijst', { telefoon: tel }); continue; }
+    const lead = kandidaatPerStaart.get(s) || null;
+    uit.push({ ...r, telefoon: tel, status: 'geldig', due: vandaag, lead_id: lead ? lead.id : null,
+      uit_nieuw: !!lead });
+  }
+
+  const tel = (st) => uit.filter((r) => r.status === st).length;
+  const redenen = {};
+  for (const r of uit) if (r.status === 'overgeslagen') redenen[r.soort] = (redenen[r.soort] || 0) + 1;
+  const nieuw = tel('geldig'), verhuis = tel('verhuis'), overgeslagen = tel('overgeslagen');
+  return {
+    rijen: uit,
+    per_dag: null,
+    dosering: false,
+    aantallen: { geldig: nieuw, verhuis, overgeslagen },
+    overgeslagen_redenen: Object.keys(OVERSLAAN).filter((k) => redenen[k])
+      .map((k) => ({ soort: k, aantal: redenen[k], tekst: OVERSLAAN[k] })),
+    vandaag: nieuw + verhuis,
+    verspreid_tot: null,
+    samenvatting: nieuw + verhuis
+      ? [nieuw ? nieuw + ' nieuw' : null, verhuis ? verhuis + ' verhuisd uit de pot' : null].filter(Boolean).join(' + ') +
+        ', alles meteen zichtbaar in de lijst'
+      : 'niets om op te laden',
+  };
+}
+
+/**
+ * De nieuwe bron_ref van een kaart die naar een aparte lijst verhuist: de
+ * bestaande sleutels blijven, alleen de lijst komt erbij.
+ */
+export function verhuisdeBronRef(bronRef, aparteLijst, nuIso) {
+  const basis = bronRef && typeof bronRef === 'object' && !Array.isArray(bronRef) ? bronRef : {};
+  return { ...basis, aparte_lijst_id: aparteLijst.id, aparte_lijst_naam: aparteLijst.naam, aparte_lijst_verhuisd_op: nuIso };
 }

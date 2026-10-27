@@ -267,6 +267,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `POST /api/opvolging-leads-lijst` (kaarten blijven onaangeroerd, lijst terug te vinden onder Gearchiveerd).
   Dag-/weekstatistiek en het logboek tellen ALLE leadkaarten (wat er gebeld werd). Zonder migratie: 503
   APARTE_LIJSTEN_NIET_ACTIEF bij de aparte keuze, de rest ongewijzigd.
+  VERHUIZEN (27 okt): bij een aparte lijst wordt een nummer dat als OPEN kaart in de algemene pot staat
+  niet geweigerd maar VERHUISD (zelfde kaart, enkel `bron_ref` + aparte_lijst_id/-naam/-verhuisd_op, voorwaardelijk
+  op open + nog in geen lijst); `maakAparteVoorvertoning` geeft nieuw / verhuis / overgeslagen (+ reden:
+  andere lijst, wacht, gearchiveerde lijst, ingepland, afgerond, daglijst, ongeldig, dubbel in CSV). Een lead uit
+  de berekende pot Nieuw krijgt een kaart MET lead_id. In een lijst geen dosering (`zonderDosering`: latere due
+  telt als nu, behalve terugbellen); Nieuw sluit leads met een lijstkaart uit (`aparteLeadIds`).
 - Eén login voor alle funnels (2026-10-26) — ELKE trial-lead (minicursus, 7-daagse, webinar,
   site-formulier, The Lab, en elke toekomstige belofte) krijgt een lab-lead (7 dagen) in het echte LMS
   (dfo-lms `hlms_lab_lead` + rol trial) i.p.v. een account in het oude trial-LMS (`lms_gebruikers`,

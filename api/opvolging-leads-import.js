@@ -7,7 +7,10 @@
 //                         (per_dag), met `label` als label.
 //   modus 'aparte_lijst'    → een NIEUWE aparte lijst met naam `lijst_naam`:
 //                         eigen chip, geen dosering (alles meteen zichtbaar),
-//                         leads tellen nergens anders mee. Vereist de migratie
+//                         leads tellen nergens anders mee. Wie al als OPEN
+//                         kaart in de algemene pot staat, VERHUIST (zelfde
+//                         kaart, alleen bron_ref.aparte_lijst_id erbij); de rest
+//                         is nieuw of overgeslagen met reden. Vereist de migratie
 //                         2026-10-27-opvolging-aparte-lijsten.sql (anders 503
 //                         APARTE_LIJSTEN_NIET_ACTIEF, er wordt niets geschreven).
 //
@@ -24,7 +27,9 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { alleenDaglijst, alleenLeadlijst } from './_lib/opvolging-lijst.js';
 import { leesKandidaten } from './_lib/opvolging-leads-data.js';
 import { dagInZone, telefoonVan } from './_lib/opvolging-leads-pot.js';
-import { leesCsv, maakVoorvertoning, importKaart, STANDAARD_PER_DAG } from './_lib/opvolging-leads-import.js';
+import {
+  leesCsv, maakVoorvertoning, importKaart, STANDAARD_PER_DAG, maakAparteVoorvertoning, verhuisdeBronRef,
+} from './_lib/opvolging-leads-import.js';
 import { brugLeadlijstVerversen } from './_lib/opvolging-brug-ververs.js';
 import {
   leesLijsten, lijstNaam, naamBezet, TABEL_LIJSTEN, LIJST_NAAM_MAX, LIJST_STATUS_ACTIEF,
@@ -51,6 +56,20 @@ async function bekendeTelefoons(nuMs) {
     ...(dag.data || []).map((t) => t.telefoon),
     ...kandidaten.map(telefoonVan).filter(Boolean),
   ];
+}
+
+/** Voor een aparte lijst: de kaarten zelf (om te kunnen verhuizen), niet enkel de nummers. */
+async function bestaandeKaarten(nuMs) {
+  const [kaarten, dag, kandidaten] = await Promise.all([
+    alleenLeadlijst(supabaseAdmin.from('opvolging_taken')
+      .select('id, telefoon, status, lead_id, bron_ref, naam, badge_label')).limit(10000),
+    alleenDaglijst(supabaseAdmin.from('opvolging_taken').select('telefoon'))
+      .in('status', ['open', 'wacht_inplanning']).not('telefoon', 'is', null).limit(5000),
+    leesKandidaten(supabaseAdmin, nuMs),
+  ]);
+  if (kaarten.error) throw new Error('leadkaarten: ' + kaarten.error.message);
+  if (dag.error) throw new Error('daglijst: ' + dag.error.message);
+  return { kaarten: kaarten.data || [], daglijstTelefoons: (dag.data || []).map((t) => t.telefoon), kandidaten };
 }
 
 export default async function handler(req, res) {
@@ -92,49 +111,31 @@ export default async function handler(req, res) {
       if (naamBezet(l.lijsten, naam)) {
         return res.status(409).json({ error: 'Er is al een actieve lijst "' + naam + '". Kies een andere naam.', code: 'LIJST_NAAM_BEZET' });
       }
+      const actieveLijstIds = l.lijsten.filter((x) => x.status === LIJST_STATUS_ACTIEF).map((x) => x.id);
+      return await aparteLijstOpladen({ res, b, rijen, naam, user, nuMs, vandaag, actieveLijstIds });
     }
 
+    // Vanaf hier de ALGEMENE POT, zoals altijd.
     // De dosering telt alleen de algemene pot: kaarten van een aparte lijst
     // staan allemaal op vandaag en mogen de dagquota niet opeten.
-    let alVandaag = 0;
-    if (!apart) {
-      const { count, error: cErr } = await alleenLeadlijst(supabaseAdmin
-        .from('opvolging_taken').select('id', { count: 'exact', head: true }))
-        .eq('bron', 'import').eq('status', 'open').eq('due', vandaag)
-        .is('bron_ref->>aparte_lijst_id', null);
-      if (cErr) throw new Error('telling vandaag: ' + cErr.message);
-      alVandaag = count || 0;
-    }
+    const { count: alVandaag, error: cErr } = await alleenLeadlijst(supabaseAdmin
+      .from('opvolging_taken').select('id', { count: 'exact', head: true }))
+      .eq('bron', 'import').eq('status', 'open').eq('due', vandaag)
+      .is('bron_ref->>aparte_lijst_id', null);
+    if (cErr) throw new Error('telling vandaag: ' + cErr.message);
 
     const vv = maakVoorvertoning({
       rijen, bekendeTelefoons: await bekendeTelefoons(nuMs), vandaag,
-      perDag: b.per_dag || STANDAARD_PER_DAG, alVandaag, dosering: !apart,
+      perDag: b.per_dag || STANDAARD_PER_DAG, alVandaag: alVandaag || 0,
     });
-    if (b.bevestig !== true) return res.status(200).json({ voorvertoning: true, modus: apart ? 'aparte_lijst' : 'pot', lijst_naam: naam, ...vv });
+    if (b.bevestig !== true) return res.status(200).json({ voorvertoning: true, modus: 'pot', ...vv });
 
     const nuIso = new Date(nuMs).toISOString();
-    const geldige = vv.rijen.filter((r) => r.status === 'geldig');
-
-    let aparteLijst = null;
-    if (apart) {
-      if (!geldige.length) return res.status(200).json({ ok: true, gemaakt: 0, fouten: [], ...vv });
-      const { data: nieuw, error: lErr } = await supabaseAdmin.from(TABEL_LIJSTEN)
-        .insert({ naam, status: LIJST_STATUS_ACTIEF, aangemaakt_door: user.id })
-        .select('id, naam').single();
-      if (lErr) {
-        if (String(lErr.code) === '23505') {
-          return res.status(409).json({ error: 'Er is al een actieve lijst "' + naam + '". Kies een andere naam.', code: 'LIJST_NAAM_BEZET' });
-        }
-        throw new Error('lijst aanmaken: ' + lErr.message);
-      }
-      aparteLijst = nieuw;
-    }
-
     let gemaakt = 0;
     const fouten = [];
-    for (const rij of geldige) {
+    for (const rij of vv.rijen.filter((r) => r.status === 'geldig')) {
       try {
-        const { error } = await supabaseAdmin.from('opvolging_taken').insert(importKaart({ rij, label, nuIso, aparteLijst }));
+        const { error } = await supabaseAdmin.from('opvolging_taken').insert(importKaart({ rij, label, nuIso }));
         if (error) throw new Error(error.message);
         gemaakt += 1;
       } catch (e) {
@@ -142,17 +143,79 @@ export default async function handler(req, res) {
         fouten.push({ regel: rij.regel, fout: String(e?.message || e).slice(0, 160) });
       }
     }
-    // Geen enkele kaart gelukt: de net gemaakte (lege) lijst weer weg, anders
-    // staat er een lege chip.
-    if (aparteLijst && !gemaakt) {
-      const { error: dErr } = await supabaseAdmin.from(TABEL_LIJSTEN).delete().eq('id', aparteLijst.id);
-      if (dErr) console.error('[opvolging-leads-import] lege lijst opruimen', dErr.message);
-      aparteLijst = null;
-    }
     if (gemaakt) await brugLeadlijstVerversen();
-    return res.status(200).json({ ok: fouten.length === 0, gemaakt, fouten, lijst: aparteLijst, ...vv });
+    return res.status(200).json({ ok: fouten.length === 0, gemaakt, fouten, ...vv });
   } catch (e) {
     console.error('[opvolging-leads-import]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
   }
+}
+
+/**
+ * Een NIEUWE APARTE LIJST: voorvertoning (nieuw / verhuisd / overgeslagen) en
+ * bij bevestigen de lijst, de nieuwe kaarten en het verhuizen.
+ *
+ * Verhuizen = dezelfde kaart houden: enkel bron_ref krijgt de lijst erbij
+ * (de bestaande sleutels blijven). Voorwaardelijk op 'nog open, lijst leads,
+ * nog in geen aparte lijst', zodat een kaart die intussen veranderde niet
+ * stil meeverhuist.
+ */
+async function aparteLijstOpladen({ res, b, rijen, naam, user, nuMs, vandaag, actieveLijstIds }) {
+  const bestaand = await bestaandeKaarten(nuMs);
+  const vv = maakAparteVoorvertoning({ rijen, ...bestaand, actieveLijstIds, vandaag });
+  if (b.bevestig !== true) return res.status(200).json({ voorvertoning: true, modus: 'aparte_lijst', lijst_naam: naam, ...vv });
+
+  const nieuwe = vv.rijen.filter((r) => r.status === 'geldig');
+  const verhuizen = vv.rijen.filter((r) => r.status === 'verhuis');
+  if (!nieuwe.length && !verhuizen.length) return res.status(200).json({ ok: true, gemaakt: 0, verhuisd: 0, fouten: [], lijst: null, ...vv });
+
+  const { data: lijst, error: lErr } = await supabaseAdmin.from(TABEL_LIJSTEN)
+    .insert({ naam, status: LIJST_STATUS_ACTIEF, aangemaakt_door: user.id })
+    .select('id, naam').single();
+  if (lErr) {
+    if (String(lErr.code) === '23505') {
+      return res.status(409).json({ error: 'Er is al een actieve lijst "' + naam + '". Kies een andere naam.', code: 'LIJST_NAAM_BEZET' });
+    }
+    throw new Error('lijst aanmaken: ' + lErr.message);
+  }
+
+  const nuIso = new Date(nuMs).toISOString();
+  const refPerKaart = new Map(bestaand.kaarten.map((k) => [k.id, k.bron_ref]));
+  let gemaakt = 0, verhuisd = 0;
+  const fouten = [];
+  const fout = (regel, e) => {
+    if (fouten.length < 3) console.error('[opvolging-leads-import] aparte lijst rij', regel, e?.message || e);
+    fouten.push({ regel, fout: String(e?.message || e).slice(0, 160) });
+  };
+
+  for (const rij of nieuwe) {
+    try {
+      const { error } = await supabaseAdmin.from('opvolging_taken').insert(importKaart({ rij, label: naam, nuIso, aparteLijst: lijst }));
+      if (error) throw new Error(error.message);
+      gemaakt += 1;
+    } catch (e) { fout(rij.regel, e); }
+  }
+  for (const rij of verhuizen) {
+    for (const id of rij.verhuis_ids || []) {
+      try {
+        const { data, error } = await alleenLeadlijst(supabaseAdmin.from('opvolging_taken')
+          .update({ bron_ref: verhuisdeBronRef(refPerKaart.get(id), lijst, nuIso) }))
+          .eq('id', id).eq('status', 'open').is('bron_ref->>aparte_lijst_id', null)
+          .select('id');
+        if (error) throw new Error(error.message);
+        if (!data || !data.length) throw new Error('de kaart veranderde intussen (niet meer open of al in een lijst)');
+        verhuisd += 1;
+      } catch (e) { fout(rij.regel, e); }
+    }
+  }
+
+  // Niets gelukt: de net gemaakte (lege) lijst weer weg, anders staat er een lege chip.
+  let uitLijst = lijst;
+  if (!gemaakt && !verhuisd) {
+    const { error: dErr } = await supabaseAdmin.from(TABEL_LIJSTEN).delete().eq('id', lijst.id);
+    if (dErr) console.error('[opvolging-leads-import] lege lijst opruimen', dErr.message);
+    uitLijst = null;
+  }
+  if (gemaakt) await brugLeadlijstVerversen();
+  return res.status(200).json({ ok: fouten.length === 0, gemaakt, verhuisd, fouten, lijst: uitLijst, ...vv });
 }
