@@ -27,10 +27,10 @@ export default async function handler(req, res) {
   try {
     const { data } = await supabaseAdmin.from('app_settings').select('value').eq('key', KEY).maybeSingle();
     const v = (data && data.value && typeof data.value === 'object') ? data.value : {};
-    const def = (v.default === 'B' || v.default === 'C') ? v.default : 'A';
+    const def = (v.default === 'B' || v.default === 'C' || v.default === 'E') ? v.default : 'A';
     const per = {};
     if (v.per_funnel && typeof v.per_funnel === 'object' && !Array.isArray(v.per_funnel)) {
-      for (const [k, val] of Object.entries(v.per_funnel)) if (val === 'A' || val === 'B' || val === 'C') per[k] = val;
+      for (const [k, val] of Object.entries(v.per_funnel)) if (val === 'A' || val === 'B' || val === 'C' || val === 'E') per[k] = val;
     }
     return res.status(200).json({ default: def, per_funnel: per });
   } catch (e) {

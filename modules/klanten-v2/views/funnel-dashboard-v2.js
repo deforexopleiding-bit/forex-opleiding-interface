@@ -58,8 +58,8 @@
   // de 7-daagse- en mini-cursus-varianten. Webinar/website boeken niet via deze
   // flow, dus daar geen schakelaar.
   const FLOW_PRODUCTS = new Set(['7-daagse', 'minicursus']);
-  const FLOWS = ['A', 'B', 'C'];
-  const normFlow = (x) => (x === 'B' || x === 'C' ? x : 'A');
+  const FLOWS = ['A', 'B', 'C', 'E'];
+  const normFlow = (x) => (x === 'B' || x === 'C' || x === 'E' ? x : 'A');
   const flowOf = (bron) => {
     const c = st.flowCfg || {};
     const per = c.per_funnel || {};
@@ -408,18 +408,18 @@
     if (!funnels.length) return '';
     const saving = st.flowSaving;
     const def = st.flowCfg ? normFlow(st.flowCfg.default) : 'A';
-    const pillStyle = { A: 'background:var(--surface-2);font-weight:700;', B: 'background:#0A7490;color:#fff;font-weight:700;', C: 'background:#B07D2B;color:#fff;font-weight:700;' };
+    const pillStyle = { A: 'background:var(--surface-2);font-weight:700;', B: 'background:#0A7490;color:#fff;font-weight:700;', C: 'background:#B07D2B;color:#fff;font-weight:700;', E: 'background:#5B2E91;color:#fff;font-weight:700;' };
     const pill = (bron, flow, active) => `<button class="btn btn-sm" style="font-size:11px;padding:3px 11px;${active ? pillStyle[flow] : 'opacity:.55;background:transparent'}" ${saving ? 'disabled' : ''} onclick="window.__flowSet('${esc(bron)}','${flow}')">${flow}</button>`;
     const rows = funnels.map((r) => {
       const f = flowOf(r.bron);
       return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
         <span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.naam)} <span style="color:var(--text-3);font-family:var(--mono,monospace);font-size:10px">${esc(r.bron)}</span></span>
-        <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}${pill(r.bron, 'C', f === 'C')}</span>
+        <span style="display:inline-flex;gap:4px;border:1px solid var(--border);border-radius:8px;padding:2px">${pill(r.bron, 'A', f === 'A')}${pill(r.bron, 'B', f === 'B')}${pill(r.bron, 'C', f === 'C')}${pill(r.bron, 'E', f === 'E')}</span>
       </div>`;
     }).join('');
     return `<details class="fd-flow"${open ? ' open' : ''} style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
       <summary style="cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
-        Boek-flow (A/B/C) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = snelle flow, C = korte route (geen quiz) · default ${def}</span>
+        Boek-flow (A/B/C/E) <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· per funnel · A = huidige flow, B = snelle flow, C = korte route (geen quiz) · E = geen quiz → full-page bevestiging + agenda · default ${def}</span>
         ${saving ? '<span style="margin-left:auto;color:var(--text-3);font-size:11px">Opslaan…</span>' : ''}
       </summary>
       <div style="margin-top:8px">
@@ -428,6 +428,7 @@
           <button class="btn btn-sm btn-ghost" style="font-size:11px;padding:3px 10px" ${saving ? 'disabled' : ''} onclick="window.__flowAll('A')">Alles op A</button>
           <button class="btn btn-sm btn-primary" style="font-size:11px;padding:3px 10px;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('B')">Alles op B</button>
           <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#B07D2B;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('C')">Alles op C</button>
+          <button class="btn btn-sm" style="font-size:11px;padding:3px 10px;background:#5B2E91;color:#fff" ${saving ? 'disabled' : ''} onclick="window.__flowAll('E')">Alles op E</button>
           ${st.flowErr ? `<span style="color:var(--amber);font-size:11px;margin-left:auto">${esc(st.flowErr)}</span>` : ''}
         </div>
         ${rows}

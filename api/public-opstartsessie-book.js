@@ -231,6 +231,20 @@ export default async function handler(req, res) {
           .eq('id', submissionId)
           .eq('resultaat', 'toegelaten');
         if (linkErr) console.warn('[public-opstartsessie-book] submission-link (soft):', linkErr.message);
+        // Tijdstip waarop de lead "akkoord" bevestigde (full-page flow typt het
+        // woord 'akkoord'); server-tijd ~= bevestigingsmoment. APARTE update zodat
+        // de link hierboven blijft werken als de kolom nog niet gemigreerd is:
+        // ontbreekt de kolom (42703/PGRST204) → stil negeren.
+        try {
+          const { error: atErr } = await supabaseAdmin
+            .from('opstartsessie_submissions')
+            .update({ noshow_akkoord_at: new Date().toISOString() })
+            .eq('id', submissionId)
+            .eq('resultaat', 'toegelaten');
+          if (atErr && !['42703', 'PGRST204'].includes(atErr.code)) {
+            console.warn('[public-opstartsessie-book] noshow_akkoord_at (soft):', atErr.message);
+          }
+        } catch { /* kolom ontbreekt of transient → booking is al gelukt */ }
       } catch (e) {
         console.warn('[public-opstartsessie-book] submission-link exception (soft):', e?.message || e);
       }
