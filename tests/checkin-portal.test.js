@@ -483,3 +483,22 @@ test('portal: geen mail/WhatsApp-code in het endpoint (er gaat niets naar studen
     assert.ok(!new RegExp(`import[^\\n]*${verboden}`, 'i').test(bron), verboden);
   }
 });
+
+// ── De sectie Automation (#1904) toont check-in-kaarten als zodanig ────────
+import { bouwOverzicht } from '../api/_lib/automation-overzicht.js';
+
+test('Automation: een check-in-kaart heeft herkomst checkin, traject en mentor uit de kaart, link naar het LMS-dossier', () => {
+  const rij = checkinKaartRij({ toewijzing: TW, student: ST, trajectLabel: '1-op-1 Mentorship', mentorNaam: 'Seppe Huysmans', belmoment: ['avond'], nuMs: NU.getTime() });
+  assert.equal(rij.bron_ref.traject_label, '1-op-1 Mentorship');
+  assert.equal(rij.bron_ref.mentor_naam, 'Seppe Huysmans');
+  const ov = bouwOverzicht({ kaarten: [{ id: 'k1', created_at: NU.toISOString(), ...rij }], pogingen: [], nuMs: NU.getTime() });
+  const k = [].concat(...Object.values(ov.tabs)).find((x) => x.id === 'k1');
+  assert.equal(k.herkomst, 'checkin');
+  assert.equal(k.traject, '1-op-1 Mentorship');
+  assert.equal(k.mentor, 'Seppe Huysmans');
+  assert.equal(k.lms_student_id, 's1');
+  assert.equal(k.onboarding_id, null);
+  const view = lees('modules/klanten-v2/views/automation-v2.js');
+  assert.match(view, /k\.herkomst === 'checkin'/);
+  assert.match(view, /lms\.deforexopleiding\.nl\/dossier\//);
+});

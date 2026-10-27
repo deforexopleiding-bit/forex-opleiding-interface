@@ -174,10 +174,17 @@ async function automation(d, lms, t, antwoorden) {
       .select('id, voornaam, achternaam, email, telefoon').eq('id', t.student_id).maybeSingle();
     if (error) console.warn('[checkin-portal] student lezen (soft):', error.message);
     const flow = flowVoor(t.student?.product_soort);
+    let mentorNaam = null;
+    if (t.student?.mentor_id) {
+      const { data: m, error: mErr } = await lms.from('hlms_personeel').select('naam').eq('id', t.student.mentor_id).maybeSingle();
+      if (mErr) console.warn('[checkin-portal] mentor lezen (soft):', mErr.message);
+      mentorNaam = m?.naam || null;
+    }
     await d.naAutomation({
       toewijzing: { id: t.id, campagne_id: t.campagne_id, student_id: t.student_id, is_test: t.is_test === true },
       student: st || { id: t.student_id, voornaam: t.student?.voornaam || null },
       trajectLabel: TRAJECT_NAAM[flow],
+      mentorNaam,
       answers: antwoorden,
       nu: d.nu(),
     });
