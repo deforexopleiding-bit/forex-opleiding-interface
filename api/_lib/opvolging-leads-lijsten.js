@@ -89,6 +89,17 @@ export function aparteStaarten(perLijst, actieveIds) {
   return uit;
 }
 
+/**
+ * De leads (lead_id) achter een kaart in een aparte lijst — elke lijst, elke
+ * status. Zo'n lead heeft al een kaart (in die lijst) en hoort dus niet als
+ * nieuwe lead in de algemene pot Nieuw, ook niet als zijn kaart verhuisd is.
+ */
+export function aparteLeadIds(perLijst) {
+  const uit = new Set();
+  for (const kaarten of (perLijst || new Map()).values()) for (const k of kaarten) if (k && k.lead_id) uit.add(k.lead_id);
+  return uit;
+}
+
 /** Open / afgewerkt van één lijst, over de hele historiek (geen venster). */
 export function lijstTelling(kaarten) {
   const t = { totaal: 0, open: 0, afgewerkt: 0, ingepland: 0, afgerond: 0 };

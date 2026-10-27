@@ -356,12 +356,14 @@ export function gespreksopener({ trial, calls, vandaag }) {
  * @param {Set<string>} p.daglijstStaarten laatste 9 cijfers van open/wacht-kaarten op de daglijst
  * @returns {{ in: true } | { in: false, reden: string }}
  */
-export function beslisKandidaat({ lead, calls, kaart, daglijstStaarten, aparteStaarten }) {
+export function beslisKandidaat({ lead, calls, kaart, daglijstStaarten, aparteStaarten, aparteLeadIds }) {
   const tel = telefoonVan(lead);
   if (!tel) return { in: false, reden: 'geen_telefoon' };
   if (lead.customer_id) return { in: false, reden: 'al_klant' };
   if (kaart && kaart.status === 'gearchiveerd') return { in: false, reden: 'weggegooid' };
   if (kaart) return { in: false, reden: 'eigen_kaart' };
+  // Zijn kaart staat in een aparte lijst (bv. verhuisd uit de pot).
+  if (aparteLeadIds && aparteLeadIds.has(lead.id)) return { in: false, reden: 'in_aparte_lijst' };
   const c = calls || {};
   if (c.komend) return { in: false, reden: 'komende_call' };
   if (c.met_uitkomst) return { in: false, reden: 'call_uitkomst' };
@@ -398,8 +400,11 @@ export function sorteerPot(a, b) {
  * @param {object} [opties]
  * @param {boolean} [opties.zonderVenster] ingepland/afgerond zonder termijn
  *   (een aparte lijst toont zijn hele historiek)
+ * @param {boolean} [opties.zonderDosering] een latere `due` die geen
+ *   terugbelafspraak is, telt als nu (een aparte lijst kent geen dosering;
+ *   een uit de pot verhuisde kaart houdt zijn due, maar staat meteen klaar)
  */
-export function potVoorKaart(kaart, vandaag, nuMs = Date.now(), { zonderVenster = false } = {}) {
+export function potVoorKaart(kaart, vandaag, nuMs = Date.now(), { zonderVenster = false, zonderDosering = false } = {}) {
   if (!kaart) return null;
   const st = String(kaart.status || '');
   const due = String(kaart.due || '');
@@ -409,7 +414,7 @@ export function potVoorKaart(kaart, vandaag, nuMs = Date.now(), { zonderVenster 
     // op de dag zelf komt hij bovenaan de Belrij. (Vroeger verdween hij tot die
     // dag in 'Later', tussen de opgeladen lijsten.)
     if (kaart.reden_code === REDEN_CODE_TERUGBELLEN) return 'terugbellen';
-    if (due > vandaag) return 'later';
+    if (due > vandaag && !zonderDosering) return 'later';
     if (kaart.reden_code === REDEN_CODE_VERLOPEN) return 'verlopen';
     return 'bezig';
   }
@@ -843,12 +848,14 @@ export function waaromTekst(r, nuMs) {
  * @param {Map<string,object>} p.telPerKaart  taak_id → telPogingen()-uitvoer (met pogingen)
  * @param {number}   p.nuMs
  * @param {Set<string>} [p.aparteStaarten] laatste 9 cijfers van lopende kaarten in een aparte lijst
+ * @param {Set<string>} [p.aparteLeadIds]  leads met een kaart in een aparte lijst
  * @param {boolean}  [p.zonderVenster] ingepland/afgerond zonder termijn (voor een aparte lijst)
+ * @param {boolean}  [p.zonderDosering] geen 'later' op due (voor een aparte lijst)
  */
 export function stelPottenSamen({
   leads = [], extraLeads = [], kaarten = [], daglijstTelefoons = [], afspraken = [],
   trialPerLead = new Map(), telPerKaart = new Map(), nuMs = Date.now(), wachtUren = 48,
-  aparteStaarten = new Set(), zonderVenster = false,
+  aparteStaarten = new Set(), aparteLeadIds = new Set(), zonderVenster = false, zonderDosering = false,
 }) {
   const vandaag = dagInZone(nuMs);
   const daglijstStaarten = new Set(daglijstTelefoons.map(staart9).filter(Boolean));
@@ -906,7 +913,7 @@ export function stelPottenSamen({
     if (!lead || !lead.id || !isProefLead(lead)) continue;
     const kaart = kaartPerLead.get(lead.id) || null;
     const rij = leadRij(lead);
-    const besluit = beslisKandidaat({ lead, calls: rij._calls, kaart, daglijstStaarten, aparteStaarten });
+    const besluit = beslisKandidaat({ lead, calls: rij._calls, kaart, daglijstStaarten, aparteStaarten, aparteLeadIds });
     if (!besluit.in) { telling[besluit.reden] = (telling[besluit.reden] || 0) + 1; continue; }
     delete rij._calls;
     potten.nieuw.push({ ...rij, kaart: null });
@@ -916,7 +923,7 @@ export function stelPottenSamen({
   // ── De kaarten ──────────────────────────────────────────────────────────
   const leadOpId = new Map([...extraLeads, ...leads].filter((l) => l && l.id).map((l) => [l.id, l]));
   for (const k of kaarten) {
-    const pot = potVoorKaart(k, vandaag, nuMs, { zonderVenster });
+    const pot = potVoorKaart(k, vandaag, nuMs, { zonderVenster, zonderDosering });
     if (!pot) continue;
     const lead = k.lead_id ? leadOpId.get(k.lead_id) : null;
     const basis = lead ? leadRij(lead) : kaartAlsLead(k, vandaag);

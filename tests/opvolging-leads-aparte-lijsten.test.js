@@ -16,7 +16,9 @@ import {
   lijstWeergave, tabelOntbreekt, isLijstId,
 } from '../api/_lib/opvolging-leads-lijsten.js';
 import { stelPottenSamen, potVoorKaart, dagInZone, UITSLUITREDENEN } from '../api/_lib/opvolging-leads-pot.js';
-import { leesCsv, maakVoorvertoning, importKaart } from '../api/_lib/opvolging-leads-import.js';
+import {
+  leesCsv, maakVoorvertoning, importKaart, maakAparteVoorvertoning, verhuisdeBronRef, OVERSLAAN,
+} from '../api/_lib/opvolging-leads-import.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const url = (p) => pathToFileURL(join(ROOT, p)).href;
@@ -413,4 +415,198 @@ test('scherm: Lijst opladen kiest tussen algemene pot (met dosering) en nieuwe a
   window.__opvLb.impVeld('csv', 'naam,telefoon\nA,0471111111');
   await window.__opvLb.impVoor();
   assert.deepEqual(posts.at(-1).body, { csv: 'naam,telefoon\nA,0471111111', label: 'Oud', per_dag: 10, bevestig: false });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VERHUIZEN UIT DE ALGEMENE POT (bug 27 okt: 41/41 'dubbel', vast)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('aparte voorvertoning: open kaart in de pot = verhuis; de rest nieuw of overgeslagen met reden', () => {
+  const csv = 'naam,telefoon\n' + [
+    'Pot,0471000001', 'LeadKaart,0471000002', 'AndereLijst,0471000003', 'Wacht,0471000004', 'OudeLijst,0471000005',
+    'Ingepland,0471000006', 'Afgerond,0471000007', 'Dag,0471000008', 'UitNieuw,0471000009', 'Vers,0471000010',
+    'Fout,123', 'Pot2,0471000001',
+  ].join('\n');
+  const kaarten = [
+    kaart({ id: 'pot', telefoon: '+32471000001', badge_label: 'Webiar 26/10', bron_ref: { import_label: 'Webiar 26/10' } }),
+    // Leadkaart zonder nummer: gevonden via de lead uit de berekende pot.
+    kaart({ id: 'lk', telefoon: null, lead_id: 'lead2', bron: 'lead' }),
+    inLijst(L2, { id: 'al', telefoon: '+32471000003' }),
+    kaart({ id: 'w', telefoon: '+32471000004', status: 'wacht_inplanning' }),
+    inLijst('dddddddd-1111-4111-8111-111111111111', { id: 'oud', telefoon: '+32471000005' }),
+    kaart({ id: 'ip', telefoon: '+32471000006', status: 'ingepland' }),
+    kaart({ id: 'af', telefoon: '+32471000007', status: 'gearchiveerd' }),
+  ];
+  const kandidaten = [
+    { id: 'lead2', telefoon_e164: '+32471000002' },
+    { id: 'lead9', telefoon_e164: '+32471000009' },
+  ];
+  const vv = maakAparteVoorvertoning({
+    rijen: leesCsv(csv).rijen, kaarten, kandidaten, daglijstTelefoons: ['+32471000008'],
+    actieveLijstIds: [L2], vandaag: '2026-10-27',
+  });
+  const per = Object.fromEntries(vv.rijen.map((r) => [r.naam, r]));
+  assert.equal(per.Pot.status, 'verhuis');
+  assert.deepEqual(per.Pot.verhuis_ids, ['pot']);
+  assert.equal(per.Pot.kaart.badge_label, 'Webiar 26/10');
+  assert.equal(per.LeadKaart.status, 'verhuis');
+  assert.deepEqual(per.LeadKaart.verhuis_ids, ['lk']);
+  assert.equal(per.AndereLijst.soort, 'andere_lijst');
+  assert.equal(per.Wacht.soort, 'wacht');
+  assert.equal(per.OudeLijst.soort, 'gearchiveerde_lijst');
+  assert.equal(per.Ingepland.soort, 'ingepland');
+  assert.equal(per.Afgerond.soort, 'afgerond');
+  assert.equal(per.Dag.soort, 'daglijst');
+  assert.equal(per.UitNieuw.status, 'geldig');
+  assert.equal(per.UitNieuw.lead_id, 'lead9', 'lead uit Nieuw: de kaart krijgt zijn lead_id');
+  assert.equal(per.Vers.status, 'geldig');
+  assert.equal(per.Vers.lead_id, null);
+  assert.equal(per.Vers.due, '2026-10-27');
+  assert.equal(per.Fout.soort, 'ongeldig');
+  assert.equal(per.Pot2.soort, 'dubbel_in_lijst');
+  assert.deepEqual(vv.aantallen, { geldig: 2, verhuis: 2, overgeslagen: 8 });
+  assert.equal(vv.overgeslagen_redenen.reduce((n, x) => n + x.aantal, 0), 8);
+  for (const x of vv.overgeslagen_redenen) assert.equal(x.tekst, OVERSLAAN[x.soort]);
+  assert.equal(vv.samenvatting, '2 nieuw + 2 verhuisd uit de pot, alles meteen zichtbaar in de lijst');
+});
+
+test('geen dosering in een lijst: een verhuisde gedoseerde kaart (due later) staat meteen klaar; terugbellen blijft op zijn dag', () => {
+  const later = kaart({ due: '2026-10-30' });
+  assert.equal(potVoorKaart(later, VANDAAG, NU), 'later', 'in de algemene pot blijft de dosering');
+  assert.equal(potVoorKaart(later, VANDAAG, NU, { zonderDosering: true }), 'bezig');
+  const terug = kaart({ due: '2026-10-30', reden_code: 'terugbellen' });
+  assert.equal(potVoorKaart(terug, VANDAAG, NU, { zonderDosering: true }), 'terugbellen');
+  const kaarten = [inLijst(L1, { id: 'g', due: '2026-10-30' })];
+  const uit = stelPottenSamen({ kaarten, nuMs: NU, zonderVenster: true, zonderDosering: true });
+  assert.deepEqual(uit.potten.belrij.map((r) => r.kaart.taak_id), ['g']);
+  assert.equal(uit.potten.belrij[0].kaart.due, '2026-10-30', 'de due zelf blijft ongewijzigd');
+});
+
+test('verhuizen: bron_ref krijgt enkel de lijst erbij, bestaande sleutels blijven', () => {
+  const ref = { import_label: 'Webiar 26/10', import_op: '2026-10-26T10:00:00Z', product: null, lead_id: 'x' };
+  const nieuw = verhuisdeBronRef(ref, { id: L1, naam: 'Webinar 26/10' }, '2026-10-27T09:00:00Z');
+  assert.deepEqual(nieuw, { ...ref, aparte_lijst_id: L1, aparte_lijst_naam: 'Webinar 26/10', aparte_lijst_verhuisd_op: '2026-10-27T09:00:00Z' });
+  assert.deepEqual(ref.aparte_lijst_id, undefined, 'het origineel blijft onaangeroerd');
+  assert.equal(verhuisdeBronRef(null, { id: L1, naam: 'X' }, 'nu').aparte_lijst_id, L1);
+});
+
+test('Nieuw: een lead wiens kaart in een aparte lijst staat (ook gearchiveerd) komt niet terug in de algemene pot', () => {
+  const lead = {
+    id: 'l1', voornaam: 'Sara', telefoon: '0471 12 34 56', traject: '7-daagse', bron: '7-daagse-v2',
+    aangemaakt: new Date(NU - 86400000).toISOString(), customer_id: null,
+  };
+  const met = stelPottenSamen({ leads: [lead], nuMs: NU, aparteLeadIds: new Set(['l1']) });
+  assert.equal(met.potten.nieuw.length, 0);
+  assert.equal(met.niet_getoond[0].code, 'in_aparte_lijst');
+});
+
+test('import aparte lijst met kaarten die al in de pot staan: verhuizen i.p.v. weigeren, geen tweede kaart', async (t) => {
+  t.after(() => mock.reset());
+  const vandaag = dagInZone(Date.now());
+  const pogingVoor = { id: 'p1', taak_id: 'w1', soort: 'call', tijdstip: '2026-10-26T10:00:00Z', resultaat: 'geen gehoor' };
+  const db = basisDb({
+    opvolging_taken: [
+      kaart({ id: 'w1', telefoon: '+32471000001', badge_label: 'Webiar 26/10', due: vandaag, notitie: 'oud',
+        reden_code: 'terugbellen', terugbel_notitie: 'na 18u', bron_ref: { import_label: 'Webiar 26/10', import_op: 'x', product: null } }),
+      kaart({ id: 'w2', telefoon: '+32471000002', badge_label: 'Webiar 26/10', due: '2099-01-01', bron_ref: { import_label: 'Webiar 26/10' } }),
+      kaart({ id: 'lk', telefoon: '+32471000003', lead_id: 'lead3', bron: 'lead', badge_label: '7-daagse', due: vandaag, bron_ref: { lead_id: 'lead3', product: '7-daagse' } }),
+      kaart({ id: 'af', telefoon: '+32471000004', status: 'gearchiveerd', gearchiveerd_at: '2026-10-20T10:00:00Z' }),
+    ],
+    opvolging_pogingen: [pogingVoor],
+  });
+  const [h, ho] = await laadAlle(['api/opvolging-leads-import.js', 'api/opvolging-leads.js'], db);
+  const csv = 'naam,telefoon\nA,0471000001\nB,0471000002\nC,0471000003\nD,0471000004\nE,0471000005';
+
+  const r1 = nepRes();
+  await h({ method: 'POST', headers: {}, body: { csv, modus: 'aparte_lijst', lijst_naam: 'Webinar 26/10' } }, r1);
+  assert.equal(r1._uit.code, 200);
+  assert.deepEqual(r1._uit.body.aantallen, { geldig: 1, verhuis: 3, overgeslagen: 1 });
+  assert.equal(db._t.opvolging_leads_lijsten.length, 0, 'voorvertoning schrijft niets');
+  assert.ok(db._t.opvolging_taken.every((k) => !k.bron_ref.aparte_lijst_id));
+
+  const voor = JSON.parse(JSON.stringify(db._t.opvolging_taken.find((k) => k.id === 'w1')));
+  const r2 = nepRes();
+  await h({ method: 'POST', headers: {}, body: { csv, modus: 'aparte_lijst', lijst_naam: 'Webinar 26/10', bevestig: true } }, r2);
+  assert.equal(r2._uit.code, 200);
+  assert.equal(r2._uit.body.gemaakt, 1);
+  assert.equal(r2._uit.body.verhuisd, 3);
+  assert.equal(r2._uit.body.lijst.id, L1);
+  assert.equal(db._t.opvolging_taken.length, 5, 'één nieuwe kaart, geen kopieën voor de verhuisde');
+
+  const na = db._t.opvolging_taken.find((k) => k.id === 'w1');
+  const { bron_ref: refNa, ...restNa } = na;
+  const { bron_ref: refVoor, ...restVoor } = voor;
+  assert.deepEqual(restNa, restVoor, 'niets anders aan de kaart veranderd (terugbelafspraak, notitie, due, label)');
+  assert.deepEqual(refNa, { ...refVoor, aparte_lijst_id: L1, aparte_lijst_naam: 'Webinar 26/10', aparte_lijst_verhuisd_op: refNa.aparte_lijst_verhuisd_op });
+  assert.equal(db._t.opvolging_taken.find((k) => k.id === 'lk').bron_ref.product, '7-daagse');
+  assert.equal(db._t.opvolging_taken.find((k) => k.id === 'af').bron_ref.aparte_lijst_id, undefined, 'afgerond blijft waar hij was');
+  assert.equal(db._t.opvolging_pogingen.length, 1, 'pogingen onaangeroerd');
+
+  // Uit de algemene pot, in de chip.
+  const rt = nepRes();
+  await ho({ method: 'GET', headers: {}, query: { pot: 'telling' } }, rt);
+  assert.equal(rt._uit.body.aantallen.belrij, 0);
+  assert.equal(rt._uit.body.aantallen.terugbellen + rt._uit.body.aantallen.bezig, 0);
+  assert.equal(rt._uit.body.aparte_lijsten.actief[0].telling.open, 4);
+  const rl = nepRes();
+  await ho({ method: 'GET', headers: {}, query: { pot: 'lijst', lijst: L1 } }, rl);
+  const ids = [...rl._uit.body.items, ...Object.values(rl._uit.body.secties).flat()].map((x) => x.kaart.taak_id);
+  assert.ok(['w1', 'w2', 'lk'].every((id) => ids.includes(id)));
+  const w1 = [...rl._uit.body.items, ...Object.values(rl._uit.body.secties).flat()].find((x) => x.kaart.taak_id === 'w1');
+  assert.equal(w1.kaart.reden_code, 'terugbellen', 'de terugbelafspraak reist mee');
+  assert.equal(w1.kaart.bel_totaal, 1, 'de pogingen reizen mee');
+  assert.ok(rl._uit.body.items.some((x) => x.kaart.taak_id === 'w2'), 'gedoseerde kaart staat meteen in Nu aan de beurt');
+  assert.equal(db._t.opvolging_taken.find((k) => k.id === 'w2').due, '2099-01-01', 'zonder zijn due te wijzigen');
+});
+
+test('import aparte lijst: alles overgeslagen → geen lijst, geen chip', async (t) => {
+  t.after(() => mock.reset());
+  const db = basisDb({
+    opvolging_taken: [inLijst(L2, { id: 'x', telefoon: '+32471000001' })],
+    opvolging_leads_lijsten: [{ id: L2, naam: 'Andere', status: 'actief', created_at: '2026-10-27T08:00:00Z' }],
+  });
+  const h = await laad('api/opvolging-leads-import.js', db);
+  const r = nepRes();
+  await h({ method: 'POST', headers: {}, body: { csv: 'naam,telefoon\nA,0471000001', modus: 'aparte_lijst', lijst_naam: 'Nieuw', bevestig: true } }, r);
+  assert.equal(r._uit.code, 200);
+  assert.equal(r._uit.body.lijst, null);
+  assert.equal(r._uit.body.overgeslagen_redenen[0].soort, 'andere_lijst');
+  assert.equal(db._t.opvolging_leads_lijsten.length, 1);
+});
+
+test('algemene pot: een dubbel blijft geweigerd zoals altijd, er verhuist niets', async (t) => {
+  t.after(() => mock.reset());
+  const db2 = basisDb({ opvolging_taken: [kaart({ id: 'p', telefoon: '+32471000001' })] });
+  const h2 = await laad('api/opvolging-leads-import.js', db2);
+  const r2 = nepRes();
+  await h2({ method: 'POST', headers: {}, body: { csv: 'naam,telefoon\nA,0471000001', label: 'Oud', bevestig: true } }, r2);
+  assert.equal(r2._uit.body.rijen[0].status, 'dubbel');
+  assert.equal(r2._uit.body.gemaakt, 0);
+  assert.equal(db2._t.opvolging_taken[0].bron_ref.aparte_lijst_id, undefined);
+});
+
+test('scherm: aparte voorvertoning toont nieuw / verhuisd / overgeslagen, bevestigen ook met enkel verhuisde', () => {
+  const { window } = laadView();
+  const st = window.__opvLeadsState;
+  st.telling.data = { aantallen: {} };
+  window.__opvLb.import();
+  window.__opvLb.impModus('aparte_lijst');
+  window.__opvLb.impVeld('lijstNaam', 'Webinar 26/10');
+  st.modal.vv = {
+    aantallen: { geldig: 0, verhuis: 41, overgeslagen: 2 }, samenvatting: '41 verhuisd uit de pot, alles meteen zichtbaar in de lijst',
+    overgeslagen_redenen: [{ soort: 'ingepland', aantal: 2, tekst: 'al ingepland' }],
+    rijen: [{ regel: 2, naam: 'An', telefoon: '+32471', status: 'verhuis', kaart: { badge_label: 'Webiar 26/10' } },
+      { regel: 3, naam: 'Bo', telefoon: '+32472', status: 'overgeslagen', soort: 'ingepland', reden: 'al ingepland' }],
+  };
+  const html = window.DFO.VIEWS['opvolging/Leads bellen']();
+  assert.match(html, /<b>0<\/b> nieuw/);
+  assert.match(html, /<b>41<\/b> verhuisd uit de pot/);
+  assert.match(html, /<b>2<\/b> overgeslagen/);
+  assert.match(html, /2 al ingepland/);
+  assert.match(html, /&#8618; verhuisd uit de pot <span class="zacht">\(Webiar 26\/10\)/);
+  assert.match(html, /overgeslagen — al ingepland/);
+  assert.match(html, /Bevestigen: lijst &ldquo;Webinar 26\/10&rdquo; met 41 verhuisd/);
+
+  st.modal.vv = { ...st.modal.vv, aantallen: { geldig: 0, verhuis: 0, overgeslagen: 2 } };
+  assert.doesNotMatch(window.DFO.VIEWS['opvolging/Leads bellen'](), /Bevestigen:/);
 });
