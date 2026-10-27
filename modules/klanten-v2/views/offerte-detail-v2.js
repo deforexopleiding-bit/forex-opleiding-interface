@@ -1135,7 +1135,8 @@
       }
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       const linkPath = d?.link || '';
-      const fullLink = linkPath ? (location.origin + linkPath) : '';
+      // persoonlijke_link = de link die de klant krijgt (portal achter de vlag).
+      const fullLink = d?.persoonlijke_link || (linkPath ? (location.origin + linkPath) : '');
       const done = document.getElementById('odvObDone');
       done.innerHTML = `
         <div class="odv-ob-success">

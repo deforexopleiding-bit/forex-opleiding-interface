@@ -61,7 +61,7 @@
 
   window.__onbOpen = async (id) => {
     try {
-      const mod = await import('./modals/onboarding-detail.js?v=2');
+      const mod = await import('./modals/onboarding-detail.js?v=3');
       mod.openOnboardingDetailModal({ onboardingId: id, onSuccess: refetchAll });
     } catch (e) { console.error('[onb-v2] detail-modal load fail:', e); window.KV?.toast?.('Kon detail niet laden'); }
   };
@@ -210,7 +210,8 @@
 
   window.__onbKebabCopy = (id) => {
     const row = [..._rowsForClick.active, ..._rowsForClick.archived].find((r) => r.id === id);
-    const link = row?.token ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(row.token)) : '';
+    // De server geeft de link die de klant krijgt (portal achter de vlag).
+    const link = row?.persoonlijke_link || (row?.token ? (location.origin + '/modules/onboarding.html?t=' + encodeURIComponent(row.token)) : '');
     if (!link) { window.KV.toast('Geen persoonlijke link beschikbaar'); return; }
     try { navigator.clipboard.writeText(link); window.KV.toast('Link gekopieerd'); } catch (_) { alert(link); }
   };

@@ -19,6 +19,7 @@
 // imports en raakt geen databank. Zie de kop van dat bestand voor waarom de
 // deadline één definitie heeft.
 import { geenGehoorDeadline, formatDeadlineNl } from './geen-gehoor-deadline.js';
+import { formatteer as formatteerStartcode } from './onboarding-startcode.js';
 // Tweede pure import: _lib/plek-bezet.js heeft zelf geen enkele import en raakt
 // geen databank. Bewust NIET via event-registration.js — dat bouwt op
 // module-niveau een Supabase-client op, en dat is precies wat dit bestand niet
@@ -258,11 +259,13 @@ export const AVAILABLE_VARIABLES = [
   //   Callers die alleen een customer hebben kunnen vóór resolveVariables
   //   loadOnboardingForCustomer(supabaseClient, customer.id) aanroepen om
   //   context.onboarding op te halen (meest recente onboardings-rij).
-  { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://crm.deforexopleiding.nl/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://www.deforexopleiding.nl/onboarding?code=ABCD-2345', requires_context: 'onboarding' },
+  // De startcode voor de portal op de website (XXXX-XXXX). Sinds 27 okt 2026.
+  { key: 'onboarding.startcode',    label: 'Startcode (onboarding op de website)', category: 'onboarding', example: 'ABCD-2345', requires_context: 'onboarding' },
   { key: 'onboarding.startdatum',   label: 'Startdatum',          category: 'onboarding', example: '20-06-2026', requires_context: 'onboarding' },
   { key: 'onboarding.traject',      label: 'Traject',             category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.mentor',       label: 'Toegewezen mentor',   category: 'onboarding', example: 'Dave de Jong', requires_context: 'onboarding' },
-  { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://crm.deforexopleiding.nl/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://www.deforexopleiding.nl/onboarding?code=ABCD-2345', requires_context: 'onboarding' },
   { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
   { key: 'onboarding.login_url',    label: 'Login-URL LMS', category: 'onboarding', example: 'https://lms.deforexopleiding.nl', requires_context: 'onboarding' },
@@ -631,13 +634,17 @@ function getOnboardingValue(onboarding, key) {
   switch (key) {
     case 'onboarding.wizard_link':
     case 'onboarding.persoonlijke_link': {
-      // Beide keys produceren exact dezelfde persoonlijke link
-      // (base-URL + /modules/onboarding.html?t=<token>), identiek aan
-      // de URL die onboarding-hub bouwt.
+      // Beide keys produceren exact dezelfde persoonlijke link. De caller
+      // legt die vooraf vast via linkVoorOnboarding() (api/_lib/onboarding-
+      // link.js): achter de vlag onboarding_portal_live is dat de portal op
+      // de website met de startcode, anders de klassieke wizard. Zonder
+      // voorberekende link: de klassieke wizard, zoals altijd.
+      if (onboarding.persoonlijke_link) return String(onboarding.persoonlijke_link);
       const token = onboarding.token;
       if (!token) return '';
       return `${PUBLIC_BASE_URL}/modules/onboarding.html?t=${encodeURIComponent(String(token))}`;
     }
+    case 'onboarding.startcode':     return formatteerStartcode(onboarding.startcode);
     case 'onboarding.startdatum':    return onboarding.start_date ? formatDateNl(onboarding.start_date) : '';
     case 'onboarding.traject':       return String(onboarding.traject_label || '');
     case 'onboarding.mentor':        return String(onboarding.mentor_name || '');

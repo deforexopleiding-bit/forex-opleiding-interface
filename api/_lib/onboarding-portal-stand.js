@@ -14,7 +14,7 @@
 //                                               zijn stand
 
 import { formatteer } from './onboarding-startcode.js';
-import { portalLink } from './onboarding-link.js';
+import { portalLink, portalLive, persoonlijkeLink } from './onboarding-link.js';
 import { alleenDaglijst } from './opvolging-lijst.js';
 import { isMoeite } from './opvolging-poging-telling.js';
 
@@ -55,7 +55,7 @@ export function interesseVan(rij) {
 
 /** Het hele blok voor één onboarding (detail). */
 export async function leesPortalStand(db, ob) {
-  const uit = { startcode: null, startcode_fmt: null, portal_link: null,
+  const uit = { startcode: null, startcode_fmt: null, portal_link: null, portal_live: false, persoonlijke_link: null,
     automation: { interesse: interesseVan(ob), op: null, belmoment: [], kaart: null } };
   try {
     const { data, error } = await db.from('onboardings')
@@ -74,6 +74,10 @@ export async function leesPortalStand(db, ob) {
   } catch (e) {
     console.warn('[onboarding-portal-stand] kolommen (soft):', e?.message || e);
   }
+  // De link die de klant krijgt (en die de kopieerknoppen kopiëren): achter de
+  // vlag de portal, anders de klassieke wizard.
+  uit.portal_live = await portalLive(db);
+  uit.persoonlijke_link = persoonlijkeLink({ token: ob.token, startcode: uit.startcode, live: uit.portal_live }) || null;
   try {
     const { data: kaarten, error } = await alleenDaglijst(db.from('opvolging_taken')
       .select('id, status, due, afspraak_ref, archief_reden, reden_code, gearchiveerd_at'))
@@ -129,4 +133,34 @@ export async function automationPerOnboarding(db, rijen) {
     kaart.set(id, { interesse: interesse.get(id), kaart_status: status.get(id) || null });
   }
   return kaart;
+}
+
+/**
+ * Voor de lijst: per onboarding-id de persoonlijke link (kopieerknop "Link
+ * kopiëren"). Leest de startcodes gebatcht; faalzacht → klassieke link.
+ * @returns {Promise<Map<string,string>>}
+ */
+export async function linksPerOnboarding(db, rijen) {
+  const links = new Map();
+  const lijst = (rijen || []).filter((r) => r && r.id);
+  if (!lijst.length) return links;
+  const live = await portalLive(db);
+  const codes = new Map();
+  if (live) {
+    try {
+      const ids = lijst.map((r) => r.id);
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data, error } = await db.from('onboardings').select('id, startcode').in('id', ids.slice(i, i + 200));
+        if (error) throw new Error(error.message);
+        for (const d of data || []) if (d.startcode) codes.set(d.id, d.startcode);
+      }
+    } catch (e) {
+      console.warn('[onboarding-portal-stand] startcodes (soft):', e?.message || e);
+    }
+  }
+  for (const r of lijst) {
+    const l = persoonlijkeLink({ token: r.token, startcode: codes.get(r.id) || null, live });
+    if (l) links.set(r.id, l);
+  }
+  return links;
 }

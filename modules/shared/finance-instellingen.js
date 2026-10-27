@@ -2140,7 +2140,9 @@
     { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=...' },
     // onboarding — server-side resolved op basis van meest recente onboardings-rij
     // voor de klant (server doet de DB-lookup; preview toont placeholder).
-    { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=...' },
+    { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://www.deforexopleiding.nl/onboarding?code=ABCD-2345' },
+    // De startcode voor de portal op de website (XXXX-XXXX). Kopie van api/_lib/template-variables.js.
+    { key: 'onboarding.startcode',         label: 'Startcode (onboarding op de website)', category: 'onboarding', example: 'ABCD-2345' },
     { key: 'onboarding.startdatum',        label: 'Startdatum',                    category: 'onboarding', example: '20-06-2026' },
     { key: 'onboarding.traject',           label: 'Traject',                       category: 'onboarding', example: 'Forex Masterclass 1-op-1' },
     { key: 'onboarding.mentor',            label: 'Toegewezen mentor',             category: 'onboarding', example: 'Dave de Jong' },

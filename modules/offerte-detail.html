@@ -770,7 +770,8 @@ async function submitObCreate(){
     if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
     // Succes — toon link + copy-knop.
     const linkPath = d?.link || '';
-    const fullLink = linkPath ? (location.origin + linkPath) : '';
+    // persoonlijke_link = de link die de klant krijgt (portal achter de vlag).
+    const fullLink = d?.persoonlijke_link || (linkPath ? (location.origin + linkPath) : '');
     const done = document.getElementById('obStepDone');
     done.innerHTML = `
       <div class="ob-success">

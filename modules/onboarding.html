@@ -1439,6 +1439,15 @@
       return;
     }
 
+    // Nieuwe onboarding op de website (27 okt 2026): staat de portal live, dan
+    // gaat de klant door naar www.deforexopleiding.nl/onboarding met zijn
+    // startcode. ?klassiek=1 toont deze wizard (rollback).
+    if (d?.portal_url && params.get('klassiek') !== '1' && /^https:\/\//.test(d.portal_url)) {
+      renderStatus({ icon: '➜', title: 'Even doorsturen…', body: 'Je onboarding staat nu op onze website.' });
+      location.replace(d.portal_url);
+      return;
+    }
+
     State.firstName = d?.customer_first_name || null;
     State.pages     = Array.isArray(d?.pages) ? d.pages : [];
     State.answers   = (d?.answers && typeof d.answers === 'object') ? d.answers : {};

@@ -307,7 +307,7 @@ function renderAccountTab() {
     <div class="kv-onb-meta">
       <div class="kv-onb-meta-row"><span>Invite verstuurd</span><span>${fmtDT(o.invite_sent_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Wizard-stap</span><span>${o.current_step != null ? String(o.current_step) : '—'}</span></div>
-      <div class="kv-onb-meta-row"><span>Persoonlijke link</span><span>${o.token ? `<a href="/modules/onboarding.html?t=${esc(o.token)}" target="_blank" rel="noopener">Openen ↗</a>` : '—'}</span></div>
+      <div class="kv-onb-meta-row"><span>Persoonlijke link</span><span>${o.portal?.persoonlijke_link ? `<a href="${esc(o.portal.persoonlijke_link)}" target="_blank" rel="noopener">Openen ↗</a>` : (o.token ? `<a href="/modules/onboarding.html?t=${esc(o.token)}" target="_blank" rel="noopener">Openen ↗</a>` : '—')}</span></div>
     </div>
 
     <div class="kv-onb-section">

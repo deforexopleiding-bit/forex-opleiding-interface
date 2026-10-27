@@ -37,6 +37,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendTemplate, MetaNotConfiguredError } from './meta-whatsapp.js';
 import { buildMetaVariablesFromMapping } from './template-variables.js';
+import { linkVoorOnboarding } from './onboarding-link.js';
 import { upsertOutboundConversation } from './conv-upsert.js';
 import { getModuleContextByPhoneNumberId } from './module-context.js';
 import { ensureInvoicePaymentLink } from './invoice-payment-link.js';
@@ -159,10 +160,15 @@ export async function sendOnboardingTemplateGeneric({
     const bodyMapping = (tplRow.meta_param_mapping && typeof tplRow.meta_param_mapping === 'object')
       ? (tplRow.meta_param_mapping.body || tplRow.meta_param_mapping)
       : null;
+    // De persoonlijke link + startcode: achter de vlag onboarding_portal_live
+    // de portal op de website, anders de klassieke wizard (onboarding-link.js).
+    const persoonlijk = await linkVoorOnboarding(supabaseAdmin, ob);
     const onboardingCtx = {
       token:         ob.token,
       status:        ob.status,
       traject_label: ob.traject?.label || null,
+      startcode:     persoonlijk.startcode,
+      persoonlijke_link: persoonlijk.link,
     };
     // Caller-specifieke extra context (bv. credentials-flow met
     // temp_password + login_url). NIET gepersist; alleen voor de
