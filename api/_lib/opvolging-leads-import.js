@@ -15,6 +15,11 @@
 //
 // Idempotent op het genormaliseerde nummer (laatste 9 cijfers): deze kaarten
 // hebben geen lead_id, dus de unieke index op lead_id beschermt ze niet.
+//
+// APARTE LIJST (27 okt): dezelfde CSV, voorvertoning en dubbel-check, maar
+// zonder dosering (alles op vandaag) en met bron_ref.aparte_lijst_id. Die
+// kaarten staan dan alleen in de chip van hun lijst
+// (zie opvolging-leads-lijsten.js).
 
 import { normaliseerNlBe } from './phone-e164.js';
 import { staart9 } from './opvolging-leads-pot.js';
@@ -97,8 +102,9 @@ export function werkdagPlus(vanaf, n) {
  * @param {string}   p.vandaag          YYYY-MM-DD (Amsterdam)
  * @param {number}   p.perDag
  * @param {number}   p.alVandaag        geïmporteerde kaarten die al op vandaag staan
+ * @param {boolean}  [p.dosering=true]  false = aparte lijst: alles meteen op vandaag
  */
-export function maakVoorvertoning({ rijen, bekendeTelefoons = [], vandaag, perDag = STANDAARD_PER_DAG, alVandaag = 0 }) {
+export function maakVoorvertoning({ rijen, bekendeTelefoons = [], vandaag, perDag = STANDAARD_PER_DAG, alVandaag = 0, dosering = true }) {
   const n = Math.max(1, Math.min(MAX_PER_DAG, Math.floor(Number(perDag) || STANDAARD_PER_DAG)));
   const bekend = new Set(bekendeTelefoons.map(staart9).filter(Boolean));
   const inLijst = new Set();
@@ -114,7 +120,7 @@ export function maakVoorvertoning({ rijen, bekendeTelefoons = [], vandaag, perDa
     inLijst.add(s);
     // De dosering: wat er vandaag al geïmporteerd staat telt mee.
     const plek = alVandaag + geldig;
-    const due = werkdagPlus(vandaag, Math.floor(plek / n));
+    const due = dosering ? werkdagPlus(vandaag, Math.floor(plek / n)) : vandaag;
     uit.push({ ...r, telefoon: norm.e164, status: 'geldig', due });
     geldig += 1;
   }
@@ -123,7 +129,8 @@ export function maakVoorvertoning({ rijen, bekendeTelefoons = [], vandaag, perDa
   const tot = geldige.length ? geldige[geldige.length - 1].due : null;
   return {
     rijen: uit,
-    per_dag: n,
+    per_dag: dosering ? n : null,
+    dosering: !!dosering,
     aantallen: {
       geldig: geldige.length,
       dubbel: uit.filter((r) => r.status === 'dubbel').length,
@@ -131,14 +138,20 @@ export function maakVoorvertoning({ rijen, bekendeTelefoons = [], vandaag, perDa
     },
     vandaag: vandaagAantal,
     verspreid_tot: tot,
-    samenvatting: geldige.length
-      ? vandaagAantal + ' vandaag' + (tot && tot !== vandaag ? ', rest verspreid tot ' + tot : '')
-      : 'niets om op te laden',
+    samenvatting: !geldige.length ? 'niets om op te laden'
+      : !dosering ? 'alle ' + geldige.length + ' meteen zichtbaar in de lijst'
+        : vandaagAantal + ' vandaag' + (tot && tot !== vandaag ? ', rest verspreid tot ' + tot : ''),
   };
 }
 
-/** De kaart voor één geldige rij. */
-export function importKaart({ rij, label, nuIso }) {
+/**
+ * De kaart voor één geldige rij.
+ * @param {object} [p.aparteLijst] { id, naam } — de kaart hoort bij die aparte lijst
+ */
+export function importKaart({ rij, label, nuIso, aparteLijst = null }) {
+  const waar = aparteLijst ? 'aparte lijst: ' + label : label;
+  const ref = { import_label: label, import_op: nuIso, product: null };
+  if (aparteLijst) { ref.aparte_lijst_id = aparteLijst.id; ref.aparte_lijst_naam = aparteLijst.naam; }
   return {
     lijst: 'leads',
     lead_id: null,
@@ -151,7 +164,7 @@ export function importKaart({ rij, label, nuIso }) {
     telefoon: rij.telefoon,
     email: rij.email || null,
     badge_label: label,
-    notitie: [String(nuIso).slice(0, 10) + ' · Opgeladen in Leads bellen (' + label + ').', rij.notitie].filter(Boolean).join('\n\n'),
-    bron_ref: { import_label: label, import_op: nuIso, product: null },
+    notitie: [String(nuIso).slice(0, 10) + ' · Opgeladen in Leads bellen (' + waar + ').', rij.notitie].filter(Boolean).join('\n\n'),
+    bron_ref: ref,
   };
 }

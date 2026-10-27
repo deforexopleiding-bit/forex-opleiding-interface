@@ -256,6 +256,17 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   en `26-10-26-demo` (update zonder video, payouts met toestemming; data · groot-getal · sliders+trechter). Beide
   'gegenereerd', NIET gepubliceerd; bron docs/contentmachine/v2/demo/*.json (bouw-demo.mjs), test
   tests/contentmachine-demo2.test.js. Bekijken = werkblad (voorbeeld via voorbeeld_token); beelden via "Opslaan in Storage".
+- Aparte lijsten in Leads bellen (2026-10-27) — Opvolging › Leads bellen › "Lijst opladen" kiest
+  "Toevoegen aan algemene pot" (zoals altijd, gedoseerd) OF "Nieuwe aparte lijst" (naam verplicht, GEEN
+  dosering). Tabel `opvolging_leads_lijsten` (status actief/gearchiveerd, migratie
+  docs/sql-migrations/2026-10-27-opvolging-aparte-lijsten.sql); kaarten blijven gewone leadkaarten
+  (lijst 'leads', bron 'import') met `bron_ref.aparte_lijst_id`. Logica `api/_lib/opvolging-leads-lijsten.js`:
+  `laadLeadsOverzicht` splitst de kaarten, de algemene potten/belrij/badge zien de lijstkaarten NIET, per
+  lijst draait `stelPottenSamen` apart (terugbellen + belrondes binnen de lijst). Eigen chip ('lijst:<id>')
+  achter de potten; `GET /api/opvolging-leads?pot=lijst&lijst=<id>`; archiveren/terugzetten via
+  `POST /api/opvolging-leads-lijst` (kaarten blijven onaangeroerd, lijst terug te vinden onder Gearchiveerd).
+  Dag-/weekstatistiek en het logboek tellen ALLE leadkaarten (wat er gebeld werd). Zonder migratie: 503
+  APARTE_LIJSTEN_NIET_ACTIEF bij de aparte keuze, de rest ongewijzigd.
 - Eén login voor alle funnels (2026-10-26) — ELKE trial-lead (minicursus, 7-daagse, webinar,
   site-formulier, The Lab, en elke toekomstige belofte) krijgt een lab-lead (7 dagen) in het echte LMS
   (dfo-lms `hlms_lab_lead` + rol trial) i.p.v. een account in het oude trial-LMS (`lms_gebruikers`,
