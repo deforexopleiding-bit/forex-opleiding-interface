@@ -1,4 +1,9 @@
 {
-  "_LEES_MIJ": "NIET GEMETEN. Kolommen die het CRM leest uit hlms-tabellen die (nog) in geen enkele meting (tests/vast/hlms-kolommen-*.json) staan, met de bron per tabel in _bron. Zodra er een meting is, verhuist de tabel naar een dump en verdwijnt hij hier — tests/hlms-lezers-kloppen.test.js dwingt dat af. Leeg sinds de meting van 15 okt 2026 (hlms-kolommen-20261015-lab.json).",
-  "_bron": {}
+  "_LEES_MIJ": "NIET GEMETEN. Kolommen die het CRM leest uit hlms-tabellen die (nog) in geen enkele meting (tests/vast/hlms-kolommen-*.json) staan, met de bron per tabel in _bron. Zodra er een meting is, verhuist de tabel naar een dump en verdwijnt hij hier — tests/hlms-lezers-kloppen.test.js dwingt dat af. Leeg sinds de meting van 15 okt 2026 (hlms-kolommen-20261015-lab.json), tot de studentencheck-in (27 okt 2026).",
+  "_bron": {
+    "hlms_checkin_campagne": "dfo-lms-prototype supabase/hlms_checkin.sql (27 okt 2026, nog niet gedraaid bij het schrijven)",
+    "hlms_checkin_toewijzing": "dfo-lms-prototype supabase/hlms_checkin.sql (27 okt 2026, nog niet gedraaid bij het schrijven)"
+  },
+  "hlms_checkin_campagne": "id, slug, naam, inhoud_versie, status, doelgroep_regel, opties, live_op, live_door, aangemaakt_op, gewijzigd_op",
+  "hlms_checkin_toewijzing": "id, campagne_id, student_id, code, sessie, is_test, status, huidige_stap, antwoorden, inhoud_versie, opties, signaal_id, popup_gezien_op, gestart_op, laatst_opgeslagen_op, verstuurd_op, aangemaakt_op"
 }

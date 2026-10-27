@@ -237,9 +237,9 @@ test('menu: eigen MODS-item Automation met rollen + permKey; ingeladen na opvolg
   assert.match(shell, /id: 'automation',\s+naam: 'Automation',[^\n]*roles: \['super_admin', 'admin', 'manager', 'sales'\], permKey: 'automation\.view', tabs: \['Te bellen', 'Ingepland', 'Afgerond', 'Alle'\]/);
   const idx = lees('modules/klanten-v2/index.html');
   assert.ok(idx.indexOf('views/automation-v2.js') > idx.indexOf('views/opvolging-v2.js'), 'na opvolging-v2.js');
-  assert.match(idx, /app-shell\.js\?v=1ea/);
+  assert.match(idx, /app-shell\.js\?v=1e[a-z]/); // opgehoogd door latere menu-items (o.a. Studentencheck-in)
   assert.match(idx, /views\/opvolging-v2\.js\?v=81/);
-  assert.match(lees('modules/klanten-v2/klanten-v2.js'), /'iris', 'automation'\]\);/);
+  assert.match(lees('modules/klanten-v2/klanten-v2.js'), /'iris', 'automation'[,\]]/);
   assert.match(lees('api/automation-overzicht.js'), /export const RECHT = 'automation\.view'/);
 });
 

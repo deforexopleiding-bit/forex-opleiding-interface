@@ -136,6 +136,10 @@ const FEATURE_REGISTRY = [
     { key:'calls.closer', label:'Closer: dagrapportage-topbar (eigen calls beoordelen)' },
     { key:'scan.use', label:'Strategie-scan afnemen en rapporten zien (gevoelig: Dave + admins)' },
   ]},
+  { moduleKey:'checkin', moduleLabel:'Studentencheck-in', moduleIcon:'ti-message-check', features:[
+    { key:'checkin.view', label:'Module zichtbaar (antwoorden, KPI\'s, export)' },
+    { key:'checkin.run', label:'Run — activeer in het LMS, pauzeren, testtoewijzingen, opties' },
+  ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },
     { key:'customer.view', label:'Klant bekijken' },
