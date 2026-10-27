@@ -1,10 +1,11 @@
 // api/opstartsessie-flow-set.js
 //
-// Schrijft de boek-flow-schakelaar (A/B/C) naar app_settings.opstartsessie_flow.
+// Schrijft de boek-flow-schakelaar (A/B/C/E) naar app_settings.opstartsessie_flow.
 // De dfo-website-funnels lezen 'm runtime (binnen ~1 min live). A blijft de
-// veilige fallback: alles wat geen 'A'/'B'/'C' is, wordt genegeerd.
+// veilige fallback: alles wat geen 'A'/'B'/'C'/'E' is, wordt genegeerd.
+// E = geen quiz → full-page bevestiging + agenda (zelfde als de 7-daagse-v5/v6).
 //
-//   POST { default: 'A'|'B'|'C', per_funnel: { <bron>: 'A'|'B'|'C' } }
+//   POST { default: 'A'|'B'|'C'|'E', per_funnel: { <bron>: 'A'|'B'|'C'|'E' } }
 //   → 200 { ok:true, default, per_funnel }
 //
 // Permission: leads.update (wijzigen welke flow live staat = leadbeheer).
@@ -14,7 +15,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 
 const KEY = 'opstartsessie_flow';
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const flow = (x) => (x === 'A' || x === 'B' || x === 'C' ? x : null);
+const flow = (x) => (x === 'A' || x === 'B' || x === 'C' || x === 'E' ? x : null);
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
