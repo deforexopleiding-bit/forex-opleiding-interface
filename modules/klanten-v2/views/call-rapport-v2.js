@@ -118,6 +118,7 @@
 .callrap{--cr-line:#e5e7eb;--cr-muted:#6b7280;--cr-ink:#0f1419;--cr-card:#fff;--cr-soft:#f6f7f9;
  color:var(--cr-ink);padding:18px 22px 60px;max-width:1040px;box-sizing:border-box}
 .callrap *{box-sizing:border-box}
+.callrap .cr-auto{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;background:#efe9fc;color:#6D3FD4;font-size:11.5px;font-weight:650;vertical-align:1px}
 .callrap .cr-kop{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 14px}
 .callrap .cr-kop h2{font-size:18px;margin:0 12px 0 0;flex:1 1 220px}
 .callrap .cr-nav{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -187,7 +188,9 @@
       ? 'Setter: ' + esc(r.setter_naam) + (r.setter_via_keten ? ' (via de oorspronkelijke boeking)' : '')
       : 'Setter: onbekend';
     return '<div class="cr-rij" data-appointment="' + esc(r.appointment_id) + '">' +
-      '<div class="t">' + esc(r.tijd || '--:--') + ' &middot; ' + esc(r.naam || 'Naamloos') + '</div>' +
+      '<div class="t">' + esc(r.tijd || '--:--') + ' &middot; ' + esc(r.naam || 'Naamloos') +
+        // Gesprek over de automation (de klant vroeg het aan in zijn onboarding).
+        (r.booking_source === 'automation' ? ' <span class="cr-auto" data-bron="automation">Automation</span>' : '') + '</div>' +
       '<div class="u">' + esc(M.categorieInfo(r.categorie).label) + ' &middot; status ' + esc(status) +
       ' &middot; ' + setter + '</div>' +
       (r.snelle_notitie ? '<div class="n">' + esc(r.snelle_notitie) + '</div>' : '') +

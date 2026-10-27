@@ -293,5 +293,5 @@ test('bedrading: call-rapport toont "Strategie-scan" bij webinar-calls voor wie 
   assert.match(v, /\['webinar', 'strategiescan'\]\.includes\(r\.booking_source\)/);
   assert.match(v, /href="\/scan\?afspraak=' \+ encodeURIComponent\(r\.appointment_id\)/);
   assert.match(lees('api/call-rapport.js'), /booking_source: a\.booking_source \|\| null,/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/call-rapport-v2\.js\?v=3/);
+  assert.match(lees('modules/klanten-v2/index.html'), /views\/call-rapport-v2\.js\?v=4/);
 });

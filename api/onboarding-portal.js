@@ -30,6 +30,7 @@ import { resolveFlowType } from './_lib/onboarding-wizard-default.js';
 import { normaliseer } from './_lib/onboarding-startcode.js';
 import { rondWizardAf } from './_lib/onboarding-afronden.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
+import { syncAutomationKaart } from './_lib/automation-interesse.js';
 import {
   valideerPatch, portalAntwoorden, ontbrekend, mentorKort, automationVelden,
   isAfgesloten, resolvePortalOrigin, TRAJECT_NAAM, TEKST,
@@ -42,10 +43,10 @@ const STANDAARD = {
   rateLimit: checkRateLimit,
   rondWizardAf,
   spiegel: (id, bron) => spiegelNaActie(id, bron),
-  // Haakje voor de automation-interesse (Opvolging-kaart voor Dave). Krijgt de
-  // onboarding + samengevoegde antwoorden na elke save die robot_interesse
-  // raakt. Moet zelf faalzacht zijn; een fout hier mag de save niet breken.
-  naAutomation: async () => {},
+  // De automation-interesse wordt een belkaart voor Dave (Opvolging). Krijgt de
+  // onboarding + samengevoegde antwoorden na elke save die robot_interesse of
+  // robot_belmoment raakt. Faalzacht; een fout hier breekt de save niet.
+  naAutomation: ({ onboarding, answers, nu }) => syncAutomationKaart(supabaseAdmin, { onboarding, answers, nu }),
   nu: () => new Date(),
 };
 

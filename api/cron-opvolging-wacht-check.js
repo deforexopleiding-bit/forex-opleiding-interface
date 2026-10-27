@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   try {
     const { data: taken, error: leesErr } = await supabaseAdmin
       .from('opvolging_taken')
-      .select('id, naam, email, telefoon, status, agenda_doorgestuurd_at, badge_label, notitie, lijst')
+      .select('id, naam, email, telefoon, status, agenda_doorgestuurd_at, badge_label, notitie, lijst, reden')
       .eq('status', 'wacht_inplanning')
       .order('agenda_doorgestuurd_at', { ascending: true })
       .limit(500);

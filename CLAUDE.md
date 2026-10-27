@@ -299,6 +299,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   (dfo-lms `hlms_akkoord.afstand_bedenktijd`, `combineerWaiver`/`leesLmsAfstand` in onboarding-bedenktijd.js).
   Migratie docs/sql-migrations/2026-10-27-onboarding-portal.sql (+ automation_interesse-kolommen + vlag
   app_settings `onboarding_portal_live`, default false).
+  AUTOMATION-INTERESSE → DAVE: `robot_interesse='ja_interesse'` in de portal-save maakt meteen één
+  Opvolging-kaart (reden `automation_interesse`, `bron_ref.onboarding_id`, unieke index; `api/_lib/automation-interesse.js`).
+  Nee vóór contact (isContact) → dicht met `klant_trok_interesse_in`, weer ja → zelfde kaart open; na contact niets
+  automatisch. Inplannen boekt met booking_source `automation` (GHL-tag bron-automation). Violette badge/filter
+  "Automation" in Opvolging; "Wat nu?": Call inplannen / Gesprek gehad / Geen interesse meer / Later terugbellen.
+  MOEITE_NVT kent de drie afsluitcodes (geen vals "te weinig pogingen"); wacht-check houdt de reden.
+  Migratie docs/sql-migrations/2026-10-27-opvolging-automation-interesse.sql. Geen WA/mail naar de klant.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

@@ -34,6 +34,7 @@ import {
   UITKOMSTEN, logErbij, momentInZone, dagPlusN, START_UUR, belPlan,
 } from './_lib/opvolging-leads-pot.js';
 import { corrigeerLaatsteCall } from './_lib/opvolging-leads-uitkomst.js';
+import { AUTOMATION_REDEN, AFSLUIT_CODES } from './_lib/automation-interesse.js';
 
 /** Een dag na `dag` (YYYY-MM-DD). */
 const dagNa = (dag) => {
@@ -169,6 +170,15 @@ export default async function handler(req, res) {
         if (fout) return res.status(400).json({ error: fout, categorieen: Object.keys(AFROND_CATEGORIEEN) });
         patch.archief_categorie = String(b.archief_categorie);
         patch.uitkomst_log = logErbij(taak, { soort: 'afgerond', tekst: 'Afgerond: ' + (AFROND_CATEGORIEEN[b.archief_categorie] || b.archief_categorie) });
+      }
+      // AUTOMATION-KAART (27 okt 2026): 'Gesprek gehad' en 'Geen interesse meer'
+      // dragen hun uitkomst als reden_code, zodat het onboardingdetail de stand
+      // kan tonen en het Salesrapport ze niet als 'te weinig pogingen' leest.
+      if (taak.reden === AUTOMATION_REDEN && b.automation_uitkomst) {
+        const code = AFSLUIT_CODES[b.automation_uitkomst];
+        if (!code) return res.status(400).json({ error: 'onbekende automation_uitkomst' });
+        patch.reden_code = code;
+        patch.archief_categorie = b.automation_uitkomst;
       }
       const reden = (b.archief_reden || '').trim();
       if (!reden) return res.status(400).json({ error: 'archief_reden is verplicht' });
