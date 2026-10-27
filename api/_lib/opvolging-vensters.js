@@ -180,6 +180,12 @@ export function telVensters(taken, dag) {
 export const MOEITE_NVT = {
   zoom_geen_interesse: 'de lead zei tijdens de call zelf nee',
   naar_zoom          : 'omgezet naar een zoomcall — geen afhaker',
+  // Automation-kaarten uit de onboarding (27 okt 2026). De klant trok zijn
+  // interesse zelf in vóór er contact was, of Dave sprak hem en sloot af: in
+  // geen van die gevallen gaat het om 'genoeg geprobeerd te bereiken'.
+  klant_trok_interesse_in  : 'de klant zette zijn automation-interesse zelf terug op nee',
+  automation_gesprek       : 'gesprek gehad over de automation',
+  automation_geen_interesse: 'de klant zei in het gesprek nee tegen de automation',
 };
 
 export function beoordeelMoeite({ bel_dagen, wa_totaal, reden_code, duur_bekend } = {}) {

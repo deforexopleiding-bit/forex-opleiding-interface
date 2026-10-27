@@ -1402,7 +1402,7 @@
 .opv .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
 .opv .t-blue{background:var(--o-accs);color:#1a49c4}.opv .t-amber{background:var(--o-ambs);color:#9a5d00}
 .opv .t-red{background:var(--o-reds);color:#b32b2f}.opv .t-green{background:var(--o-grns);color:#08794a}
-.opv .t-purple{background:var(--o-purs);color:#5a2fd6}.opv .t-grey{background:#f0f1f4;color:#5b6472}
+.opv .t-purple{background:var(--o-purs);color:#5a2fd6}.opv .t-auto{background:#efe9fc;color:#6D3FD4}.opv .autochip{display:inline-flex;align-items:center;gap:6px;margin:0 0 10px;padding:5px 12px;border-radius:999px;border:1px solid #d9cdf7;background:#fff;color:#6D3FD4;font-size:12.5px;font-weight:650;cursor:pointer}.opv .autochip.aan{background:#6D3FD4;border-color:#6D3FD4;color:#fff}.opv .t-grey{background:#f0f1f4;color:#5b6472}
 .opv .pil{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:650;border:1px solid #e4e7ec;background:#fff;color:#7a828f}
 .opv .pil.aan{background:#0f1420;border-color:#0f1420;color:#fff}
 .opv .pil.wa{background:var(--o-grn);border-color:var(--o-grn);color:#fff}
@@ -1719,7 +1719,11 @@
     zoom_bevestigen: ['Zoomcall bevestigen', 't-purple'],
     // cron-lab-belmelding / lab-terugbellen: een warme lab-lead.
     lab_bellen: ['The Lab · bel nu', 't-red'],
+    // api/_lib/automation-interesse.js: de klant koos in de onboarding "Ja, bel
+    // mij" bij de automation-vraag. Eigen kleur (violet), eigen filter.
+    automation_interesse: ['Automation', 't-auto'],
   };
+  function isAutomation(t) { return !!t && t.reden === 'automation_interesse'; }
 
   /**
    * BEL NU — THE LAB. Warme lab-leads staan bovenaan, boven alles: wie The Lab
@@ -2261,7 +2265,9 @@
         : trn
           ? ' <span class="tag t-amber" data-bron="training" title="Strategiesessie geboekt vanuit de live training van ' +
             trn[1] + '/' + trn[2] + '/' + trn[3] + '.">Training ' + trn[1] + '/' + trn[2] + '</span>'
-          : '';
+          : c.bron === 'automation'
+            ? ' <span class="tag t-auto" data-bron="automation" title="Gesprek over de automation — de klant vroeg het aan in zijn onboarding.">Automation</span>'
+            : '';
       return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
         '<div class="who"><div class="nm">' + esc(c.naam) + bron + label + '</div>' +
@@ -3387,7 +3393,11 @@
     // dat is geen archief, want morgen staat hij gewoon terug.
     const aanmeldingen = alles.filter((t) => isAanmelding(t) && !klaarVoorVandaag(t));
     const klaar        = alles.filter((t) => isAanmelding(t) && klaarVoorVandaag(t));
-    const rest         = alles.filter((t) => !isAanmelding(t) && !isLabBel(t));
+    const restAlles    = alles.filter((t) => !isAanmelding(t) && !isLabBel(t));
+    // Filter 'Automation': Dave ziet al zijn automation-kaarten apart.
+    const nAuto        = restAlles.filter(isAutomation).length;
+    if (!nAuto) _ui.alleenAutomation = false;
+    const rest         = _ui.alleenAutomation ? restAlles.filter(isAutomation) : restAlles;
     const r1 = rest.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
     const r2 = rest.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
     const wacht = st.data.wacht || [];
@@ -3400,6 +3410,11 @@
     h += aanmeldBlok(aanmeldingen, dag);
 
     h += '<div class="sh"><div class="ic" style="background:#eef0f3">&#9776;</div><h3>Werklijst</h3><span class="n">' + r1.length + '</span></div>';
+    if (nAuto) {
+      h += '<button type="button" class="autochip' + (_ui.alleenAutomation ? ' aan' : '') + '" data-opv-filter="automation" ' +
+        'aria-pressed="' + (_ui.alleenAutomation ? 'true' : 'false') + '" onclick="window.__opvAutoFilter()">' +
+        (_ui.alleenAutomation ? '&#10003; ' : '') + 'Automation &middot; ' + nAuto + '</button>';
+    }
     h += '<div class="ronde">Elke naam die je aanraakt verlaat deze lijst. Wil je er later vandaag nog eens achter, dan zakt hij naar de tweede ronde — zo wordt deze lijst alleen maar korter. <b>Wat je vandaag niet afwerkt, staat morgen vanzelf terug</b> met de melding "bleef liggen"; doorschuiven naar morgen hoef je niet te doen.</div>';
     h += r1.length ? r1.map((t) => taakKaart(t, dag)).join('')
       : '<div class="empty">Eerste ronde afgewerkt.' + (r2.length ? ' Wat overblijft staat in de tweede ronde.' : '') + '</div>';
@@ -4103,6 +4118,36 @@
         'onclick="window.__opvOpwarmBevestig(\'annuleren\')">Annuleren vastleggen</button>');
     }
 
+    // ── AUTOMATION-KAART: VIER UITGANGEN ────────────────────────────────
+    // De klant vroeg in zijn onboarding om gebeld te worden over de
+    // automation. Dave belt; geen WhatsApp of mail vanuit het systeem.
+    if (m.soort === 'watnu' && isAutomation(t)) {
+      const b =
+        opt('&#128197;', 'var(--o-grns)', 'Call inplannen',
+          'Kies samen een moment in de agenda (ook buiten de vrije momenten). De afspraak krijgt de bron Automation; deze kaart sluit als ingepland.',
+          "window.__opvActie('inplannen')") +
+        opt('&#128172;', 'var(--o-accs)', 'Gesprek gehad',
+          'Je sprak hem al. Schrijf op wat er gezegd is; daarmee is deze kaart klaar.',
+          "window.__opvAutoAfsluit('gesprek_gehad')") +
+        opt('&#128533;', '#f0f1f4', 'Geen interesse meer',
+          'Hij wil er toch niet over praten. Schrijf kort waarom; de kaart gaat dicht.',
+          "window.__opvAutoAfsluit('geen_interesse')") +
+        opt('&#9200;', 'var(--o-purs)', 'Later terugbellen',
+          'Kies de dag waarop hij terug in je lijst komt.',
+          "window.__opvActie('kiesdag')");
+      return scrim('Wat nu met ' + esc(t.naam) + '?',
+        'Automation &middot; ' + (t.bel_totaal || 0) + '&times; gebeld op ' + (t.bel_dagen || 0) + ' dag' + (t.bel_dagen === 1 ? '' : 'en'), b);
+    }
+    if (m.soort === 'auto-afsluit') {
+      const gesprek = m.uitkomst === 'gesprek_gehad';
+      return scrim((gesprek ? 'Gesprek gehad met ' : 'Geen interesse meer &mdash; ') + esc(t.naam), 'Automation',
+        '<div class="ronde">' + (gesprek
+          ? 'Wat is er gezegd? Zonder deze zin weet niemand later waar het gesprek op uitkwam.'
+          : 'Waarom niet? Zo weet het onboardingdossier waarom de kaart dicht ging.') + ' <b>(verplicht)</b></div>' +
+        '<textarea id="opv-an" rows="3" placeholder="' + (gesprek ? 'bv. alles uitgelegd, denkt erover na tot na de bootcamp' : 'bv. wil zich eerst volledig op traden focussen') + '"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAutoAfsluitBevestig()">Vastleggen en afronden</button>');
+    }
+
     if (m.soort === 'watnu') {
       const gp = (t.bel_vandaag || 0) + (t.wa_vandaag || 0) > 0;
       body =
@@ -4598,6 +4643,27 @@
       m.fout = (e && e.message) || 'onbekende fout';
       render();
     }
+  };
+
+  // ── Automation-kaart: filter en de twee afsluitingen met notitie ─────────
+  window.__opvAutoFilter = () => { _ui.alleenAutomation = !_ui.alleenAutomation; render(); };
+  window.__opvAutoAfsluit = (uitkomst) => {
+    const m = _ui.modal; if (!m) return;
+    _ui.modal = { soort: 'auto-afsluit', taakId: m.taakId, uitkomst }; render();
+  };
+  window.__opvAutoAfsluitBevestig = async () => {
+    const m = _ui.modal; if (!m || m.soort !== 'auto-afsluit') return;
+    const el = document.getElementById('opv-an');
+    const notitie = (el && el.value || '').trim();
+    if (!notitie) { alert('Schrijf eerst kort op wat er gezegd is.'); return; }
+    const kop = m.uitkomst === 'gesprek_gehad' ? 'Gesprek gehad' : 'Geen interesse meer';
+    try {
+      await post('/api/opvolging-taak-update', {
+        taak_id: m.taakId, actie: 'archiveer', automation_uitkomst: m.uitkomst,
+        archief_reden: kop + ': ' + notitie,
+      });
+      _ui.modal = null; leegTakenCache(); render();
+    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
 
   window.__opvArchiveer = async () => {

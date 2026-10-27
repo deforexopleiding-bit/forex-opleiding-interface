@@ -632,6 +632,11 @@ function isoPlusDagen(datum, n) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** De booking_source voor een boeking vanaf deze kaart, of null. PURE. */
+export function boekBronVoorTaak(taak) {
+  return taak && taak.reden === 'automation_interesse' ? 'automation' : null;
+}
+
 // ── POST: boeken via het bestaande zoom_ingepland-pad ──────────────────────
 async function boek(req, res) {
   // Alleen op het boeken, niet op het lezen: de vrije momenten bekijken is
@@ -708,6 +713,10 @@ async function boek(req, res) {
       lead,
       scheduledAt    : start.toISOString(),
       durationMinutes: DUUR_MIN,
+      // Een automation-kaart (uit de onboarding) boekt met bron 'automation':
+      // dan komt de GHL-tag "bron-automation" op het contact en toont de call
+      // een chip "Automation". Alle andere kaarten: zoals vroeger, zonder bron.
+      ...(boekBronVoorTaak(taak) ? { source: boekBronVoorTaak(taak) } : {}),
     });
   } catch (e) {
     // Dezelfde vertaling als de cockpit-uitkomst gebruikt, zodat de melding in

@@ -262,7 +262,7 @@ export function beslisWachtVerplaatsing({ taak, aanmeldingen, nu = Date.now() })
  * verlopen', apart van de volle pot Nieuw.
  *
  * @param {object} p
- * @param {object} p.taak     { lijst, notitie }
+ * @param {object} p.taak     { lijst, reden, notitie }
  * @param {string} p.vandaag  YYYY-MM-DD (Amsterdam)
  * @param {string} p.regel    de notitieregel die bovenaan komt
  */
@@ -272,6 +272,11 @@ export function terugNaWachtPatch({ taak, vandaag, regel }) {
   const basis = { status: 'open', due: vandaag, later: false, notitie };
   if (String((taak && taak.lijst) || 'dag') === 'leads') {
     return { ...basis, reden_code: 'inplantermijn_verlopen', badge_label: 'Inplantermijn verlopen' };
+  }
+  // Een automation-kaart (uit de onboarding) HOUDT zijn reden: anders valt hij
+  // stil uit de automation-filter en het onboardingdetail (27 okt 2026).
+  if (String((taak && taak.reden) || '') === 'automation_interesse') {
+    return { ...basis, badge_label: 'Agenda doorgestuurd' };
   }
   return { ...basis, reden: 'niet_ingepland', badge_label: 'Agenda doorgestuurd' };
 }
