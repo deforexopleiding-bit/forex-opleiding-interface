@@ -328,6 +328,21 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   achter de vlag door naar de portal (`portal_url` uit onboarding-wizard-get); `?klassiek=1` = oude wizard. Automation-
   mailstap: een regel `{{onboarding.startcode}}` = code groot, een regel `[knop: Label]` = knop (onboarding-mail-opmaak.js);
   zonder die regels exact de oude platte mail. WhatsApp `welkom_onboarding` heeft de link als variabele {{2}} → geen Meta-wijziging.
+- Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE studenten op
+  www.deforexopleiding.nl/checkin (dfo-website): LMS-pop-up (één keer) + balk met een persoonlijke
+  code tot verstuurd. DATA IN HET LMS (dfo-lms): `hlms_checkin_campagne` (concept → test → live ⇄
+  gepauzeerd → gesloten) + `hlms_checkin_toewijzing` (uniek per campagne+student, code 8 tekens zelfde
+  alfabet als de startcode, server-side `sessie`); migratie dfo-lms-prototype `supabase/hlms_checkin.sql`.
+  ABSOLUTE REGEL: niemand ziet iets vóór Run — alleen `live`, of `test` + `is_test` (Maxims eigen
+  studentlogin), is zichtbaar (`hlms_checkin_zichtbaar()`, `isZichtbaar` in `api/_lib/checkin-portal.js`).
+  Publieke API `api/checkin-portal.js` (open/save/submit, zelfde CORS + rate limits als de
+  onboarding-portal; bewaren/versturen via de LMS-functies `hlms_checkin_bewaren`/`_versturen`: atomair,
+  idempotent). Regels + labels: `api/_lib/checkin-portal.js`. Bij versturen een begeleidingssignaal
+  (`hlms_signaal` bron `checkin`, soort `checkin_feedback`, bak hoofdmentor; contact ja = oranje, nps ≤6
+  geel/≤3 rood, mentorscore ≤2 oranje, knelpunt volgende_stap geel) — een mentor leest die NIET (RLS).
+  Automation "Ja, bel mij" → kaart voor Dave via `syncCheckinAutomationKaart` (sleutel
+  `bron_ref.checkin_toewijzing_id`, unieke index in docs/sql-migrations/2026-10-27-studentencheck-in.sql),
+  nooit voor is_test. Geen mail/WhatsApp naar studenten.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
