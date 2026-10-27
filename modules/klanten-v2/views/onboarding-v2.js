@@ -61,7 +61,7 @@
 
   window.__onbOpen = async (id) => {
     try {
-      const mod = await import('./modals/onboarding-detail.js');
+      const mod = await import('./modals/onboarding-detail.js?v=2');
       mod.openOnboardingDetailModal({ onboardingId: id, onSuccess: refetchAll });
     } catch (e) { console.error('[onb-v2] detail-modal load fail:', e); window.KV?.toast?.('Kon detail niet laden'); }
   };
@@ -441,8 +441,35 @@
   }
   window.__onbRefetch = () => { _page.active = 1; _page.archived = 1; refetchAll(); };
 
+  // ── Automation-interesse (27 okt 2026) ─────────────────────────────────
+  // De klant koos in de onboarding "Ja, bel mij" bij de automation-vraag.
+  // Server: r.automation = { interesse: 'ja'|'nee', kaart_status } (onboarding-
+  // portal-stand.js). "Open" = Daves kaart staat nog open (of bestaat nog niet).
+  function heeftAutoInteresse(r) { return !!(r && r.automation && r.automation.interesse === 'ja'); }
+  function autoOpen(r) {
+    if (!heeftAutoInteresse(r)) return false;
+    const st = r.automation.kaart_status;
+    return !st || st === 'open' || st === 'wacht_inplanning';
+  }
+  function autoIcoon(r) {
+    if (!heeftAutoInteresse(r)) return '';
+    const st = r.automation.kaart_status;
+    const titel = 'Automation-interesse' + (st === 'ingepland' ? ' — gesprek ingepland'
+      : st === 'gearchiveerd' ? ' — afgehandeld door Dave' : ' — Dave belt');
+    return ` <span class="kv-onb-auto" title="${esc(titel)}" aria-label="${esc(titel)}">&#10227;</span>`;
+  }
+  window.__onbAutoFilter = () => {
+    DFO.setF('onb-auto', F('onb-auto', '') === 'ja' ? '' : 'ja');
+    _page.active = 1;
+  };
+  function autoFilter(rows) {
+    return F('onb-auto', '') === 'ja' ? asArr(rows).filter(heeftAutoInteresse) : null;
+  }
+
   function kpisActive(rows) {
     const list = asArr(rows);
+    const autoN = list.filter(autoOpen).length;
+    const autoAan = F('onb-auto', '') === 'ja';
     const noMentor = list.filter((r) => !r.mentor_user_id).length;
     const started  = list.filter((r) => r.status === 'bezig').length;
     const today    = list.filter((r) => r.start_date && new Date(r.start_date).toDateString() === new Date().toDateString()).length;
@@ -451,6 +478,8 @@
       { c: 'amber',   icon: I.alert,  label: 'Zonder mentor',       val: String(noMentor),                    sub: 'nog toe te wijzen' },
       { c: 'emerald', icon: I.tick,   label: 'Bezig',               val: String(started),                     sub: 'wizard gestart' },
       { c: 'violet',  icon: I.clock,  label: 'Start vandaag',       val: String(today) },
+      { c: 'violet',  icon: I.phone || I.bell || I.clock, label: 'Automation-interesse', val: String(autoN), hi: autoAan ? 1 : 0,
+        sub: autoAan ? '&#10003; filter aan — klik om te wissen' : 'Dave belt nog · klik om te filteren', click: 'window.__onbAutoFilter()' },
     ]);
   }
   function kpisArchive(rows) {
@@ -650,7 +679,7 @@
       <th style="width:32px"></th>
     </tr>`;
     const rowsHtml = list.map((r, i) => `<tr onclick="${handlerName}(${i})" style="cursor:pointer">
-      <td><span class="kv-onb-title">${esc(r.customer_name) || '—'}</span></td>
+      <td><span class="kv-onb-title">${esc(r.customer_name) || '—'}</span>${autoIcoon(r)}</td>
       <td>${intakePillOf(r)}</td>
       <td><span style="color:var(--text-2);font-size:12.5px">${esc(r.traject_label) || '—'}</span></td>
       <td>${statusPillVan(r)}</td>
@@ -678,7 +707,9 @@
     if (!st.rows && !st.loading && !st.error) queueMicrotask(() => fetchScope('active'));
     const raw = asArr(st.rows);
     // Filter-pipeline: startgroep-tabs (enige primaire filter) → sort → pagineren.
-    const afterStart  = startFilter(raw);
+    // Automation-filter (KPI-tegel) gaat vóór de startgroep-tabs: dan wil je
+    // élke klant met interesse zien, ook buiten 'binnenkort'.
+    const afterStart  = autoFilter(raw) || startFilter(raw);
     const sorted      = sortRows(afterStart, 'active');
     const pageMeta    = paginate(sorted, 'active');
     _rowsForClick.active = pageMeta.slice;
