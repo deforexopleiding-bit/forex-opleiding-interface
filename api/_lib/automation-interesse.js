@@ -206,7 +206,7 @@ export function checkinKaartNotitie({ trajectLabel, belmoment }) {
 }
 
 /** De nieuwe check-in-kaart. PURE. */
-export function checkinKaartRij({ toewijzing, student, trajectLabel, belmoment, nuMs }) {
+export function checkinKaartRij({ toewijzing, student, trajectLabel, mentorNaam = null, belmoment, nuMs }) {
   const naam = [student?.voornaam, student?.achternaam].filter(Boolean).join(' ').trim()
     || student?.email || 'Onbekende student';
   return {
@@ -222,6 +222,9 @@ export function checkinKaartRij({ toewijzing, student, trajectLabel, belmoment, 
       lms_student_id: toewijzing.student_id || student?.id || null,
       belmoment: Array.isArray(belmoment) ? belmoment : [],
       bron: 'checkin',
+      // Voor de sectie Automation: een check-in-kaart heeft geen onboardingdossier.
+      traject_label: trajectLabel || null,
+      mentor_naam: mentorNaam || null,
     },
     badge_label: null,
     due: dueVoor(nuMs),
@@ -240,7 +243,7 @@ export function checkinKaartRij({ toewijzing, student, trajectLabel, belmoment, 
  * @param {object} db  CRM-client (service role) — daar staat opvolging_taken
  * @param {{toewijzing: object, student?: object, trajectLabel?: string, answers: object, nu?: Date}} p
  */
-export async function syncCheckinAutomationKaart(db, { toewijzing, student = null, trajectLabel = null, answers, nu = new Date() }) {
+export async function syncCheckinAutomationKaart(db, { toewijzing, student = null, trajectLabel = null, mentorNaam = null, answers, nu = new Date() }) {
   if (!db || !toewijzing?.id) return { actie: 'niets', waarom: 'geen toewijzing', taak_id: null };
   return voerUit(db, {
     sleutel: 'checkin_toewijzing_id',
@@ -252,8 +255,8 @@ export async function syncCheckinAutomationKaart(db, { toewijzing, student = nul
     answers,
     nu,
     log: { checkin_toewijzing_id: toewijzing.id },
-    context: async () => ({ student, trajectLabel }),
-    nieuweRij: (ctx, belmoment, nuMs) => checkinKaartRij({ toewijzing, student: ctx.student, trajectLabel: ctx.trajectLabel, belmoment, nuMs }),
+    context: async () => ({ student, trajectLabel, mentorNaam }),
+    nieuweRij: (ctx, belmoment, nuMs) => checkinKaartRij({ toewijzing, student: ctx.student, trajectLabel: ctx.trajectLabel, mentorNaam: ctx.mentorNaam, belmoment, nuMs }),
     notitie: (ctx, belmoment) => checkinKaartNotitie({ trajectLabel: ctx.trajectLabel, belmoment }),
   });
 }

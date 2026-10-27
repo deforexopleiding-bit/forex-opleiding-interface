@@ -2,8 +2,8 @@
 //
 // SECTIE "AUTOMATION" (27 okt 2026, Maxim).
 //
-// Kiest een klant in zijn onboarding "Ja, bel mij" bij de automation-vraag, dan
-// staat hier een kaart (opvolging_taken, lijst 'automation'). Bewust NIET meer
+// Kiest een klant in zijn onboarding (of een bestaande student in zijn
+// studentencheck-in) "Ja, bel mij" bij de automation-vraag, dan staat hier een kaart (opvolging_taken, lijst 'automation'). Bewust NIET meer
 // tussen Daves gewone Opvolging-daglijst.
 //
 // Tabs: Te bellen · Ingepland · Afgerond · Alle. KPI-strip bovenaan.
@@ -119,7 +119,7 @@
     const k = (d && d.kpi) || {};
     const tegel = (label, waarde, sub) => '<div class="aut-tegel"><span>' + esc(label) + '</span><b>' + esc(waarde) + '</b>' + (sub ? '<i>' + esc(sub) + '</i>' : '') + '</div>';
     return '<div class="aut-kpi" data-aut="kpi">' +
-      tegel('Nieuw vandaag', k.nieuw_vandaag ?? 0, 'interesse uit de onboarding') +
+      tegel('Nieuw vandaag', k.nieuw_vandaag ?? 0, 'uit de onboarding of de check-in') +
       tegel('Te bellen', k.te_bellen ?? 0, k.later ? k.later + ' komt later terug' : 'staat vandaag klaar') +
       tegel('Ingepland deze week', k.ingepland_week ?? 0, 'calls van ma t/m zo') +
       tegel('Interesse → gesprek', k.conversie_pct == null ? '—' : String(k.conversie_pct).replace('.', ',') + '%',
@@ -154,8 +154,11 @@
       (k.komt_terug_op ? '<span class="aut-chip grijs">terug op ' + esc(dagKort(k.komt_terug_op)) + '</span>' : '') +
       (k.tab === 'afgerond' ? '<span class="aut-chip grijs">' + esc(k.afgerond_label || 'Afgerond') + '</span>' : '') +
       '</div>';
-    h += '<div class="aut-regel"><b>' + esc(k.traject || 'Traject onbekend') + '</b> &middot; start ' + esc(k.start_date ? dagKort(k.start_date) : 'nog niet bekend') +
-      ' &middot; mentor ' + (k.mentor ? '<b>' + esc(k.mentor) + '</b>' : 'nog niet gekoppeld') + '</div>';
+    const checkin = k.herkomst === 'checkin';
+    h += '<div class="aut-regel">' + (checkin ? '<span class="aut-chip" style="margin:0 6px 0 0" title="Bestaande student: interesse uit de studentencheck-in">check-in</span>' : '') +
+      '<b>' + esc(k.traject || 'Traject onbekend') + '</b> &middot; ' +
+      (checkin ? 'bestaande student' : 'start ' + esc(k.start_date ? dagKort(k.start_date) : 'nog niet bekend')) +
+      ' &middot; mentor ' + (k.mentor ? '<b>' + esc(k.mentor) + '</b>' : (checkin ? 'geen' : 'nog niet gekoppeld')) + '</div>';
     h += '<div class="aut-regel">Belmoment: <b>' + esc(belmomentTekst(k.belmoment)) + '</b> &middot; interesse sinds ' + esc(moment(k.interesse_op)) +
       ' &middot; ' + esc(pogingTekst(k)) + '</div>';
     if (k.afspraak) h += callRegel(k.afspraak);
@@ -173,6 +176,7 @@
     }
     h += knop('Historiek', "window.__opvHist('" + id + "')");
     if (k.onboarding_id) h += knop('Dossier &rarr;', "window.__autDossier('" + esc(k.onboarding_id) + "')", { titel: 'Het onboardingdossier van deze klant' });
+    else if (k.lms_student_id) h += '<a class="obtn" style="text-decoration:none" target="_blank" rel="noopener" title="Het studentdossier in het LMS" href="https://lms.deforexopleiding.nl/dossier/' + encodeURIComponent(k.lms_student_id) + '/">Dossier &#8599;</a>';
     h += '</div></div>';
     return h;
   }
@@ -189,7 +193,7 @@
     if (!st.data && !st.laden && !st.fout) queueMicrotask(laad);
 
     let h = '<div class="opv aut">';
-    h += '<div class="aut-kop"><div class="info">Klanten die in hun onboarding vroegen om gebeld te worden over de automation. ' +
+    h += '<div class="aut-kop"><div class="info">Klanten die in hun onboarding, en bestaande studenten die in hun check-in, vroegen om gebeld te worden over de automation. ' +
       'Bellen, WhatsApp en inplannen werken zoals in Opvolging; de call krijgt de bron <b>Automation</b>.</div>' +
       '<label style="font-size:12.5px;color:var(--o-muted);display:inline-flex;gap:6px;align-items:center"><input type="checkbox" ' + (st.toonTest ? 'checked ' : '') +
       'onchange="window.__autTest(this.checked)"> testkaarten</label>' +

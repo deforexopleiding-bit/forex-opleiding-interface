@@ -150,11 +150,15 @@ export function bouwOverzicht({ kaarten = [], pogingen = [], onboardings = new M
       is_test: k.is_test === true,
       tab,
       afgerond_label: afgerondLabel(k),
+      // Waar de interesse vandaan komt: de onboarding van een nieuwe klant, of de
+      // studentencheck-in van een bestaande student (bron_ref.bron 'checkin').
+      herkomst: ref.bron === 'checkin' || ref.checkin_toewijzing_id ? 'checkin' : 'onboarding',
       onboarding_id: ref.onboarding_id || null,
+      lms_student_id: ref.lms_student_id || null,
       customer_id: ob?.customer_id || ref.customer_id || null,
-      traject: traject_id ? trajecten.get(String(traject_id)) || null : null,
+      traject: (traject_id ? trajecten.get(String(traject_id)) || null : null) || ref.traject_label || null,
       start_date: ob?.start_date || ref.start_date || null,
-      mentor: mentorId ? mentoren.get(String(mentorId)) || 'Mentor (naam onbekend)' : null,
+      mentor: mentorId ? mentoren.get(String(mentorId)) || 'Mentor (naam onbekend)' : (ref.mentor_naam || null),
       belmoment,
       interesse_op: ob?.automation_interesse_op || k.created_at || null,
       afspraak: afspraakStand(k, afspraken, opvolgers, nuMs),
