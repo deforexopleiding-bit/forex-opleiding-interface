@@ -146,6 +146,11 @@
     // super_admin via '*') ziet het item. De scan zelf draait op /scan.
     // Groep "Leren & Events" (naast Webinar: de scan volgt op het webinar).
     { g: 'Leren & Events',         id: 'scans',            naam: 'Strategie-scans',   icon: I.target,   color: 'amber',   roles: [], permKey: 'scan.use', tabs: ['Overzicht', 'Dashboard'] },
+    // Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE
+    // studenten (LMS-pop-up + balk → deforexopleiding.nl/checkin). GEEN rollen:
+    // alleen wie checkin.view heeft (admin/manager + de hoofdmentor-profielen,
+    // super_admin via '*'). Run en de andere knoppen vragen checkin.run.
+    { g: 'Leren & Events',         id: 'checkin',          naam: 'Studentencheck-in', icon: I.chat,     color: 'emerald', roles: [], permKey: 'checkin.view', tabs: ['Overzicht', 'Payouts', 'Per mentor'] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM, permKey: 'onboarding.admin', tabs: ['Actief', 'Inbox', 'Archief'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Commissies', 'Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 

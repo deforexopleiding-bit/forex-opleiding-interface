@@ -343,6 +343,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Automation "Ja, bel mij" → kaart voor Dave via `syncCheckinAutomationKaart` (sleutel
   `bron_ref.checkin_toewijzing_id`, unieke index in docs/sql-migrations/2026-10-27-studentencheck-in.sql),
   nooit voor is_test. Geen mail/WhatsApp naar studenten.
+  CRM-SECTIE "Studentencheck-in" (MODS-item `checkin` in Leren & Events, GEEN rollen, permKey `checkin.view`;
+  knoppen vragen `checkin.run`): `views/studentencheckin-v2.js` + `api/checkin-beheer.js` (rekenkern
+  `api/_lib/checkin-beheer.js`). Campagnekaart (Voorbeeld als teststudent · Testtoewijzingen · Run · Pauzeren/
+  Hervatten · opties payout/trustpilot/autopilot; na Run = nieuwe inhoudsversie), KPI-strip die filtert, tabel +
+  detail + CSV, tabs Payouts en Per mentor. RUN: grijs zonder testinzending, bevestigen met "ACTIVEER", de server
+  rekent de doelgroep ZELF (auth + einddatum ≥ vandaag + mentorship/membership; uit: CRM-onboarding aangemeld/bezig
+  of ≤30 d gestart via crm_onboarding_id én klant-e-mail; testaccounts uit `testaccounts()` / env
+  CHECKIN_TESTACCOUNTS) en roept `hlms_checkin_run` (lock, idempotent). Rechten: role_permissions admin/manager
+  (view) + admin (run); hoofdmentoren = wie `signals.hoofdmentor.receive` heeft (user_permissions, view).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
