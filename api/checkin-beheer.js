@@ -29,7 +29,7 @@ import { alleenAutomationlijst } from './_lib/opvolging-lijst.js';
 import { leesPortalKolommen } from './_lib/onboarding-portal-kolommen.js';
 import { LABELS, VRAAG, STANDAARD_OPTIES } from './_lib/checkin-portal.js';
 import {
-  doelgroep, doelgroepSamenvatting, doelgroepRegel, rijenVan, kpi, perMentor, payouts, csv,
+  doelgroep, doelgroepSamenvatting, doelgroepRegel, lijn, lijnSamenvatting, rijenVan, kpi, perMentor, payouts, csv,
   schoneOpties, runStand, testaccounts, PRODUCTEN, vandaag, UITSLUIT_REDEN,
 } from './_lib/checkin-beheer.js';
 
@@ -152,16 +152,8 @@ export async function laadOverzicht({ lms, crm, slug = null }) {
 }
 
 /** Doelgroep van NU (altijd server-side uitgerekend). */
-export async function berekenDoelgroep({ lms, crm, nu = new Date() }) {
-  const [studenten, namen] = await Promise.all([
-    leesAlles(lms.from('hlms_student')
-      .select('id, auth_id, email, voornaam, achternaam, product_soort, eind_datum, mentor_id, crm_onboarding_id')
-      .not('auth_id', 'is', null)
-      .gte('eind_datum', vandaag(nu))
-      .in('product_soort', PRODUCTEN)
-      .range(0, 9999), 'studenten'),
-    mentorNamen(lms),
-  ]);
+/** De CRM-onboardings voor de doelgroep en de lijn (met e-mail + portalkolom). */
+async function leesDoelgroepOnboardings(crm) {
   const { data: obs, error } = await crm.from('onboardings')
     .select('id, status, started_at, created_at, is_test, handmatig_afgerond_op, auto_afgerond_op, customer:customers(email)')
     .range(0, 9999);
@@ -174,6 +166,35 @@ export async function berekenDoelgroep({ lms, crm, nu = new Date() }) {
   // die uitsluiting niet — dat staat dan in het Run-venster.
   const portal = await leesPortalKolommen(crm, onboardings.map((o) => o.id));
   if (portal) for (const o of onboardings) o.portal_gestart_op = portal.get(o.id)?.portal_gestart_op || null;
+  return { onboardings, portal };
+}
+
+/**
+ * DE LIJN ONBOARDING ↔ CHECK-IN op de echte data (28 okt 2026): elke actieve
+ * student precies één plek. GET ?lijn=1.
+ */
+export async function berekenLijn({ lms, crm, nu = new Date() }) {
+  const studenten = await leesAlles(lms.from('hlms_student')
+    .select('id, auth_id, email, voornaam, achternaam, product_soort, eind_datum, mentor_id, crm_onboarding_id')
+    .gte('eind_datum', vandaag(nu))
+    .range(0, 9999), 'studenten');
+  const { onboardings, portal } = await leesDoelgroepOnboardings(crm);
+  const s = lijnSamenvatting(lijn({ studenten, onboardings, testEmails: testaccounts(), nu }));
+  s.portal_gelezen = !!portal;
+  return s;
+}
+
+export async function berekenDoelgroep({ lms, crm, nu = new Date() }) {
+  const [studenten, namen] = await Promise.all([
+    leesAlles(lms.from('hlms_student')
+      .select('id, auth_id, email, voornaam, achternaam, product_soort, eind_datum, mentor_id, crm_onboarding_id')
+      .not('auth_id', 'is', null)
+      .gte('eind_datum', vandaag(nu))
+      .in('product_soort', PRODUCTEN)
+      .range(0, 9999), 'studenten'),
+    mentorNamen(lms),
+  ]);
+  const { onboardings, portal } = await leesDoelgroepOnboardings(crm);
   const dg = doelgroep({ studenten, onboardings, testEmails: testaccounts(), nu });
   const samenvatting = doelgroepSamenvatting(dg, namen);
   samenvatting.portal_gelezen = !!portal;
@@ -233,6 +254,10 @@ export function maakHandler(deps = {}) {
     const q = req.query || {};
     try {
       if (req.method === 'GET') {
+        if (String(q.lijn || '') === '1') {
+          res.setHeader('Content-Type', 'application/json');
+          return res.status(200).json({ lijn: await berekenLijn({ lms, crm: d.crm, nu: d.nu() }) });
+        }
         const ov = await laadOverzicht({ lms, crm: d.crm, slug: typeof q.campagne === 'string' ? q.campagne : null });
         if (String(q.csv || '') === '1') {
           res.setHeader('Content-Type', 'text/csv; charset=utf-8');
