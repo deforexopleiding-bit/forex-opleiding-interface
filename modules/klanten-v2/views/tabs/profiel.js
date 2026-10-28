@@ -310,12 +310,14 @@ function renderOnboardingSummary(ob) {
     ob.duur_maanden != null ? `${ob.duur_maanden} mnd` : null,
     ob.calls != null ? `${ob.calls} calls` : null,
   ].filter(Boolean).join(' · ');
-  const showStep = ob.current_step != null && String(ob.status).toLowerCase() === 'bezig';
+  // De stand in de NIEUWE onboarding (28 okt 2026); nooit meer een pagina van de oude wizard als "Stap N".
+  const stapTekst = ob.voortgang?.label || (ob.current_step != null ? 'Stap ' + ob.current_step : '');
+  const showStep = !!stapTekst && ['aangemeld', 'bezig'].includes(String(ob.status).toLowerCase());
   return `
     <div class="kv-prof-ob">
       <div class="kv-prof-ob-top">
         ${obStatusPill(ob.status)}
-        ${showStep ? `<span class="kv-prof-ob-step">Stap ${K().esc(String(ob.current_step))}</span>` : ''}
+        ${showStep ? `<span class="kv-prof-ob-step">${K().esc(stapTekst)}</span>` : ''}
       </div>
       ${trajectBits ? `<div class="kv-prof-ob-traject">${K().esc(trajectBits)}</div>` : ''}
       <div class="kv-prof-ob-meta">

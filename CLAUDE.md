@@ -340,6 +340,19 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   belmoment in een EIGEN LMS-tabel `hlms_crm_onboarding_automation` (RLS: enkel hoofdmentor/admin). Zonder de
   LMS-migratie (dfo-lms-prototype supabase/hlms_crm_onboarding_antwoorden.sql) schrijft de spiegel zonder die velden.
   Het hoofdmentorbord krijgt `onboarding_antwoorden` per rij via onboarding-overzicht-rijen.js.
+  OUDE WIZARD vs NIEUWE ONBOARDING (28 okt): current_step van de klassieke wizard (tot 10 pagina's) ≠ scherm van de
+  portal. Kenmerk = `onboardings.portal_gestart_op` (eerste portal-save of afronden; `portal_geopend_op` = eerste open),
+  NOOIT de sleutels in answers. Eén afleiding `portalVoortgang()` in onboarding-antwoorden.js (stand niet_gestart /
+  oude_wizard / bezig x/y / afgerond + label) voor lijst (kolom Voortgang + tab/tegel "Moet onboarding nog afronden"),
+  detail, profiel, v1-overzicht, LMS-bord en spiegel. Kolommen faalzacht via onboarding-portal-kolommen.js (zonder
+  migratie: afleiding van vóór 28 okt). Portal 'open' geeft `hervatStap()`: oude wizard → eerste onbeantwoorde vraag
+  van de nieuwe flow, anders afgeklemd. Migratie docs/sql-migrations/2026-10-28-onboarding-portal-gestart.sql.
+  "ONBOARDING IS KLAAR" (28 okt): `onboardingKlaar()` in onboarding-einde.js = status 'afgerond' OF handmatig_afgerond_op
+  OF auto_afgerond_op — gebruikt door voortgang, tegel "Moet onboarding nog afronden", check-in-doelgroep (klaar + niet
+  recent → wél check-in) en de portal. Met de hand afronden zet sinds 28 okt ook status 'afgerond' + completed_at
+  (zelfde moment → `wizardDoorKlantVoltooid` = false: portal blijft invulbaar, afronden draait GEEN rondWizardAf). De
+  automation-catch-up on_wizard_completed slaat handmatig/auto afgesloten over. Backfill
+  docs/sql-migrations/2026-10-28-onboarding-handmatig-status-backfill.sql (pas NA de merge draaien).
 - Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE studenten op
   www.deforexopleiding.nl/checkin (dfo-website): LMS-pop-up (één keer) + balk met een persoonlijke
   code tot verstuurd. DATA IN HET LMS (dfo-lms): `hlms_checkin_campagne` (concept → test → live ⇄

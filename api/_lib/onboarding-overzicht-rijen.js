@@ -29,6 +29,7 @@ import {
   buildAvailabilityView,
 } from './onboarding-wizard-default.js';
 import { antwoordenVoorLms } from './onboarding-antwoorden.js';
+import { leesPortalKolommen } from './onboarding-portal-kolommen.js';
 
 function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
@@ -79,6 +80,11 @@ export async function bouwOverzichtRijen(opts = {}) {
     if (rowErr) throw new Error('onboardings fetch: ' + rowErr.message);
     const list = rows || [];
     if (list.length === 0) return [];
+    // Oude wizard vs nieuwe onboarding (28 okt 2026): portal_gestart_op /
+    // portal_geopend_op apart en faalzacht. null = kolommen nog niet te lezen
+    // → de afleiding valt terug op die van vóór 28 okt (geen "oude wizard").
+    const portalKol = await leesPortalKolommen(supabaseAdmin, list.map((r) => r.id));
+    if (portalKol) for (const r of list) Object.assign(r, portalKol.get(r.id) || { portal_gestart_op: null, portal_geopend_op: null });
     // Met de hand afgerond (6 okt 2026): aparte, faalzachte lezing, zodat het
     // overzicht niet omvalt zolang de migratie nog niet gedraaid is.
     await vulHandmatigAan(supabaseAdmin, list);

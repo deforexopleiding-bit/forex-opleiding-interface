@@ -14,11 +14,16 @@
 // DOELGROEP (opdracht 27 okt 2026):
 //   hlms_student met auth_id, eind_datum ≥ vandaag, product mentorship of
 //   membership. UITGESLOTEN: wie een CRM-onboarding heeft die nog loopt
-//   (aangemeld of bezig) of in de laatste 30 dagen gestart is — die deed net de
-//   nieuwe onboarding —, en de testaccounts. De onboarding wordt gevonden via
-//   hlms_student.crm_onboarding_id én via het e-mailadres van de klant (niet
-//   elke student is aan zijn onboarding gekoppeld).
+//   (aangemeld of bezig, en NIET klaar) of in de laatste 30 dagen gestart is —
+//   die deed net de nieuwe onboarding —, en de testaccounts. "Klaar" is de
+//   gedeelde regel van onboarding-einde.js (28 okt 2026): status afgerond OF
+//   met de hand OF door een sessie afgesloten — met de hand afgeronde
+//   onboardings stonden nog op aangemeld/bezig en vielen zo ten onrechte uit.
+//   De onboarding wordt gevonden via hlms_student.crm_onboarding_id én via
+//   het e-mailadres van de klant (niet elke student is aan zijn onboarding
+//   gekoppeld).
 
+import { onboardingKlaar } from './onboarding-einde.js';
 import { LABELS, VRAAG, signaalVoor } from './checkin-portal.js';
 
 /**
@@ -81,7 +86,7 @@ export function doelgroep({ studenten, onboardings, testEmails = testaccounts(),
     const obs = [];
     if (s.crm_onboarding_id && perId.has(String(s.crm_onboarding_id))) obs.push(perId.get(String(s.crm_onboarding_id)));
     for (const o of perEmail.get(lower(s.email)) || []) if (!obs.includes(o)) obs.push(o);
-    if (obs.some((o) => o.status === 'aangemeld' || o.status === 'bezig')) {
+    if (obs.some((o) => (o.status === 'aangemeld' || o.status === 'bezig') && !onboardingKlaar(o))) {
       uitgesloten.push({ student: s, reden: 'onboarding_loopt' }); continue;
     }
     if (obs.some((o) => { const t = Date.parse(o.started_at || o.created_at || ''); return Number.isFinite(t) && t >= grens; })) {

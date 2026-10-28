@@ -54,6 +54,7 @@ import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 import { antwoordenVoorLms } from './onboarding-antwoorden.js';
+import { vulPortalKolommenAan } from './onboarding-portal-kolommen.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
 // De Autopilot-interesse (28 okt 2026) staat in een EIGEN tabel: alleen de
@@ -175,6 +176,8 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     if (ob) await vulHandmatigAan(supabaseAdmin, ob);
     // In incasso-opvolging (6 okt 2026): ook een aparte, faalzachte lezing.
     if (ob) await vulIncassoAan(supabaseAdmin, ob);
+    // Oude wizard vs nieuwe onboarding (28 okt 2026): faalzacht, zie onboarding-portal-kolommen.js.
+    if (ob) await vulPortalKolommenAan(supabaseAdmin, ob);
 
     // DE INTAKE-POT (5 oktober 2026) — vóór de vroege uitgangen hieronder,
     // want een onboarding zonder LMS-student of een geannuleerde hoort daar

@@ -300,13 +300,26 @@ function renderOverzichtTab() {
     </div>`;
 }
 
+// De stand in de NIEUWE onboarding (28 okt 2026) — dezelfde afleiding als de
+// lijst en het LMS (api/_lib/onboarding-antwoorden.js portalVoortgang). De
+// pagina van de klassieke wizard staat er alleen nog als uitleg bij.
+function voortgangHtml(o) {
+  const v = o.portal?.voortgang;
+  if (!v || !v.label) return o.current_step != null ? 'Stap ' + esc(String(o.current_step)) : '—';
+  if (v.stand === 'oude_wizard') {
+    return `<span style="color:var(--amber,#B7791F)">${esc(v.label)}</span>`
+      + `<div class="kv-onb-hint" style="margin-top:4px">Begonnen in de klassieke wizard (pagina ${esc(String(o.current_step ?? '?'))}). Opent de klant de nieuwe link, dan start hij bij de eerste vraag die nog open staat.</div>`;
+  }
+  return esc(v.label);
+}
+
 // ── Sub-tab 2: Account & LMS ───────────────────────────────────────────────
 function renderAccountTab() {
   const o = state.data;
   return `
     <div class="kv-onb-meta">
       <div class="kv-onb-meta-row"><span>Invite verstuurd</span><span>${fmtDT(o.invite_sent_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Wizard-stap</span><span>${o.current_step != null ? String(o.current_step) : '—'}</span></div>
+      <div class="kv-onb-meta-row"><span>Voortgang</span><span>${voortgangHtml(o)}</span></div>
       <div class="kv-onb-meta-row"><span>Persoonlijke link</span><span>${o.portal?.persoonlijke_link ? `<a href="${esc(o.portal.persoonlijke_link)}" target="_blank" rel="noopener">Openen ↗</a>` : (o.token ? `<a href="/modules/onboarding.html?t=${esc(o.token)}" target="_blank" rel="noopener">Openen ↗</a>` : '—')}</span></div>
     </div>
 
@@ -500,6 +513,10 @@ function renderVragenlijstTab() {
   const bm = Array.isArray(a.belmoment) && a.belmoment.length
     ? a.belmoment.map((b) => portalLabel('robot_belmoment', b)).join(', ') : '<span style="color:var(--text-3)">geen voorkeur</span>';
   return `
+    <div class="kv-onb-section">
+      <div class="kv-onb-section-title">Voortgang</div>
+      <div style="font-size:13px">${voortgangHtml(o)}</div>
+    </div>
     <div class="kv-onb-section">
       <div class="kv-onb-section-title">Startcode</div>
       ${startcode}

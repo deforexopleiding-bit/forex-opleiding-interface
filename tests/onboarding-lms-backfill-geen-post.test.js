@@ -160,7 +160,10 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // antwoorden mee (onboarding-antwoorden.js), met de whitelist van de portal
   // (onboarding-portal.js) en de flow-regel per traject (onboarding-wizard-
   // default.js). Alle drie puur: geen I/O, niets dat verstuurt.
-  assert.ok(AFSLUITING.size <= 24,
+  // 24 → 25 (28 oktober 2026, Maxim): onboarding-portal-kolommen.js — de
+  // spiegel leest portal_gestart_op/portal_geopend_op (oude wizard vs nieuwe
+  // onboarding). Alleen lezen.
+  assert.ok(AFSLUITING.size <= 25,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

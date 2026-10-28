@@ -162,7 +162,7 @@ export async function berekenDoelgroep({ lms, crm, nu = new Date() }) {
     mentorNamen(lms),
   ]);
   const { data: obs, error } = await crm.from('onboardings')
-    .select('id, status, started_at, created_at, is_test, customer:customers(email)')
+    .select('id, status, started_at, created_at, is_test, handmatig_afgerond_op, auto_afgerond_op, customer:customers(email)')
     .range(0, 9999);
   // Zonder de onboardings kunnen we niet uitsluiten wie net de nieuwe onboarding
   // deed — dan liever geen Run dan een te brede.

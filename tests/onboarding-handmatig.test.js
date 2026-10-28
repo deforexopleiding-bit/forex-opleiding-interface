@@ -4,6 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   onboardingAfgesloten, afgeslotenOp, afgeslotenDoor, lmsStandVoor,
 } from '../api/_lib/onboarding-einde.js';
@@ -69,8 +70,27 @@ test('AFRONDEN: reden verplicht, schrijft drie velden en een tijdlijnregel', asy
   assert.equal(db.log.updates[0].handmatig_afgerond_door, 'Maxim');
   assert.equal(db.log.updates[0].handmatig_afgerond_reden, 'traject loopt al, calls in Bubble');
   assert.match(db.log.inserts[0].v.note, /met de hand afgerond door Maxim\. Reden: traject loopt al/);
-  // De wizardstatus blijft wat hij was.
-  assert.equal(ob.status, 'bezig');
+  // Sinds 28 okt 2026 (Maxim): ook status 'afgerond' + completed_at, op
+  // HETZELFDE moment als handmatig_afgerond_op — zo blijft te zien dat de klant
+  // de wizard niet zelf voltooide (wizardDoorKlantVoltooid), en lezen de
+  // check-in-doelgroep en "Moet onboarding nog afronden" hem als klaar.
+  assert.equal(db.log.updates[0].status, 'afgerond');
+  assert.equal(db.log.updates[0].completed_at, db.log.updates[0].handmatig_afgerond_op);
+});
+
+test('AFRONDEN: wizard al voltooid (status afgerond) → status en wizardmoment blijven staan', async () => {
+  const db = nepDb({ onboarding: { id: 'o1', status: 'afgerond', completed_at: '2026-10-01T10:00:00Z', archived_at: null } });
+  const r = await rondOnboardingHandmatigAf({ onboardingId: 'o1', reden: 'traject loopt al', door: 'Maxim', db });
+  assert.equal(r.status, 200);
+  assert.equal('status' in db.log.updates[0], false);
+  assert.equal('completed_at' in db.log.updates[0], false);
+});
+
+test('AFRONDEN: geen automations van wizard-afronding — niet in deze code, en de catch-up slaat afgesloten onboardings over', () => {
+  const bron = readFileSync(new URL('../api/_lib/onboarding-handmatig.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(bron.replace(/\/\/.*$/gm, ''), /rondWizardAf|enrollForTrigger|on_wizard_completed/);
+  const engine = readFileSync(new URL('../api/_lib/onboarding-automation-engine.js', import.meta.url), 'utf8');
+  assert.match(engine, /q = q\.eq\('status', 'afgerond'\)\.not\('completed_at', 'is', null\)[\s\S]{0,400}\.is\('handmatig_afgerond_op', null\)[\s\S]{0,40}\.is\('auto_afgerond_op', null\)/);
 });
 
 test('AFRONDEN: geannuleerd mag niet, en vóór de migratie een duidelijke 503', async () => {
