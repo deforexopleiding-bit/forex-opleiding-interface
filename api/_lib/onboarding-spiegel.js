@@ -53,8 +53,22 @@ import { lmsStandVoor, afgeslotenOp } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
+import { antwoordenVoorLms } from './onboarding-antwoorden.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
+// De Autopilot-interesse (28 okt 2026) staat in een EIGEN tabel: alleen de
+// hoofdmentor en de admin lezen hem (RLS); de mentor niet. Ook die tabel
+// schrijft alleen dit bestand.
+export const AUTOMATION_TABEL = 'hlms_crm_onboarding_automation';
+
+// De kolommen die de antwoorden-migratie (dfo-lms supabase/
+// hlms_crm_onboarding_antwoorden.sql) toevoegt. Bestaan ze nog niet, dan
+// schrijft de spiegel de rij zonder deze velden — hij valt nooit stil op een
+// kolom die er pas morgen is.
+export const ANTWOORD_KOLOMMEN = Object.freeze([
+  'flow_type', 'portal_stand', 'portal_afgerond_op', 'coaching_locatie_voorkeur',
+  'ervaring_trading', 'motivatie_primair', 'commitment_uren_per_week', 'beschikbaarheid',
+]);
 
 // Dezelfde woordenlijst als api/_lib/dfo-lms-sessies.js. Bewust geen tweede
 // vocabulaire voor hetzelfde begrip.
@@ -128,16 +142,6 @@ export function hoortZichtbaarTeZijn(ob) {
 }
 
 /**
- * Het aantal stappen in de wizard van dit traject. Zonder totaal zegt een
- * stapnummer niets: "stap 3" is geen stand, "3 van 7" wel.
- */
-function telStappen(structure) {
-  if (!structure || typeof structure !== 'object') return null;
-  const pages = Array.isArray(structure.pages) ? structure.pages : [];
-  return pages.length > 0 ? pages.length : null;
-}
-
-/**
  * Spiegel één onboarding naar het LMS.
  *
  * Gooit NOOIT. De aanroeper (een endpoint na zijn hoofdactie, of de cron)
@@ -195,9 +199,9 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // ── 2) De vier feiten ────────────────────────────────────────────────
     // Alles wat kan mislukken, mislukt hier — vóór er ook maar iets
     // geschreven is. Zo bestaat een halve rij niet.
-    // Het traject wordt ÉÉN keer gelezen; zowel de waiver-sleutel als het
-    // aantal stappen komen uit dezelfde structuur.
-    const [betaald, wizard, dealRow, mentor, tel, lmsAfstand] = await Promise.all([
+    // De wizard-structuur wordt ÉÉN keer gelezen, voor de waiver-sleutel. Het
+    // aantal stappen komt sinds 28 okt 2026 uit de nieuwe flow (het traject).
+    const [betaald, wizard, dealRow, mentor, tel, lmsAfstand, trajectType] = await Promise.all([
       leesEersteFactuurBetaald(ob.customer_id),
       leesWizardStructuur(),
       leesOfferteDeal(ob.customer_id),
@@ -208,6 +212,9 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // Afstand van bedenktijd in de LMS-voorwaardenpoort (27 okt 2026) —
       // faalzacht: een lege map laat alleen de wizard-waiver tellen.
       leesLmsAfstand([ob.dfo_lms_student_id], lms),
+      // Het traject (1-op-1 of membership) bepaalt de stappen van de nieuwe
+      // flow. Faalzacht: `undefined` = niet gelezen → stappen onbekend.
+      leesTrajectType(ob.traject_id),
     ]);
     const structure = wizard.structure;
 
@@ -215,7 +222,11 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       lmsAfstand.get(String(ob.dfo_lms_student_id)) || null);
     const bedenktijdInfo = computeBedenktijd(
       waiver, leesOfferteMoment(dealRow), opties.nu);
-    const stappenTotaal = telStappen(structure);
+    // DE ANTWOORDEN EN DE STAPPEN VAN DE NIEUWE FLOW (28 okt 2026) — zie
+    // onboarding-antwoorden.js. "Stap X van Y" telt de vraagschermen van de
+    // portal (1-op-1: 4, membership: 2), niet meer de pagina's van de
+    // klassieke wizard.
+    const ant = antwoordenVoorLms(ob, trajectType);
 
     // ── 3) De volledige rij, in één keer ─────────────────────────────────
     const rij = {
@@ -237,8 +248,8 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // dezelfde regel: nooit meer `completed_at` (= het wizardmoment).
       onboarding_stand       : lmsStandVoor(ob),
       afgerond_op            : afgeslotenOp(ob),
-      wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
-      wizard_stappen_totaal  : stappenTotaal,
+      wizard_stap            : ant.wizard_stap,
+      wizard_stappen_totaal  : ant.wizard_stappen_totaal,
       eerste_factuur_betaald : betaald,
       bedenktijd_status      : bedenktijdInfo.status,
       bedenktijd_vervalt_op  : bedenktijdInfo.vervalt_op,
@@ -251,9 +262,20 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       bron_fout              : wizard.fout,
       // Het telefoonnummer (6 okt 2026) — zie onboarding-telefoon.js.
       telefoon               : tel.telefoon,
+      // De onboarding-antwoorden (28 okt 2026). Ook voor de mentor: hij plant
+      // er de eerste sessie mee. GEEN automation hier — zie hieronder.
+      flow_type                : ant.flow_type,
+      portal_stand             : ant.portal_stand,
+      portal_afgerond_op       : ant.portal_afgerond_op,
+      coaching_locatie_voorkeur: ant.coaching_locatie_voorkeur,
+      ervaring_trading         : ant.ervaring_trading,
+      motivatie_primair        : ant.motivatie_primair,
+      commitment_uren_per_week : ant.commitment_uren_per_week,
+      beschikbaarheid          : ant.beschikbaarheid,
     };
 
     await schrijfSpiegelRij(lms, rij);
+    await schrijfAutomation(lms, ob.id, ant);
     await vulStudentTelefoonAan(lms, ob.dfo_lms_student_id, tel.telefoon);
 
     // DE FACTUURSTAND MEE, meteen. Een student in onboarding staat in het LMS
@@ -284,6 +306,21 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
 }
 
 let _telefoonKolomOntbreektGemeld = false;
+let _antwoordKolommenOntbrekenGemeld = false;
+let _automationTabelOntbreektGemeld = false;
+
+/** Is dit "een van de antwoordkolommen bestaat (nog) niet"? PURE. */
+export function isAntwoordKolomOntbreekt(err) {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || '');
+  return (code === 'PGRST204' || code === '42703') && ANTWOORD_KOLOMMEN.some((k) => msg.includes(k));
+}
+
+/** Bestaat de automation-tabel (nog) niet? PURE. */
+export function isTabelOntbreekt(err) {
+  const code = String(err?.code || '');
+  return code === '42P01' || code === 'PGRST205' || /does not exist|could not find the table/i.test(String(err?.message || ''));
+}
 
 /** Is dit de fout "kolom telefoon bestaat (nog) niet"? PURE. */
 export function isTelefoonKolomOntbreekt(err) {
@@ -300,6 +337,17 @@ export function isTelefoonKolomOntbreekt(err) {
  */
 async function schrijfSpiegelRij(lms, rij) {
   let { error } = await lms.from(SPIEGEL_TABEL).upsert(rij, { onConflict: 'crm_onboarding_id' });
+  //  DE ANTWOORDKOLOMMEN (28 okt 2026): migratie hlms_crm_onboarding_antwoorden.sql
+  //  nog niet gedraaid → zonder die velden, de rest van de rij gaat gewoon door.
+  if (error && isAntwoordKolomOntbreekt(error)) {
+    if (!_antwoordKolommenOntbrekenGemeld) {
+      console.warn('[onboarding-spiegel] antwoordkolommen ontbreken op ' + SPIEGEL_TABEL
+        + ' — draai hlms_crm_onboarding_antwoorden.sql; rij zonder antwoorden geschreven.');
+      _antwoordKolommenOntbrekenGemeld = true;
+    }
+    rij = Object.fromEntries(Object.entries(rij).filter(([k]) => !ANTWOORD_KOLOMMEN.includes(k)));
+    ({ error } = await lms.from(SPIEGEL_TABEL).upsert(rij, { onConflict: 'crm_onboarding_id' }));
+  }
   if (error && isTelefoonKolomOntbreekt(error)) {
     if (!_telefoonKolomOntbreektGemeld) {
       console.warn('[onboarding-spiegel] kolom telefoon ontbreekt op ' + SPIEGEL_TABEL
@@ -310,6 +358,55 @@ async function schrijfSpiegelRij(lms, rij) {
     ({ error } = await lms.from(SPIEGEL_TABEL).upsert(zonder, { onConflict: 'crm_onboarding_id' }));
   }
   if (error) throw new Error('spiegel schrijven: ' + error.message);
+}
+
+/**
+ * DE AUTOPILOT-INTERESSE, in een eigen tabel (28 okt 2026). Alleen de
+ * hoofdmentor en de admin lezen hem; een mentor niet (RLS in
+ * hlms_crm_onboarding_antwoorden.sql). Faalzacht: een ontbrekende tabel of een
+ * schrijffout houdt de spiegelrij niet tegen — die staat er al.
+ */
+async function schrijfAutomation(lms, onboardingId, ant) {
+  try {
+    const { error } = await lms.from(AUTOMATION_TABEL).upsert({
+      crm_onboarding_id   : onboardingId,
+      automation_interesse: ant.automation_interesse,
+      automation_belmoment: ant.automation_belmoment,
+      bijgewerkt_op       : new Date().toISOString(),
+    }, { onConflict: 'crm_onboarding_id' });
+    if (!error) return;
+    if (isTabelOntbreekt(error)) {
+      if (!_automationTabelOntbreektGemeld) {
+        console.warn('[onboarding-spiegel] ' + AUTOMATION_TABEL + ' ontbreekt — draai hlms_crm_onboarding_antwoorden.sql.');
+        _automationTabelOntbreektGemeld = true;
+      }
+      return;
+    }
+    console.warn('[onboarding-spiegel] automation schrijven: ' + error.message);
+  } catch (e) {
+    console.warn('[onboarding-spiegel] automation schrijven: ' + (e?.message || e));
+  }
+}
+
+/**
+ * Het type van het traject ('1op1' | 'membership'), `null` zonder traject, of
+ * `undefined` als het niet gelezen kon worden. Gooit nooit: de stappen zijn
+ * dan onbekend, de rest van de rij klopt gewoon.
+ */
+async function leesTrajectType(trajectId) {
+  if (!trajectId) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('onboarding_trajecten').select('type').eq('id', trajectId).maybeSingle();
+    if (error) {
+      console.warn('[onboarding-spiegel] traject lezen: ' + error.message);
+      return undefined;
+    }
+    return data?.type ?? null;
+  } catch (e) {
+    console.warn('[onboarding-spiegel] traject lezen: ' + (e?.message || e));
+    return undefined;
+  }
 }
 
 /**

@@ -328,6 +328,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   achter de vlag door naar de portal (`portal_url` uit onboarding-wizard-get); `?klassiek=1` = oude wizard. Automation-
   mailstap: een regel `{{onboarding.startcode}}` = code groot, een regel `[knop: Label]` = knop (onboarding-mail-opmaak.js);
   zonder die regels exact de oude platte mail. WhatsApp `welkom_onboarding` heeft de link als variabele {{2}} → geen Meta-wijziging.
+  ANTWOORDEN IN HET LMS (28 okt): de spiegel (`onboarding-spiegel.js`, nog altijd de ENIGE schrijver) neemt via
+  `api/_lib/onboarding-antwoorden.js` (puur) de portalstand (niet_gestart/bezig/afgerond + portal_afgerond_op),
+  flow_type, coachingvoorkeur, ervaring, motivatie, uren/week en beschikbaarheid mee naar `hlms_crm_onboarding`.
+  wizard_stap/-totaal = ingevulde VRAAGSCHERMEN van de nieuwe flow (1op1 4: locatie/jij/beschikbaar/extra, membership 2:
+  jij/extra), uit de antwoorden en niet uit current_step (klassieke wizard droeg 6/9). Autopilot-interesse +
+  belmoment in een EIGEN LMS-tabel `hlms_crm_onboarding_automation` (RLS: enkel hoofdmentor/admin). Zonder de
+  LMS-migratie (dfo-lms-prototype supabase/hlms_crm_onboarding_antwoorden.sql) schrijft de spiegel zonder die velden.
+  Het hoofdmentorbord krijgt `onboarding_antwoorden` per rij via onboarding-overzicht-rijen.js.
 - Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE studenten op
   www.deforexopleiding.nl/checkin (dfo-website): LMS-pop-up (één keer) + balk met een persoonlijke
   code tot verstuurd. DATA IN HET LMS (dfo-lms): `hlms_checkin_campagne` (concept → test → live ⇄

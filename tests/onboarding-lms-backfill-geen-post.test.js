@@ -156,7 +156,11 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // 20 → 21 (6 oktober 2026, Maxim): onboarding-incasso-stand.js — de spiegel
   // leest of een onboarding in incasso-opvolging staat (dan uit het LMS).
   // Alleen lezen; het schrijvende onboarding-incasso.js zit er bewust NIET in.
-  assert.ok(AFSLUITING.size <= 21,
+  // 21 → 24 (28 oktober 2026, Maxim): de spiegel neemt de onboarding-
+  // antwoorden mee (onboarding-antwoorden.js), met de whitelist van de portal
+  // (onboarding-portal.js) en de flow-regel per traject (onboarding-wizard-
+  // default.js). Alle drie puur: geen I/O, niets dat verstuurt.
+  assert.ok(AFSLUITING.size <= 24,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });
