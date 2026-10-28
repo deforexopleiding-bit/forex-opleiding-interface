@@ -107,6 +107,83 @@ export function doelgroep({ studenten, onboardings, testEmails = testaccounts(),
   return { ontvangers, uitgesloten };
 }
 
+// ── DE LIJN ONBOARDING ↔ CHECK-IN (Maxim, 28 okt 2026) ─────────────────────
+// Harde regel: elke actieve student zit in de onboarding OF in de check-in,
+// nooit in beide. Onboarding = de onboarding loopt nog (niet klaar), of begon /
+// werd ingevuld in de laatste 30 dagen — precies de uitsluitredenen van
+// doelgroep(). Check-in = de ontvangers van doelgroep(). Wie in geen van beide
+// valt, krijgt een reden; die lijst hoort leeg of verklaard te zijn.
+
+export const ONBOARDING_REDENEN = Object.freeze(['onboarding_loopt', 'onboarding_recent', 'onboarding_portal_recent']);
+export const GEEN_VAN_BEIDE = Object.freeze({
+  geen_account: 'Nog geen LMS-account (nooit ingelogd of niet aangemaakt)',
+  ander_product: 'Geen mentorship of membership',
+  testaccount: 'Testaccount',
+});
+
+/**
+ * De lijn: per ACTIEVE student (einddatum ≥ vandaag) precies één plek. PURE.
+ * @returns {{onboarding: object[], checkin: object[], geen: object[], dubbel: object[]}}
+ *   elk element { student, reden }; `dubbel` hoort ALTIJD leeg te zijn.
+ */
+export function lijn({ studenten, onboardings, testEmails = testaccounts(), nu = new Date() }) {
+  const dag = vandaag(nu);
+  const actief = (studenten || []).filter((s) => s.eind_datum && String(s.eind_datum).slice(0, 10) >= dag);
+  const dg = doelgroep({ studenten: actief, onboardings, testEmails, nu });
+  const plek = new Map();
+  for (const s of dg.ontvangers) plek.set(s.id, { student: s, reden: 'checkin', kant: 'checkin' });
+  for (const u of dg.uitgesloten) {
+    plek.set(u.student.id, ONBOARDING_REDENEN.includes(u.reden)
+      ? { student: u.student, reden: u.reden, kant: 'onboarding' }
+      : { student: u.student, reden: u.reden, kant: 'geen' });
+  }
+  //  Wat doelgroep() stil overslaat: geen account, ander product. Ook die
+  //  kunnen nog een lopende onboarding hebben — dan horen ze bij de onboarding.
+  const perId = new Map((onboardings || []).filter((o) => !o.is_test).map((o) => [String(o.id), o]));
+  const perEmail = new Map();
+  for (const o of onboardings || []) {
+    if (o.is_test) continue;
+    const e = lower(o.email);
+    if (e) (perEmail.get(e) || perEmail.set(e, []).get(e)).push(o);
+  }
+  for (const s of actief) {
+    if (plek.has(s.id)) continue;
+    const obs = [...(s.crm_onboarding_id && perId.has(String(s.crm_onboarding_id)) ? [perId.get(String(s.crm_onboarding_id))] : []), ...(perEmail.get(lower(s.email)) || [])];
+    if (obs.some((o) => (o.status === 'aangemeld' || o.status === 'bezig') && !onboardingKlaar(o))) {
+      plek.set(s.id, { student: s, reden: 'onboarding_loopt', kant: 'onboarding' });
+    } else {
+      plek.set(s.id, { student: s, reden: !s.auth_id ? 'geen_account' : 'ander_product', kant: 'geen' });
+    }
+  }
+  const uit = { onboarding: [], checkin: [], geen: [], dubbel: [] };
+  for (const p of plek.values()) uit[p.kant].push({ student: p.student, reden: p.reden });
+  //  De controle: niemand in de check-in met een lopende onboarding.
+  for (const c of uit.checkin) {
+    const s = c.student;
+    const obs = [...(s.crm_onboarding_id && perId.has(String(s.crm_onboarding_id)) ? [perId.get(String(s.crm_onboarding_id))] : []), ...(perEmail.get(lower(s.email)) || [])];
+    if (obs.some((o) => !onboardingKlaar(o) && (o.status === 'aangemeld' || o.status === 'bezig'))) uit.dubbel.push({ student: s, reden: 'checkin_met_lopende_onboarding' });
+  }
+  return uit;
+}
+
+/** De telling voor het scherm (zonder persoonsgegevens behalve bij "geen van beide"). PURE. */
+export function lijnSamenvatting(l) {
+  const per = (lijst) => lijst.reduce((m, x) => ({ ...m, [x.reden]: (m[x.reden] || 0) + 1 }), {});
+  return {
+    onboarding: l.onboarding.length,
+    onboarding_per_reden: per(l.onboarding),
+    checkin: l.checkin.length,
+    geen: l.geen.length,
+    geen_per_reden: per(l.geen),
+    geen_lijst: l.geen.slice(0, 500).map((g) => ({
+      naam: [g.student.voornaam, g.student.achternaam].filter(Boolean).join(' ') || g.student.email || g.student.id,
+      email: g.student.email || null, product: g.student.product_soort || null, reden: g.reden,
+      reden_label: GEEN_VAN_BEIDE[g.reden] || UITSLUIT_REDEN[g.reden] || g.reden,
+    })),
+    dubbel: l.dubbel.length,
+  };
+}
+
 /** Tellingen voor het bevestigingsvenster van Run. */
 export function doelgroepSamenvatting({ ontvangers, uitgesloten }, mentorNamen = new Map()) {
   const perProduct = { mentorship: 0, membership: 0 };

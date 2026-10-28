@@ -368,6 +368,55 @@ test('Run-venster: leest portal_gestart_op mee, toont de redenen apart en waarsc
   const view = readFileSync(new URL('../modules/klanten-v2/views/studentencheckin-v2.js', import.meta.url), 'utf8');
   assert.match(view, /uitgesloten_per_reden/);
   assert.match(view, /s\.waarschuwing/);
-  assert.match(readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8'), /studentencheckin-v2\.js\?v=2/);
+  assert.match(readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8'), /studentencheckin-v2\.js\?v=([2-9]|\d\d)"/);
   assert.match(readFileSync(new URL('../api/checkin-beheer.js', import.meta.url), 'utf8'), /leesPortalKolommen\(crm,/);
+});
+
+// ── DE LIJN ONBOARDING ↔ CHECK-IN (28 okt 2026) ────────────────────────────
+import { lijn, lijnSamenvatting } from '../api/_lib/checkin-beheer.js';
+
+test('LIJN: elke actieve student precies één plek; niemand in beide; "geen van beide" met reden', () => {
+  const nu = new Date('2026-10-28T10:00:00Z');
+  const st = (id, over = {}) => ({ id, auth_id: 'a-' + id, email: id + '@x.nl', product_soort: 'mentorship', eind_datum: '2027-06-01', crm_onboarding_id: null, ...over });
+  const studenten = [
+    st('loopt', { crm_onboarding_id: 'o1' }),
+    st('recent', { email: 'recent@x.nl' }),
+    st('klaar-oud', { crm_onboarding_id: 'o3' }),
+    st('geen-ob'),
+    st('test', { email: 'maxim@deforexopleiding.nl' }),
+    st('zonder-account', { auth_id: null }),
+    st('zonder-account-loopt', { auth_id: null, crm_onboarding_id: 'o4' }),
+    st('trial', { product_soort: 'trial' }),
+    st('voorbij', { eind_datum: '2026-10-01' }),
+  ];
+  const onboardings = [
+    { id: 'o1', status: 'bezig', created_at: '2026-08-01T00:00:00Z', email: 'loopt@x.nl' },
+    { id: 'o2', status: 'afgerond', created_at: '2026-10-20T00:00:00Z', email: 'recent@x.nl' },
+    { id: 'o3', status: 'bezig', created_at: '2026-06-01T00:00:00Z', handmatig_afgerond_op: '2026-07-01T00:00:00Z' },
+    { id: 'o4', status: 'aangemeld', created_at: '2026-06-01T00:00:00Z' },
+  ];
+  const l = lijn({ studenten, onboardings, testEmails: ['maxim@deforexopleiding.nl'], nu });
+  const kant = (id) => ['onboarding', 'checkin', 'geen'].filter((k) => l[k].some((x) => x.student.id === id));
+  //  Precies één plek voor elke actieve student; wie voorbij is, telt niet.
+  for (const s of studenten.filter((x) => x.id !== 'voorbij')) assert.equal(kant(s.id).length, 1, s.id);
+  assert.deepEqual(kant('voorbij'), []);
+  assert.deepEqual(kant('loopt'), ['onboarding']);
+  assert.deepEqual(kant('recent'), ['onboarding']);
+  assert.deepEqual(kant('klaar-oud'), ['checkin'], 'met de hand afgerond, lang geleden: check-in');
+  assert.deepEqual(kant('geen-ob'), ['checkin']);
+  assert.deepEqual(kant('zonder-account-loopt'), ['onboarding'], 'ook zonder account: de onboarding loopt');
+  assert.deepEqual(l.geen.map((g) => [g.student.id, g.reden]).sort(), [['test', 'testaccount'], ['trial', 'ander_product'], ['zonder-account', 'geen_account']]);
+  assert.deepEqual(l.dubbel, []);
+  const s = lijnSamenvatting(l);
+  assert.equal(s.onboarding + s.checkin + s.geen, 8);
+  assert.equal(s.dubbel, 0);
+  assert.equal(s.geen_lijst.length, 3);
+  assert.ok(s.geen_lijst.every((g) => g.reden_label && g.reden_label !== g.reden));
+});
+
+test('LIJN: het endpoint kent ?lijn=1 en leest dezelfde onboardings als Run', () => {
+  const src = readFileSync(new URL('../api/checkin-beheer.js', import.meta.url), 'utf8');
+  assert.match(src, /String\(q\.lijn \|\| ''\) === '1'/);
+  assert.match(src, /export async function berekenLijn/);
+  assert.equal((src.match(/await leesDoelgroepOnboardings\(crm\)/g) || []).length, 2, 'Run en de lijn: één bron');
 });

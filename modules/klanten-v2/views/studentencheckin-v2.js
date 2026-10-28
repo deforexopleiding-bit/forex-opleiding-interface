@@ -326,8 +326,43 @@
   }
 
   function overzicht() {
-    return geraamte(() => kpiStrip(st.data.kpi || {}) + filters(st.data) + tabel(rijen()));
+    return geraamte(() => kpiStrip(st.data.kpi || {}) + filters(st.data) + tabel(rijen()) + lijnKaart());
   }
+
+  // ── DE LIJN ONBOARDING ↔ CHECK-IN (28 okt 2026) ───────────────────────────
+  // Elke actieve student zit in de onboarding OF in de check-in, nooit in
+  // beide. Op vraag gemeten op de echte data (GET ?lijn=1); "geen van beide"
+  // staat er met naam en reden.
+  function lijnKaart() {
+    const l = st.lijn;
+    let h = `<div class="card" style="margin-top:12px" data-testid="ck-lijn"><div class="card-head"><div class="card-title">De lijn onboarding ↔ check-in</div>`
+      + `<button type="button" class="btn btn-ghost btn-sm" onclick="window.__ckLijn()" ${l && l.laden ? 'disabled' : ''}>${l && l.laden ? 'Bezig…' : (l && l.data ? 'Opnieuw meten' : 'Meten')}</button></div>`;
+    if (!l || (!l.data && !l.fout)) return h + `<div class="card-body ck-sub">Elke actieve student (einddatum vandaag of later) hoort in precies één van beide: de onboarding (loopt nog, of begon / werd ingevuld in de laatste 30 dagen) of de check-in.</div></div>`;
+    if (l.fout) return h + `<div class="card-body" style="color:var(--rose)">${esc(l.fout)}</div></div>`;
+    const d = l.data;
+    const per = (o) => Object.entries(o || {}).map(([k, n]) => `${esc(k.replace(/_/g, ' '))}: ${n}`).join(' · ');
+    h += `<div class="card-body"><div class="ck-kpi" style="margin-bottom:10px">
+      <div class="ck-tegel"><span>Onboarding</span><b>${d.onboarding}</b><i>${per(d.onboarding_per_reden)}</i></div>
+      <div class="ck-tegel"><span>Check-in</span><b>${d.checkin}</b><i>krijgen de check-in bij Run</i></div>
+      <div class="ck-tegel"><span>Geen van beide</span><b>${d.geen}</b><i>${per(d.geen_per_reden) || 'niemand'}</i></div>
+      <div class="ck-tegel"><span>In beide</span><b style="color:${d.dubbel ? 'var(--rose)' : 'var(--emerald)'}">${d.dubbel}</b><i>hoort altijd 0 te zijn</i></div></div>`;
+    if (d.geen_lijst && d.geen_lijst.length) {
+      h += `<table class="ck-tbl"><thead><tr><th>Geen van beide</th><th>E-mail</th><th>Product</th><th>Waarom</th></tr></thead><tbody>`
+        + d.geen_lijst.map((g) => `<tr><td><b>${esc(g.naam)}</b></td><td>${esc(g.email || '—')}</td><td>${esc(g.product || '—')}</td><td>${esc(g.reden_label)}</td></tr>`).join('') + `</tbody></table>`;
+    }
+    if (!d.portal_gelezen) h += `<div class="ck-sub" style="margin-top:6px">Let op: portal_gestart_op bestaat nog niet (migratie 2026-10-28-onboarding-portal-gestart.sql).</div>`;
+    return h + `</div></div>`;
+  }
+  window.__ckLijn = async () => {
+    st.lijn = { laden: true, data: st.lijn && st.lijn.data, fout: null }; rerender();
+    try {
+      const j = await window.KV.authedJson(API + '?lijn=1');
+      st.lijn = { laden: false, data: j.lijn, fout: null };
+    } catch (e) {
+      st.lijn = { laden: false, data: null, fout: foutTekst(e, 'De lijn kon niet gemeten worden.') };
+    }
+    rerender();
+  };
 
   function payoutsView() {
     return geraamte(() => {
