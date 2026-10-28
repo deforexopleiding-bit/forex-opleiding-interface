@@ -42,7 +42,7 @@ import { resolvePortalOrigin } from './_lib/onboarding-portal.js';
 import { syncCheckinAutomationKaart } from './_lib/automation-interesse.js';
 import {
   valideerPatch, schoneAntwoorden, ontbrekend, signaalVoor, signaalBewijs, flowVoor, optiesVan,
-  maandVan, persoonKort, isZichtbaar, TRAJECT_NAAM, TEKST,
+  maandVan, persoonKort, isZichtbaar, TRAJECT_NAAM, TEKST, AUTOPILOT_SLEUTELS,
 } from './_lib/checkin-portal.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -230,7 +230,7 @@ async function save(d, req, res, body) {
   if (r?.verstuurd) return res.status(409).json({ error: 'Je check-in is al verstuurd.', code: 'verstuurd' });
   if (r?.dicht) return res.status(410).json({ error: TEKST.dicht, code: 'dicht' });
 
-  if (opties.autopilot_stap && ('robot_interesse' in schoon || 'robot_belmoment' in schoon)) {
+  if (opties.autopilot_stap && AUTOPILOT_SLEUTELS.some((k) => k in schoon)) {
     await automation(d, lms, t, schoneAntwoorden(r?.antwoorden, { flow, opties }));
   }
   return res.status(200).json({ ok: true, huidige_stap: stap });

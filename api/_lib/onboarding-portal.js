@@ -24,6 +24,7 @@ const KEUZES = Object.freeze({
 export const PORTAL_SLEUTELS = Object.freeze([
   'coaching_locatie_voorkeur', 'ervaring_trading', 'motivatie_primair',
   'commitment_uren_per_week', 'beschikbaarheid', 'robot_interesse', 'robot_belmoment',
+  'robot_contact_tel', 'robot_contact_email',
 ]);
 
 /** Verplicht bij "Afronden", per flow. */
@@ -60,7 +61,33 @@ function subset(waarde, toegestaan) {
   return toegestaan.filter((v) => set.has(v));
 }
 
+// ── Ander nummer of e-mail voor de Autopilot (28 okt 2026) ─────────────────
+// Optioneel, onder "Ja zeker": de klant kan een ander telefoonnummer of
+// e-mailadres opgeven dan het bekende. Leeg = wissen (we bellen het bekende).
+// Gedeeld met api/_lib/checkin-portal.js.
+export const MAX_CONTACT_TEL = 30;
+export const MAX_CONTACT_EMAIL = 200;
+const TEL_TEKENS = /^[0-9+()./\s-]*$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** robot_contact_tel / robot_contact_email → { ok, waarde }. Leeg mag (= wissen). */
+export function valideerContact(sleutel, waarde) {
+  if (typeof waarde !== 'string') return { ok: false };
+  const t = waarde.replace(/\u0000/g, '').trim();
+  if (sleutel === 'robot_contact_tel') {
+    if (t.length > MAX_CONTACT_TEL || !TEL_TEKENS.test(t)) return { ok: false };
+    if (t && !/\d/.test(t)) return { ok: false };
+    return { ok: true, waarde: t };
+  }
+  if (sleutel === 'robot_contact_email') {
+    if (t.length > MAX_CONTACT_EMAIL || (t && !EMAIL_RE.test(t))) return { ok: false };
+    return { ok: true, waarde: t };
+  }
+  return { ok: false };
+}
+
 function valideerWaarde(sleutel, waarde) {
+  if (sleutel === 'robot_contact_tel' || sleutel === 'robot_contact_email') return valideerContact(sleutel, waarde);
   if (KEUZES[sleutel]) {
     return (typeof waarde === 'string' && KEUZES[sleutel].includes(waarde)) ? { ok: true, waarde } : { ok: false };
   }
@@ -145,14 +172,15 @@ export function mentorKort(volledigeNaam) {
 
 /**
  * Wat er op de automation-kolommen moet komen na deze patch, of null als de
- * patch er niets aan verandert.
+ * patch er niets aan verandert. Een ander nummer/e-mail telt ook als "raakt":
+ * dan volgt de kaart van Dave (de kolommen blijven gelijk).
  *
  *   automation_interesse     'ja' | 'nee'
  *   automation_interesse_op  moment van de laatste WIJZIGING van ja/nee
  *   automation_belmoment     de gekozen belmomenten (alleen bij ja; bij nee leeg)
  */
 export function automationVelden(vorige, samengevoegd, schoon, nu = new Date()) {
-  const raakt = ('robot_interesse' in schoon) || ('robot_belmoment' in schoon);
+  const raakt = ['robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email'].some((k) => k in schoon);
   if (!raakt) return null;
   const nieuw = samengevoegd.robot_interesse;
   if (nieuw !== 'ja_interesse' && nieuw !== 'nee') return null;

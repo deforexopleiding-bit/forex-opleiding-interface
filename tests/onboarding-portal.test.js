@@ -632,3 +632,30 @@ test('bedenktijd: elke plek die hem berekent leest ook de LMS-voorwaardenpoort',
     assert.equal(m, n, `${p}: ${n}× computeBedenktijd maar ${m}× combineerWaiver`);
   }
 });
+
+// ═══ Autopilot v3: ander nummer of e-mail (28 okt 2026) ═══════════════════
+
+test('Autopilot v3: robot_contact_tel/-email optioneel in de whitelist, leeg mag (= wissen)', () => {
+  const ok = valideerPatch({ robot_contact_tel: ' +32 (0)470 12.34-56 ', robot_contact_email: ' wim@example.com ' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.schoon, { robot_contact_tel: '+32 (0)470 12.34-56', robot_contact_email: 'wim@example.com' });
+  assert.deepEqual(valideerPatch({ robot_contact_tel: '', robot_contact_email: '' }).schoon, { robot_contact_tel: '', robot_contact_email: '' });
+  // Te lang, verkeerde tekens, geen cijfer, ongeldig e-mailadres, geen tekst → 400-sleutels.
+  for (const [k, v] of [
+    ['robot_contact_tel', '0'.repeat(31)], ['robot_contact_tel', '0470abc'], ['robot_contact_tel', '+-()'],
+    ['robot_contact_tel', 470], ['robot_contact_email', 'geen-adres'], ['robot_contact_email', 'a@b'],
+    ['robot_contact_email', 'x'.repeat(195) + '@ab.be'], ['robot_contact_email', null],
+  ]) {
+    assert.deepEqual(valideerPatch({ [k]: v }).fouten, [k], `${k}=${String(v).slice(0, 20)}`);
+  }
+  // Niet verplicht bij afronden.
+  assert.deepEqual(ontbrekend('membership', { ervaring_trading: 'geen', motivatie_primair: 'anders', commitment_uren_per_week: 3, robot_interesse: 'ja_interesse' }), []);
+  // Gaan mee terug naar de browser (de klant ziet wat hij invulde).
+  assert.deepEqual(portalAntwoorden({ robot_contact_tel: '0470', robot_contact_email: 'a@b.be' }), { robot_contact_tel: '0470', robot_contact_email: 'a@b.be' });
+});
+
+test('Autopilot v3: een ander nummer/e-mail alleen → de automation-kaart volgt', () => {
+  const nu = new Date('2026-10-28T10:00:00Z');
+  const v = automationVelden({ robot_interesse: 'ja_interesse' }, { robot_interesse: 'ja_interesse', robot_contact_tel: '0470' }, { robot_contact_tel: '0470' }, nu);
+  assert.deepEqual(v, { automation_interesse: 'ja', automation_belmoment: [] });
+});

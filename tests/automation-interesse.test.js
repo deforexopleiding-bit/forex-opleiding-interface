@@ -284,3 +284,16 @@ test('migratie: leest de huidige redenen uit de databank en behoudt ze, unieke i
 test('portal: de save roept de automation-sync aan', () => {
   assert.match(lees('api/onboarding-portal.js'), /naAutomation: \(\{ onboarding, answers, nu \}\) => syncAutomationKaart\(supabaseAdmin/);
 });
+
+test('Autopilot v3: onboarding-kaart belt het opgegeven nummer en noemt het e-mailadres', async () => {
+  const db = nepDb();
+  await syncAutomationKaart(db, { onboarding: OB, answers: { robot_interesse: 'ja_interesse', robot_contact_tel: '0499 11 22 33', robot_contact_email: 'wim.ander@example.com' }, nu: NU });
+  const k = db.tabellen.opvolging_taken[0];
+  assert.equal(k.telefoon, '+32499112233');
+  assert.equal(k.bron_ref.contact_tel, '0499 11 22 33');
+  assert.equal(k.bron_ref.contact_email, 'wim.ander@example.com');
+  assert.equal(k.bron_ref.telefoon_bekend, '+32470000000');
+  assert.match(k.notitie, /BEL OP HET OPGEGEVEN NUMMER/);
+  // Nee → het andere nummer telt niet (en blijft niet op de notitie).
+  assert.equal(kaartNotitie({ belmoment: [], contact: null }).includes('OPGEGEVEN'), false);
+});

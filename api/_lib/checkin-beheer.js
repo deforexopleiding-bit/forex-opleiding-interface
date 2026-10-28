@@ -161,6 +161,8 @@ export function antwoordenLeesbaar(a) {
   voeg('begeleiding_contact', lbl('begeleiding_contact', x.begeleiding_contact));
   voeg('robot_interesse', lbl('robot_interesse', x.robot_interesse));
   voeg('robot_belmoment', lbl('robot_belmoment', x.robot_belmoment));
+  voeg('robot_contact_tel', x.robot_contact_tel || null);
+  voeg('robot_contact_email', x.robot_contact_email || null);
   voeg('verbeter', x.verbeter || null);
   return rijen;
 }
@@ -284,7 +286,7 @@ function csvVeld(v) {
 
 /** De export: één regel per toewijzing, met alle antwoorden leesbaar. Puntkomma (Excel NL/BE). */
 export function csv(rijen) {
-  const vragen = ['fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'nps', 'helpt', 'knelpunt', 'hulp', 'mentor_score', 'begeleiding_contact', 'robot_interesse', 'robot_belmoment', 'verbeter'];
+  const vragen = ['fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'nps', 'helpt', 'knelpunt', 'hulp', 'mentor_score', 'begeleiding_contact', 'robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email', 'verbeter'];
   const kop = [...CSV_KOLOMMEN.map(([, l]) => l), ...vragen.map((k) => VRAAG[k] || k), 'Begeleidingssignaal', 'Automation-kaart'];
   const regels = [kop.map(csvVeld).join(';')];
   for (const x of rijen || []) {
