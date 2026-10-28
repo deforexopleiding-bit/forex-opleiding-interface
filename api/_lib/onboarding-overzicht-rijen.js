@@ -30,6 +30,7 @@ import {
 } from './onboarding-wizard-default.js';
 import { antwoordenVoorLms } from './onboarding-antwoorden.js';
 import { leesPortalKolommen } from './onboarding-portal-kolommen.js';
+import { vulOpvolgAan, welkomstmailMomenten } from './onboarding-opvolg-kolommen.js';
 
 function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
@@ -89,6 +90,9 @@ export async function bouwOverzichtRijen(opts = {}) {
     // overzicht niet omvalt zolang de migratie nog niet gedraaid is.
     await vulHandmatigAan(supabaseAdmin, list);
     await vulIncassoAan(supabaseAdmin, list);
+    // De opvolgflow (28 okt 2026): reden van automatisch afronden + "Geen
+    // herinneringen". Faalzacht (null zonder migratie).
+    await vulOpvolgAan(supabaseAdmin, list);
 
     // Input-sets voor de 5 afgeleide queries. Bouwen we één keer vóór de
     // Promise.all zodat elk blok z'n eigen ids kan gebruiken.
@@ -115,6 +119,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       lmsAfstandByStudent,
       automationByOb,
       linkByOb,
+      welkomstByOb,
     ] = await Promise.all([
       // ── 2) Mentor-naam per uniek mentor_user_id ─────────────────────────
       (async () => {
@@ -295,6 +300,9 @@ export async function bouwOverzichtRijen(opts = {}) {
       automationPerOnboarding(supabaseAdmin, list),
       // ── 15) De persoonlijke link per rij (portal achter de vlag). Faalzacht.
       linksPerOnboarding(supabaseAdmin, list),
+      // ── 16) De echte welkomstmail (28 okt 2026): invite_sent_at bleef leeg,
+      //     de mail staat in het log van de automation. Faalzacht (lege map).
+      welkomstmailMomenten(supabaseAdmin, list.map((r) => r.id)),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -450,7 +458,7 @@ export async function bouwOverzichtRijen(opts = {}) {
         // regel "stil" (welkomstmail ≥ 10 dagen, nog niets geopend).
         // portal_*_op = undefined → kolommen niet gelezen (migratie
         // 2026-10-28-onboarding-portal-gestart.sql niet gedraaid).
-        uitnodiging_op:        r.invite_sent_at || null,
+        uitnodiging_op:        r.invite_sent_at || welkomstByOb.get(r.id) || null,
         portal_geopend_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_geopend_op || null),
         portal_gestart_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_gestart_op || null),
         oude_wizard_paginas:   oudeWizardPaginas,

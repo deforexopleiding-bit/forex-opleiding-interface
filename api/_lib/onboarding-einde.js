@@ -111,9 +111,19 @@ export function afgeslotenOp(ob) {
   return null;
 }
 
-/** Hoe hij afgesloten werd: 'sessie', 'handmatig' of null. PURE. */
+/**
+ * Hoe hij afgesloten werd: 'sessie', 'handmatig', of — automatisch zonder
+ * sessie (28 okt 2026, onboarding-auto-afronden.js) — de reden uit
+ * `auto_afgerond_reden` ('membership_start', 'oud_dossier'). Een automatische
+ * afsluiting zonder sessie-id en zonder (gelezen) reden heet 'automatisch':
+ * nooit 'sessie', want er was er geen. null = niet afgesloten. PURE.
+ */
 export function afgeslotenDoor(ob) {
-  if (automatischAfgesloten(ob)) return 'sessie';
+  if (automatischAfgesloten(ob)) {
+    if (ob.auto_afgerond_sessie_id) return 'sessie';
+    const reden = typeof ob.auto_afgerond_reden === 'string' ? ob.auto_afgerond_reden.trim() : '';
+    return reden && reden !== 'sessie' ? reden : 'automatisch';
+  }
   if (handmatigAfgesloten(ob)) return 'handmatig';
   return null;
 }

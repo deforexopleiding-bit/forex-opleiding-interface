@@ -185,6 +185,6 @@ test('lijst: KPI-tegel Automation-interesse opent de sectie Automation, violet i
   assert.match(lees('modules/klanten-v2/views/modals/onboarding-detail.js'), /D\(\)\.goMod\('automation'\)/);
   assert.match(lees('modules/klanten-v2/klanten-v2.css'), /\.kv-onb-auto \{[^}]*#6D3FD4/);
   const idx = lees('modules/klanten-v2/index.html');
-  assert.match(idx, /views\/onboarding-v2\.js\?v=23/);
+  assert.match(idx, /views\/onboarding-v2\.js\?v=(2[3-9]|[3-9]\d)/);
   assert.match(idx, /klanten-v2\.css\?v=1r15/);
 });

@@ -328,7 +328,7 @@ test('backfill-migratie: alleen aangemeld/bezig met een afsluiting, zelfde momen
 test('onboardingbord (LMS): de overzicht-rijen dragen uitnodiging, portalmomenten en het aantal pagina\'s van de oude wizard', () => {
   const b = lees('api/_lib/onboarding-overzicht-rijen.js');
   assert.match(b, /start_date, created_at, invite_sent_at,/);
-  assert.match(b, /uitnodiging_op:\s+r\.invite_sent_at \|\| null/);
+  assert.match(b, /uitnodiging_op:\s+r\.invite_sent_at \|\| welkomstByOb\.get\(r\.id\) \|\| null/);
   // undefined = kolom niet gelezen (migratie niet gedraaid) — niet "nooit geopend".
   assert.match(b, /portal_geopend_op:\s+r\.portal_gestart_op === undefined \? undefined/);
   assert.match(b, /portal_gestart_op:\s+r\.portal_gestart_op === undefined \? undefined/);

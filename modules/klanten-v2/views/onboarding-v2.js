@@ -606,11 +606,18 @@
     return `<span style="color:var(--rose);font-size:12px">Geannuleerd op ${esc(fmtDag(a.op))}</span>`
       + `<div style="font-size:11px;color:var(--text-3)">${esc(d)}</div>`;
   }
+  //  Hoe een onboarding dicht ging (28 okt 2026: ook automatisch zonder sessie).
+  const AFGESLOTEN_DOOR = {
+    sessie: 'Afgerond door sessie',
+    handmatig: 'Met de hand afgerond',
+    membership_start: 'Automatisch afgerond (membership, startdatum)',
+    oud_dossier: 'Automatisch afgerond (oud dossier)',
+  };
   function voortgangCell(r) {
     if (r.status === 'geannuleerd') return annuleringCell(r);
     if (r.afgesloten === true) {
       const op = r.afgesloten_op ? ' op ' + fmtDag(r.afgesloten_op) : '';
-      const hoe = r.afgesloten_door === 'handmatig' ? 'Met de hand afgerond' : 'Afgerond door sessie';
+      const hoe = AFGESLOTEN_DOOR[r.afgesloten_door] || 'Automatisch afgerond';
       return `<span style="color:var(--emerald);font-size:12px">✓ ${esc(hoe + op)}</span>`;
     }
     // De stand in de NIEUWE onboarding (28 okt 2026) — dezelfde afleiding als
