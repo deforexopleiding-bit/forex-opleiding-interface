@@ -236,7 +236,7 @@
     else g.openModal({ soort: 'auto-afsluit', taakId: id, uitkomst: welke });
   };
   window.__autDossier = (onboardingId) => {
-    import('./modals/onboarding-detail.js?v=4')
+    import('./modals/onboarding-detail.js?v=5')
       .then((m) => m.openOnboardingDetailModal({ onboardingId }))
       .catch((e) => { console.warn('[automation] dossier:', e && e.message); alert('Het dossier kon niet geopend worden.'); });
   };

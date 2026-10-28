@@ -20,6 +20,12 @@
 // MINIMALE PII. 'open' geeft alleen de voornaam terug — geen e-mail, telefoon
 // of achternaam — en van de antwoorden alleen de portal-sleutels.
 //
+// OUDE WIZARD → NIEUWE PORTAL (28 okt 2026). current_step van wie in de
+// klassieke wizard begon is een pagina van die wizard (tot 10). 'open' geeft
+// daarom het scherm van de NIEUWE flow terug (hervatStap: eerste onbeantwoorde
+// vraag, afgeklemd) en zet portal_geopend_op; de eerste save (of afronden)
+// zet portal_gestart_op — het kenmerk "begonnen in de nieuwe onboarding".
+//
 // De klassieke wizard (onboarding-wizard-get / -step-save / -complete) blijft
 // ongewijzigd werken: dat is het rollback-pad. 'complete' voert exact dezelfde
 // neveneffecten uit via api/_lib/onboarding-afronden.js.
@@ -31,6 +37,8 @@ import { normaliseer } from './_lib/onboarding-startcode.js';
 import { rondWizardAf } from './_lib/onboarding-afronden.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 import { syncAutomationKaart } from './_lib/automation-interesse.js';
+import { hervatStap } from './_lib/onboarding-antwoorden.js';
+import { vulPortalKolommenAan } from './_lib/onboarding-portal-kolommen.js';
 import {
   valideerPatch, portalAntwoorden, ontbrekend, mentorKort, automationVelden,
   isAfgesloten, resolvePortalOrigin, TRAJECT_NAAM, TEKST,
@@ -118,6 +126,14 @@ async function open(d, req, res, body) {
   }
 
   const flow = resolveFlowType(traj?.data?.type);
+  // Portalkolommen apart en faalzacht (migratie 2026-10-28-onboarding-portal-gestart.sql).
+  await vulPortalKolommenAan(db, ob);
+  const afgerond = ob.status === 'afgerond';
+  if (!afgerond && ob.portal_geopend_op === null) {
+    const { error: gErr } = await db.from('onboardings')
+      .update({ portal_geopend_op: d.nu().toISOString() }).eq('id', ob.id).is('portal_geopend_op', null);
+    if (gErr) console.error('[onboarding-portal] portal_geopend_op:', gErr.message);
+  }
   return res.status(200).json({
     sessie: ob.token,
     voornaam: cust?.data?.first_name || null,
@@ -127,10 +143,24 @@ async function open(d, req, res, body) {
     duur_maanden: traj?.data?.duur_maanden ?? null,
     mentor: mentorKort(mentor?.data?.full_name),
     status: ob.status,
-    current_step: ob.current_step == null ? 0 : Number(ob.current_step),
+    // Een scherm van de NIEUWE flow — nooit een pagina van de klassieke wizard.
+    current_step: afgerond ? (ob.current_step == null ? 0 : Number(ob.current_step)) : hervatStap(ob, flow),
     answers: portalAntwoorden(ob.answers),
-    afgerond: ob.status === 'afgerond',
+    afgerond,
   });
+}
+
+/**
+ * "Begonnen in de nieuwe onboarding": alleen de eerste keer (is null).
+ * Faalzacht — zonder migratie (kolom ontbreekt) gaat de save gewoon door.
+ */
+async function zetPortalGestart(db, id, nuIso) {
+  const { error } = await db.from('onboardings')
+    .update({ portal_gestart_op: nuIso }).eq('id', id).is('portal_gestart_op', null);
+  if (error) {
+    if (kolomOntbreekt(error)) console.warn('[onboarding-portal] portal_gestart_op ontbreekt nog — draai 2026-10-28-onboarding-portal-gestart.sql');
+    else console.error('[onboarding-portal] portal_gestart_op:', error.message);
+  }
 }
 
 async function zoekSessie(d, sessie, kolommen) {
@@ -180,6 +210,7 @@ async function save(d, req, res, body) {
     console.error('[onboarding-portal] save update:', updErr.message);
     return res.status(500).json({ error: 'Opslaan mislukt.', code: 'fout' });
   }
+  await zetPortalGestart(db, ob.id, nowIso);
 
   // Automation-kolommen apart en faalzacht: zonder migratie blijft de save
   // gewoon slagen (answers bevat robot_interesse/robot_belmoment toch al).
@@ -235,6 +266,7 @@ async function complete(d, req, res, body) {
 
   const af = await d.rondWizardAf(ob, { bron: 'onboarding-portal' });
   if (!af.ok) return res.status(500).json({ error: af.error, code: 'fout' });
+  await zetPortalGestart(d.db(), ob.id, d.nu().toISOString());
   return res.status(200).json({ ok: true });
 }
 

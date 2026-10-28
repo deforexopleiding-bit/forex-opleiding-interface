@@ -196,6 +196,8 @@
     const st = row?.status || '';
     if (row?.afgesloten === true) return 'Afgerond door sessie';
     if (st === 'afgerond')     return 'Wizard voltooid';
+    // Oude wizard vs nieuwe onboarding (28 okt 2026): de afleiding van de server.
+    if (row?.onboarding_antwoorden?.portal_label && (st === 'bezig' || st === 'aangemeld')) return esc(row.onboarding_antwoorden.portal_label);
     if (st === 'gearchiveerd') return '—';
     if (st === 'bezig')        return row?.current_step ? ('Stap ' + esc(row.current_step)) : 'Wizard bezig';
     return 'Wizard nog niet gestart';

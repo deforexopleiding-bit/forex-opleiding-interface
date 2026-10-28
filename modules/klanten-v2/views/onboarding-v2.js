@@ -61,7 +61,7 @@
 
   window.__onbOpen = async (id) => {
     try {
-      const mod = await import('./modals/onboarding-detail.js?v=4');
+      const mod = await import('./modals/onboarding-detail.js?v=5');
       mod.openOnboardingDetailModal({ onboardingId: id, onSuccess: refetchAll });
     } catch (e) { console.error('[onb-v2] detail-modal load fail:', e); window.KV?.toast?.('Kon detail niet laden'); }
   };
@@ -234,7 +234,7 @@
   // Als user handmatig gesorteerd heeft, respecteren we die keuze — de
   // default geldt alleen wanneer F('onb-sort-<scope>') niet gezet is.
   function _defaultSortFor(scope) {
-    if (scope === 'active' && F('onb-start', 'binnenkort') === 'binnenkort') return 'startdatum:asc';
+    if (scope === 'active' && ['binnenkort', 'af_te_ronden'].includes(F('onb-start', 'binnenkort'))) return 'startdatum:asc';
     return 'created:desc';
   }
   window.__onbSort = (scope, key) => {
@@ -340,6 +340,10 @@
       if (!r.start_date) return true; // geen startdatum → nog te plannen, dus in "binnenkort"
       return new Date(r.start_date).getTime() >= today;
     });
+    // "Moet onboarding nog afronden" (28 okt 2026): status aangemeld of bezig,
+    // niet geannuleerd/gearchiveerd (testonboardings komen hier niet: de lijst
+    // laat is_test al weg). Standaard op startdatum, eerstkomende eerst.
+    if (f === 'af_te_ronden') return arr.filter(moetNogAfronden);
     if (f === 'probleem') return arr.filter((r) => {
       if (r.cancelled || r.in_incasso === true) return false;
       if (String(r.status || '').toLowerCase() !== 'aangemeld') return false;
@@ -347,6 +351,10 @@
       return new Date(r.start_date).getTime() < today;
     });
     return arr;
+  }
+  function moetNogAfronden(r) {
+    const st = String(r.status || '').toLowerCase();
+    return !r.cancelled && (st === 'aangemeld' || st === 'bezig');
   }
   function startCounts(rows) {
     const arr = asArr(rows);
@@ -362,13 +370,14 @@
       }
       if (!r.cancelled && st === 'aangemeld' && r.start_date && new Date(r.start_date).getTime() < today) probleem++;
     }
-    return { binnenkort, probleem, incasso, afgehandeld, geannuleerd, alle: arr.length };
+    return { binnenkort, probleem, incasso, afgehandeld, geannuleerd, af_te_ronden: arr.filter(moetNogAfronden).length, alle: arr.length };
   }
   function startTabs(counts) {
     const cur = F('onb-start', 'binnenkort');
     const items = [
       { k: 'binnenkort', l: 'Moeten nog starten', n: counts.binnenkort },
       { k: 'probleem',   l: 'Op te lossen',       n: counts.probleem, warn: true },
+      { k: 'af_te_ronden', l: 'Moet onboarding nog afronden', n: counts.af_te_ronden },
       { k: 'afgehandeld', l: 'Afgehandeld',       n: counts.afgehandeld },
       { k: 'incasso',    l: 'Incasso',            n: counts.incasso },
       { k: 'geannuleerd', l: 'Geannuleerd',       n: counts.geannuleerd },
@@ -471,11 +480,15 @@
     const autoN = list.filter(autoOpen).length;
     const noMentor = list.filter((r) => !r.mentor_user_id).length;
     const started  = list.filter((r) => r.status === 'bezig').length;
+    const afTeRonden = list.filter(moetNogAfronden).length;
+    const oudeWizard = list.filter((r) => moetNogAfronden(r) && r.onboarding_antwoorden?.portal_stand === 'oude_wizard').length;
     const today    = list.filter((r) => r.start_date && new Date(r.start_date).toDateString() === new Date().toDateString()).length;
     return H.kpis([
       { c: 'blue',    icon: I.check2, label: 'Actieve onboardings', val: String(list.length), hi: 1 },
       { c: 'amber',   icon: I.alert,  label: 'Zonder mentor',       val: String(noMentor),                    sub: 'nog toe te wijzen' },
       { c: 'emerald', icon: I.tick,   label: 'Bezig',               val: String(started),                     sub: 'wizard gestart' },
+      { c: 'amber',   icon: I.clock,  label: 'Moet onboarding nog afronden', val: String(afTeRonden),
+        sub: oudeWizard ? `waarvan ${oudeWizard} in de oude wizard &rarr;` : 'aangemeld of bezig &rarr;', click: "__onbStartTab('af_te_ronden')" },
       { c: 'violet',  icon: I.clock,  label: 'Start vandaag',       val: String(today) },
       { c: 'violet',  icon: I.phone || I.bell || I.clock, label: 'Automation-interesse', val: String(autoN),
         sub: 'Dave belt nog · open Automation &rarr;', click: 'window.__onbNaarAutomation()' },
@@ -596,6 +609,18 @@
       const op = r.afgesloten_op ? ' op ' + fmtDag(r.afgesloten_op) : '';
       const hoe = r.afgesloten_door === 'handmatig' ? 'Met de hand afgerond' : 'Afgerond door sessie';
       return `<span style="color:var(--emerald);font-size:12px">✓ ${esc(hoe + op)}</span>`;
+    }
+    // De stand in de NIEUWE onboarding (28 okt 2026) — dezelfde afleiding als
+    // het detail en het LMS (api/_lib/onboarding-antwoorden.js portalVoortgang).
+    // current_step van de oude wizard (tot 10 pagina's) toont nooit meer als "Stap N".
+    const v = r.onboarding_antwoorden;
+    if (v && v.portal_label) {
+      if (v.portal_stand === 'oude_wizard') {
+        const titel = 'Begonnen in de klassieke wizard (pagina ' + (r.current_step ?? '?') + '), nog niets bewaard in de nieuwe onboarding.';
+        return `<span style="font-size:12px;color:var(--amber,#B7791F)" title="${esc(titel)}">${esc(v.portal_label)}</span>`;
+      }
+      const kleur = v.portal_stand === 'afgerond' ? 'var(--emerald)' : 'var(--text-2)';
+      return `<span style="font-size:12px;color:${kleur}">${esc(v.portal_label)}</span>`;
     }
     if (r.status === 'afgerond') return '<span style="font-size:12px;color:var(--text-2)">Wizard voltooid</span>';
     const step = r.current_step != null ? String(r.current_step) : '0';

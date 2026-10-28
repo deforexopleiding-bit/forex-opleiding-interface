@@ -20,6 +20,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
+import { portalVoortgang } from './_lib/onboarding-antwoorden.js';
+import { vulPortalKolommenAan } from './_lib/onboarding-portal-kolommen.js';
+import { resolveFlowType } from './_lib/onboarding-wizard-default.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -54,7 +57,7 @@ export default async function handler(req, res) {
     // niet tonen in het profiel-vak.
     const { data: row, error: rowErr } = await supabaseAdmin
       .from('onboardings')
-      .select(`id, customer_id, mentor_user_id, status, current_step,
+      .select(`id, customer_id, mentor_user_id, status, current_step, answers,
                start_date, started_at, completed_at,
                traject:onboarding_trajecten(label, type, calls, duur_maanden)`)
       .eq('customer_id', customerId)
@@ -82,6 +85,9 @@ export default async function handler(req, res) {
     }
 
     const tr = row.traject || {};
+    // Oude wizard vs nieuwe onboarding (28 okt 2026): zelfde afleiding als de lijst.
+    await vulPortalKolommenAan(supabaseAdmin, row);
+    const v = portalVoortgang(row, row.traject ? resolveFlowType(tr.type) : null);
     return res.status(200).json({
       ok: true,
       onboarding: {
@@ -97,6 +103,7 @@ export default async function handler(req, res) {
         duur_maanden:   tr.duur_maanden != null ? tr.duur_maanden : null,
         mentor_user_id: row.mentor_user_id || null,
         mentor_name:    mentorName,
+        voortgang:      { stand: v.stand, label: v.label },
       },
     });
   } catch (e) {

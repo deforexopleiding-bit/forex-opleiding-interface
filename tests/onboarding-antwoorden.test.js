@@ -161,7 +161,9 @@ test('de spiegel schrijft de antwoorden en de nieuwe stappen; Autopilot apart', 
   assert.equal(uit.resultaat, 'geschreven', JSON.stringify(uit));
   const rij = lms.geschreven[SPIEGEL_TABEL][0];
   assert.equal(rij.flow_type, '1op1');
-  assert.equal(rij.portal_stand, 'bezig');
+  //  current_step 9 en nooit in de portal bewaard (portal_gestart_op null) =
+  //  begonnen in de klassieke wizard (28 okt 2026, tests/onboarding-oude-wizard.test.js).
+  assert.equal(rij.portal_stand, 'oude_wizard');
   assert.equal(rij.wizard_stap, 4, 'alle vier schermen ingevuld, ook al staat current_step op 9');
   assert.equal(rij.wizard_stappen_totaal, 4);
   assert.equal(rij.coaching_locatie_voorkeur, 'zoveel_mogelijk_kantoor');

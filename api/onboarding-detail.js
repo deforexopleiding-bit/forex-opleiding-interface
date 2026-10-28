@@ -20,6 +20,8 @@ import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { computeBedenktijd, findWaiverConsentKey, combineerWaiver, leesLmsAfstand } from './_lib/onboarding-bedenktijd.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { leesPortalStand } from './_lib/onboarding-portal-stand.js';
+import { portalVoortgang } from './_lib/onboarding-antwoorden.js';
+import { vulPortalKolommenAan } from './_lib/onboarding-portal-kolommen.js';
 import { resolveFlowType } from './_lib/onboarding-wizard-default.js';
 import {
   findAvailabilityBlock,
@@ -283,6 +285,10 @@ export default async function handler(req, res) {
     const bedenktijd = computeBedenktijd(waiverEff, offerteOp);
 
     const t = row.traject || null;
+    // De voortgang in de NIEUWE onboarding (28 okt 2026) — zelfde afleiding als
+    // de lijst en het LMS: oude wizard / nieuwe onboarding x/y / afgerond.
+    await vulPortalKolommenAan(supabaseAdmin, row);
+    portal.voortgang = portalVoortgang(row, t ? resolveFlowType(t.type) : null);
     return res.status(200).json({
       ok: true,
       onboarding: {

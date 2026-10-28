@@ -28,7 +28,7 @@
 // dan het woord zelf in plaats van een vertaling die niet klopt.
 
 import { resolveFlowType } from './onboarding-wizard-default.js';
-import { DAGEN, DAGDELEN, BELMOMENTEN } from './onboarding-portal.js';
+import { DAGEN, DAGDELEN, BELMOMENTEN, portalAntwoorden } from './onboarding-portal.js';
 
 /** De vraagschermen van de nieuwe flow (zonder welkom en klaar). */
 export const PORTAL_SCHERMEN = Object.freeze({
@@ -36,7 +36,15 @@ export const PORTAL_SCHERMEN = Object.freeze({
   membership: Object.freeze(['jij', 'extra']),
 });
 
-export const PORTAL_STANDEN = Object.freeze(['niet_gestart', 'bezig', 'afgerond']);
+/** Alle schermen van de nieuwe flow, zoals de website (FLOWS in lib/onboarding-portal.ts). */
+export const PORTAL_FLOWS = Object.freeze({
+  '1op1': Object.freeze(['welkom', ...PORTAL_SCHERMEN['1op1'], 'klaar']),
+  membership: Object.freeze(['welkom', ...PORTAL_SCHERMEN.membership, 'klaar']),
+});
+
+// 'oude_wizard' (28 okt 2026): begonnen in de klassieke wizard, nog niets
+// bewaard in de nieuwe onboarding. Zie portalVoortgang().
+export const PORTAL_STANDEN = Object.freeze(['niet_gestart', 'oude_wizard', 'bezig', 'afgerond']);
 
 function tekst(v) {
   if (typeof v !== 'string') return null;
@@ -77,6 +85,98 @@ export function wizardAfgerond(ob) {
   return String(ob?.status || '').trim().toLowerCase() === 'afgerond' || !!ob?.completed_at;
 }
 
+// ── DE PORTALSTAND (28 okt 2026) ─────────────────────────────────────────
+//
+// Eén afleiding voor de CRM-lijst, het detail, het LMS-bord en de LMS-spiegel.
+// Het kenmerk is `portal_gestart_op` (eerste save in de nieuwe onboarding,
+// migratie 2026-10-28-onboarding-portal-gestart.sql) — NIET de sleutels in
+// answers, want die deelt de nieuwe onboarding met de klassieke wizard.
+//
+//   afgerond     status 'afgerond' (of completed_at), welke wizard ook;
+//   bezig        portal_gestart_op gezet → stap x van y op de NIEUWE flow;
+//   oude_wizard  nooit in de portal bewaard, maar wel begonnen in de
+//                klassieke wizard (status 'bezig' of current_step > 0);
+//   niet_gestart nergens begonnen.
+// Is de kolom niet gelezen (sleutel ontbreekt: migratie niet gedraaid), dan
+// is oud/nieuw niet te scheiden en geldt de afleiding van vóór 28 okt.
+
+function oudeWizardBegonnen(ob) {
+  return String(ob?.status || '').trim().toLowerCase() === 'bezig' || Number(ob?.current_step) > 0;
+}
+
+/**
+ * @param {object} ob  rij uit `onboardings` (+ portal_gestart_op/portal_geopend_op als gelezen)
+ * @param {'1op1'|'membership'|null} flow
+ * @returns {{stand: string, stap: number|null, totaal: number|null, geopend: boolean|null,
+ *            gestart_op: string|null, kolom_gelezen: boolean, label: string}}
+ */
+export function portalVoortgang(ob, flow) {
+  const a = (ob?.answers && typeof ob.answers === 'object') ? ob.answers : {};
+  const afgerond = wizardAfgerond(ob);
+  const kolomGelezen = ob?.portal_gestart_op !== undefined;
+  const gestart = !!ob?.portal_gestart_op;
+  const schermen = flow ? PORTAL_SCHERMEN[flow] : null;
+  const totaal = schermen ? schermen.length : null;
+  const stap = schermen ? (afgerond ? totaal : schermen.filter((s) => schermKlaar(s, a)).length) : null;
+
+  let stand;
+  if (afgerond) stand = 'afgerond';
+  else if (gestart) stand = 'bezig';
+  else if (!kolomGelezen) {
+    const iets = ['coaching_locatie_voorkeur', 'ervaring_trading', 'motivatie_primair', 'robot_interesse']
+      .some((k) => tekst(a[k])) || a.commitment_uren_per_week != null || schoneBeschikbaarheid(a.beschikbaarheid) !== null
+      || Number(ob?.current_step) > 0;
+    stand = iets ? 'bezig' : 'niet_gestart';
+  } else stand = oudeWizardBegonnen(ob) ? 'oude_wizard' : 'niet_gestart';
+
+  const geopend = kolomGelezen ? !!ob?.portal_geopend_op : null;
+  const v = { stand, stap, totaal, geopend, gestart_op: ob?.portal_gestart_op || null, kolom_gelezen: kolomGelezen };
+  return { ...v, label: voortgangLabel(v) };
+}
+
+/** De voortgang in woorden — dezelfde tekst in de CRM-lijst, het detail en het LMS. PURE. */
+export function voortgangLabel({ stand, stap, totaal, geopend }) {
+  if (stand === 'afgerond') return 'Afgerond';
+  if (stand === 'bezig') return totaal ? `Nieuwe onboarding · ${stap ?? 0}/${totaal}` : 'Nieuwe onboarding · bezig';
+  if (stand === 'oude_wizard') {
+    return geopend
+      ? 'Oude wizard (onvolledig) — nieuwe link geopend, nog niets ingevuld'
+      : 'Oude wizard (onvolledig) — nieuwe link nog niet geopend';
+  }
+  return geopend ? 'Nog niet gestart — link geopend' : 'Nog niet gestart';
+}
+
+/**
+ * Op welk scherm van de NIEUWE flow opent de portal? (28 okt 2026)
+ *
+ * current_step van wie nooit in de portal bewaarde is een pagina van de
+ * klassieke wizard (tot 10) en betekent hier niets: die klant start bij de
+ * eerste onbeantwoorde vraag van de nieuwe flow (alles beantwoord → de laatste
+ * vraag, waar hij afrondt). Wie al in de portal bewaarde, hervat op zijn
+ * scherm — afgeklemd op de laatste vraag en nooit voorbij een onbeantwoorde.
+ * Nog nergens begonnen → het welkomscherm. Kolom niet gelezen (migratie niet
+ * gedraaid) → afklemmen + eerste onbeantwoorde, nooit een onbestaand scherm.
+ *
+ * @returns {number} index in PORTAL_FLOWS[flow] (0 = welkom, nooit 'klaar')
+ */
+export function hervatStap(ob, flow) {
+  const schermen = PORTAL_FLOWS[flow] || PORTAL_FLOWS['1op1'];
+  const laatste = schermen.length - 2;
+  const a = portalAntwoorden(ob?.answers);
+  const eersteOpen = (tot) => {
+    for (let i = 1; i < tot; i++) if (!schermKlaar(schermen[i], a)) return i;
+    return null;
+  };
+  const kolomGelezen = ob?.portal_gestart_op !== undefined;
+  if (kolomGelezen && !ob.portal_gestart_op) {
+    if (!oudeWizardBegonnen(ob)) return 0;
+    return eersteOpen(laatste + 1) ?? laatste;
+  }
+  const n = Number(ob?.current_step);
+  const doel = Number.isInteger(n) ? Math.max(0, Math.min(n, laatste)) : 0;
+  return eersteOpen(doel) ?? doel;
+}
+
 /**
  * Alles wat het LMS van de onboarding-antwoorden te zien krijgt.
  *
@@ -97,20 +197,17 @@ export function antwoordenVoorLms(ob, trajectType) {
     ? BELMOMENTEN.filter((m) => a.robot_belmoment.includes(m))
     : [];
 
-  const iets = ['coaching_locatie_voorkeur', 'ervaring_trading', 'motivatie_primair', 'robot_interesse']
-    .some((k) => tekst(a[k])) || Number.isFinite(uren) || beschikbaarheid !== null
-    || Number(ob?.current_step) > 0;
-
-  const schermen = flow ? PORTAL_SCHERMEN[flow] : null;
-  const totaal = schermen ? schermen.length : null;
-  const stap = schermen ? (afgerond ? totaal : schermen.filter((s) => schermKlaar(s, a)).length) : null;
+  const v = portalVoortgang(ob, flow);
 
   return {
     flow_type: flow,
-    portal_stand: afgerond ? 'afgerond' : (iets ? 'bezig' : 'niet_gestart'),
+    portal_stand: v.stand,
     portal_afgerond_op: afgerond ? (ob?.completed_at || null) : null,
-    wizard_stap: stap,
-    wizard_stappen_totaal: totaal,
+    // Voor het LMS-bord (niet in de spiegel): de tekst en of de nieuwe link al open ging.
+    portal_label: v.label,
+    portal_geopend: v.geopend,
+    wizard_stap: v.stap,
+    wizard_stappen_totaal: v.totaal,
     coaching_locatie_voorkeur: tekst(a.coaching_locatie_voorkeur),
     ervaring_trading: tekst(a.ervaring_trading),
     motivatie_primair: tekst(a.motivatie_primair),
