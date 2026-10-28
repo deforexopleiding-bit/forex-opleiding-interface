@@ -257,6 +257,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/cron/onboarding-auto-afronden",
+      "schedule": "10 7 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-spiegel-sync",
       "schedule": "20 7 * * *"
     },

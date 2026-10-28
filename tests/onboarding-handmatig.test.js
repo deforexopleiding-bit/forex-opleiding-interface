@@ -24,7 +24,7 @@ test('EINDE: met de hand afgerond telt als afgesloten, los van de wizardstatus',
   assert.equal(afgeslotenDoor(ob), 'handmatig');
   assert.equal(lmsStandVoor(ob), 'afgerond');
   // De sessie wint als bron als ze er allebei zijn: aparte kolommen.
-  assert.equal(afgeslotenDoor({ status: 'afgerond', auto_afgerond_op: 'x', handmatig_afgerond_op: 'y' }), 'sessie');
+  assert.equal(afgeslotenDoor({ status: 'afgerond', auto_afgerond_op: 'x', auto_afgerond_sessie_id: 's1', handmatig_afgerond_op: 'y' }), 'sessie');
   // Wizard voltooid zonder iets: niet afgesloten.
   assert.equal(onboardingAfgesloten({ status: 'afgerond' }), false);
   assert.equal(lmsStandVoor({ status: 'afgerond' }), 'wizard_voltooid');
