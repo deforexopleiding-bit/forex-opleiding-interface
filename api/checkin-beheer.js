@@ -26,6 +26,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { alleenAutomationlijst } from './_lib/opvolging-lijst.js';
+import { leesPortalKolommen } from './_lib/onboarding-portal-kolommen.js';
 import { LABELS, VRAAG, STANDAARD_OPTIES } from './_lib/checkin-portal.js';
 import {
   doelgroep, doelgroepSamenvatting, doelgroepRegel, rijenVan, kpi, perMentor, payouts, csv,
@@ -168,8 +169,19 @@ export async function berekenDoelgroep({ lms, crm, nu = new Date() }) {
   // deed — dan liever geen Run dan een te brede.
   if (error) throw new Fout(500, 'De onboardings konden niet gelezen worden: ' + error.message);
   const onboardings = (obs || []).map((o) => ({ ...o, email: o.customer?.email || null }));
+  // Wie de NIEUWE onboarding recent gebruikte (portal_gestart_op, migratie
+  // 2026-10-28-onboarding-portal-gestart.sql). Faalzacht: zonder de kolom kan
+  // die uitsluiting niet — dat staat dan in het Run-venster.
+  const portal = await leesPortalKolommen(crm, onboardings.map((o) => o.id));
+  if (portal) for (const o of onboardings) o.portal_gestart_op = portal.get(o.id)?.portal_gestart_op || null;
   const dg = doelgroep({ studenten, onboardings, testEmails: testaccounts(), nu });
-  return { dg, samenvatting: doelgroepSamenvatting(dg, namen) };
+  const samenvatting = doelgroepSamenvatting(dg, namen);
+  samenvatting.portal_gelezen = !!portal;
+  if (!portal) {
+    samenvatting.waarschuwing = 'De kolom portal_gestart_op bestaat nog niet (migratie 2026-10-28-onboarding-portal-gestart.sql): '
+      + 'wie de nieuwe onboarding de laatste 30 dagen invulde maar al langer in het CRM staat, wordt nu NIET uitgesloten.';
+  }
+  return { dg, samenvatting };
 }
 
 async function testStudenten(lms) {

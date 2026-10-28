@@ -365,6 +365,9 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   idempotent). Regels + labels: `api/_lib/checkin-portal.js`. Bij versturen een begeleidingssignaal
   (`hlms_signaal` bron `checkin`, soort `checkin_feedback`, bak hoofdmentor; contact ja = oranje, nps ≤6
   geel/≤3 rood, mentorscore ≤2 oranje, knelpunt volgende_stap geel) — een mentor leest die NIET (RLS).
+  DOELGROEP-UITSLUITING (28 okt): onboarding loopt (aangemeld/bezig, niet klaar) · created_at/started_at ≤30 d ·
+  `portal_gestart_op` ≤30 d (nieuwe onboarding ingevuld, eigen reden `onboarding_portal_recent`). BEWUST NIET
+  completed_at: oude dossiers die met de hand afgerond worden krijgen de check-in wél.
   Automation "Ja, bel mij" → kaart voor Dave via `syncCheckinAutomationKaart` (sleutel
   `bron_ref.checkin_toewijzing_id`, unieke index in docs/sql-migrations/2026-10-27-studentencheck-in.sql),
   nooit voor is_test. Geen mail/WhatsApp naar studenten.
