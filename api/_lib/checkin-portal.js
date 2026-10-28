@@ -14,7 +14,7 @@
 // De website (dfo-website lib/checkin-portal.ts) kent dezelfde sleutels en
 // waarden — wijzig ze samen.
 
-import { BELMOMENTEN, TRAJECT_NAAM } from './onboarding-portal.js';
+import { BELMOMENTEN, TRAJECT_NAAM, valideerContact } from './onboarding-portal.js';
 
 export { TRAJECT_NAAM };
 
@@ -37,6 +37,7 @@ export const TRUSTPILOT_URL = 'https://nl.trustpilot.com/evaluate/deforexopleidi
 export const CHECKIN_SLEUTELS = Object.freeze([
   'fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'nps', 'helpt', 'knelpunt',
   'verbeter', 'hulp', 'mentor_score', 'begeleiding_contact', 'robot_interesse', 'robot_belmoment',
+  'robot_contact_tel', 'robot_contact_email',
 ]);
 
 /** Leesbare labels — dezelfde woorden als op de website. */
@@ -68,6 +69,8 @@ export const VRAAG = Object.freeze({
   begeleiding_contact: 'Contact over traject',
   robot_interesse: 'Autopilot',
   robot_belmoment: 'Belmoment Autopilot',
+  robot_contact_tel: 'Ander nummer (Autopilot)',
+  robot_contact_email: 'Ander e-mailadres (Autopilot)',
 });
 
 /** product_soort (hlms_student) → flow. Alles behalve mentorship = membership. */
@@ -102,11 +105,14 @@ function geheel(v, min, max) {
   return Number.isInteger(v) && v >= min && v <= max;
 }
 
+/** De sleutels van de Autopilot-stap — alleen als de campagne hem aanzet. */
+export const AUTOPILOT_SLEUTELS = Object.freeze(['robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email']);
+
 /** Mag deze sleutel in deze flow/opties? */
 function sleutelMag(sleutel, flow, opties) {
   if (sleutel === 'mentor_score') return flow === '1op1';
   if (sleutel === 'payout' || sleutel === 'payout_delen') return opties.payout_vraag;
-  if (sleutel === 'robot_interesse' || sleutel === 'robot_belmoment') return opties.autopilot_stap;
+  if (AUTOPILOT_SLEUTELS.includes(sleutel)) return opties.autopilot_stap;
   return CHECKIN_SLEUTELS.includes(sleutel);
 }
 
@@ -134,6 +140,8 @@ function valideerWaarde(sleutel, waarde, flow) {
       if (!s || (s.includes('niets') && s.length > 1)) return { ok: false };
       return { ok: true, waarde: s };
     }
+    case 'robot_contact_tel':
+    case 'robot_contact_email': return valideerContact(sleutel, waarde);
     case 'robot_belmoment': {
       const s = subset(waarde, BELMOMENTEN);
       return s ? { ok: true, waarde: s } : { ok: false };
@@ -179,8 +187,12 @@ export function schoneAntwoorden(antwoorden, { flow = '1op1', opties = STANDAARD
   }
   // Payout delen heeft alleen zin bij een payout.
   if (uit.payout === 'nog_niet' || !uit.payout) delete uit.payout_delen;
-  // Belmoment alleen bij "ja, bel mij".
-  if (uit.robot_interesse !== 'ja_interesse') delete uit.robot_belmoment;
+  // Belmoment en een ander nummer/e-mail alleen bij "ja"; leeg = niet opgegeven.
+  if (uit.robot_interesse !== 'ja_interesse') {
+    delete uit.robot_belmoment; delete uit.robot_contact_tel; delete uit.robot_contact_email;
+  }
+  if (uit.robot_contact_tel === '') delete uit.robot_contact_tel;
+  if (uit.robot_contact_email === '') delete uit.robot_contact_email;
   return uit;
 }
 

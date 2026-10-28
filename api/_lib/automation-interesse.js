@@ -69,25 +69,48 @@ function datumNl(iso) {
     .toLocaleDateString('nl-BE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: ZONE });
 }
 
+/**
+ * Ander nummer of e-mail uit de Autopilot-stap (28 okt 2026). PURE.
+ * Alleen bij "ja"; leeg = niet opgegeven → { tel: null, email: null }.
+ */
+export function contactVoorkeur(answers) {
+  const a = answers || {};
+  if (a.robot_interesse !== 'ja_interesse') return { tel: null, email: null };
+  const tekst = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  return { tel: tekst(a.robot_contact_tel), email: tekst(a.robot_contact_email) };
+}
+
+/** De zin over het opgegeven nummer/e-mail, of null. PURE. */
+function contactZin(contact) {
+  const c = contact || {};
+  const delen = [];
+  if (c.tel) delen.push(`BEL OP HET OPGEGEVEN NUMMER: ${c.tel} (niet het bekende).`);
+  if (c.email) delen.push(`Opgegeven e-mailadres: ${c.email}.`);
+  return delen.length ? delen.join(' ') : null;
+}
+
 /** De notitie op de kaart. PURE. */
-export function kaartNotitie({ trajectLabel, startDatum, belmoment }) {
+export function kaartNotitie({ trajectLabel, startDatum, belmoment, contact = null }) {
   const delen = ['Kwam binnen via de onboarding: wil graag gebeld worden over de automation.'];
   if (trajectLabel) delen.push(`Traject: ${trajectLabel}.`);
   const start = datumNl(startDatum);
   if (start) delen.push(`Start: ${start}.`);
   const bm = (Array.isArray(belmoment) ? belmoment : []).map((b) => BELMOMENT_LABEL[b] || b);
   delen.push(bm.length ? `Voorkeur belmoment: ${bm.join(', ')}.` : 'Geen voorkeur voor het belmoment.');
+  const cz = contactZin(contact);
+  if (cz) delen.push(cz);
   return delen.join(' ');
 }
 
 /** De nieuwe kaart. PURE. */
-export function kaartRij({ onboarding, klant, trajectLabel, belmoment, nuMs }) {
+export function kaartRij({ onboarding, klant, trajectLabel, belmoment, contact = null, nuMs }) {
   const naam = [klant?.first_name, klant?.last_name].filter(Boolean).join(' ').trim()
     || onboarding.customer_name || klant?.email || 'Onbekende klant';
   return {
     naam,
     email: klant?.email || null,
-    telefoon: klant?.phone || null,
+    // Een opgegeven ander nummer is het nummer dat Dave belt; het bekende blijft in bron_ref.
+    telefoon: contact?.tel || klant?.phone || null,
     reden: AUTOMATION_REDEN,
     reden_code: null,
     bron: 'handmatig',
@@ -97,6 +120,7 @@ export function kaartRij({ onboarding, klant, trajectLabel, belmoment, nuMs }) {
       traject_id: onboarding.traject_id || null,
       start_date: onboarding.start_date || null,
       belmoment: Array.isArray(belmoment) ? belmoment : [],
+      ...contactRef(contact, klant?.phone || null),
       bron: 'onboarding-portal',
     },
     badge_label: null,
@@ -104,7 +128,7 @@ export function kaartRij({ onboarding, klant, trajectLabel, belmoment, nuMs }) {
     later: false,
     status: 'open',
     lijst: LIJST_AUTOMATION,
-    notitie: kaartNotitie({ trajectLabel, startDatum: onboarding.start_date, belmoment }),
+    notitie: kaartNotitie({ trajectLabel, startDatum: onboarding.start_date, belmoment, contact }),
     is_test: onboarding.is_test === true,
     eigenaar_id: null,
   };
@@ -141,6 +165,15 @@ export function beslis({ interesse, kaart, contact }) {
   return doorKlantGesloten
     ? { actie: 'niets', waarom: 'al dicht' }
     : { actie: 'sluit', waarom: 'klant trok zijn interesse in vóór contact' };
+}
+
+/** contact_tel/contact_email (null = niet opgegeven) + het bekende nummer, voor bron_ref. PURE. */
+function contactRef(contact, telefoonBekend) {
+  return {
+    contact_tel: contact?.tel || null,
+    contact_email: contact?.email || null,
+    telefoon_bekend: telefoonBekend || null,
+  };
 }
 
 function nieuweGeschiedenis(kaart, tekst, nuIso) {
@@ -180,8 +213,8 @@ export async function syncAutomationKaart(db, { onboarding, answers, nu = new Da
       if (trajR?.error) console.warn('[automation-interesse] traject lezen (soft):', trajR.error.message);
       return { klant: klantR?.data || null, trajectLabel: trajR?.data?.label || null };
     },
-    nieuweRij: ({ klant, trajectLabel }, belmoment, nuMs) => kaartRij({ onboarding, klant, trajectLabel, belmoment, nuMs }),
-    notitie: ({ trajectLabel }, belmoment) => kaartNotitie({ trajectLabel, startDatum: onboarding.start_date, belmoment }),
+    nieuweRij: ({ klant, trajectLabel }, belmoment, nuMs, contact) => kaartRij({ onboarding, klant, trajectLabel, belmoment, contact, nuMs }),
+    notitie: ({ trajectLabel }, belmoment, contact) => kaartNotitie({ trajectLabel, startDatum: onboarding.start_date, belmoment, contact }),
   });
 }
 
@@ -197,22 +230,24 @@ export async function syncAutomationKaart(db, { onboarding, answers, nu = new Da
 // telefoon komen daarvandaan.
 
 /** De notitie op een check-in-kaart. PURE. */
-export function checkinKaartNotitie({ trajectLabel, belmoment }) {
+export function checkinKaartNotitie({ trajectLabel, belmoment, contact = null }) {
   const delen = ['Kwam binnen via de studentencheck-in: bestaande student, wil graag gebeld worden over de automation.'];
   if (trajectLabel) delen.push(`Traject: ${trajectLabel}.`);
   const bm = (Array.isArray(belmoment) ? belmoment : []).map((b) => BELMOMENT_LABEL[b] || b);
   delen.push(bm.length ? `Voorkeur belmoment: ${bm.join(', ')}.` : 'Geen voorkeur voor het belmoment.');
+  const cz = contactZin(contact);
+  if (cz) delen.push(cz);
   return delen.join(' ');
 }
 
 /** De nieuwe check-in-kaart. PURE. */
-export function checkinKaartRij({ toewijzing, student, trajectLabel, mentorNaam = null, belmoment, nuMs }) {
+export function checkinKaartRij({ toewijzing, student, trajectLabel, mentorNaam = null, belmoment, contact = null, nuMs }) {
   const naam = [student?.voornaam, student?.achternaam].filter(Boolean).join(' ').trim()
     || student?.email || 'Onbekende student';
   return {
     naam,
     email: student?.email || null,
-    telefoon: student?.telefoon || null,
+    telefoon: contact?.tel || student?.telefoon || null,
     reden: AUTOMATION_REDEN,
     reden_code: null,
     bron: 'handmatig',
@@ -221,6 +256,7 @@ export function checkinKaartRij({ toewijzing, student, trajectLabel, mentorNaam 
       checkin_campagne_id: toewijzing.campagne_id || null,
       lms_student_id: toewijzing.student_id || student?.id || null,
       belmoment: Array.isArray(belmoment) ? belmoment : [],
+      ...contactRef(contact, student?.telefoon || null),
       bron: 'checkin',
       // Voor de sectie Automation: een check-in-kaart heeft geen onboardingdossier.
       traject_label: trajectLabel || null,
@@ -231,7 +267,7 @@ export function checkinKaartRij({ toewijzing, student, trajectLabel, mentorNaam 
     later: false,
     status: 'open',
     lijst: LIJST_AUTOMATION,
-    notitie: checkinKaartNotitie({ trajectLabel, belmoment }),
+    notitie: checkinKaartNotitie({ trajectLabel, belmoment, contact }),
     is_test: toewijzing.is_test === true,
     eigenaar_id: null,
   };
@@ -256,8 +292,8 @@ export async function syncCheckinAutomationKaart(db, { toewijzing, student = nul
     nu,
     log: { checkin_toewijzing_id: toewijzing.id },
     context: async () => ({ student, trajectLabel, mentorNaam }),
-    nieuweRij: (ctx, belmoment, nuMs) => checkinKaartRij({ toewijzing, student: ctx.student, trajectLabel: ctx.trajectLabel, mentorNaam: ctx.mentorNaam, belmoment, nuMs }),
-    notitie: (ctx, belmoment) => checkinKaartNotitie({ trajectLabel: ctx.trajectLabel, belmoment }),
+    nieuweRij: (ctx, belmoment, nuMs, contact) => checkinKaartRij({ toewijzing, student: ctx.student, trajectLabel: ctx.trajectLabel, mentorNaam: ctx.mentorNaam, belmoment, contact, nuMs }),
+    notitie: (ctx, belmoment, contact) => checkinKaartNotitie({ trajectLabel: ctx.trajectLabel, belmoment, contact }),
   });
 }
 
@@ -268,12 +304,13 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
     if (isTest) return { ...verslag, waarom: testWaarom };
     const interesse = answers?.robot_interesse;
     const belmoment = Array.isArray(answers?.robot_belmoment) ? answers.robot_belmoment : [];
+    const opgegeven = contactVoorkeur(answers);
     const nuMs = nu.getTime();
     const nuIso = nu.toISOString();
 
     // Een automation-kaart staat in lijst 'automation' (vóór de migratie nog 'dag').
     const { data: kaarten, error: kErr } = await alleenAutomationlijst(db.from('opvolging_taken')
-      .select('id, status, archief_reden, notitie, bron_ref, uitkomst_log'))
+      .select('id, status, archief_reden, notitie, bron_ref, uitkomst_log, telefoon'))
       .eq(`bron_ref->>${sleutel}`, bronId)
       .limit(1);
     if (kErr) throw new Error('kaart lezen: ' + kErr.message);
@@ -294,7 +331,7 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
     const ctx = await context();
 
     if (besluit.actie === 'maak') {
-      const rij = nieuweRij(ctx, belmoment, nuMs);
+      const rij = nieuweRij(ctx, belmoment, nuMs, opgegeven);
       rij.telefoon = telefoonNlBe(rij.telefoon, { bron: 'automation-interesse' });
       let { data: nieuw, error } = await db.from('opvolging_taken').insert(rij).select('id').maybeSingle();
       // Vóór de migratie 2026-10-27-automation-lijst.sql kent de CHECK de lijst
@@ -312,12 +349,17 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
       return verslag;
     }
 
-    const notitie = maakNotitie(ctx, belmoment);
-    const bron_ref = { ...(kaart.bron_ref || {}), belmoment };
+    const notitie = maakNotitie(ctx, belmoment, opgegeven);
+    // Het bekende nummer onthouden we de eerste keer dat er een ander komt, zodat
+    // "geen ander nummer meer" de kaart terugzet op het bekende.
+    const oud = kaart.bron_ref || {};
+    const bekend = Object.prototype.hasOwnProperty.call(oud, 'telefoon_bekend') ? oud.telefoon_bekend : (kaart.telefoon || null);
+    const bron_ref = { ...oud, belmoment, ...contactRef(opgegeven, bekend) };
+    const telefoon = telefoonNlBe(opgegeven.tel || bekend, { bron: 'automation-interesse' });
 
     if (besluit.actie === 'bijwerken') {
       const { error } = await db.from('opvolging_taken')
-        .update({ notitie, bron_ref, updated_at: nuIso })
+        .update({ notitie, bron_ref, telefoon, updated_at: nuIso })
         .eq('id', kaart.id).in('status', ['open', 'wacht_inplanning']);
       if (error) throw new Error('kaart bijwerken: ' + error.message);
       return verslag;
@@ -326,7 +368,7 @@ async function voerUit(db, { sleutel, bronId, isTest, testWaarom, answers, nu, l
     if (besluit.actie === 'heropen') {
       const { error } = await db.from('opvolging_taken').update({
         status: 'open', due: dueVoor(nuMs), later: false, gearchiveerd_at: null, archief_reden: null,
-        reden_code: null, notitie, bron_ref, updated_at: nuIso,
+        reden_code: null, notitie, bron_ref, telefoon, updated_at: nuIso,
         uitkomst_log: nieuweGeschiedenis(kaart, 'De klant zette de automation-interesse weer op ja.', nuIso),
       }).eq('id', kaart.id).eq('status', 'gearchiveerd').eq('archief_reden', TROK_IN);
       if (error) throw new Error('kaart heropenen: ' + error.message);

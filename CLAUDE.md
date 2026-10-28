@@ -312,6 +312,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   "Automation" in Opvolging; "Wat nu?": Call inplannen / Gesprek gehad / Geen interesse meer / Later terugbellen.
   MOEITE_NVT kent de drie afsluitcodes (geen vals "te weinig pogingen"); wacht-check houdt de reden.
   Migratie docs/sql-migrations/2026-10-27-opvolging-automation-interesse.sql. Geen WA/mail naar de klant.
+  ANDER NUMMER/E-MAIL (Autopilot v3, 28 okt): optionele portalsleutels `robot_contact_tel` (≤30, cijfers + +()./- en
+  spatie) en `robot_contact_email` (≤200, geldig) in BEIDE portals (`valideerContact` in onboarding-portal.js, gedeeld met
+  checkin-portal.js; leeg = wissen). Alleen bij ja: de kaart belt dan dat nummer (`telefoon`), `bron_ref.contact_tel/
+  contact_email/telefoon_bekend`, notitie "BEL OP HET OPGEGEVEN NUMMER"; leeg gemaakt → terug naar het bekende nummer.
   SECTIE AUTOMATION (27 okt, Maxim): de kaarten staan NIET meer in Daves daglijst maar in lijst
   `automation` (opvolging_taken.lijst; `alleenAutomationlijst`/`isAutomationkaart` in opvolging-lijst.js,
   leest ook 'dag' voor vóór de migratie; insert valt bij CHECK-23514 terug op 'dag'). Eigen MODS-item

@@ -19,8 +19,9 @@ import { readFileSync } from 'node:fs';
 
 import {
   valideerPatch, schoneAntwoorden, ontbrekend, verplicht, signaalVoor, signaalBewijs, flowVoor,
-  optiesVan, maandVan, persoonKort, isZichtbaar, LABELS, CHECKIN_SLEUTELS,
+  optiesVan, maandVan, persoonKort, isZichtbaar, LABELS, CHECKIN_SLEUTELS, VRAAG,
 } from '../api/_lib/checkin-portal.js';
+import { antwoordenLeesbaar, csv } from '../api/_lib/checkin-beheer.js';
 import { maakHandler } from '../api/checkin-portal.js';
 import { syncCheckinAutomationKaart, checkinKaartRij } from '../api/_lib/automation-interesse.js';
 
@@ -136,7 +137,7 @@ test('elke keuzesleutel heeft labels voor elke waarde (CRM-overzicht, CSV, bewij
   for (const k of ['fase', 'doel_3m', 'payout', 'helpt', 'knelpunt', 'hulp', 'robot_interesse', 'robot_belmoment']) {
     assert.ok(LABELS[k], k);
   }
-  assert.equal(CHECKIN_SLEUTELS.length, 14);
+  assert.equal(CHECKIN_SLEUTELS.length, 16); // + robot_contact_tel/-email (Autopilot v3, 28 okt)
 });
 
 // ── Een nep-LMS met dezelfde semantiek als de databankfuncties ─────────────
@@ -501,4 +502,51 @@ test('Automation: een check-in-kaart heeft herkomst checkin, traject en mentor u
   const view = lees('modules/klanten-v2/views/automation-v2.js');
   assert.match(view, /k\.herkomst === 'checkin'/);
   assert.match(view, /lms\.deforexopleiding\.nl\/dossier\//);
+});
+
+// ═══ Autopilot v3: ander nummer of e-mail (28 okt 2026) ═══════════════════
+
+test('Autopilot v3: robot_contact_tel/-email in de whitelist, alleen met de Autopilot-stap', () => {
+  const p = valideerPatch({ robot_contact_tel: '0470 12 34 56', robot_contact_email: 'lotte@example.com' });
+  assert.equal(p.ok, true);
+  assert.deepEqual(p.schoon, { robot_contact_tel: '0470 12 34 56', robot_contact_email: 'lotte@example.com' });
+  assert.deepEqual(valideerPatch({ robot_contact_tel: '0470abc', robot_contact_email: 'geen' }).fouten, ['robot_contact_tel', 'robot_contact_email']);
+  const uit = { payout_vraag: true, trustpilot_vraag: false, autopilot_stap: false };
+  assert.deepEqual(valideerPatch({ robot_contact_tel: '0470' }, { opties: uit }).fouten, ['robot_contact_tel']);
+  // Niet verplicht.
+  assert.equal(verplicht('membership').includes('robot_contact_tel'), false);
+  // Alleen bij ja; leeg = niet opgegeven.
+  assert.deepEqual(schoneAntwoorden({ robot_interesse: 'nee', robot_contact_tel: '0470', robot_contact_email: 'a@b.be' }), { robot_interesse: 'nee' });
+  assert.deepEqual(schoneAntwoorden({ robot_interesse: 'ja_interesse', robot_contact_tel: '', robot_contact_email: 'a@b.be' }), { robot_interesse: 'ja_interesse', robot_contact_email: 'a@b.be' });
+  // Leesbaar in het CRM-detail en de CSV.
+  const rijen = antwoordenLeesbaar({ robot_interesse: 'ja_interesse', robot_contact_tel: '0470' });
+  assert.ok(rijen.some((r) => r.sleutel === 'robot_contact_tel' && r.vraag === VRAAG.robot_contact_tel && r.antwoord === '0470'));
+  assert.match(csv([]), /Ander nummer \(Autopilot\)/);
+});
+
+test('Autopilot v3: een save met alleen een ander nummer werkt de kaart bij', async () => {
+  const lms = nepLms();
+  const kaarten = [];
+  const api = maak(lms, { kaarten });
+  await api({ action: 'save', sessie: lms.t.sessie, huidige_stap: 4, antwoorden: { robot_interesse: 'ja_interesse' } });
+  await api({ action: 'save', sessie: lms.t.sessie, huidige_stap: 4, antwoorden: { robot_contact_tel: '0499 11 22 33' } });
+  assert.equal(kaarten.length, 2);
+  assert.equal(kaarten[1].answers.robot_contact_tel, '0499 11 22 33');
+});
+
+test('Autopilot v3: Daves kaart belt het opgegeven nummer; leeg → terug naar het bekende', async () => {
+  const db = nepCrm();
+  await syncCheckinAutomationKaart(db, { toewijzing: TW, student: ST, answers: { robot_interesse: 'ja_interesse', robot_contact_tel: '0499 11 22 33', robot_contact_email: 'ander@example.com' }, nu: NU });
+  const k = db.taken[0];
+  assert.equal(k.telefoon, '+32499112233');
+  assert.equal(k.bron_ref.contact_tel, '0499 11 22 33');
+  assert.equal(k.bron_ref.contact_email, 'ander@example.com');
+  assert.equal(k.bron_ref.telefoon_bekend, '0470 00 00 00');
+  assert.match(k.notitie, /BEL OP HET OPGEGEVEN NUMMER: 0499 11 22 33/);
+  assert.match(k.notitie, /ander@example\.com/);
+  await syncCheckinAutomationKaart(db, { toewijzing: TW, student: ST, answers: { robot_interesse: 'ja_interesse' }, nu: NU });
+  assert.equal(db.taken.length, 1);
+  assert.equal(k.telefoon, '+32470000000');
+  assert.equal(k.bron_ref.contact_tel, null);
+  assert.doesNotMatch(k.notitie, /OPGEGEVEN/);
 });
