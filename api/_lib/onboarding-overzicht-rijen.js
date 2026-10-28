@@ -28,6 +28,7 @@ import {
   findAvailabilityBlock,
   buildAvailabilityView,
 } from './onboarding-wizard-default.js';
+import { antwoordenVoorLms } from './onboarding-antwoorden.js';
 
 function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
@@ -433,6 +434,10 @@ export async function bouwOverzichtRijen(opts = {}) {
         // Het LMS-student-id (dfo-lms): de brug voor het LMS-overzicht.
         dfo_lms_student_id:    r.dfo_lms_student_id || null,
         automation:            automationByOb.get(r.id) || null,
+        // De onboarding-antwoorden zoals het LMS ze toont (28 okt 2026): de
+        // portalstand, de stappen van de nieuwe flow en de antwoorden — één
+        // afleiding, dezelfde als de LMS-spiegel (onboarding-antwoorden.js).
+        onboarding_antwoorden: antwoordenVoorLms(r, t ? (t.type ?? null) : null),
         persoonlijke_link:     linkByOb.get(r.id) || null,
         // Intake (Fase 1+ + Fase A nog_geen_mentor):
         mentor_intake_status: r.mentor_intake_status || null,
