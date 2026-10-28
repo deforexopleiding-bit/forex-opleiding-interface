@@ -29,6 +29,7 @@
 
 import { resolveFlowType } from './onboarding-wizard-default.js';
 import { DAGEN, DAGDELEN, BELMOMENTEN, portalAntwoorden } from './onboarding-portal.js';
+import { onboardingKlaar, klaarOp } from './onboarding-einde.js';
 
 /** De vraagschermen van de nieuwe flow (zonder welkom en klaar). */
 export const PORTAL_SCHERMEN = Object.freeze({
@@ -80,9 +81,13 @@ export function schermKlaar(scherm, a) {
   return false;
 }
 
-/** Is de wizard (oud of nieuw) afgerond? Zelfde betekenis als onboardings.status 'afgerond'. */
+/**
+ * Is de onboarding klaar? De gedeelde regel van onboarding-einde.js
+ * (status 'afgerond' OF met de hand OF door een sessie afgesloten), plus een
+ * completed_at zonder status voor oude rijen.
+ */
 export function wizardAfgerond(ob) {
-  return String(ob?.status || '').trim().toLowerCase() === 'afgerond' || !!ob?.completed_at;
+  return onboardingKlaar(ob) || !!ob?.completed_at;
 }
 
 // ── DE PORTALSTAND (28 okt 2026) ─────────────────────────────────────────
@@ -202,7 +207,7 @@ export function antwoordenVoorLms(ob, trajectType) {
   return {
     flow_type: flow,
     portal_stand: v.stand,
-    portal_afgerond_op: afgerond ? (ob?.completed_at || null) : null,
+    portal_afgerond_op: afgerond ? (klaarOp(ob) || ob?.completed_at || null) : null,
     // Voor het LMS-bord (niet in de spiegel): de tekst en of de nieuwe link al open ging.
     portal_label: v.label,
     portal_geopend: v.geopend,

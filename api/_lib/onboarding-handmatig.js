@@ -10,9 +10,17 @@
 // ── EIGEN KOLOMMEN, NIET DOOR ELKAAR ────────────────────────────────────
 // `handmatig_afgerond_op / _door / _reden` op `onboardings` (migratie
 // docs/sql-migrations/2026-10-06-onboarding-handmatig-afgerond.sql). De
-// automatische afsluiting (`auto_afgerond_*`) blijft apart. De wizardstatus
-// wordt NIET aangeraakt: `status` zegt iets over de wizard, niet over de
-// onboarding (zie onboarding-einde.js).
+// automatische afsluiting (`auto_afgerond_*`) blijft apart.
+//
+// STATUS (28 okt 2026, Maxim): tot nu bleef `status` op aangemeld/bezig staan
+// en las alles wat op status keek de onboarding als lopend (check-in-
+// doelgroep, "Moet onboarding nog afronden"). Nu zet afronden ook
+// status = 'afgerond' en completed_at (= hetzelfde moment als
+// handmatig_afgerond_op, zodat `wizardDoorKlantVoltooid` weet dat de klant de
+// wizard niet zelf deed) — zoals de afsluiting door een sessie al deed.
+// ZONDER de automations van wizard-afronding: die hangen aan rondWizardAf()
+// (hier niet aangeroepen) en de catch-up in onboarding-automation-engine.js
+// slaat met de hand of door een sessie afgesloten onboardings over.
 //
 // ── VÓÓR DE MIGRATIE ─────────────────────────────────────────────────────
 // De lezers vragen deze kolommen in een APARTE, faalzachte query
@@ -85,7 +93,7 @@ export async function rondOnboardingHandmatigAf({ onboardingId, reden, door, doo
   const r = String(reden || '').trim();
   if (r.length < 5) return { status: 400, body: { error: 'Geef een reden (minstens 5 tekens).', code: 'reden_verplicht' } };
   const { data: ob, error } = await db.from('onboardings')
-    .select('id, status, archived_at, auto_afgerond_op, auto_afgerond_sessie_id').eq('id', onboardingId).maybeSingle();
+    .select('id, status, archived_at, completed_at, auto_afgerond_op, auto_afgerond_sessie_id').eq('id', onboardingId).maybeSingle();
   if (error) return { status: 500, body: { error: 'Onboarding lezen: ' + error.message } };
   if (!ob) return { status: 404, body: { error: 'Onboarding niet gevonden.' } };
   const s = String(ob.status || '').toLowerCase();
@@ -97,8 +105,15 @@ export async function rondOnboardingHandmatigAf({ onboardingId, reden, door, doo
   if (onboardingAfgesloten(ob)) return { status: 200, body: { ok: true, al_afgerond: true } };
 
   const nu = new Date().toISOString();
+  const patch = { handmatig_afgerond_op: nu, handmatig_afgerond_door: String(door || 'onbekend').slice(0, 200), handmatig_afgerond_reden: r.slice(0, 1000) };
+  // Nog aangemeld/bezig → nu ook afgerond (zie boven). Al 'afgerond' (wizard
+  // voltooid) → status en het wizardmoment blijven staan.
+  if (s === 'aangemeld' || s === 'bezig') {
+    patch.status = 'afgerond';
+    patch.completed_at = ob.completed_at || nu;
+  }
   const { data: upd, error: upErr } = await db.from('onboardings')
-    .update({ handmatig_afgerond_op: nu, handmatig_afgerond_door: String(door || 'onbekend').slice(0, 200), handmatig_afgerond_reden: r.slice(0, 1000) })
+    .update(patch)
     .eq('id', onboardingId)
     .is('handmatig_afgerond_op', null)
     .select('id');

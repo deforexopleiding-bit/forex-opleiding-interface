@@ -352,9 +352,12 @@
     });
     return arr;
   }
+  // Klaar = de gedeelde regel (api/_lib/onboarding-einde.js onboardingKlaar):
+  // met de hand of door een sessie afgesloten telt nooit als "nog afronden",
+  // ook als de status nog aangemeld/bezig zegt (28 okt 2026).
   function moetNogAfronden(r) {
     const st = String(r.status || '').toLowerCase();
-    return !r.cancelled && (st === 'aangemeld' || st === 'bezig');
+    return !r.cancelled && (st === 'aangemeld' || st === 'bezig') && r.afgesloten !== true;
   }
   function startCounts(rows) {
     const arr = asArr(rows);

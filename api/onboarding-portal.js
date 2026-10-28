@@ -26,6 +26,11 @@
 // vraag, afgeklemd) en zet portal_geopend_op; de eerste save (of afronden)
 // zet portal_gestart_op — het kenmerk "begonnen in de nieuwe onboarding".
 //
+// MET DE HAND OF DOOR EEN SESSIE AFGESLOTEN (28 okt 2026): zo'n onboarding mag
+// de portal nog openen en invullen (alleen-lezen is enkel wie de wizard ZELF
+// voltooide — wizardDoorKlantVoltooid), maar afronden draait dan NIET de
+// neveneffecten van wizard-afronding (automations, …): hij is al klaar.
+//
 // De klassieke wizard (onboarding-wizard-get / -step-save / -complete) blijft
 // ongewijzigd werken: dat is het rollback-pad. 'complete' voert exact dezelfde
 // neveneffecten uit via api/_lib/onboarding-afronden.js.
@@ -39,6 +44,8 @@ import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 import { syncAutomationKaart } from './_lib/automation-interesse.js';
 import { hervatStap } from './_lib/onboarding-antwoorden.js';
 import { vulPortalKolommenAan } from './_lib/onboarding-portal-kolommen.js';
+import { vulHandmatigAan } from './_lib/onboarding-handmatig.js';
+import { onboardingKlaar, wizardDoorKlantVoltooid } from './_lib/onboarding-einde.js';
 import {
   valideerPatch, portalAntwoorden, ontbrekend, mentorKort, automationVelden,
   isAfgesloten, resolvePortalOrigin, TRAJECT_NAAM, TEKST,
@@ -94,7 +101,7 @@ async function open(d, req, res, body) {
   const db = d.db();
   const { data: ob, error } = await db
     .from('onboardings')
-    .select('id, token, status, customer_id, traject_id, mentor_user_id, start_date, current_step, answers')
+    .select('id, token, status, customer_id, traject_id, mentor_user_id, start_date, current_step, answers, completed_at, auto_afgerond_op')
     .eq('startcode', code)
     .maybeSingle();
   if (error) {
@@ -128,7 +135,10 @@ async function open(d, req, res, body) {
   const flow = resolveFlowType(traj?.data?.type);
   // Portalkolommen apart en faalzacht (migratie 2026-10-28-onboarding-portal-gestart.sql).
   await vulPortalKolommenAan(db, ob);
-  const afgerond = ob.status === 'afgerond';
+  await vulHandmatigAan(db, ob);
+  // Alleen-lezen = de klant voltooide de wizard zelf. Met de hand of door een
+  // sessie afgesloten → hij mag nog invullen.
+  const afgerond = wizardDoorKlantVoltooid(ob);
   if (!afgerond && ob.portal_geopend_op === null) {
     const { error: gErr } = await db.from('onboardings')
       .update({ portal_geopend_op: d.nu().toISOString() }).eq('id', ob.id).is('portal_geopend_op', null);
@@ -184,14 +194,15 @@ async function save(d, req, res, body) {
   }
 
   const { data: ob, error } = await zoekSessie(d, sessie,
-    'id, status, started_at, answers, customer_id, customer_name, traject_id, start_date, is_test');
+    'id, status, started_at, answers, customer_id, customer_name, traject_id, start_date, is_test, completed_at, auto_afgerond_op');
   if (error) {
     console.error('[onboarding-portal] save lookup:', error.message);
     return res.status(500).json({ error: 'Opslaan mislukt.', code: 'fout' });
   }
   if (!ob) return res.status(404).json({ error: 'Sessie onbekend.', code: 'sessie' });
   if (isAfgesloten(ob.status)) return res.status(410).json({ error: TEKST.afgesloten, code: 'afgesloten' });
-  if (ob.status === 'afgerond') return res.status(409).json({ error: 'Onboarding is al afgerond.', code: 'afgerond' });
+  await vulHandmatigAan(d.db(), ob);
+  if (wizardDoorKlantVoltooid(ob)) return res.status(409).json({ error: 'Onboarding is al afgerond.', code: 'afgerond' });
 
   // Zelfde gedrag als api/onboarding-step-save.js: shallow merge, current_step
   // overschrijven, aangemeld → bezig (+ started_at), updated_at altijd.
@@ -242,14 +253,15 @@ async function complete(d, req, res, body) {
   }
 
   const { data: ob, error } = await zoekSessie(d, sessie,
-    'id, status, traject_id, answers, mentor_user_id, customer_name');
+    'id, status, traject_id, answers, mentor_user_id, customer_name, completed_at, auto_afgerond_op');
   if (error) {
     console.error('[onboarding-portal] complete lookup:', error.message);
     return res.status(500).json({ error: 'Afronden mislukt.', code: 'fout' });
   }
   if (!ob) return res.status(404).json({ error: 'Sessie onbekend.', code: 'sessie' });
   if (isAfgesloten(ob.status)) return res.status(410).json({ error: TEKST.afgesloten, code: 'afgesloten' });
-  if (ob.status === 'afgerond') return res.status(200).json({ ok: true, already: true });
+  await vulHandmatigAan(d.db(), ob);
+  if (wizardDoorKlantVoltooid(ob)) return res.status(200).json({ ok: true, already: true });
 
   let flow = '1op1';
   if (ob.traject_id) {
@@ -262,6 +274,14 @@ async function complete(d, req, res, body) {
   const missing = ontbrekend(flow, ob.answers);
   if (missing.length) {
     return res.status(400).json({ error: 'Niet alle verplichte vragen zijn ingevuld.', code: 'onvolledig', missing });
+  }
+
+  // Al klaar (met de hand of door een sessie): de antwoorden staan er, maar geen
+  // tweede afronding — geen automations van wizard-afronding, status blijft.
+  if (onboardingKlaar(ob)) {
+    await zetPortalGestart(d.db(), ob.id, d.nu().toISOString());
+    await d.spiegel(ob.id, 'onboarding-portal-complete');
+    return res.status(200).json({ ok: true, already: true });
   }
 
   const af = await d.rondWizardAf(ob, { bron: 'onboarding-portal' });

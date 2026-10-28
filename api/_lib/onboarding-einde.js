@@ -60,6 +60,50 @@ export function onboardingAfgesloten(ob) {
   return automatischAfgesloten(ob) || handmatigAfgesloten(ob);
 }
 
+// ── "DE ONBOARDING IS KLAAR" (Maxim, 28 oktober 2026) ───────────────────
+// Gemeten 28 okt: 8 onboardings met handmatig_afgerond_op stonden nog op
+// status aangemeld/bezig. Het LMS toonde ze terecht als afgerond, maar alles
+// wat op `status` las zag ze als lopend: de check-in sloot ze uit ("onboarding
+// loopt nog") en "Moet onboarding nog afronden" zou ze tonen. Eén regel voor
+// al die plekken: klaar = status 'afgerond' OF met de hand OF door een sessie
+// afgesloten. Sinds 28 okt zet met de hand afronden ook status + completed_at
+// (onboarding-handmatig.js), maar de regel blijft de drie bronnen lezen.
+
+/** Is de onboarding klaar — wizard voltooid, met de hand of door een sessie afgesloten? PURE. */
+export function onboardingKlaar(ob) {
+  if (!ob) return false;
+  return statusVan(ob) === 'afgerond' || !!ob.handmatig_afgerond_op || !!ob.auto_afgerond_op;
+}
+
+/** Wanneer klaar: het wizardmoment, anders de afsluiting. null = niet klaar. PURE. */
+export function klaarOp(ob) {
+  if (!onboardingKlaar(ob)) return null;
+  return ob.completed_at || ob.handmatig_afgerond_op || ob.auto_afgerond_op || null;
+}
+
+function zelfdeMoment(a, b) {
+  if (!a || !b) return false;
+  const x = Date.parse(a);
+  return Number.isFinite(x) && x === Date.parse(b);
+}
+
+/**
+ * Heeft de KLANT de wizard zelf voltooid? PURE.
+ *
+ * Een afsluiting met de hand of door een sessie zet `completed_at` op
+ * hetzelfde moment als `handmatig_afgerond_op` / `auto_afgerond_op`
+ * (onboarding-handmatig.js, onboarding-afsluiten-na-sessie.js `afsluitPatch`,
+ * backfill 2026-10-28). Dan is de wizard NIET door de klant ingevuld: de
+ * nieuwe onboarding mag hij nog openen en invullen.
+ */
+export function wizardDoorKlantVoltooid(ob) {
+  if (!ob || statusVan(ob) !== 'afgerond') return false;
+  // Niet afgesloten met de hand of door een sessie: 'afgerond' = wizard voltooid.
+  if (!ob.handmatig_afgerond_op && !ob.auto_afgerond_op) return true;
+  if (!ob.completed_at) return false;
+  return !zelfdeMoment(ob.completed_at, ob.handmatig_afgerond_op) && !zelfdeMoment(ob.completed_at, ob.auto_afgerond_op);
+}
+
 /** Wanneer hij afgesloten werd, of null als hij niet afgesloten is. PURE. */
 export function afgeslotenOp(ob) {
   if (automatischAfgesloten(ob)) return ob.auto_afgerond_op || ob.auto_afgerond_sessie_op || null;

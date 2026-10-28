@@ -232,3 +232,95 @@ test('schermen: lijst, detail, profiel en v1-overzicht tonen de afleiding — no
   assert.match(lees('modules/klanten-v2/views/tabs/profiel.js'), /ob\.voortgang\?\.label/);
   assert.match(lees('modules/shared/onboarding-overzicht.js'), /onboarding_antwoorden\.portal_label/);
 });
+
+// ── "De onboarding is klaar" (28 okt 2026) ────────────────────────────────
+// Gemeten: 8 onboardings met handmatig_afgerond_op stonden nog op aangemeld/
+// bezig (Rachael Njoki, Rahim Gusani, BV Ky, Eva Turcksin, Miguel Claeys,
+// Evertjan Graeff, Erduhan Ahmedov, Daniel Dimitrov).
+
+import { onboardingKlaar, klaarOp, wizardDoorKlantVoltooid } from '../api/_lib/onboarding-einde.js';
+import { doelgroep } from '../api/_lib/checkin-beheer.js';
+
+const H = '2026-10-21T13:00:00.502Z';
+const EVERTJAN_HAND = { ...EVERTJAN, handmatig_afgerond_op: H };            // vóór de backfill
+const EVERTJAN_NA = { ...EVERTJAN_HAND, status: 'afgerond', completed_at: H }; // na backfill / nieuwe afronding
+
+test('klaar: status afgerond OF met de hand OF door een sessie afgesloten', () => {
+  assert.equal(onboardingKlaar(EVERTJAN), false);
+  assert.equal(onboardingKlaar(EVERTJAN_HAND), true);
+  assert.equal(onboardingKlaar(EVERTJAN_NA), true);
+  assert.equal(onboardingKlaar({ status: 'bezig', auto_afgerond_op: H }), true);
+  assert.equal(onboardingKlaar({ status: 'afgerond' }), true);
+  assert.equal(klaarOp(EVERTJAN_HAND), H);
+  assert.equal(klaarOp(EVERTJAN), null);
+  // Zelf voltooid ≠ met de hand afgesloten (zelfde moment = niet zelf).
+  assert.equal(wizardDoorKlantVoltooid(EVERTJAN_NA), false);
+  assert.equal(wizardDoorKlantVoltooid({ status: 'afgerond', completed_at: '2026-10-01T10:00:00Z' }), true);
+  assert.equal(wizardDoorKlantVoltooid({ status: 'afgerond', completed_at: '2026-10-01T10:00:00Z', handmatig_afgerond_op: H }), true);
+  assert.equal(wizardDoorKlantVoltooid({ status: 'afgerond', completed_at: H, auto_afgerond_op: H }), false);
+  assert.equal(wizardDoorKlantVoltooid({ status: 'afgerond' }), true, 'oude rij zonder completed_at, nooit afgesloten');
+});
+
+test('voortgang: met de hand afgerond = Afgerond — vóór én na de backfill, nooit "oude wizard" of "moet nog"', () => {
+  for (const ob of [EVERTJAN_HAND, EVERTJAN_NA]) {
+    const v = portalVoortgang(ob, 'membership');
+    assert.equal(v.stand, 'afgerond');
+    assert.equal(v.label, 'Afgerond');
+  }
+  assert.equal(antwoordenVoorLms(EVERTJAN_HAND, 'membership').portal_afgerond_op, H);
+  // De lijst: "Moet onboarding nog afronden" sluit afgesloten rijen uit.
+  assert.match(lees('modules/klanten-v2/views/onboarding-v2.js'),
+    /function moetNogAfronden\(r\)[\s\S]*?&& r\.afgesloten !== true/);
+});
+
+test('portal: met de hand afgerond mag nog openen en invullen; afronden draait GEEN wizard-afronding', async () => {
+  for (const ob of [EVERTJAN_HAND, EVERTJAN_NA]) {
+    const db = dbMet({ ...ob }, 'membership');
+    const afgerond = [];
+    const h = maakHandler({ db: () => db, rateLimit: async () => ({ limited: false }),
+      rondWizardAf: async (o) => { afgerond.push(o.id); return { ok: true }; },
+      spiegel: async () => {}, naAutomation: async () => {}, nu: () => new Date('2026-10-28T10:00:00Z') });
+    const o = await post(h, { action: 'open', code: 'ABCD2345' });
+    assert.equal(o.body.afgerond, false, 'niet alleen-lezen');
+    assert.equal(o.body.current_step, 1, 'jij — de eerste open vraag');
+    const s = await post(h, { action: 'save', sessie: TOKEN, current_step: 1, answers: { ervaring_trading: 'geen', motivatie_primair: 'anders', commitment_uren_per_week: 3 } });
+    assert.equal(s.statusCode, 200);
+    const c = await post(h, { action: 'complete', sessie: TOKEN });
+    assert.equal(c.statusCode, 200);
+    assert.equal(c.body.already, true);
+    assert.deepEqual(afgerond, [], 'geen rondWizardAf → geen automations van wizard-afronding');
+  }
+  // Wie de wizard ZELF voltooide, blijft alleen-lezen.
+  const zelf = dbMet({ status: 'afgerond', completed_at: '2026-10-01T10:00:00Z', current_step: 4, answers: {} });
+  const r = await post(handler(zelf), { action: 'open', code: 'ABCD2345' });
+  assert.equal(r.body.afgerond, true);
+  assert.equal((await post(handler(zelf), { action: 'save', sessie: TOKEN, current_step: 1, answers: { ervaring_trading: 'geen' } })).statusCode, 409);
+});
+
+test('check-in-doelgroep: met de hand afgerond en niet recent → krijgt de check-in; recent of lopend → niet', () => {
+  const nu = new Date('2026-10-28T10:00:00Z');
+  const st = (id, email) => ({ id, auth_id: 'a-' + id, email, product_soort: 'membership', eind_datum: '2027-06-01' });
+  const studenten = [st('s1', 'evertjan@x.be'), st('s2', 'daniel@x.be'), st('s3', 'lopend@x.be'), st('s4', 'na@x.be')];
+  const onboardings = [
+    { id: 'o1', email: 'evertjan@x.be', status: 'bezig', handmatig_afgerond_op: H, created_at: '2026-09-01T00:00:00Z', started_at: '2026-09-02T00:00:00Z' },
+    // Daniel Dimitrov: met de hand afgerond, maar aangemeld op 24/10 → recent → nog geen check-in.
+    { id: 'o2', email: 'daniel@x.be', status: 'aangemeld', handmatig_afgerond_op: '2026-10-26T11:17:00Z', created_at: '2026-10-24T00:00:00Z', started_at: null },
+    { id: 'o3', email: 'lopend@x.be', status: 'bezig', created_at: '2026-08-01T00:00:00Z', started_at: '2026-08-02T00:00:00Z' },
+    { id: 'o4', email: 'na@x.be', status: 'afgerond', completed_at: H, handmatig_afgerond_op: H, created_at: '2026-08-01T00:00:00Z' },
+  ];
+  const dg = doelgroep({ studenten, onboardings, testEmails: [], nu });
+  assert.deepEqual(dg.ontvangers.map((s) => s.id).sort(), ['s1', 's4']);
+  const reden = Object.fromEntries(dg.uitgesloten.map((u) => [u.student.id, u.reden]));
+  assert.deepEqual(reden, { s2: 'onboarding_recent', s3: 'onboarding_loopt' });
+  // De Run leest de afsluitkolommen mee.
+  assert.match(lees('api/checkin-beheer.js'), /handmatig_afgerond_op, auto_afgerond_op/);
+});
+
+test('backfill-migratie: alleen aangemeld/bezig met een afsluiting, zelfde moment, met rollback-lijst', () => {
+  const sql = lees('docs/sql-migrations/2026-10-28-onboarding-handmatig-status-backfill.sql');
+  assert.match(sql, /where status in \('aangemeld', 'bezig'\)\s+and \(handmatig_afgerond_op is not null or auto_afgerond_op is not null\)/);
+  assert.match(sql, /completed_at = coalesce\(o\.completed_at, o\.handmatig_afgerond_op, o\.auto_afgerond_op\)/);
+  assert.match(sql, /returning o\.id, o\.customer_name, oud\.status as oude_status/);
+  assert.match(sql, /NA de merge/);
+  assert.equal((sql.match(/'::uuid, '(aangemeld|bezig)'\)/g) || []).length, 8);
+});

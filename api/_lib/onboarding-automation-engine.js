@@ -222,7 +222,12 @@ async function loadCandidatesForAutomation(auto, now) {
   if (auto.trigger_type === 'on_onboarding_created') {
     if (newOnly) q = q.gte('created_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_wizard_completed') {
-    q = q.eq('status', 'afgerond').not('completed_at', 'is', null);
+    q = q.eq('status', 'afgerond').not('completed_at', 'is', null)
+      // Met de hand of door een sessie afgesloten (28 okt 2026): status +
+      // completed_at staan dan ook, maar de klant voltooide de wizard niet.
+      // Wie hem wél voltooide, werd al ingeschreven door de hook in rondWizardAf.
+      .is('handmatig_afgerond_op', null)
+      .is('auto_afgerond_op', null);
     if (newOnly) q = q.gte('completed_at', auto.enabled_at);
   } else if (auto.trigger_type === 'time_after_signup') {
     const cfg = auto.trigger_config || {};

@@ -347,6 +347,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   detail, profiel, v1-overzicht, LMS-bord en spiegel. Kolommen faalzacht via onboarding-portal-kolommen.js (zonder
   migratie: afleiding van vóór 28 okt). Portal 'open' geeft `hervatStap()`: oude wizard → eerste onbeantwoorde vraag
   van de nieuwe flow, anders afgeklemd. Migratie docs/sql-migrations/2026-10-28-onboarding-portal-gestart.sql.
+  "ONBOARDING IS KLAAR" (28 okt): `onboardingKlaar()` in onboarding-einde.js = status 'afgerond' OF handmatig_afgerond_op
+  OF auto_afgerond_op — gebruikt door voortgang, tegel "Moet onboarding nog afronden", check-in-doelgroep (klaar + niet
+  recent → wél check-in) en de portal. Met de hand afronden zet sinds 28 okt ook status 'afgerond' + completed_at
+  (zelfde moment → `wizardDoorKlantVoltooid` = false: portal blijft invulbaar, afronden draait GEEN rondWizardAf). De
+  automation-catch-up on_wizard_completed slaat handmatig/auto afgesloten over. Backfill
+  docs/sql-migrations/2026-10-28-onboarding-handmatig-status-backfill.sql (pas NA de merge draaien).
 - Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE studenten op
   www.deforexopleiding.nl/checkin (dfo-website): LMS-pop-up (één keer) + balk met een persoonlijke
   code tot verstuurd. DATA IN HET LMS (dfo-lms): `hlms_checkin_campagne` (concept → test → live ⇄
