@@ -303,6 +303,37 @@ function renderOverzichtTab() {
 // De stand in de NIEUWE onboarding (28 okt 2026) — dezelfde afleiding als de
 // lijst en het LMS (api/_lib/onboarding-antwoorden.js portalVoortgang). De
 // pagina van de klassieke wizard staat er alleen nog als uitleg bij.
+// De onboarding-herinneringen (28 okt 2026): welke mail wanneer vertrok, en de
+// schakelaar "Geen herinneringen" (wie en wanneer). Instellingen en teksten:
+// Onboarding › Herinneringen.
+const HERINNERING_LABEL = {
+  herinnering_1: 'Herinnering 1', herinnering_2: 'Herinnering 2', bijna_start: 'Bijna van start',
+  laatste: 'Laatste herinnering', signaal_geen_reactie: 'Signaal "geen reactie" naar de administratie',
+};
+function herinneringenHtml(h) {
+  if (!h) return '';
+  const log = h.log === null
+    ? '<div class="kv-onb-empty">Logboek nog niet beschikbaar (migratie 2026-10-28-onboarding-opvolgflow.sql).</div>'
+    : (h.log.length
+      ? '<ul style="margin:0 0 8px;padding-left:18px;font-size:13px">' + h.log.map((l) => `<li>${esc(HERINNERING_LABEL[l.soort] || l.soort)} · ${esc(fmtDT(l.op))}`
+        + (l.status === 'mislukt' ? ' · <span style="color:var(--rose)">mislukt</span>' : l.status === 'overgenomen' ? ' · <span style="color:var(--text-3)">via de oude automation</span>' : '')
+        + (l.naar && l.naar !== 'administratie' ? ` · <span style="color:var(--text-3)">${esc(l.naar)}</span>` : '') + '</li>').join('') + '</ul>'
+      : '<div class="kv-onb-empty" style="margin-bottom:8px">Nog geen herinnering verstuurd.</div>');
+  const g = h.geen;
+  return `
+    <div class="kv-onb-section">
+      <div class="kv-onb-section-title">Herinneringen</div>
+      ${log}
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px">
+        <input type="checkbox" data-kv-onb-geen-herinneringen ${g ? 'checked' : ''} ${state.savingAction ? 'disabled' : ''}>
+        <span><b>Geen herinneringen</b> — voor deze student vertrekt er geen enkele automatische onboarding-herinnering${g ? ` <span style="color:var(--text-3)">(aan sinds ${esc(fmtDT(g.op))}${g.door ? ' door ' + esc(g.door) : ''})</span>` : ''}</span>
+      </label>
+    </div>`;
+}
+function actGeenHerinneringen(aan) {
+  return callAction('geen_herinneringen', '/api/onboarding-herinneringen', { actie: 'geen_herinneringen', onboarding_id: state.id, aan });
+}
+
 function voortgangHtml(o) {
   const v = o.portal?.voortgang;
   if (!v || !v.label) return o.current_step != null ? 'Stap ' + esc(String(o.current_step)) : '—';
@@ -521,6 +552,7 @@ function renderVragenlijstTab() {
       <div class="kv-onb-section-title">Startcode</div>
       ${startcode}
     </div>
+    ${herinneringenHtml(p.herinneringen)}
     <div class="kv-onb-section">
       <div class="kv-onb-section-title">Antwoorden</div>
       <dl style="display:grid;grid-template-columns:minmax(150px,auto) 1fr;gap:6px 14px;margin:0 0 12px">
@@ -1019,6 +1051,7 @@ function wire() {
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
   box.querySelector('[data-kv-onb-dfolms]')?.addEventListener('click', actDfoLms);
   box.querySelector('[data-kv-onb-lmsinvite]')?.addEventListener('click', actLmsInvite);
+  box.querySelector('[data-kv-onb-geen-herinneringen]')?.addEventListener('change', (e) => actGeenHerinneringen(e.currentTarget.checked));
   box.querySelectorAll('[data-kv-onb-copy]').forEach((b) => b.addEventListener('click', () => kopieer(b.getAttribute('data-kv-onb-copy'))));
   box.querySelector('[data-kv-onb-naar-kaart]')?.addEventListener('click', (e) => naarKaart(e.currentTarget.getAttribute('data-kv-onb-naar-kaart')));
 }

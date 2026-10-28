@@ -17,6 +17,7 @@
 //   POST { actie: 'naar_incasso',       onboarding_id, reden, door_email }       (6 okt 2026)
 //   POST { actie: 'koppel_student',     onboarding_id, student_id, door_email }  (7 okt 2026)
 //   POST { actie: 'terug_activeren',    onboarding_id, start_datum, door_email } (6 okt 2026)
+//   POST { actie: 'geen_herinneringen', onboarding_id, aan: true|false, door_email } (28 okt 2026)
 // Die lopen door DEZELFDE functies als de CRM-schermen
 // (api/_lib/onboarding-acties.js): dezelfde controles, dezelfde meldingen aan
 // mentoren, dezelfde spiegel. Annuleren en archiveren kunnen hier NIET — die
@@ -61,11 +62,12 @@ import {
   wijsMentorToe, zetStartdatumOnboarding, zetStartstatus, schrijfOnboardingNotitie,
 } from './_lib/onboarding-acties.js';
 import { rondOnboardingHandmatigAf } from './_lib/onboarding-handmatig.js';
+import { zetGeenHerinneringen } from './_lib/onboarding-herinneringen-server.js';
 import { zetNaarIncasso, activeerUitIncasso } from './_lib/onboarding-incasso.js';
 import { crmMentorVoorLmsId, crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
 
 /** De acties die op een onboarding-id werken (en niet op een student-id). */
-export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie', 'handmatig_afronden', 'naar_incasso', 'terug_activeren', 'koppel_student']);
+export const ONBOARDING_ACTIES = new Set(['mentor_toewijzen', 'startdatum', 'startstatus', 'notitie', 'handmatig_afronden', 'naar_incasso', 'terug_activeren', 'koppel_student', 'geen_herinneringen']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -108,7 +110,7 @@ export default async function handler(req, res) {
   const onboardingId = String(body?.onboarding_id || '').trim();
   if (actie !== 'sessie_afgerond' && !ONBOARDING_ACTIES.has(actie)) {
     return antwoord(res, 400, false, 'ongeldige_actie',
-      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie, handmatig_afronden, naar_incasso, terug_activeren of koppel_student.');
+      'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie, handmatig_afronden, naar_incasso, terug_activeren, koppel_student of geen_herinneringen.');
   }
   // DE ONBOARDING-ACTIES: op onboarding-id. `startdatum` met een student-id
   // blijft de oude weg (start later op, PR6).
@@ -313,6 +315,11 @@ async function onboardingActie(res, actie, onboardingId, body) {
         studentId: typeof body?.student_id === 'string' ? body.student_id.trim() : '',
         door: (door?.full_name || doorEmail || 'onbekend') + ' ' + viaLms,
         doorUserId,
+      });
+    } else if (actie === 'geen_herinneringen') {
+      //  De schakelaar "Geen herinneringen" (28 okt 2026): aan of uit, met wie.
+      uitkomst = await zetGeenHerinneringen(supabaseAdmin, {
+        onboardingId, aan: body?.aan === true, door: (door?.full_name || doorEmail || 'onbekend') + ' ' + viaLms,
       });
     } else if (actie === 'handmatig_afronden') {
       const reden = typeof body?.reden === 'string' ? body.reden.trim().slice(0, 1000) : '';

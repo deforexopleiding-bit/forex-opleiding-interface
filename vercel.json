@@ -257,6 +257,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/cron/onboarding-herinneringen",
+      "schedule": "5 8 * * *"
+    },
+    {
       "path": "/api/cron/onboarding-auto-afronden",
       "schedule": "10 7 * * *"
     },

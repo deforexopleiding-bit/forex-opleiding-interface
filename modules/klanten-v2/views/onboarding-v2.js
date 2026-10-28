@@ -61,7 +61,7 @@
 
   window.__onbOpen = async (id) => {
     try {
-      const mod = await import('./modals/onboarding-detail.js?v=5');
+      const mod = await import('./modals/onboarding-detail.js?v=6');
       mod.openOnboardingDetailModal({ onboardingId: id, onSuccess: refetchAll });
     } catch (e) { console.error('[onb-v2] detail-modal load fail:', e); window.KV?.toast?.('Kon detail niet laden'); }
   };
