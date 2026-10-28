@@ -150,7 +150,7 @@
     // studenten (LMS-pop-up + balk → deforexopleiding.nl/checkin). GEEN rollen:
     // alleen wie checkin.view heeft (admin/manager + de hoofdmentor-profielen,
     // super_admin via '*'). Run en de andere knoppen vragen checkin.run.
-    { g: 'Leren & Events',         id: 'checkin',          naam: 'Studentencheck-in', icon: I.chat,     color: 'emerald', roles: [], permKey: 'checkin.view', tabs: ['Overzicht', 'Payouts', 'Per mentor'] },
+    { g: 'Leren & Events',         id: 'checkin',          naam: 'Studentencheck-in', icon: I.chat,     color: 'emerald', roles: [], permKey: 'checkin.view', tabs: ['Overzicht', 'Payouts', 'Per mentor', 'Mails'] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM, permKey: 'onboarding.admin', tabs: ['Actief', 'Inbox', 'Archief', 'Herinneringen'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Commissies', 'Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 

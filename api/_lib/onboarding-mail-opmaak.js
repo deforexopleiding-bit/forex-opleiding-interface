@@ -42,8 +42,8 @@ function metLinks(htmlVeilig) {
  *   persoonlijke link voor de knop.
  * @returns {{html: string, text: string}}
  */
-export function bouwOpmaakMail({ subject, body, waarden, link }) {
-  const code = waarden?.[CODE_REGEL] || '';
+export function bouwOpmaakMail({ subject, body, waarden, link, codeLabel = 'Jouw startcode', codeRegel = CODE_REGEL }) {
+  const code = waarden?.[codeRegel] || '';
   const html = [];
   const tekst = [];
   let alinea = [];
@@ -55,14 +55,14 @@ export function bouwOpmaakMail({ subject, body, waarden, link }) {
   };
   for (const regel of String(body || '').split('\n')) {
     const knop = KNOP_RE.exec(regel);
-    if (regel.trim() === CODE_REGEL) {
+    if (regel.trim() === codeRegel) {
       sluitAlinea();
       if (code) {
         html.push('<div style="margin:6px 0 18px;padding:16px 18px;border:2px dashed #C98B2E;border-radius:12px;text-align:center;background:#fdf8ef">'
-          + '<div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#7a6a4f;margin-bottom:6px">Jouw startcode</div>'
+          + `<div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#7a6a4f;margin-bottom:6px">${esc(codeLabel)}</div>`
           + `<div style="font-family:'Courier New',Courier,monospace;font-size:30px;font-weight:700;letter-spacing:.18em;color:#10284A">${esc(code)}</div>`
           + '</div>');
-        tekst.push(`Jouw startcode: ${code}`, '');
+        tekst.push(`${codeLabel}: ${code}`, '');
       }
       continue;
     }

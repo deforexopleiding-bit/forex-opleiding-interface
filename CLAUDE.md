@@ -389,6 +389,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Automation "Ja, bel mij" → kaart voor Dave via `syncCheckinAutomationKaart` (sleutel
   `bron_ref.checkin_toewijzing_id`, unieke index in docs/sql-migrations/2026-10-27-studentencheck-in.sql),
   nooit voor is_test. Geen mail/WhatsApp naar studenten.
+  CHECK-IN PER MAIL (28 okt): `api/cron/checkin-mails.js` (*/10, max 40 per loop, vanaf info@) — uitnodiging met
+  code + knop naar /checkin, herinnering 5 en 10 dagen na de uitnodiging zolang niet verstuurd. Sloten: campagne LIVE
+  (de Run van Maxim) · app_settings `checkin_mails.aan` (standaard UIT) · tekst goedgekeurd (recht
+  `checkin.mails.goedkeuren` = super_admin) · logboek `checkin_mails` (uniek toewijzing+soort). Tab Studentencheck-in
+  › Mails (`api/checkin-mails.js`; teksten via de gedeelde `views/mail-teksten-v2.js`, ook gebruikt door Onboarding ›
+  Herinneringen). "Genegeerd" = niet verstuurd 14 dagen na `campagne.live_op` (los van de mails; het LMS-overzicht
+  Betrokkenheid rekent hetzelfde). LIJN onboarding ↔ check-in: `lijn()` in checkin-beheer.js, `GET ?lijn=1`.
+  Migratie docs/sql-migrations/2026-10-28-checkin-mails.sql.
   CRM-SECTIE "Studentencheck-in" (MODS-item `checkin` in Leren & Events, GEEN rollen, permKey `checkin.view`;
   knoppen vragen `checkin.run`): `views/studentencheckin-v2.js` + `api/checkin-beheer.js` (rekenkern
   `api/_lib/checkin-beheer.js`). Campagnekaart (Voorbeeld als teststudent · Testtoewijzingen · Run · Pauzeren/
