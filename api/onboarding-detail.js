@@ -13,6 +13,8 @@
 //                           calls, duur_maanden, mentor_name, paid } }
 // 404 bij onbekend id.
 
+import { vulOpvolgAan } from './_lib/onboarding-opvolg-kolommen.js';
+import { leesLog as leesHerinneringen } from './_lib/onboarding-herinneringen-server.js';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 // DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
@@ -289,6 +291,20 @@ export default async function handler(req, res) {
     // de lijst en het LMS: oude wizard / nieuwe onboarding x/y / afgerond.
     await vulPortalKolommenAan(supabaseAdmin, row);
     portal.voortgang = portalVoortgang(row, t ? resolveFlowType(t.type) : null);
+    //  De onboarding-herinneringen (28 okt 2026): de schakelaar en het logboek.
+    //  Faalzacht: zonder migratie null (= niet gelezen).
+    await vulOpvolgAan(supabaseAdmin, row);
+    let herinneringLog = null;
+    try {
+      const kaart = await leesHerinneringen(supabaseAdmin, [row.id]);
+      herinneringLog = kaart === null ? null : (kaart.get(row.id) || []).map((h) => ({ soort: h.soort, status: h.status, op: h.aangemaakt_op, naar: h.naar || null }));
+    } catch (e) {
+      console.warn('[onboarding-detail] herinneringen:', e?.message || e);
+    }
+    portal.herinneringen = {
+      geen: row.geen_herinneringen_op ? { op: row.geen_herinneringen_op, door: row.geen_herinneringen_door || null } : null,
+      log: herinneringLog,
+    };
     return res.status(200).json({
       ok: true,
       onboarding: {

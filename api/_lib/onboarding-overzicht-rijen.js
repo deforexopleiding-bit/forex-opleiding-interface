@@ -31,6 +31,7 @@ import {
 import { antwoordenVoorLms } from './onboarding-antwoorden.js';
 import { leesPortalKolommen } from './onboarding-portal-kolommen.js';
 import { vulOpvolgAan, welkomstmailMomenten } from './onboarding-opvolg-kolommen.js';
+import { leesLog as leesHerinneringen } from './onboarding-herinneringen-server.js';
 
 function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
@@ -120,6 +121,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       automationByOb,
       linkByOb,
       welkomstByOb,
+      herinneringenByOb,
     ] = await Promise.all([
       // ── 2) Mentor-naam per uniek mentor_user_id ─────────────────────────
       (async () => {
@@ -303,6 +305,12 @@ export async function bouwOverzichtRijen(opts = {}) {
       // ── 16) De echte welkomstmail (28 okt 2026): invite_sent_at bleef leeg,
       //     de mail staat in het log van de automation. Faalzacht (lege map).
       welkomstmailMomenten(supabaseAdmin, list.map((r) => r.id)),
+      // ── 17) Het logboek van de onboarding-herinneringen (28 okt 2026).
+      //     null = tabel nog niet aangemaakt of niet gelezen. Faalzacht.
+      leesHerinneringen(supabaseAdmin, list.map((r) => r.id)).catch((e) => {
+        console.warn('[onboarding-overzicht] herinneringen:', e?.message || e);
+        return null;
+      }),
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
@@ -462,6 +470,13 @@ export async function bouwOverzichtRijen(opts = {}) {
         portal_geopend_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_geopend_op || null),
         portal_gestart_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_gestart_op || null),
         oude_wizard_paginas:   oudeWizardPaginas,
+        // De opvolgflow (28 okt 2026): de schakelaar "Geen herinneringen" per
+        // student, en welke herinnering wanneer vertrok (null = niet gelezen).
+        geen_herinneringen_op: r.geen_herinneringen_op || null,
+        geen_herinneringen:    r.geen_herinneringen_op ? { op: r.geen_herinneringen_op, door: r.geen_herinneringen_door || null } : null,
+        herinneringen:         herinneringenByOb === null ? null
+          : (herinneringenByOb.get(r.id) || []).map((h) => ({ soort: h.soort, status: h.status, op: h.aangemaakt_op })),
+        auto_afgerond_reden:   r.auto_afgerond_reden || null,
         persoonlijke_link:     linkByOb.get(r.id) || null,
         // Intake (Fase 1+ + Fase A nog_geen_mentor):
         mentor_intake_status: r.mentor_intake_status || null,

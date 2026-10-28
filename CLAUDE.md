@@ -353,6 +353,24 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   (zelfde moment → `wizardDoorKlantVoltooid` = false: portal blijft invulbaar, afronden draait GEEN rondWizardAf). De
   automation-catch-up on_wizard_completed slaat handmatig/auto afgesloten over. Backfill
   docs/sql-migrations/2026-10-28-onboarding-handmatig-status-backfill.sql (pas NA de merge draaien).
+- Opvolgflow onboarding (2026-10-28) — AUTOMATISCH AFRONDEN: membership dicht op de startdatum
+  (Brussel) mits zelf ingevuld (`api/cron/onboarding-auto-afronden.js`, 07:10; regel
+  `besluitMembershipAfronden` in `api/_lib/onboarding-auto-afronden.js`); 1-op-1 blijft de eerste sessie.
+  `onboardings.auto_afgerond_reden` (membership_start / oud_dossier) → `afgeslotenDoor()` zegt nooit
+  'sessie' zonder sessie. WELKOMSTMAIL: `invite_sent_at` is leeg; `uitnodiging_op` = eerste gelukte
+  send_email van de automation on_onboarding_created (`welkomstmailMomenten`). HERINNERINGEN
+  (`api/_lib/onboarding-herinneringen.js`, puur; IO in `-server.js`; cron `onboarding-herinneringen` 08:05;
+  CRM-tab Onboarding › Herinneringen = `api/onboarding-herinneringen.js`): NOOIT tijdens de bedenktijd;
+  dag 15 = bedenktijd.vervalt_op + 1 (anders aanmelding + 15), dag 22, start − 2 (na de bedenktijd en niet
+  binnen 3 dagen van een vorige), start + 7 → signaal melding_geen_reactie (bak admin) i.p.v. mail.
+  Hoofdschakelaar app_settings `onboarding_herinneringen.aan` (standaard UIT) + per tekst goedgekeurd
+  (exact die tekst; recht `onboarding.herinneringen.goedkeuren` = super_admin). Logboek
+  `onboarding_herinneringen` (uniek onboarding+soort, eerst claimen dan mailen). Per student "Geen
+  herinneringen" (`geen_herinneringen_op/_door`; LMS-actie `geen_herinneringen`). Oude automation
+  "Reminder na bedenktijd" (time_after_signup) aan → wij sturen herinnering 1 niet; haar mail telt als 1.
+  OUDE DOSSIERS (start > 30 d, niet ingevuld): niet in de cadans; één laatste mail via de knop (typ
+  VERSTUUR), 7 dagen later automatisch afgerond (oud_dossier) → check-in. Migratie
+  docs/sql-migrations/2026-10-28-onboarding-opvolgflow.sql.
 - Studentencheck-in (2026-10-27) — "Jouw DFO-check-in" voor BESTAANDE studenten op
   www.deforexopleiding.nl/checkin (dfo-website): LMS-pop-up (één keer) + balk met een persoonlijke
   code tot verstuurd. DATA IN HET LMS (dfo-lms): `hlms_checkin_campagne` (concept → test → live ⇄
