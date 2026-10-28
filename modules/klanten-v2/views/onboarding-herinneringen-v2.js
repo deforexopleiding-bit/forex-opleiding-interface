@@ -45,7 +45,7 @@
     wacht_7_dagen: 'Laatste mail verstuurd, wacht 7 dagen', geen_oud_dossier: '—',
   };
 
-  const st = window.__ohState = window.__ohState || { laden: false, data: null, fout: null, seq: 0, bezig: null, concept: {}, toonAlles: false };
+  const st = window.__ohState = window.__ohState || { laden: false, data: null, fout: null, seq: 0, bezig: null, toonAlles: false };
   const rerender = () => { if (typeof window.DFO.render === 'function') window.DFO.render(); };
   const toast = (m) => { if (window.KV && typeof window.KV.toast === 'function') window.KV.toast(m); else alert(m); };
   const foutTekst = (e, standaard) => (e && e.body && e.body.error) || (e && e.message) || standaard;
@@ -76,42 +76,6 @@
     }
   }
 
-  window.__ohTekst = (soort, veld, waarde) => {
-    st.concept[soort] = st.concept[soort] || {};
-    st.concept[soort][veld] = waarde;
-  };
-  window.__ohBewaar = async (soort) => {
-    const t = st.data.instellingen.teksten[soort];
-    const c = st.concept[soort] || {};
-    try {
-      const j = await post({ actie: 'tekst', soort, onderwerp: c.onderwerp ?? t.onderwerp, tekst: c.tekst ?? t.tekst }, 'bewaar:' + soort);
-      st.data.instellingen = j.instellingen; delete st.concept[soort];
-      toast('Bewaard. De tekst staat weer op concept tot hij goedgekeurd is.');
-    } catch (e) { toast(foutTekst(e, 'Bewaren mislukt.')); }
-  };
-  window.__ohGoedkeuren = async (soort) => {
-    if (st.concept[soort]) return toast('Bewaar eerst je wijziging.');
-    try {
-      const j = await post({ actie: 'goedkeuren', soort }, 'goed:' + soort);
-      st.data.instellingen = j.instellingen;
-      toast('Goedgekeurd.');
-    } catch (e) { toast(foutTekst(e, 'Goedkeuren mislukt.')); }
-  };
-  window.__ohTest = async (soort) => {
-    if (st.concept[soort]) return toast('Bewaar eerst je wijziging; de testmail gebruikt de bewaarde tekst.');
-    try {
-      const j = await post({ actie: 'test', soort }, 'test:' + soort);
-      toast('Testmail verstuurd naar ' + j.naar + '.');
-    } catch (e) { toast(foutTekst(e, 'Testmail mislukt.')); }
-  };
-  window.__ohSchakelaar = async (aan) => {
-    if (aan && !confirm('Herinneringen AANZETTEN? Vanaf de volgende ochtend (± 9u) vertrekken de goedgekeurde herinneringen automatisch naar studenten.')) return;
-    try {
-      const j = await post({ actie: 'schakelaar', aan }, 'schakelaar');
-      st.data.instellingen = j.instellingen;
-      toast(aan ? 'Herinneringen staan AAN.' : 'Herinneringen staan UIT.');
-    } catch (e) { toast(foutTekst(e, 'Mislukt.')); }
-  };
   window.__ohGeen = async (id, aan) => {
     try {
       await post({ actie: 'geen_herinneringen', onboarding_id: id, aan }, 'geen:' + id);
@@ -140,47 +104,26 @@
     return `<button type="button" class="btn ${p ? 'btn-primary' : 'btn-ghost'} btn-sm" ${uit ? 'disabled' : ''} title="${esc(titel)}" onclick="${onclick}">${esc(label)}</button>`;
   }
 
-  function schakelaarKaart(d) {
-    const i = d.instellingen;
-    const mag = d.rechten && d.rechten.goedkeuren;
-    const goed = d.soorten.filter((s) => i.teksten[s.soort].goedgekeurd).length;
-    let h = `<div class="card" style="margin-bottom:12px"><div class="card-body" style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:240px">`;
-    h += `<div style="display:flex;gap:8px;align-items:center"><div style="font-size:16px;font-weight:700">Onboarding-herinneringen</div>${i.aan ? pill('ok', 'AAN') : pill('neutral', 'UIT')}</div>`;
-    h += `<div style="font-size:12.5px;color:var(--text-2);margin-top:6px;line-height:1.5">Nooit tijdens de bedenktijd. Dag 15 (de dag na het vervallen) · dag 22 · startdatum − 2 (niet binnen 3 dagen van een vorige) · startdatum + 7: geen mail meer, een signaal "geen reactie" naar de administratie.`;
-    h += ` Elke ochtend ± 9u. Alleen goedgekeurde teksten vertrekken (${goed}/${d.soorten.length} goedgekeurd).</div>`;
-    if (i.aan && i.aan_op) h += `<div style="font-size:12px;color:var(--text-3);margin-top:4px">Aangezet op ${esc(moment(i.aan_op))}${i.aan_door ? ' door ' + esc(i.aan_door) : ''}.</div>`;
-    if (d.oude_automation && d.oude_automation.aan) {
-      h += `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--amber-soft,#fdf6e7);font-size:12.5px">De automation <b>${esc(d.oude_automation.namen.join(', '))}</b> staat nog aan en mailt zelf op aanmelding + 15 dagen. Zolang ze aan staat, stuurt deze module herinnering 1 niet (geen twee mails op één dag). Zet ze uit in Onboarding-automations als deze module het overneemt.</div>`;
-    }
-    if (!d.logboek) h += `<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--rose-soft,#fdecee);font-size:12.5px">Het logboek ontbreekt: draai eerst <span class="mono">docs/sql-migrations/2026-10-28-onboarding-opvolgflow.sql</span>. Zonder logboek vertrekt er niets.</div>`;
-    h += `</div><div>`;
-    h += i.aan
-      ? knop(st.bezig === 'schakelaar' ? 'Bezig…' : 'Zet UIT', 'window.__ohSchakelaar(false)', { uit: !mag || !!st.bezig, titel: mag ? '' : 'Alleen met het recht onboarding.herinneringen.goedkeuren.' })
-      : knop(st.bezig === 'schakelaar' ? 'Bezig…' : 'Zet AAN', 'window.__ohSchakelaar(true)', { p: true, uit: !mag || !!st.bezig || !goed, titel: !mag ? 'Alleen met het recht onboarding.herinneringen.goedkeuren.' : (!goed ? 'Keur eerst minstens één tekst goed.' : '') });
-    h += `</div></div></div>`;
-    return h;
-  }
+  const mt = window.KVMailTeksten.maak({
+    api: API, sleutel: 'oh',
+    codeUitleg: 'Een regel <span class="mono">{{onboarding.startcode}}</span> = de code groot in een kader; een regel <span class="mono">[knop: …]</span> = een knop naar www.deforexopleiding.nl/onboarding. Ook: <span class="mono">{{klant.voornaam}}</span>.',
+    data: () => st.data,
+    zetInstellingen: (i) => { st.data.instellingen = i; },
+    opnieuw: () => laad(),
+  });
 
-  function tekstKaart(d, s) {
-    const t = d.instellingen.teksten[s.soort];
-    const c = st.concept[s.soort] || {};
-    const mag = d.rechten && d.rechten.goedkeuren;
-    const gewijzigd = !!st.concept[s.soort];
-    let h = `<div class="card" style="margin-bottom:10px" data-testid="oh-tekst-${esc(s.soort)}"><div class="card-body">`;
-    h += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><b>${esc(s.label)}</b>`;
-    h += t.goedgekeurd ? pill('ok', 'Goedgekeurd') : pill('warn', 'Concept');
-    if (t.goedgekeurd) h += `<span style="font-size:11.5px;color:var(--text-3)">door ${esc(t.goedgekeurd_door || '?')} op ${esc(moment(t.goedgekeurd_op))}</span>`;
-    else if (t.gewijzigd_op) h += `<span style="font-size:11.5px;color:var(--text-3)">gewijzigd door ${esc(t.gewijzigd_door || '?')} op ${esc(moment(t.gewijzigd_op))}</span>`;
-    h += `</div>`;
-    h += `<input type="text" value="${esc(c.onderwerp ?? t.onderwerp)}" oninput="window.__ohTekst('${s.soort}','onderwerp',this.value)" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit;font-weight:600;margin-bottom:6px" aria-label="Onderwerp">`;
-    h += `<textarea rows="9" oninput="window.__ohTekst('${s.soort}','tekst',this.value)" style="width:100%;padding:8px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit;font-family:inherit;font-size:13px;line-height:1.45" aria-label="Tekst">${esc(c.tekst ?? t.tekst)}</textarea>`;
-    h += `<div style="font-size:11.5px;color:var(--text-3);margin:4px 0 8px">Een regel <span class="mono">{{onboarding.startcode}}</span> = de code groot in een kader; een regel <span class="mono">[knop: …]</span> = een knop naar www.deforexopleiding.nl/onboarding. Ook: <span class="mono">{{klant.voornaam}}</span>.</div>`;
-    h += `<div style="display:flex;gap:6px;flex-wrap:wrap">`;
-    h += knop(st.bezig === 'bewaar:' + s.soort ? 'Bezig…' : 'Bewaren', `window.__ohBewaar('${s.soort}')`, { uit: !!st.bezig });
-    h += knop(st.bezig === 'test:' + s.soort ? 'Bezig…' : 'Testmail naar mij', `window.__ohTest('${s.soort}')`, { uit: !!st.bezig || gewijzigd, titel: 'Stuurt deze tekst naar jouw eigen adres, met een voorbeeldcode.' });
-    h += knop(st.bezig === 'goed:' + s.soort ? 'Bezig…' : 'Goedkeuren', `window.__ohGoedkeuren('${s.soort}')`, { p: true, uit: !mag || t.goedgekeurd || gewijzigd || !!st.bezig, titel: mag ? '' : 'Alleen met het recht onboarding.herinneringen.goedkeuren.' });
-    h += `</div></div></div>`;
-    return h;
+  function schakelaarKaart(d) {
+    const w = [];
+    if (d.oude_automation && d.oude_automation.aan) {
+      w.push({ html: `De automation <b>${esc(d.oude_automation.namen.join(', '))}</b> staat nog aan en mailt zelf op aanmelding + 15 dagen. Zolang ze aan staat, stuurt deze module herinnering 1 niet (geen twee mails op één dag). Zet ze uit in Onboarding-automations als deze module het overneemt.` });
+    }
+    if (!d.logboek) w.push({ ernst: 'rood', html: 'Het logboek ontbreekt: draai eerst <span class="mono">docs/sql-migrations/2026-10-28-onboarding-opvolgflow.sql</span>. Zonder logboek vertrekt er niets.' });
+    return mt.schakelaar(d, {
+      titel: 'Onboarding-herinneringen',
+      uitleg: 'Nooit tijdens de bedenktijd. Dag 15 (de dag na het vervallen) · dag 22 · startdatum − 2 (niet binnen 3 dagen van een vorige) · startdatum + 7: geen mail meer, een signaal "geen reactie" naar de administratie. Elke ochtend ± 9u.',
+      bevestig: 'Herinneringen AANZETTEN? Vanaf de volgende ochtend (± 9u) vertrekken de goedgekeurde herinneringen automatisch naar studenten.',
+      waarschuwingen: w,
+    });
   }
 
   function vandaagKaart(d) {
@@ -233,7 +176,7 @@
     if (!st.data) return `<div class="card"><div class="card-body" style="color:var(--text-3)">Laden…</div></div>`;
     const d = st.data;
     return `<div data-testid="onboarding-herinneringen">${schakelaarKaart(d)}${vandaagKaart(d)}${oudeKaart(d)}
-      <div style="font-weight:700;margin:16px 0 8px">Teksten</div>${d.soorten.map((s) => tekstKaart(d, s)).join('')}</div>`;
+      ${mt.teksten(d)}</div>`;
   }
 
   window.DFO.VIEWS['onboarding/Herinneringen'] = view;

@@ -27,7 +27,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 import { bouwOverzichtRijen } from './_lib/onboarding-overzicht-rijen.js';
 import { dagBrussel } from './_lib/onboarding-auto-afronden.js';
-import { SOORTEN, SOORT_LABEL, normaliseerInstellingen, eersteDag } from './_lib/onboarding-herinneringen.js';
+import { SOORTEN, SOORT_LABEL, normaliseerInstellingen, eersteDag, keurGoed, bewerkTekst } from './_lib/onboarding-herinneringen.js';
 import {
   leesInstellingen, leesRuweInstellingen, bewaarInstellingen, planHerinneringen, claim, markeer,
   stuurHerinnering, stuurTestHerinnering, zetGeenHerinneringen,
@@ -115,13 +115,9 @@ export function maakHandler(deps = {}) {
         const onderwerp = String(b.onderwerp || '').trim().slice(0, 200);
         const tekst = String(b.tekst || '').replace(/\r\n/g, '\n').trim().slice(0, 5000);
         if (!onderwerp || !tekst) return res.status(400).json({ error: 'Onderwerp en tekst zijn verplicht.' });
-        const ruw = await leesRuweInstellingen(d.db);
-        const teksten = { ...(ruw.teksten || {}) };
-        //  De goedkeuring blijft staan als bewijs van wat goedgekeurd werd; de
-        //  normalisatie ziet dat de tekst nu anders is → weer concept.
-        teksten[b.soort] = { ...(teksten[b.soort] || {}), onderwerp, tekst, gewijzigd_op: new Date().toISOString(), gewijzigd_door: door };
-        await bewaarInstellingen(d.db, { ...ruw, teksten }, user.id);
-        return res.status(200).json({ ok: true, instellingen: normaliseerInstellingen({ ...ruw, teksten }) });
+        const ruw = bewerkTekst(await leesRuweInstellingen(d.db), b.soort, { onderwerp, tekst }, door);
+        await bewaarInstellingen(d.db, ruw, user.id);
+        return res.status(200).json({ ok: true, instellingen: normaliseerInstellingen(ruw) });
       }
 
       //  Vanaf hier: alleen wie mag goedkeuren.
@@ -129,16 +125,10 @@ export function maakHandler(deps = {}) {
 
       if (b.actie === 'goedkeuren') {
         if (!SOORTEN.includes(b.soort)) return res.status(400).json({ error: 'Onbekende soort.' });
-        const ruw = await leesRuweInstellingen(d.db);
-        const huidig = normaliseerInstellingen(ruw).teksten[b.soort];
-        const teksten = { ...(ruw.teksten || {}) };
-        teksten[b.soort] = {
-          ...(teksten[b.soort] || {}), onderwerp: huidig.onderwerp, tekst: huidig.tekst,
-          goedgekeurd_onderwerp: huidig.onderwerp, goedgekeurd_tekst: huidig.tekst,
-          goedgekeurd_op: new Date().toISOString(), goedgekeurd_door: door,
-        };
-        await bewaarInstellingen(d.db, { ...ruw, teksten }, user.id);
-        return res.status(200).json({ ok: true, instellingen: normaliseerInstellingen({ ...ruw, teksten }) });
+        const oud = await leesRuweInstellingen(d.db);
+        const ruw = keurGoed(oud, b.soort, normaliseerInstellingen(oud).teksten[b.soort], door);
+        await bewaarInstellingen(d.db, ruw, user.id);
+        return res.status(200).json({ ok: true, instellingen: normaliseerInstellingen(ruw) });
       }
 
       if (b.actie === 'schakelaar') {

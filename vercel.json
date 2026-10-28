@@ -257,6 +257,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/cron/checkin-mails",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron/onboarding-herinneringen",
       "schedule": "5 8 * * *"
     },

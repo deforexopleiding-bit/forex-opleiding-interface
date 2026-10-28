@@ -33,18 +33,18 @@ export async function leesInstellingen(db) {
 }
 
 /** Schrijft de RUWE waarde (met goedgekeurd_onderwerp/_tekst), upsert op key. */
-export async function bewaarInstellingen(db, waarde, door = null) {
-  const row = { key: SETTING_KEY, value: waarde, updated_by_user_id: door };
-  const { data: al, error: lErr } = await db.from('app_settings').select('key').eq('key', SETTING_KEY).maybeSingle();
+export async function bewaarInstellingen(db, waarde, door = null, key = SETTING_KEY) {
+  const row = { key, value: waarde, updated_by_user_id: door };
+  const { data: al, error: lErr } = await db.from('app_settings').select('key').eq('key', key).maybeSingle();
   if (lErr) throw new Error('instellingen: ' + lErr.message);
   const { error } = al
-    ? await db.from('app_settings').update(row).eq('key', SETTING_KEY)
+    ? await db.from('app_settings').update(row).eq('key', key)
     : await db.from('app_settings').insert(row);
   if (error) throw new Error('instellingen bewaren: ' + error.message);
 }
 
-export async function leesRuweInstellingen(db) {
-  const { data, error } = await db.from('app_settings').select('value').eq('key', SETTING_KEY).maybeSingle();
+export async function leesRuweInstellingen(db, key = SETTING_KEY) {
+  const { data, error } = await db.from('app_settings').select('value').eq('key', key).maybeSingle();
   if (error) throw new Error('instellingen: ' + error.message);
   return data?.value && typeof data.value === 'object' ? data.value : {};
 }

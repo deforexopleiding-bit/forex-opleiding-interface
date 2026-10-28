@@ -118,16 +118,20 @@ export const CONCEPT_TEKSTEN = {
   },
 };
 
-/** De instellingen uit app_settings, met de concepten als standaard. PURE. */
-export function normaliseerInstellingen(waarde) {
+/**
+ * Instellingen met teksten die eerst goedgekeurd moeten worden — gedeeld met de
+ * check-in-mails (checkin-mails.js). Een tekst is goedgekeurd zolang hij EXACT
+ * gelijk is aan wat goedgekeurd werd; anders weer concept. PURE.
+ * @param {object|null} waarde de ruwe app_settings-waarde
+ * @param {Record<string,{onderwerp:string,tekst:string}>} concepten de standaardteksten per soort
+ */
+export function normaliseerTekstInstellingen(waarde, concepten) {
   const v = waarde && typeof waarde === 'object' ? waarde : {};
   const teksten = {};
-  for (const s of SOORTEN) {
+  for (const [s, c] of Object.entries(concepten)) {
     const t = v.teksten && typeof v.teksten === 'object' ? v.teksten[s] : null;
-    const c = CONCEPT_TEKSTEN[s];
     const onderwerp = t && typeof t.onderwerp === 'string' && t.onderwerp.trim() ? t.onderwerp : c.onderwerp;
     const tekst = t && typeof t.tekst === 'string' && t.tekst.trim() ? t.tekst : c.tekst;
-    //  Goedgekeurd geldt alleen voor exact de tekst die goedgekeurd werd.
     const ok = !!(t && t.goedgekeurd_op && t.goedgekeurd_onderwerp === onderwerp && t.goedgekeurd_tekst === tekst);
     teksten[s] = {
       onderwerp, tekst,
@@ -138,12 +142,33 @@ export function normaliseerInstellingen(waarde) {
       gewijzigd_door: t?.gewijzigd_door || null,
     };
   }
-  return {
-    aan: v.aan === true,
-    aan_op: v.aan_op || null,
-    aan_door: v.aan_door || null,
-    teksten,
+  return { aan: v.aan === true, aan_op: v.aan_op || null, aan_door: v.aan_door || null, teksten };
+}
+
+/** De instellingen van de onboarding-herinneringen, met de concepten als standaard. PURE. */
+export function normaliseerInstellingen(waarde) {
+  return normaliseerTekstInstellingen(waarde, CONCEPT_TEKSTEN);
+}
+
+/**
+ * De ruwe waarde na "Goedkeuren": de huidige tekst wordt de goedgekeurde. PURE.
+ * @returns {object} nieuwe ruwe waarde
+ */
+export function keurGoed(ruw, soort, huidig, door, nuIso = new Date().toISOString()) {
+  const teksten = { ...((ruw && ruw.teksten) || {}) };
+  teksten[soort] = {
+    ...(teksten[soort] || {}), onderwerp: huidig.onderwerp, tekst: huidig.tekst,
+    goedgekeurd_onderwerp: huidig.onderwerp, goedgekeurd_tekst: huidig.tekst,
+    goedgekeurd_op: nuIso, goedgekeurd_door: door,
   };
+  return { ...(ruw || {}), teksten };
+}
+
+/** De ruwe waarde na een bewerking: de goedkeuring vervalt vanzelf (andere tekst). PURE. */
+export function bewerkTekst(ruw, soort, { onderwerp, tekst }, door, nuIso = new Date().toISOString()) {
+  const teksten = { ...((ruw && ruw.teksten) || {}) };
+  teksten[soort] = { ...(teksten[soort] || {}), onderwerp, tekst, gewijzigd_op: nuIso, gewijzigd_door: door };
+  return { ...(ruw || {}), teksten };
 }
 
 /** Is deze onboarding klaar (ingevuld of afgesloten)? Zelfde regel als onboardingKlaar. PURE. */
