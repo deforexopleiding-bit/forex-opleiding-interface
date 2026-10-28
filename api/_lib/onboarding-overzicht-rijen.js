@@ -61,7 +61,7 @@ export async function bouwOverzichtRijen(opts = {}) {
       .from('onboardings')
       .select(`id, customer_id, customer_name, traject_id, mentor_user_id,
                status, current_step, answers,
-               start_date, created_at,
+               start_date, created_at, invite_sent_at,
                started_at, completed_at, assigned_at, archived_at, token,
                               bubble_user_id, mentor_intake_status, dfo_lms_student_id,
                intake_handled_at, intake_handled_by,
@@ -186,6 +186,8 @@ export async function bouwOverzichtRijen(opts = {}) {
           return {
             waiverKey:         findWaiverConsentKey(pub),
             availabilityBlock: findAvailabilityBlock(pub),
+            // Het aantal pagina's van de KLASSIEKE wizard, voor "Oude wizard 3/10".
+            oudeWizardPaginas: Array.isArray(pub?.pages) && pub.pages.length ? pub.pages.length : null,
           };
         } catch (e) {
           console.warn('[admin-future-students-list] wizard exception:', e?.message || e);
@@ -296,7 +298,7 @@ export async function bouwOverzichtRijen(opts = {}) {
     ]);
 
     const mentorNameByUid   = mentorMaps.nameMap;
-    const { waiverKey, availabilityBlock } = wizardMeta;
+    const { waiverKey, availabilityBlock, oudeWizardPaginas = null } = wizardMeta;
 
     // ── 5) 1-op-1 fetchen — VERWIJDERD uit het kritieke pad ────────────────
     // De live sessie-call was seconden traag en
@@ -444,6 +446,14 @@ export async function bouwOverzichtRijen(opts = {}) {
         // portalstand, de stappen van de nieuwe flow en de antwoorden — één
         // afleiding, dezelfde als de LMS-spiegel (onboarding-antwoorden.js).
         onboarding_antwoorden: antwoordenVoorLms(r, t ? (t.type ?? null) : null),
+        // Voor het onboardingbord in het LMS (28 okt 2026): de tijdlijn en de
+        // regel "stil" (welkomstmail ≥ 10 dagen, nog niets geopend).
+        // portal_*_op = undefined → kolommen niet gelezen (migratie
+        // 2026-10-28-onboarding-portal-gestart.sql niet gedraaid).
+        uitnodiging_op:        r.invite_sent_at || null,
+        portal_geopend_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_geopend_op || null),
+        portal_gestart_op:     r.portal_gestart_op === undefined ? undefined : (r.portal_gestart_op || null),
+        oude_wizard_paginas:   oudeWizardPaginas,
         persoonlijke_link:     linkByOb.get(r.id) || null,
         // Intake (Fase 1+ + Fase A nog_geen_mentor):
         mentor_intake_status: r.mentor_intake_status || null,
