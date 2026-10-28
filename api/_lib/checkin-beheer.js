@@ -19,6 +19,11 @@
 //   gedeelde regel van onboarding-einde.js (28 okt 2026): status afgerond OF
 //   met de hand OF door een sessie afgesloten — met de hand afgeronde
 //   onboardings stonden nog op aangemeld/bezig en vielen zo ten onrechte uit.
+//   OOK UITGESLOTEN (28 okt 2026, Maxim): wie de NIEUWE onboarding in de laatste
+//   30 dagen gebruikte (onboardings.portal_gestart_op) — bv. begonnen in de oude
+//   wizard in september, nieuwe onboarding volgende week: started_at is oud,
+//   maar hij deed net de onboarding. BEWUST NIET completed_at: oude dossiers die
+//   nu met de hand afgerond worden (sessies liepen al) krijgen de check-in wél.
 //   De onboarding wordt gevonden via hlms_student.crm_onboarding_id én via
 //   het e-mailadres van de klant (niet elke student is aan zijn onboarding
 //   gekoppeld).
@@ -47,6 +52,7 @@ export const UITSLUIT_REDEN = Object.freeze({
   testaccount: 'Testaccount',
   onboarding_loopt: 'Onboarding loopt nog',
   onboarding_recent: 'Onboarding in de laatste 30 dagen gestart',
+  onboarding_portal_recent: 'Nieuwe onboarding in de laatste 30 dagen ingevuld',
 });
 
 const lower = (s) => String(s || '').trim().toLowerCase();
@@ -89,8 +95,12 @@ export function doelgroep({ studenten, onboardings, testEmails = testaccounts(),
     if (obs.some((o) => (o.status === 'aangemeld' || o.status === 'bezig') && !onboardingKlaar(o))) {
       uitgesloten.push({ student: s, reden: 'onboarding_loopt' }); continue;
     }
-    if (obs.some((o) => { const t = Date.parse(o.started_at || o.created_at || ''); return Number.isFinite(t) && t >= grens; })) {
+    const recent = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) && t >= grens; };
+    if (obs.some((o) => recent(o.started_at) || recent(o.created_at))) {
       uitgesloten.push({ student: s, reden: 'onboarding_recent' }); continue;
+    }
+    if (obs.some((o) => recent(o.portal_gestart_op))) {
+      uitgesloten.push({ student: s, reden: 'onboarding_portal_recent' }); continue;
     }
     ontvangers.push(s);
   }
@@ -127,7 +137,7 @@ export function doelgroepSamenvatting({ ontvangers, uitgesloten }, mentorNamen =
 export function doelgroepRegel(samenvatting, nu = new Date()) {
   return {
     regel: 'hlms_student met auth_id, eind_datum >= vandaag, product mentorship of membership',
-    uitgesloten: 'CRM-onboarding loopt nog (aangemeld/bezig) of in de laatste 30 dagen gestart; testaccounts',
+    uitgesloten: 'CRM-onboarding loopt nog (aangemeld/bezig, niet klaar), in de laatste 30 dagen gestart (created_at/started_at) of de nieuwe onboarding in de laatste 30 dagen ingevuld (portal_gestart_op); testaccounts',
     peildatum: vandaag(nu),
     ontvangers: samenvatting.totaal,
     per_product: samenvatting.per_product,

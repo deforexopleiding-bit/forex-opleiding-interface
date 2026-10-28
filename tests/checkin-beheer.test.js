@@ -10,6 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   doelgroep, doelgroepSamenvatting, rijenVan, kpi, perMentor, payouts, csv, runStand, schoneOpties, testaccounts, npsBand,
@@ -309,4 +310,64 @@ test('CSV-export', async () => {
   assert.equal(r.statusCode, 200);
   assert.match(r.headers['content-type'], /text\/csv/);
   assert.match(r.body, /Naam;E-mail/);
+});
+
+// ── De nieuwe onboarding recent gebruikt (28 okt 2026, Maxim) ─────────────
+// Gat: begonnen in de OUDE wizard in september (started_at oud), de NIEUWE
+// onboarding volgende week afgerond → zonder deze regel meteen een check-in.
+// Bewust NIET completed_at: oude dossiers die nu met de hand afgerond worden
+// (sessies liepen al) moeten de check-in juist WEL krijgen.
+
+test('doelgroep: nieuwe onboarding in de laatste 30 dagen ingevuld → uit (aparte reden); oud dossier met de hand afgerond → wél', () => {
+  const nu = new Date('2026-11-05T10:00:00Z');
+  const studenten = [
+    st({ id: 'aschwin' }), st({ id: 'oud' }), st({ id: 'lang' }), st({ id: 'grens' }), st({ id: 'zonder' }),
+  ];
+  const ob = (id, over) => ({ id: 'o-' + id, email: id + '@x.be', is_test: false, created_at: '2026-08-01T00:00:00Z', started_at: '2026-09-06T00:00:00Z', ...over });
+  const onboardings = [
+    // Aschwin: oude wizard 6 sep, nieuwe onboarding 2 nov afgerond.
+    ob('aschwin', { status: 'afgerond', completed_at: '2026-11-02T18:00:00Z', portal_gestart_op: '2026-11-01T09:00:00Z' }),
+    // Oud dossier, vandaag met de hand afgerond (completed_at = nu): geen portal → krijgt de check-in.
+    ob('oud', { status: 'afgerond', completed_at: '2026-11-05T09:00:00Z', handmatig_afgerond_op: '2026-11-05T09:00:00Z', portal_gestart_op: null }),
+    // Portal langer dan 30 dagen geleden → krijgt de check-in.
+    ob('lang', { status: 'afgerond', portal_gestart_op: '2026-09-30T09:00:00Z' }),
+    // Precies op de grens van 30 dagen telt nog als recent.
+    ob('grens', { status: 'afgerond', portal_gestart_op: '2026-10-06T10:00:00Z' }),
+    // Kolom niet gelezen (migratie niet gedraaid): geen portal_gestart_op → niet uit te sluiten.
+    ob('zonder', { status: 'afgerond' }),
+  ];
+  const dg = doelgroep({ studenten, onboardings, testEmails: [], nu });
+  assert.deepEqual(dg.ontvangers.map((s) => s.id).sort(), ['lang', 'oud', 'zonder']);
+  assert.deepEqual(Object.fromEntries(dg.uitgesloten.map((u) => [u.student.id, u.reden])),
+    { aschwin: 'onboarding_portal_recent', grens: 'onboarding_portal_recent' });
+  // Apart te zien in het Run-venster, met een eigen label.
+  const sam = doelgroepSamenvatting(dg);
+  assert.equal(sam.uitgesloten_per_reden.onboarding_portal_recent, 2);
+  assert.equal(sam.uitgesloten.find((u) => u.reden === 'onboarding_portal_recent').reden_label, 'Nieuwe onboarding in de laatste 30 dagen ingevuld');
+  // completed_at speelt nergens mee in de regel.
+  const bron = readFileSync(new URL('../api/_lib/checkin-beheer.js', import.meta.url), 'utf8');
+  const regel = bron.slice(bron.indexOf('export function doelgroep('), bron.indexOf('/** Tellingen voor het bevestigingsvenster'));
+  assert.doesNotMatch(regel, /completed_at/);
+});
+
+test('doelgroep: volgorde van de redenen — loopt, dan gestart, dan nieuwe onboarding', () => {
+  const nu = new Date('2026-11-05T10:00:00Z');
+  const s = [st({ id: 'a' }), st({ id: 'b' })];
+  const dg = doelgroep({ studenten: s, testEmails: [], nu, onboardings: [
+    { id: 'oa', email: 'a@x.be', status: 'bezig', created_at: '2026-08-01T00:00:00Z', portal_gestart_op: '2026-11-01T00:00:00Z' },
+    { id: 'ob', email: 'b@x.be', status: 'afgerond', created_at: '2026-10-20T00:00:00Z', portal_gestart_op: '2026-11-01T00:00:00Z' },
+  ] });
+  assert.deepEqual(dg.uitgesloten.map((u) => u.reden), ['onboarding_loopt', 'onboarding_recent']);
+});
+
+test('Run-venster: leest portal_gestart_op mee, toont de redenen apart en waarschuwt zonder de kolom', async () => {
+  const r = await api(nepLms())('POST', { actie: 'doelgroep', campagne_id: 'c1' });
+  assert.equal(r.body.samenvatting.portal_gelezen, true);
+  assert.equal(r.body.samenvatting.waarschuwing, undefined);
+  assert.equal(r.body.uitsluit_redenen.onboarding_portal_recent, 'Nieuwe onboarding in de laatste 30 dagen ingevuld');
+  const view = readFileSync(new URL('../modules/klanten-v2/views/studentencheckin-v2.js', import.meta.url), 'utf8');
+  assert.match(view, /uitgesloten_per_reden/);
+  assert.match(view, /s\.waarschuwing/);
+  assert.match(readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8'), /studentencheckin-v2\.js\?v=2/);
+  assert.match(readFileSync(new URL('../api/checkin-beheer.js', import.meta.url), 'utf8'), /leesPortalKolommen\(crm,/);
 });

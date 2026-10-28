@@ -286,9 +286,16 @@
     const t = r.lms_tekst || {};
     const ok = r.getypt === 'ACTIVEER';
     let h = `<div class="waarschuw"><b>Dit zet de check-in live voor ${esc(s.totaal)} studenten.</b> Zij zien bij hun volgende bezoek aan het LMS de pop-up (één keer) en de balk. Er gaat GEEN mail of WhatsApp uit. Nieuwe studenten worden later niet stil toegevoegd.</div>`;
-    h += `<h4 style="margin:0 0 6px;font-size:13px">Doelgroep</h4><p class="ck-sub" style="margin:0 0 8px">Studenten met een login, einddatum vandaag of later, product mentorship of membership. Uitgesloten: wie een onboarding in het CRM heeft die nog loopt of in de laatste 30 dagen gestart is, en de testaccounts.</p>`;
+    h += `<h4 style="margin:0 0 6px;font-size:13px">Doelgroep</h4><p class="ck-sub" style="margin:0 0 8px">Studenten met een login, einddatum vandaag of later, product mentorship of membership. Uitgesloten: wie een onboarding in het CRM heeft die nog loopt, in de laatste 30 dagen gestart is of de nieuwe onboarding in de laatste 30 dagen invulde, en de testaccounts. Een oud dossier dat nu met de hand afgerond wordt, krijgt de check-in wél.</p>`;
+    if (s.waarschuwing) h += `<div class="waarschuw">${esc(s.waarschuwing)}</div>`;
     h += `<dl><dt>Ontvangers</dt><dd>${esc(s.totaal)}</dd><dt>Mentorship</dt><dd>${esc(s.per_product.mentorship || 0)}</dd><dt>Membership</dt><dd>${esc(s.per_product.membership || 0)}</dd></dl>`;
     h += `<details style="margin-top:8px"><summary style="cursor:pointer">Per mentor (${s.per_mentor.length})</summary><dl style="margin-top:6px">${s.per_mentor.map((m) => `<dt>${esc(m.naam)}</dt><dd>${esc(m.aantal)}</dd>`).join('')}</dl></details>`;
+    // De uitsluitredenen apart geteld (28 okt 2026) — o.a. "Nieuwe onboarding in de laatste 30 dagen ingevuld".
+    const perReden = Object.entries(s.uitgesloten_per_reden || {});
+    if (perReden.length) {
+      const label = (k) => (s.uitgesloten.find((u) => u.reden === k) || {}).reden_label || k;
+      h += `<dl style="margin-top:6px" data-ck-redenen>${perReden.map(([k, n]) => `<dt>${esc(label(k))}</dt><dd>${esc(n)}</dd>`).join('')}</dl>`;
+    }
     h += `<details style="margin-top:6px"><summary style="cursor:pointer">Uitgesloten (${s.uitgesloten.length})</summary><dl style="margin-top:6px">${s.uitgesloten.map((u) => `<dt>${esc(u.naam)}</dt><dd>${esc(u.reden_label)}</dd>`).join('') || '<dt>—</dt><dd></dd>'}</dl></details>`;
     if (t.popup) {
       h += `<h4 style="margin:16px 0 6px;font-size:13px">Wat de student ziet — pop-up (één keer)</h4><div class="blok"><span class="ck-sub">${esc(t.popup.eyebrow)}</span>\n<b>${esc(t.popup.titel)}</b>\n${esc(t.popup.tekst)}\n[${esc(t.popup.knoppen.join('] [ '))}]</div>`;
