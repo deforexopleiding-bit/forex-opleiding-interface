@@ -16,7 +16,7 @@
 //
 // Auth: CRON_SECRET via Authorization: Bearer <secret> (ook voor preview).
 
-import { supabaseAdmin, checkCronAuth } from './supabase.js';
+import { supabaseAdmin, checkCronAuth, verifyAdmin } from './supabase.js';
 import { verzamelDagrapport } from './_lib/dagrapport-data.js';
 import { buildDagrapportPdf } from './_lib/dagrapport-pdf.js';
 import { leesConfig, uploadEnToken, verzendWhatsapp, verzendEmail } from './_lib/dagrapport-verzend.js';
@@ -26,12 +26,20 @@ const NOTIF_TYPE = 'dagrapport_2130';
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  const cronAuth = checkCronAuth(req);
-  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
-
   const q = req.query || {};
   const preview = truthy(q.preview);
   const force = truthy(q.force);
+
+  // Auth: de cron gebruikt CRON_SECRET. Een ingelogde admin mag de PREVIEW ook
+  // starten (zodat het zonder secret in de browser kan); de echte verzend-run
+  // blijft bewust cron-only.
+  const cronAuth = checkCronAuth(req);
+  if (preview) {
+    const magPreview = cronAuth.ok || !!(await verifyAdmin(req));
+    if (!magPreview) return res.status(403).json({ error: 'Admin of CRON_SECRET vereist voor preview' });
+  } else if (!cronAuth.ok) {
+    return res.status(cronAuth.status).json(cronAuth.body);
+  }
 
   try {
     // ── Preview: bouwen + PDF, niets versturen ──────────────────────────────
