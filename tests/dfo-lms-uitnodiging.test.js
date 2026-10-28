@@ -22,6 +22,7 @@ import {
   MAIL_VERSTUURD_WACHTWOORD_NIET_GEZET,
   FOUT_PREFIX_HERSTELBAAR,
   FOUT_PREFIX_ACTIE_VEREIST,
+  ROL_TOEKENNEN_MISLUKT,
 } from '../api/_lib/dfo-lms-uitnodiging.js';
 
 const echteFetch = globalThis.fetch;
@@ -165,6 +166,37 @@ test('half_aangemaakt stuurt GEEN uitnodiging en meldt het auth_id', async () =>
   assert.equal(r.herstelbaar, true);
   assert.match(r.fout, /auth-9/);
   assert.ok(!gedaan.some((g) => g.url.includes('/uitnodiging/')));
+});
+
+// De studentrol (28 okt 2026): zonder rol in hlms_rol komt de student het LMS
+// niet in. Het LMS mailt dan niet; het CRM mag dat ook niet als succes lezen.
+test('stap 1 rol_toekennen_mislukt: GEEN uitnodiging, herstelbaar, duidelijke fout', async () => {
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { status: 500, body: { ok: false, code: ROL_TOEKENNEN_MISLUKT,
+      message: 'permission denied',
+      data: { student: { id: 's', uitnodiging_verstuurd_op: null }, auth_id: 'auth-1' } } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, ROL_TOEKENNEN_MISLUKT);
+  assert.equal(r.herstelbaar, true);
+  assert.match(r.fout, /studentrol/);
+  assert.match(r.fout, /GEEN uitnodiging/);
+  assert.ok(!gedaan.some((g) => g.url.includes('/uitnodiging/')));
+});
+
+test('stap 2 rol_toekennen_mislukt: niet als succes, herstelbaar, geen actie vereist', async () => {
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { body: { code: 'bestaat_al',
+      data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
+    '/uitnodiging/': { status: 500, body: { ok: false, code: ROL_TOEKENNEN_MISLUKT } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
+  assert.equal(r.ok, false);
+  assert.notEqual(r.verstuurd, true);
+  assert.equal(r.herstelbaar, true);
+  assert.notEqual(r.actie_vereist, true);
+  assert.equal(r.code, ROL_TOEKENNEN_MISLUKT);
 });
 
 test('er wordt op code geprogrammeerd, niet op de HTTP-status', async () => {

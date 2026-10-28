@@ -59,6 +59,22 @@ const STAP1_OK = new Set([
 // Geen uitnodiging sturen: we weten niet of het dossier compleet is.
 const STAP1_HALF = 'half_aangemaakt';
 
+// Stap 1 én stap 2 — de STUDENTROL in het LMS (hlms_rol) kon niet worden
+// toegekend (28 okt 2026). Zonder die rol komt de student er niet in, dus het
+// LMS heeft GEEN mail verstuurd en niets als "uitgenodigd" gezet. Er is niets
+// veranderd aan het wachtwoord: veilig om opnieuw te proberen.
+export const ROL_TOEKENNEN_MISLUKT = 'rol_toekennen_mislukt';
+
+function rolMislukt(stap, studentId, message) {
+  return {
+    ok: false, student_id: studentId, code: ROL_TOEKENNEN_MISLUKT, herstelbaar: true,
+    fout: 'stap ' + stap + ': de studentrol kon in het LMS niet worden toegekend'
+      + (message ? ' (' + message + ')' : '')
+      + '. Er is GEEN uitnodiging verstuurd — opnieuw proberen is veilig, of ken de rol toe'
+      + ' in het LMS (Studenten › "Heeft account maar geen LMS-rol").',
+  };
+}
+
 // Stap 2 — de twee foutcodes die WEZENLIJK verschillen.
 //   mail_mislukt  → er is NIETS veranderd. Het oude wachtwoord van de student
 //                   werkt door. Veilig om opnieuw te proberen.
@@ -186,6 +202,9 @@ export async function stuurLmsUitnodiging({ email, opnieuw = false }) {
   const studentId = student?.id ? String(student.id) : null;
   const alGemaild = student?.uitnodiging_verstuurd_op || null;
 
+  if (code1 === ROL_TOEKENNEN_MISLUKT) {
+    return rolMislukt(1, studentId, r1.json?.message ? String(r1.json.message) : '');
+  }
   if (code1 === STAP1_HALF) {
     // Account bestaat, maar het dossier is niet compleet. Geen uitnodiging:
     // opnieuw proberen koppelt aan het account uit data.auth_id.
@@ -233,6 +252,9 @@ export async function stuurLmsUitnodiging({ email, opnieuw = false }) {
 
   const code2 = r2.json?.code ? String(r2.json.code) : null;
 
+  if (code2 === ROL_TOEKENNEN_MISLUKT) {
+    return rolMislukt(2, studentId, r2.json?.message ? String(r2.json.message) : '');
+  }
   if (code2 === MAIL_VERSTUURD_WACHTWOORD_NIET_GEZET) {
     return {
       ok: false, student_id: studentId, code: code2, actie_vereist: true,
