@@ -367,6 +367,10 @@
     {
       "path": "/api/cron-iris-gezondheid",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron-dagrapport",
+      "schedule": "30 19,20 * * *"
     }
   ],
   "redirects": [
@@ -392,7 +396,8 @@
   "rewrites": [
     { "source": "/display", "destination": "/display.html" },
     { "source": "/tv",      "destination": "/api/tv" },
-    { "source": "/scan",    "destination": "/modules/scan/index.html" }
+    { "source": "/scan",    "destination": "/modules/scan/index.html" },
+    { "source": "/r/:token", "destination": "/api/r/:token" }
   ],
   "headers": [
     {
