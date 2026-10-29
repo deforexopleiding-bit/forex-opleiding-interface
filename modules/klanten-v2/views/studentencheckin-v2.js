@@ -37,7 +37,7 @@
   const CAMPAGNE_STATUS = {
     concept: ['Concept', 'neutral', 'Niemand ziet iets.'],
     test: ['Test', 'warn', 'Alleen de testaccounts zien de check-in.'],
-    live: ['Live', 'ok', 'Studenten in de doelgroep zien de pop-up en de balk.'],
+    live: ['Live', 'ok', 'Studenten in de doelgroep krijgen het verplichte check-in-scherm tot ze verstuurd hebben.'],
     gepauzeerd: ['Gepauzeerd', 'warn', 'Pop-up en balk zijn weg; de antwoorden blijven.'],
     gesloten: ['Gesloten', 'neutral', 'Afgesloten.'],
   };
@@ -285,7 +285,7 @@
     const s = r.samenvatting;
     const t = r.lms_tekst || {};
     const ok = r.getypt === 'ACTIVEER';
-    let h = `<div class="waarschuw"><b>Dit zet de check-in live voor ${esc(s.totaal)} studenten.</b> Zij zien bij hun volgende bezoek aan het LMS de pop-up (één keer) en de balk. Er gaat GEEN mail of WhatsApp uit. Nieuwe studenten worden later niet stil toegevoegd.</div>`;
+    let h = `<div class="waarschuw"><b>Dit zet de check-in live voor ${esc(s.totaal)} studenten.</b> Zij krijgen bij hun volgende bezoek aan het LMS het VERPLICHTE check-in-scherm: niet weg te klikken, het leerplatform blijft dicht tot de check-in verstuurd is (uitloggen kan). Er gaat GEEN mail of WhatsApp uit. Nieuwe studenten worden later niet stil toegevoegd.</div>`;
     h += `<h4 style="margin:0 0 6px;font-size:13px">Doelgroep</h4><p class="ck-sub" style="margin:0 0 8px">Studenten met een login, einddatum vandaag of later, product mentorship of membership. Uitgesloten: wie een onboarding in het CRM heeft die nog loopt, in de laatste 30 dagen gestart is of de nieuwe onboarding in de laatste 30 dagen invulde, en de testaccounts. Een oud dossier dat nu met de hand afgerond wordt, krijgt de check-in wél.</p>`;
     if (s.waarschuwing) h += `<div class="waarschuw">${esc(s.waarschuwing)}</div>`;
     h += `<dl><dt>Ontvangers</dt><dd>${esc(s.totaal)}</dd><dt>Mentorship</dt><dd>${esc(s.per_product.mentorship || 0)}</dd><dt>Membership</dt><dd>${esc(s.per_product.membership || 0)}</dd></dl>`;
@@ -298,8 +298,8 @@
     }
     h += `<details style="margin-top:6px"><summary style="cursor:pointer">Uitgesloten (${s.uitgesloten.length})</summary><dl style="margin-top:6px">${s.uitgesloten.map((u) => `<dt>${esc(u.naam)}</dt><dd>${esc(u.reden_label)}</dd>`).join('') || '<dt>—</dt><dd></dd>'}</dl></details>`;
     if (t.popup) {
-      h += `<h4 style="margin:16px 0 6px;font-size:13px">Wat de student ziet — pop-up (één keer)</h4><div class="blok"><span class="ck-sub">${esc(t.popup.eyebrow)}</span>\n<b>${esc(t.popup.titel)}</b>\n${esc(t.popup.tekst)}\n[${esc(t.popup.knoppen.join('] [ '))}]</div>`;
-      h += `<h4 style="margin:12px 0 6px;font-size:13px">Balk bovenaan (tot verstuurd)</h4><div class="blok"><b>${esc(t.balk.titel)}</b>  ${esc(t.balk.code)}  [${esc(t.balk.knop)}]</div>`;
+      h += `<h4 style="margin:16px 0 6px;font-size:13px">Wat de student ziet — verplicht scherm (tot verstuurd)</h4><div class="blok"><span class="ck-sub">${esc(t.popup.eyebrow)}</span>\n<b>${esc(t.popup.titel)}</b>\n${esc(t.popup.tekst)}\n${esc(t.popup.code || '')}\n[${esc(t.popup.knoppen.join('] [ '))}]\n${esc(t.popup.hulp || '')}</div>`;
+      if (t.popup.verplicht) h += `<p class="ck-sub" style="margin:6px 0 0">${esc(t.popup.verplicht)}</p>`;
     }
     if (r.fout) h += `<div class="waarschuw">${esc(r.fout)}</div>`;
     h += `<label for="ckTyp" style="display:block;margin:14px 0 6px;font-weight:600">Typ ACTIVEER om te bevestigen</label>
@@ -417,7 +417,7 @@
   };
 
   window.__ckTest = async () => {
-    if (!window.confirm('Testtoewijzingen aanmaken voor de testaccounts (Maxims eigen studentlogin)?\n\nDe campagne gaat naar "test": ALLEEN die accounts zien de pop-up en de balk.')) return;
+    if (!window.confirm('Testtoewijzingen aanmaken voor de testaccounts (Maxims eigen studentlogin)?\n\nDe campagne gaat naar "test": ALLEEN die accounts zien het verplichte check-in-scherm.')) return;
     try {
       const j = await actie({ actie: 'test' }, 'test');
       toast('Testtoewijzing klaar voor ' + (j.testaccounts || []).join(', ') + (j.zonder_studentrij && j.zonder_studentrij.length ? ' (zonder studentrij: ' + j.zonder_studentrij.join(', ') + ')' : '') + '.');
