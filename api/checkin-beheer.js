@@ -49,17 +49,15 @@ const LMS = 'https://lms.deforexopleiding.nl';
  */
 export const LMS_TEKST = Object.freeze({
   //  Sinds 29 okt 2026 VERPLICHT: niet weg te klikken, het LMS blijft dicht tot verstuurd.
+  //  Zelfde teksten als CHECKIN_TEKST in dfo-lms (src/lib/checkin/stand.ts).
   popup: {
     eyebrow: 'Persoonlijke check-in · ±4 min',
     titel: 'Hoe loopt jouw traject, <voornaam>?',
     tekst: 'Voor je verder gaat in het leerplatform: vertel ons in vier minuten waar je staat, wat je van ons gebruikt en wat jou vooruithelpt. Je antwoorden gaan rechtstreeks naar het team. Daarna ga je meteen verder.',
+    code: 'Jouw persoonlijke code: XXXX-XXXX (met kopieerknop)',
     knoppen: ['Start mijn check-in'],
-    verplicht: 'Niet weg te klikken; het leerplatform blijft dicht tot de check-in verstuurd is. Uitloggen kan wel. "Lukt het niet? Mail info@deforexopleiding.nl."',
-  },
-  balk: {
-    titel: 'Jouw check-in staat klaar.',
-    code: 'Code XXXX-XXXX (met kopieerknop)',
-    knop: 'Start check-in · of "Ga verder" als de student al begon',
+    hulp: 'Lukt het niet? Mail info@deforexopleiding.nl',
+    verplicht: 'Geen "Later", geen kruisje, Escape en een klik ernaast doen niets. Het scherm staat op elke pagina tot de check-in verstuurd is en verdwijnt dan voorgoed. Uitloggen kan altijd.',
   },
 });
 
