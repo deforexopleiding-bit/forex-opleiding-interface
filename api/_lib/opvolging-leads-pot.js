@@ -1052,6 +1052,9 @@ export function kaartSamenvatting(k, tel, nuMs, wachtUren = 48) {
     later: !!k.later,
     reden_code: k.reden_code || null,
     badge_label: k.badge_label || null,
+    // Voor de tag op de rij: in welke aparte lijst staat deze kaart (ook als
+    // hij erin verhuisd is en zijn oude badge houdt). Enkel weergave.
+    aparte_lijst_naam: (k.bron_ref && typeof k.bron_ref === 'object' && k.bron_ref.aparte_lijst_id && k.bron_ref.aparte_lijst_naam) || null,
     notitie: k.notitie || null,
     terugbel_notitie: k.terugbel_notitie || null,
     agenda_doorgestuurd_at: k.agenda_doorgestuurd_at || null,
