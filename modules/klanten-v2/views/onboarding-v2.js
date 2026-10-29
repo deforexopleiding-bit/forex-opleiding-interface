@@ -929,14 +929,15 @@
     if (_onbInb.thread._markedFor === convId) return;
     _onbInb.thread._markedFor = convId;
     try {
+      // module: ook de ongelezen mail in onboarding@ van deze klant gaat op gelezen.
       window.KV.authedFetch('/api/inbox-mark-read', {
         method: 'POST',
-        body: JSON.stringify({ conversation_id: convId }),
+        body: JSON.stringify({ conversation_id: convId, module: 'onboarding' }),
       }).then(r => {
         if (!r.ok) { console.warn('[onb-inbox] mark-read HTTP', r.status); return; }
         // Lokale state + surgische DOM-patch (spiegel inbox-v2).
         const idx = _onbInb.convs.items.findIndex(it => String(it.id) === String(convId));
-        if (idx >= 0) _onbInb.convs.items[idx] = { ..._onbInb.convs.items[idx], unread_count: 0 };
+        if (idx >= 0) _onbInb.convs.items[idx] = { ..._onbInb.convs.items[idx], unread_count: 0, email_unread_count: 0, total_unread: 0 };
         const rowEl = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
         if (rowEl) {
           rowEl.classList.remove('nw');
@@ -1233,14 +1234,17 @@
     if (!convId) return;
     try {
       const resp = await window.KV.authedFetch('/api/inbox-mark-unread', {
-        method: 'POST', body: JSON.stringify({ conversation_id: convId }),
+        method: 'POST', body: JSON.stringify({ conversation_id: convId, module: 'onboarding' }),
       });
       if (!resp.ok) {
         const j = await resp.json().catch(() => ({}));
         throw new Error(j.error || ('HTTP ' + resp.status));
       }
       const idx = _onbInb.convs.items.findIndex(it => String(it.id) === String(convId));
-      if (idx >= 0) _onbInb.convs.items[idx] = { ..._onbInb.convs.items[idx], unread_count: (_onbInb.convs.items[idx].unread_count || 0) + 1 };
+      if (idx >= 0) {
+        const it = _onbInb.convs.items[idx];
+        _onbInb.convs.items[idx] = { ...it, unread_count: (it.unread_count || 0) + 1, total_unread: Math.max(1, Number(it.total_unread) || 0) };
+      }
       const rowEl = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
       if (rowEl && !rowEl.classList.contains('nw')) {
         rowEl.classList.add('nw');
@@ -1305,7 +1309,7 @@
   }
   function _onbInbRenderRow(row) {
     const naam    = _onbInbRowVan(row);
-    const nw      = (row.unread_count || 0) > 0;
+    const nw      = (Number(row.total_unread ?? row.unread_count) || 0) > 0;
     const tijd    = _onbInbFmtTijd(row.last_message_at || row.last_activity_at);
     const preview = row.last_message_preview || '—';
     const ctx     = row.customer?.email || row.phone_number || '';

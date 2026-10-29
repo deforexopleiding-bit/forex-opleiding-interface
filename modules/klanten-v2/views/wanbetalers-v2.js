@@ -3202,6 +3202,11 @@
     // Categorie-filter (2026-10-07): 'alles' of een sleutel uit INBOX_CATEGORIE.
     catFilter:     'alles',
     autoOpenedFirst: false,            // SURFACE A: auto-open first conv na eerste fetch
+    // Leesstand die de gebruiker zelf net koos, per conv-id:
+    // { stand: 'gelezen'|'ongelezen', sinds: ms }. Houdt de lijst zo over
+    // refreshes heen tot de server hetzelfde zegt — een lijst-fetch die vóór
+    // de schrijfactie vertrok, laat de badge dan niet terugspringen.
+    leesStand:     {},
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
     compose: {
@@ -3281,6 +3286,7 @@
       st.fetched = true;
     } else {
       st.items = asArr(j?.items); st.fetched = true;
+      _wbxPasLeesStandToe(st.items);
       st.error = null;
       // Alleen een uitdrukkelijke true. Een ouder endpoint dat het veld
       // niet kent, laat de vlag uit staan in plaats van 'undefined' te
@@ -3303,7 +3309,10 @@
       if (first?.id) {
         _ui.inbox.autoOpenedFirst = true;
         // queueMicrotask zodat de render eerst een lijst rendert vóór de select-race.
-        queueMicrotask(() => window.__wbxInboxSelect(String(first.id)));
+        // Automatisch openen is geen klik: het gesprek blijft ongelezen tot
+        // de gebruiker het zelf aanklikt (anders zou een ongelezen gezet
+        // gesprek bij elke herlaadbeurt meteen weer gelezen worden).
+        queueMicrotask(() => window.__wbxInboxSelect(String(first.id), { markeer: false }));
       }
     }
     // SURFACE A polish (v=24-fix): surgical repaint van alleen de list (behoudt
@@ -3531,7 +3540,7 @@
     el.innerHTML = _inboxKlantgegevensHtml(_ui.inbox.selectedConv);
   }
 
-  window.__wbxInboxSelect = (convId) => {
+  window.__wbxInboxSelect = (convId, opts) => {
     _ui.inbox.selectedConv = String(convId);
     // BROK 5-fix (v=11): increment select-seq zodat oudere in-flight
     // fetches (van eerdere convId) hun state-write skippen zodra ze
@@ -3553,26 +3562,12 @@
     // catch-all volgt) de container mogelijk vervangt tussen surgical repaints
     // in — zonder deze loop bleef de user bovenaan hangen bij openen.
     _wbxScrollThreadToBottomSoon(convId, 0);
-    // Mark-read (silent, fire-and-forget). WA via inbox-mark-read;
-    // email via email-actions?action=mark-read per email-id (BROK 9 v=14:
-    // /api/inbox-mark-read raakt alleen WA-unread → email_unread_count bleef
-    // staan). Loop over thread-items met channel=email + direction=inbound.
-    apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
-    // Wait tot thread is geladen om email-ids op te halen.
-    setTimeout(() => {
-      const bag = _live.inbox.thread.byConv[convId];
-      if (!bag || !bag.items) return;
-      const inboundEmails = bag.items.filter((m) =>
-        m.channel === 'email' && (m.direction === 'inbound' || m.direction === 'in')
-      );
-      for (const m of inboundEmails) {
-        // Fire-and-forget per email. email-actions is idempotent, dubbele
-        // mark-read is no-op.
-        const emailId = String(m.id || '').replace(/^email:/, '').replace(/^reply:/, '');
-        if (!emailId) continue;
-        apiPost('/api/email-actions', { email_id: emailId, action: 'mark-read' }).catch(() => {});
-      }
-    }, 1500); // 1.5s = ruim voldoende voor thread-fetch (typisch 200-500ms).
+    // Gelezen bij openen: één call, server-side. /api/inbox-mark-read zet de
+    // WA van deze klant (dit nummer) én de ongelezen mail in administratie@ op
+    // gelezen, in de databank. Vroeger ging hier per mail een
+    // /api/email-actions {action:'mark-read'} uit — dat schrijft alleen een
+    // auditregel, dus elke badge kwam terug na herladen.
+    if (!opts || opts.markeer !== false) _wbxMarkeerGelezen(convId, { stil: true });
     // BP3 v30 — scroll-preserve op #wbxInboxList (voorheen: DFO.render zette
     // scrollTop=0 bij aanklikken van een gesprek).
     _wbxSafeRender();
@@ -4199,57 +4194,74 @@
     _repaintInboxThreadHeader();
   }
 
-  window.__wbxInboxMarkRead = async (convId) => {
-    if (!convId) return;
-    // BROK WB-FIX-2 #3: v=25 gebruikte /api/email-actions {action:'mark-read'}
-    // per-email — dat is een AUDIT-QUEUE tabel-insert, geen IMAP \Seen-toggle.
-    // Server-side email_unread_count bleef dus 5 → badge kwam terug bij poll +
-    // ook na refresh. Fix: v1's endpoint /api/inbox-email-mark-read gebruikt,
-    // dat gaat DIRECT naar IMAP + invalidateert email-unread-cache zodat de
-    // volgende conversations-list fetch email_unread_count=0 teruggeeft.
-    // Customer_id ophalen uit de conv-row (nodig voor het email-endpoint).
-    const row = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId));
-    const custId = row?.customer_id || null;
-
-    // 1) Optimistic: badge/stripe DIRECT weg.
-    _wbxOptimisticSetUnread(convId, 0);
-
-    // 2) WA-side (silent — geen await, kan parallel).
-    apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
-
-    // 3) E-mail-side (v1-parity endpoint). Await zodat we een echte
-    //    error kunnen tonen bij falen (i.p.v. stille toast-lie).
-    let emailOk = true;
-    if (custId) {
-      const r = await apiPost('/api/inbox-email-mark-read', { customer_id: custId, module: 'finance' });
-      if (!r.ok) {
-        emailOk = false;
-        console.warn('[wbx mark-read] email side failed:', r.error);
+  // Na elke lijst-fetch: wat de gebruiker zelf koos, wint tot de server het
+  // bevestigt. 'gelezen' vervalt zodra de server 0 zegt of er na de klik een
+  // nieuw bericht binnenkwam (dat is terecht ongelezen); 'ongelezen' zodra de
+  // server ≥1 zegt. Na twee minuten vervalt alles — dan geldt de server.
+  const WBX_LEESSTAND_MAX_MS = 2 * 60 * 1000;
+  function _wbxPasLeesStandToe(items) {
+    const ls = _ui.inbox.leesStand;
+    if (!ls) return;
+    const nu = Date.now();
+    for (const row of items || []) {
+      const id = String(row?.id || '');
+      const k = ls[id];
+      if (!k) continue;
+      const totaal = Number(row.total_unread ?? row.unread_count) || 0;
+      if (nu - k.sinds > WBX_LEESSTAND_MAX_MS) { delete ls[id]; continue; }
+      if (k.stand === 'gelezen') {
+        const laatste = Date.parse(row.last_activity_at || row.last_message_at || '') || 0;
+        if (totaal === 0 || laatste > k.sinds) { delete ls[id]; continue; }
+        row.unread_count = 0; row.email_unread_count = 0; row.total_unread = 0;
+      } else {
+        if (totaal > 0) { delete ls[id]; continue; }
+        row.total_unread = 1;
       }
     }
+  }
 
-    if (emailOk) _toast('Gemarkeerd als gelezen.', 'success');
-    else _toast('WA gelezen, e-mail-flag mislukt.', 'warn');
+  // Eén gesprek als gelezen: optimistisch meteen weg, dan de server.
+  // `stil` = bij openen (geen succes-toast); een fout meldt altijd.
+  async function _wbxMarkeerGelezen(convId, { stil } = {}) {
+    const id = String(convId || '');
+    if (!id) return false;
+    const k = { stand: 'gelezen', sinds: Date.now() };
+    _ui.inbox.leesStand[id] = k;
+    _wbxOptimisticSetUnread(id, 0);
+    const r = await apiPost('/api/inbox-mark-read', { conversation_id: id, module: 'finance' });
+    if (!r.ok) {
+      if (_ui.inbox.leesStand[id] === k) delete _ui.inbox.leesStand[id];
+      console.warn('[wbx mark-read] mislukt:', r.error);
+      _toast('Gelezen markeren mislukt: ' + r.error, 'error');
+      _live.inbox.convs.fetched = false; _fetchInboxConvs();
+      return false;
+    }
+    if (!stil) _toast('Gemarkeerd als gelezen.', 'success');
+    return true;
+  }
 
-    // 4) Reconcile (silent) — server-side status ophalen zodat evt. failure
-    //    van de WA-mark de badge terug laat komen.
-    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1500);
+  window.__wbxInboxMarkRead = async (convId) => {
+    if (!convId) return;
+    await _wbxMarkeerGelezen(convId, { stil: false });
   };
 
+  // Ongelezen: het laatste inkomende bericht (WA of mail) gaat terug op
+  // ongelezen, server-side. Het open gesprek blijft ongelezen tot een nieuwe
+  // klik — niets anders dan __wbxInboxSelect markeert gelezen.
   window.__wbxInboxMarkUnread = async (convId) => {
     if (!convId) return;
-    // 1) Optimistic: badge=1 direct zichtbaar.
-    _wbxOptimisticSetUnread(convId, 1);
-    // 2) WA-side mark-unread. NB: /api/email-actions ondersteunt geen
-    //    'mark-unread' action-type (alleen 'mark-read'), dus e-mail-kant
-    //    blijft \Seen — acceptabel voor mark-unread als "flag deze conv
-    //    weer als todo"-signaal. Als de conv puur email-only was, is de
-    //    WA-toggle een no-op maar de optimistic-badge blijft correct staan
-    //    tot de volgende poll.
-    const r = await apiPost('/api/inbox-mark-unread', { conversation_id: convId });
-    if (!r.ok) { _toast('Markeren mislukt: ' + r.error, 'error'); _live.inbox.convs.fetched = false; _fetchInboxConvs(); return; }
+    const id = String(convId);
+    const k = { stand: 'ongelezen', sinds: Date.now() };
+    _ui.inbox.leesStand[id] = k;
+    _wbxOptimisticSetUnread(id, 1);
+    const r = await apiPost('/api/inbox-mark-unread', { conversation_id: id, module: 'finance' });
+    if (!r.ok) {
+      if (_ui.inbox.leesStand[id] === k) delete _ui.inbox.leesStand[id];
+      _toast('Markeren mislukt: ' + r.error, 'error');
+      _live.inbox.convs.fetched = false; _fetchInboxConvs();
+      return;
+    }
     _toast('Gemarkeerd als ongelezen.', 'success');
-    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1200);
   };
   window.__wbxInboxPauseFlow = async (cid) => {
     if (!cid) return;

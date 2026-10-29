@@ -1,7 +1,9 @@
 // api/inbox-mark-unread.js
-// POST → zet unread_count op een conversation terug > 0 zodat de gebruiker
-// het gesprek later opnieuw als 'te lezen' terugkrijgt (indicator in de
-// gesprekkenlijst + 'Ongelezen'-filter).
+// POST → zet een gesprek terug op ongelezen zodat de gebruiker het later
+// opnieuw als 'te lezen' terugkrijgt (indicator in de gesprekkenlijst +
+// 'Ongelezen'-filter). Het laatste inkomende bericht gaat terug op ongelezen:
+// een mail (email_messages.is_read=false) als die het laatst binnenkwam, anders
+// WA (unread_count ≥ 1). Badge daarna minstens 1. Zie _lib/gesprek-leesstand.js.
 //
 // Bewust GÉÉN Meta-call: WhatsApp heeft geen 'markAsUnread' — de blauwe
 // vinkjes bij de klant blijven staan. Dit is puur een lokale UX-vlag.
@@ -12,12 +14,17 @@
 //
 // Body:
 //   conversation_id  uuid required
+//   module           'finance'|'onboarding'|'events' optional — zonder module
+//                    kijkt het enkel naar WA (gedrag van vóór 29 okt).
 //
-// Response: 200 { success: true, conversation_id, unread_count }
+// Response: 200 { success: true, conversation_id, unread_count,
+//                 kanaal: 'email'|'wa', email_id }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
+import { mailboxLabel } from './_lib/module-mailbox.js';
+import { markeerGesprekOngelezen } from './_lib/gesprek-leesstand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -45,13 +52,16 @@ export default async function handler(req, res) {
   const convId = String(body.conversation_id || '').trim();
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
+  const moduleRaw = String(body.module || '').trim().toLowerCase();
+  const mbLabel = moduleRaw ? mailboxLabel(moduleRaw) : null;
+  if (moduleRaw && !mbLabel) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
 
   try {
     // Conversation bestaat-check + ACL-context (phone_number_id + customer_id
     // voor de onboarding-scope-hook, spiegel mark-read).
     const { data: conv, error: convErr } = await supabaseAdmin
       .from('whatsapp_conversations')
-      .select('id, unread_count, phone_number_id, customer_id')
+      .select('id, unread_count, phone_number_id, customer_id, last_inbound_at')
       .eq('id', convId)
       .maybeSingle();
     if (convErr) throw new Error('conversation lookup: ' + convErr.message);
@@ -63,19 +73,14 @@ export default async function handler(req, res) {
     });
     if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
-    // Zet unread_count op max(1, huidige). Als 'ie al > 0 was, laat 'em staan
-    // (voorkomt overschrijven bij dubbele klik).
-    const cur = Number(conv.unread_count || 0);
-    const next = Math.max(1, cur);
-    if (next !== cur) {
-      const { error: updErr } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .update({ unread_count: next })
-        .eq('id', convId);
-      if (updErr) throw new Error('unread set: ' + updErr.message);
-    }
+    // Laatste inkomende bericht (WA of mail) terug op ongelezen. Bij WA:
+    // unread_count = max(1, huidige) — dubbele klik overschrijft niets.
+    const r = await markeerGesprekOngelezen(supabaseAdmin, { conv, mailboxLabel: mbLabel });
 
-    return res.status(200).json({ success: true, conversation_id: convId, unread_count: next });
+    return res.status(200).json({
+      success: true, conversation_id: convId,
+      unread_count: r.unread_count, kanaal: r.kanaal, email_id: r.email_id,
+    });
   } catch (e) {
     console.error('[inbox-mark-unread]', e.message);
     return res.status(500).json({ error: e.message });

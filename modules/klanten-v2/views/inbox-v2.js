@@ -624,9 +624,10 @@
     const kind = (IB_SRC.find(x => x[0] === src) || [])[4];
     if (kind !== 'wa') { _toast('Alleen WhatsApp-conversaties hebben ongelezen-vlag', 'warn'); return; }
     try {
+      const module = IB_SRC_MODULE[src];
       const resp = await window.KV.authedFetch('/api/inbox-mark-unread', {
         method: 'POST',
-        body: JSON.stringify({ conversation_id: convId }),
+        body: JSON.stringify(module ? { conversation_id: convId, module } : { conversation_id: convId }),
       });
       if (!resp.ok) {
         const j = await resp.json().catch(() => ({}));
@@ -636,7 +637,10 @@
       const s = _live.sources[src];
       if (s && Array.isArray(s.items)) {
         const idx = s.items.findIndex(it => String(it.id) === String(convId));
-        if (idx >= 0) s.items[idx] = { ...s.items[idx], unread_count: (s.items[idx].unread_count || 0) + 1 };
+        if (idx >= 0) {
+          const it = s.items[idx];
+          s.items[idx] = { ...it, unread_count: (it.unread_count || 0) + 1, total_unread: Math.max(1, Number(it.total_unread) || 0) };
+        }
       }
       const rowEl = document.querySelector('.ib-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
       if (rowEl && !rowEl.classList.contains('nw')) {
@@ -844,7 +848,8 @@
       t: c.last_message_preview || '—',
       p: c.attendee?.event?.title || c.customer?.email || '',
       tijd: _fmtTijd(c.last_message_at || c.last_activity_at),
-      nw: (c.unread_count || 0) > 0,
+      // Ongelezen = WA + mail van de klant (total_unread), zoals Wanbetalers.
+      nw: (Number(c.total_unread ?? c.unread_count) || 0) > 0,
       kan: 'WhatsApp',
       ctx: c.customer?.email || c.phone_number || '',
       // Categorie (2026-10-07), server-side afgeleid uit de CRM-status.
@@ -986,14 +991,18 @@
   // BROK 1 bug 2 fix: bij succes-response reset unread lokaal + patch de
   // DOM van díe rij surgisch (verwijder .nw + het rose-stip-element).
   // Geen full render — behoudt scrollpositie in .ib-list.
+  // Welke module (en dus mailbox) hoort bij een WA-bron? Het endpoint zet
+  // daarmee ook de ongelezen mail van de klant in die mailbox op gelezen.
+  const IB_SRC_MODULE = { wb: 'finance', ev: 'events', ob: 'onboarding' };
   function _markReadOnce(conversationId, src) {
     if (!conversationId) return;
     if (_thread._markedFor === conversationId) return; // 1 poging per conv
     _thread._markedFor = conversationId;
     try {
+      const module = IB_SRC_MODULE[src || ibSrc];
       window.KV.authedFetch('/api/inbox-mark-read', {
         method: 'POST',
-        body: JSON.stringify({ conversation_id: conversationId }),
+        body: JSON.stringify(module ? { conversation_id: conversationId, module } : { conversation_id: conversationId }),
       }).then(async (r) => {
         if (!r.ok) { console.warn('[inbox-v2] mark-read HTTP', r.status); return; }
         // Lokale state: reset unread_count in _live.sources[src].items[X]
@@ -1003,7 +1012,7 @@
         if (s && Array.isArray(s.items)) {
           const idx = s.items.findIndex(it => String(it.id) === String(conversationId));
           if (idx >= 0) {
-            s.items[idx] = { ...s.items[idx], unread_count: 0 };
+            s.items[idx] = { ...s.items[idx], unread_count: 0, email_unread_count: 0, total_unread: 0 };
           }
         }
         // Surgische DOM-patch op de rij (geen full render → scroll blijft).
