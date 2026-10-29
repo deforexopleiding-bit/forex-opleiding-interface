@@ -55,6 +55,11 @@ export const SOORT_LABEL = {
  * wijziging na goedkeuring zet hem terug op concept. De regel
  * {{onboarding.startcode}} = de code groot in een kader, [knop: …] = een knop
  * naar de persoonlijke link (onboarding-mail-opmaak.js).
+ *
+ * PER TRAJECT (Maxim, 29 okt): een membership heeft geen 1-op-1-mentor. Een
+ * regel die begint met [1-op-1] gaat alleen naar 1-op-1, een regel met
+ * [membership] alleen naar membership (tekstVoorFlow hieronder); de rest naar
+ * iedereen.
  */
 export const CONCEPT_TEKSTEN = {
   herinnering_1: {
@@ -62,7 +67,8 @@ export const CONCEPT_TEKSTEN = {
     tekst: [
       'Hi {{klant.voornaam}},',
       '',
-      'Je onboarding bij De Forex Opleiding staat nog voor je klaar. Het duurt ongeveer drie minuten, en zo kan je mentor je eerste sessie meteen goed voorbereiden.',
+      '[1-op-1] Je onboarding bij De Forex Opleiding staat nog voor je klaar. Het duurt ongeveer drie minuten, en zo kan je mentor je eerste sessie meteen goed voorbereiden.',
+      '[membership] Je onboarding bij De Forex Opleiding staat nog voor je klaar. Het duurt ongeveer drie minuten, en zo kunnen we je start goed voorbereiden.',
       '',
       'Je persoonlijke startcode:',
       '{{onboarding.startcode}}',
@@ -79,7 +85,8 @@ export const CONCEPT_TEKSTEN = {
     tekst: [
       'Hi {{klant.voornaam}},',
       '',
-      'We zagen dat je onboarding nog openstaat. Met je antwoorden kan je mentor je traject op jou afstemmen: je ervaring, je doel en wanneer je tijd hebt.',
+      '[1-op-1] We zagen dat je onboarding nog openstaat. Met je antwoorden kan je mentor je traject op jou afstemmen: je ervaring, je doel en wanneer je tijd hebt.',
+      '[membership] We zagen dat je onboarding nog openstaat. Met je antwoorden stemmen we je traject op jou af: je ervaring, je doel en wanneer je tijd hebt.',
       '',
       '{{onboarding.startcode}}',
       '[knop: Verder met je onboarding]',
@@ -93,7 +100,8 @@ export const CONCEPT_TEKSTEN = {
     tekst: [
       'Hi {{klant.voornaam}},',
       '',
-      'Over twee dagen begint je traject. Vul vóór de start nog even je onboarding in, dan kan je mentor meteen met je aan de slag.',
+      '[1-op-1] Over twee dagen begint je traject. Vul vóór de start nog even je onboarding in, dan kan je mentor meteen met je aan de slag.',
+      '[membership] Over twee dagen begint je traject. Vul vóór de start nog even je onboarding in, zodat we je start goed kunnen voorbereiden.',
       '',
       '{{onboarding.startcode}}',
       '[knop: Vul je onboarding in]',
@@ -107,7 +115,8 @@ export const CONCEPT_TEKSTEN = {
     tekst: [
       'Hi {{klant.voornaam}},',
       '',
-      'Je traject loopt al een tijdje, maar je onboarding staat nog open. Dit is de laatste keer dat we je eraan herinneren: vul hem gerust nog in, dan weet je mentor wat jij nodig hebt.',
+      '[1-op-1] Je traject loopt al een tijdje, maar je onboarding staat nog open. Dit is de laatste keer dat we je eraan herinneren: vul hem gerust nog in, dan weet je mentor wat jij nodig hebt.',
+      '[membership] Je traject loopt al een tijdje, maar je onboarding staat nog open. Dit is de laatste keer dat we je eraan herinneren: vul hem gerust nog in, dan weten we wat jij nodig hebt.',
       '',
       '{{onboarding.startcode}}',
       '[knop: Vul je onboarding in]',
@@ -117,6 +126,32 @@ export const CONCEPT_TEKSTEN = {
     ].join('\n'),
   },
 };
+
+export const FLOW_MARKERS = { '1op1': '[1-op-1]', membership: '[membership]' };
+
+/**
+ * De tekst voor één traject: regels met [1-op-1] of [membership] vooraan
+ * blijven alleen voor dat traject staan (zonder het label), de andere regels
+ * blijven altijd. Onbekend traject = 1-op-1 (zoals resolveFlowType). PURE.
+ * @param {string} tekst
+ * @param {'1op1'|'membership'|string|null} flow
+ */
+export function tekstVoorFlow(tekst, flow) {
+  const eigen = flow === 'membership' ? 'membership' : '1op1';
+  const uit = [];
+  for (const regel of String(tekst ?? '').split('\n')) {
+    const m = /^\s*\[(1-op-1|membership)\]\s?/i.exec(regel);
+    if (!m) { uit.push(regel); continue; }
+    const voor = m[1].toLowerCase() === 'membership' ? 'membership' : '1op1';
+    if (voor === eigen) uit.push(regel.slice(m[0].length));
+  }
+  return uit.join('\n');
+}
+
+/** Staan er regels per traject in deze tekst? PURE. */
+export function heeftFlowRegels(tekst) {
+  return /^\s*\[(1-op-1|membership)\]/im.test(String(tekst ?? ''));
+}
 
 /**
  * Instellingen met teksten die eerst goedgekeurd moeten worden — gedeeld met de

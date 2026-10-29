@@ -106,7 +106,7 @@
 
   const mt = window.KVMailTeksten.maak({
     api: API, sleutel: 'oh',
-    codeUitleg: 'Een regel <span class="mono">{{onboarding.startcode}}</span> = de code groot in een kader; een regel <span class="mono">[knop: …]</span> = een knop naar www.deforexopleiding.nl/onboarding. Ook: <span class="mono">{{klant.voornaam}}</span>.',
+    codeUitleg: 'Een regel <span class="mono">{{onboarding.startcode}}</span> = de code groot in een kader; een regel <span class="mono">[knop: …]</span> = een knop naar www.deforexopleiding.nl/onboarding. Ook: <span class="mono">{{klant.voornaam}}</span>. Een regel die begint met <span class="mono">[1-op-1]</span> gaat alleen naar 1-op-1, met <span class="mono">[membership]</span> alleen naar membership (die heeft geen eigen mentor); de testmail stuurt dan beide versies.',
     data: () => st.data,
     zetInstellingen: (i) => { st.data.instellingen = i; },
     opnieuw: () => laad(),
