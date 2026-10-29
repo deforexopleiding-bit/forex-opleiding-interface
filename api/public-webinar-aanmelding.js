@@ -1,6 +1,6 @@
 // api/public-webinar-aanmelding.js
 //
-// POST — aanmelding voor de eerstvolgende actieve webinar, aangeroepen door de
+// POST - aanmelding voor de eerstvolgende actieve webinar, aangeroepen door de
 // website (dfo-website /api/webinar-aanmelding) NA upsert_lead. Server-naar-
 // server: x-internal-token == OPSTARTSESSIE_SECRET (zelfde geheim als
 // public-event-vervolg-invite).
@@ -13,9 +13,9 @@
 // 200 { ok, aanmelding_id, al_aangemeld, verplaatst, sessie: { id, titel, starts_at, ends_at } }
 //   verplaatst = al aangemeld voor een andere datum → naar de gekozen verplaatst
 //   (verse bevestiging); al_aangemeld = al aangemeld voor DEZE datum.
-// 409 { error, code: 'GEEN_SESSIE' }      — geen actieve komende webinar (alles overgeslagen / reeks uit)
-// 409 { error, code: 'SESSIE_ONGELDIG' }  — gekozen sessie niet (meer) aangeboden
-// 400 { error }                           — ongeldige invoer
+// 409 { error, code: 'GEEN_SESSIE' }      - geen actieve komende webinar (alles overgeslagen / reeks uit)
+// 409 { error, code: 'SESSIE_ONGELDIG' }  - gekozen sessie niet (meer) aangeboden
+// 400 { error }                           - ongeldige invoer
 //
 // De bevestiging (mail + WhatsApp, met datum + Zoom-link) gaat hier meteen uit
 // (api/_lib/webinar.js → meldAan). Geen limiet op het aantal aanmeldingen.
@@ -24,13 +24,14 @@
 // niet opslaan) en bestaat er ook geen lead op dit e-mailadres, dan maakt het
 // CRM de lead hier alsnog aan (upsert_lead, traject 'webinar'). Lukt ook dat
 // niet, dan gaat de aanmelding door (de plek telt zwaarder) maar met een
-// console.error én een alarmmail — nooit meer stil.
+// console.error én een alarmmail - nooit meer stil.
 
 import { supabaseAdmin } from './supabase.js';
 import { meldAan } from './_lib/webinar.js';
 import { sendMail } from './_lib/email.js';
 import { waitUntil } from '@vercel/functions';
 import { leesBestemming } from './_lib/trial-product.js';
+import { verwerkLeadMeta } from './_lib/crm-lead-meta.js';
 
 const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
@@ -83,7 +84,7 @@ export async function zorgVoorLead(sb, w, alarm = stuurLeadAlarm) {
     console.warn('[public-webinar-aanmelding] LEAD-VANGNET: lead alsnog aangemaakt in het CRM', { lead_id: rij.id, bron: w.bron });
     return rij.id;
   } catch (e) {
-    console.error('[public-webinar-aanmelding] LEAD-VANGNET MISLUKT — aanmelding zonder lead', { bron: w.bron, fout: e?.message || String(e) });
+    console.error('[public-webinar-aanmelding] LEAD-VANGNET MISLUKT - aanmelding zonder lead', { bron: w.bron, fout: e?.message || String(e) });
     await alarm(w, e?.message || String(e));
     return null;
   }
@@ -150,11 +151,27 @@ export default async function handler(req, res) {
 
   try {
     const leadId = await zorgVoorLead(supabaseAdmin, v.waarden);
+    // Meta "Lead": niet-blokkerend + fail-soft. Deduped op lead_<id>, dus voor een
+    // webinar-lead die de site al als Lead stuurde is dit een no-op (al_gemeld);
+    // het vult alleen het vangnet-geval waar de site geen lead kon aanmaken.
+    // fbp/fbc/UA/IP komen (door de site doorgestuurd) uit de body.
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    waitUntil(verwerkLeadMeta(supabaseAdmin, {
+      leadId, email: v.waarden.email, telefoonE164: v.waarden.telefoon,
+      voornaam: v.waarden.voornaam, achternaam: null,
+      toestemming: v.waarden.toestemming,
+      userAgent: typeof b.user_agent === 'string' ? b.user_agent : null,
+      fbp: typeof b.fbp === 'string' ? b.fbp : null,
+      fbc: typeof b.fbc === 'string' ? b.fbc : null,
+      clientIp: typeof b.client_ip === 'string' ? b.client_ip : null,
+      referer: typeof b.referer === 'string' ? b.referer : null,
+      bron: v.waarden.bron,
+    }).catch(() => {}));
     const r = await meldAan(supabaseAdmin, { ...v.waarden, leadId });
     if (r.geenSessie) return res.status(409).json({ error: 'Er staat geen webinar gepland', code: 'GEEN_SESSIE' });
     if (r.ongeldigeSessie) return res.status(409).json({ error: 'Deze sessie wordt niet (meer) aangeboden', code: 'SESSIE_ONGELDIG' });
     // Enkel bij een uitdrukkelijke 'lab' in trial_bestemming (standaard: geen
-    // trial — de webinar heeft een eigen flow). Na het antwoord.
+    // trial - de webinar heeft een eigen flow). Na het antwoord.
     if (!r.alAangemeld && !r.verplaatst) naAntwoord(trialVoorWebinar({ ...v.waarden, leadId }));
     return res.status(200).json({
       ok: true,

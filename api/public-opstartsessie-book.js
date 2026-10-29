@@ -5,7 +5,7 @@
 // privilege; dfo-website's serverless-proxy roept aan, browser NIET direct).
 //
 // Doet:
-//   1) upsert_lead (RPC — dedup op lower(email)); bron='opstartsessie',
+//   1) upsert_lead (RPC - dedup op lower(email)); bron='opstartsessie',
 //      soort='opstartsessie', traject=<bron-slug uit link>.
 //   2) createAppointmentForLead({ lead, scheduledAt, source }) →
 //      GHL-contact-upsert + GHL-appointment aanmaken + follow_up_appointments-
@@ -21,11 +21,11 @@
 //   achternaam      string  optional
 //   email           string  required (geldig)
 //   telefoon        string  required (min 6 tekens, spaties/plussen ok)
-//   scheduledAt     ISO8601 required — start-tijd (bv. '2026-09-05T13:00:00+02:00')
-//   source          string  optional — bron-slug uit /opstartsessie/<slug>;
+//   scheduledAt     ISO8601 required - start-tijd (bv. '2026-09-05T13:00:00+02:00')
+//   source          string  optional - bron-slug uit /opstartsessie/<slug>;
 //                                       default 'direct' als weggelaten
 //   noshow_akkoord  boolean required (moet true; €50-no-show-vinkje)
-//   durationMinutes int     optional — default 20 (Opstartsessie ≈ 20 min)
+//   durationMinutes int     optional - default 20 (Opstartsessie ≈ 20 min)
 //
 // Response:
 //   200 { ok:true, appointment_id, ghl_appointment_id, zoom_join_url, source }
@@ -38,8 +38,10 @@
 // 0 incasso-writes. Raakt alleen leads + follow_up_appointments; GHL calendar/
 // contacts. Geen dunning/arrangement/pending-action touches.
 
+import { waitUntil } from '@vercel/functions';
 import { supabaseAdmin } from './supabase.js';
 import { telefoonNlBe } from './_lib/phone-e164.js';
+import { verwerkLeadMeta } from './_lib/crm-lead-meta.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { isScanBron, scanGhlTitel, leesScanAssessor, maakScanConcept } from './_lib/strategiescan-boeking.js';
 import { isTrainingBron } from './_lib/training-bron.js';
@@ -81,7 +83,7 @@ export default async function handler(req, res) {
     ? Math.max(15, Math.min(60, Number(body.durationMinutes)))
     : 20;
 
-  // Source-slug — default 'direct' als weggelaten. Onbekende typo's worden
+  // Source-slug - default 'direct' als weggelaten. Onbekende typo's worden
   // door create-appointment-from-lead genormaliseerd + geaccepteerd
   // (typo blijft telbaar in de stats).
   let source = body.source ? String(body.source).trim().toLowerCase() : 'direct';
@@ -132,7 +134,7 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (exErr) {
         // Non-fataal: bij lookup-fout vallen we terug op de veilige route
-        // (payload zonder bron/soort/traject — geen overschrijving).
+        // (payload zonder bron/soort/traject - geen overschrijving).
         console.warn('[public-opstartsessie-book] lead pre-check (soft):', exErr.message);
       } else if (exRow?.id) {
         existingLead = exRow;
@@ -157,13 +159,33 @@ export default async function handler(req, res) {
     leadId = leadRow0?.id;
     if (!leadId) {
       // Diagnose-log voor toekomstig RPC-signatuur-drift.
-      console.error('[public-opstartsessie-book] upsert_lead gaf geen id — return shape:',
+      console.error('[public-opstartsessie-book] upsert_lead gaf geen id - return shape:',
         JSON.stringify(leadRes)?.slice(0, 200));
       throw new Error('upsert_lead gaf geen lead-id');
     }
   } catch (e) {
     console.error('[public-opstartsessie-book] lead upsert:', e?.message || e);
     return res.status(500).json({ error: 'Lead aanmaken mislukt' });
+  }
+
+  // Meta "Lead" (funnel-opt-in). Niet-blokkerend + fail-soft; deduped op lead_<id>
+  // zodat een funnel-lead die al via de site een Lead kreeg hier niet dubbel telt.
+  // De echte bezoeker-UA/IP/fbp/fbc/consent komen (door de site doorgestuurd) uit
+  // de body - NIET uit de server-to-server request-headers (die zijn van de proxy).
+  try {
+    waitUntil(verwerkLeadMeta(supabaseAdmin, {
+      leadId, email, telefoonE164: telefoonE164(telefoon),
+      voornaam, achternaam,
+      toestemming: body.cookie_toestemming === true ? true : (body.cookie_toestemming === false ? false : undefined),
+      userAgent: typeof body.user_agent === 'string' ? body.user_agent : null,
+      fbp: typeof body.fbp === 'string' ? body.fbp : null,
+      fbc: typeof body.fbc === 'string' ? body.fbc : null,
+      clientIp: typeof body.client_ip === 'string' ? body.client_ip : null,
+      referer: typeof body.referer === 'string' ? body.referer : null,
+      bron: 'opstartsessie',
+    }).catch(() => {}));
+  } catch (e) {
+    console.warn('[public-opstartsessie-book] Meta-lead (soft):', e?.message || e);
   }
 
   // 2) Lead-row samenstellen voor createAppointmentForLead.
@@ -174,7 +196,7 @@ export default async function handler(req, res) {
   //    (customer-koppeling gebeurt pas later; source_ref is voor
   //    event-import-leads). createAppointmentForLead resolveGhlContactId()
   //    valt bij NULL customer_id + NULL source_ref door naar GHL contact-
-  //    upsert op email/telefoon — precies wat we willen voor nieuwe leads.
+  //    upsert op email/telefoon - precies wat we willen voor nieuwe leads.
   const leadRow = {
     id         : leadId,
     voornaam, achternaam, email, telefoon,
@@ -189,7 +211,7 @@ export default async function handler(req, res) {
   // 'Strategie-scan · …' in zijn agenda. Zie _lib/strategiescan-boeking.js.
   // De gratis strategiesessie uit een training-drop (bron 'training-<dd-mm-jj>',
   // dfo-website #132) volgt dezelfde weg voor de eigenaar: Dave. Geen scan-rij
-  // en geen scan-titel — het is een strategiesessie, geen strategie-scan.
+  // en geen scan-titel - het is een strategiesessie, geen strategie-scan.
   const isScan = isScanBron(source);
   const isTraining = isTrainingBron(source);
   const scanAssessor = (isScan || isTraining) ? await leesScanAssessor() : null;
@@ -213,7 +235,7 @@ export default async function handler(req, res) {
     }
 
     // DEEL 3: link naar de submission-rij (fail-soft). Zet noshow_akkoord=
-    // true (impliciet — de client heeft 'em al gevalideerd) + appointment_id +
+    // true (impliciet - de client heeft 'em al gevalideerd) + appointment_id +
     // lead_id. Alleen op de meegegeven submission-id + defensief scoped op
     // resultaat='toegelaten' (afgewezen submissions mogen nooit een booking
     // krijgen, ook niet bij een spoof-caller die het id kent). Faalt de
@@ -254,15 +276,15 @@ export default async function handler(req, res) {
     // toegang_aanvragen-rij zodat call_geboekt=true wordt. Zonder deze
     // update krijgt de lead Flow B ("Plan je call") terwijl ze net wél
     // een call boekten. Match op email (case-insensitive) OF last-9-digits
-    // van telefoon — beide werken bij inconsistente E.164-formaten.
+    // van telefoon - beide werken bij inconsistente E.164-formaten.
     // Fail-soft: mag de boeking NOOIT breken (booking is al gelukt).
-    // Alleen status='wachtend' — een 'gereageerd' aanvraag heeft al
+    // Alleen status='wachtend' - een 'gereageerd' aanvraag heeft al
     // provisioning gehad; call_geboekt daar wijzigen zou niks veranderen.
     try {
       const digits = String(telefoon || '').replace(/\D/g, '');
       const last9  = digits.slice(-9);
       // Selecteer kandidaten defensief (max 20) en filter in JS op last-9-match.
-      // Simpelere query dan een OR met right(regexp_replace(...)) — schaalt
+      // Simpelere query dan een OR met right(regexp_replace(...)) - schaalt
       // prima bij een handvol 'wachtend'-rijen.
       const { data: kandidaten, error: fetchErr } = await supabaseAdmin
         .from('toegang_aanvragen')
