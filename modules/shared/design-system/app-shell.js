@@ -168,7 +168,7 @@
     { g: 'Groei',                  id: 'contentmachine',   naam: 'Contentmachine',    icon: I.sparkle,  color: 'amber',   roles: SAMMK, permKey: 'content.machine', tabs: ['Overzicht', 'Nieuwe drop', 'Bibliotheek'] },
     { g: 'Groei',                  id: 'trainingdrops',    naam: 'Trainingdrops',     icon: I.video,    color: 'amber',   roles: SAMMK.concat('sales'),tabs: [] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken', 'Meta-koppeling'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', { groep: 'Opvolging', items: ['Wachtrij', 'Contacten', 'Gesprekken', 'Opstartsessies'] }, { groep: 'Berichten', items: ['Templates', 'E-mails', 'Vragenlijst'] }, { groep: 'Acquisitie', items: ['Funnels', 'The Lab', 'Bronnen', 'Meta-koppeling'] }, 'Toegang-aanvragen', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
@@ -365,7 +365,12 @@
       return R.canSync(sleutel) === true;
     } catch (_) { return true; }
   };
-  const roleTabs   = m => m.tabs.filter(t => {
+  // Een tabs-entry is een STRING of een GROEP { groep, items:[...] }. leafItems
+  // slaat groepen plat tot hun losse tab-strings - die blijven de route-/VIEWS-/
+  // permissie-sleutels. Zo blijft roleTabs() een platte leaf-lijst (identiek voor
+  // modules zonder groepen) en veranderen goTab/deep-links/TAB_RESTRICT niets.
+  const leafItems = entries => (entries || []).flatMap(e => (typeof e === 'string' ? [e] : (e && Array.isArray(e.items) ? e.items : [])));
+  const roleTabs   = m => leafItems(m.tabs).filter(t => {
     const r = TAB_RESTRICT[m.id + '/' + t];
     if (r && !r.some(x => S.roles.includes(x))) return false;
     return tabPermOk(TAB_PERM[m.id + '/' + t]);
@@ -550,6 +555,35 @@
     NS.render();
   }
 
+  /* ── Tab-groep-dropdowns ─────────────────────────────────────────────
+     Puur een render-/UI-laag bovenop de platte tabs; goTab() navigeert nog
+     steeds naar de leaf-tab-string. Dropdown is position:fixed (de .tabs-balk
+     heeft overflow-x:auto en zou een absolute menu knippen). */
+  function sluitTabGroepen() {
+    document.querySelectorAll('.tab-group.open').forEach(g => {
+      g.classList.remove('open');
+      const b = g.querySelector('.tab-group-btn'); if (b) b.setAttribute('aria-expanded', 'false');
+      const d = g.querySelector('.tab-drop'); if (d) { d.style.top = ''; d.style.left = ''; d.style.minWidth = ''; }
+    });
+  }
+  function toggleTabGroup(btn) {
+    const g = btn && btn.closest('.tab-group'); if (!g) return;
+    const wasOpen = g.classList.contains('open');
+    sluitTabGroepen();
+    if (wasOpen) return;
+    g.classList.add('open');
+    btn.setAttribute('aria-expanded', 'true');
+    const d = g.querySelector('.tab-drop');
+    if (!d) return;
+    const r = btn.getBoundingClientRect();
+    const w = Math.max(160, r.width);
+    let left = r.left;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - w);
+    d.style.top = (r.bottom + 2) + 'px';
+    d.style.left = left + 'px';
+    d.style.minWidth = r.width + 'px';
+  }
+
   function comingSoonView(m) {
     return `<div class="empty" style="padding:82px 20px">
       <div class="empty-ico" style="width:54px;height:54px;border-radius:16px;background:var(--${m.color}-soft);color:var(--${m.color})">${svg(I.clock, 'width:25px;height:25px')}</div>
@@ -576,7 +610,21 @@
     const tb = document.getElementById('tabs');
     if (tb) {
       tb.style.display = (tabs.length > 1 && !S.dossier && !locked) ? 'flex' : 'none';
-      tb.innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${tabLabel(t)}</button>`).join('');
+      // String-entries renderen EXACT als voorheen; een groep-object wordt een
+      // dropdown-knop met de (zichtbare) item-knoppen eronder. `tabs` = roleTabs(m)
+      // is de reeds gefilterde platte leaf-lijst → `zichtbaar` sluit items uit die
+      // de rol/permissie niet mag zien (lege groep valt weg).
+      const zichtbaar = new Set(tabs);
+      const tabKnop = t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${tabLabel(t)}</button>`;
+      tb.innerHTML = (m.tabs || []).map(e => {
+        if (typeof e === 'string') return zichtbaar.has(e) ? tabKnop(e) : '';
+        const items = (Array.isArray(e.items) ? e.items : []).filter(it => zichtbaar.has(it));
+        if (!items.length) return '';
+        const actief = items.includes(S.tab);
+        const menu = items.map(it => `<button class="tab-drop-item ${S.tab === it ? 'active' : ''}" onclick="DFO.goTab('${it.replace(/'/g, "\\'")}')">${tabLabel(it)}</button>`).join('');
+        const label = String(e.groep || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        return `<div class="tab-group"><button class="tab tab-group-btn ${actief ? 'active' : ''}" aria-haspopup="true" aria-expanded="false" onclick="DFO.toggleTabGroup(this)">${label}<span class="tab-caret" aria-hidden="true">&#9662;</span></button><div class="tab-drop" role="menu">${menu}</div></div>`;
+      }).join('');
     }
     const c = document.getElementById('content');
     if (c) {
@@ -670,12 +718,15 @@
   /* ── Keyboard: Esc = close panel; ↑↓ = stepRow als paneel open ───── */
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'Escape') { closePanel(); closeModal(); }
+    if (e.key === 'Escape') { closePanel(); closeModal(); sluitTabGroepen(); }
     if (document.getElementById('panel')?.classList.contains('open')) {
       if (e.key === 'ArrowDown') { e.preventDefault(); stepRow(1); }
       if (e.key === 'ArrowUp')   { e.preventDefault(); stepRow(-1); }
     }
   });
+  // Klik buiten een open tab-groep → sluiten (de knop/items zelf vallen binnen
+  // .tab-group, dus die sluiten niet per ongeluk; render rebuildt de balk toch).
+  document.addEventListener('click', e => { if (!(e.target.closest && e.target.closest('.tab-group'))) sluitTabGroepen(); });
 
   /* ── Dynamic sidebar-badges (v=1c5) ────────────────────────────────
      `NS.badges` is een { moduleId: number } map. Consumers zetten via
@@ -768,7 +819,7 @@
     S, key, F, setF,
     visMods, curMod, roleTabs, modCanOpen, modLocked, modUsable, me,
     VIEWS,
-    setRole, setRoles, goMod, goTab, render, renderNav, applyColor, toggleNav,
+    setRole, setRoles, goMod, goTab, toggleTabGroup, render, renderNav, applyColor, toggleNav,
     openPanel, closePanel, stepRow, showHint,
     openModal, closeModal,
     dfoPrompt, dfoConfirm,
