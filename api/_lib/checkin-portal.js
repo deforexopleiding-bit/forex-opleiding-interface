@@ -29,6 +29,31 @@ export const ROBOT = Object.freeze(['ja_interesse', 'nee']);
 export const MAX_KEUZES = 3;
 export const MAX_VERBETER = 2000;
 
+// ── UITBREIDING 29 okt 2026 (Maxim keurde goed): meetbare input ─────────────
+// Blok 1 · waar sta je
+export const TRADE_STAND = Object.freeze(['niet_gestart', 'demo', 'eigen_live', 'challenge_bezig', 'funded']);
+export const TRADES_VORIGE_MAAND = Object.freeze(['0', '1_5', '6_15', '15_plus']);
+export const JOURNAL_GEBRUIK = Object.freeze(['altijd', 'soms', 'nooit']);
+// Blok 2 · de methode: zekerheid 1–5 per trechterstap
+export const ZEKERHEID_STAPPEN = Object.freeze(['h4_impuls', 'fib_71', 'bevestiging_15m', 'risk', 'discipline']);
+export const GROOTSTE_KNELPUNT = Object.freeze(['strategie', 'geduld_discipline', 'emoties_na_verlies', 'tijd', 'risk_management', 'propfirm_regels', 'weet_niet_waar_beginnen']);
+// Blok 3 · wat gebruik je van ons ('een_op_een' alleen in de 1-op-1-flow)
+export const GEBRUIK_ONDERDELEN = Object.freeze(['live_sessies', 'sunday_markups', 'opgenomen_trainingen', 'trade_recaps', 'lessen_pdfs', 'discord', 'journal_lms', 'the_lab', 'een_op_een']);
+export const GEBRUIK_NIVEAU = Object.freeze(['vaak', 'soms', 'nooit']);
+export const WAAROM_NIET = Object.freeze(['wist_niet', 'tijdstip_past_niet', 'te_moeilijk', 'niet_nuttig']);
+export const LIVE_MOMENT = Object.freeze(['weekavond', 'zaterdag', 'zondagochtend', 'maakt_niet_uit']);
+// Blok 4 · ervaring & begeleiding
+export const SESSIE_RITME = Object.freeze(['te_weinig', 'goed', 'te_veel']);
+export const FEEDBACK_CONCREET = Object.freeze(['ja', 'soms', 'nee']);
+export const VOORUITHELPEN = Object.freeze(['feedback_eigen_trades', 'live_meetraden', 'oefeningen_backtesten', 'propfirm_begeleiding', 'psychologie_routine', 'studiebuddy', 'kortere_videos', 'stappenplan_beginners']);
+export const MAX_VOORUITHELPEN = 2;
+export const MAX_EEN_DING = 500;
+
+/** De onderdelen van het gebruik-raster voor deze flow. */
+export function gebruikOnderdelen(flow) {
+  return flow === '1op1' ? GEBRUIK_ONDERDELEN : GEBRUIK_ONDERDELEN.filter((o) => o !== 'een_op_een');
+}
+
 /** De standaardopties van een campagne (hlms_checkin_campagne.opties). */
 export const STANDAARD_OPTIES = Object.freeze({ payout_vraag: true, trustpilot_vraag: false, autopilot_stap: true });
 export const TRUSTPILOT_URL = 'https://nl.trustpilot.com/evaluate/deforexopleiding.nl';
@@ -38,7 +63,14 @@ export const CHECKIN_SLEUTELS = Object.freeze([
   'fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'nps', 'helpt', 'knelpunt',
   'verbeter', 'hulp', 'mentor_score', 'begeleiding_contact', 'robot_interesse', 'robot_belmoment',
   'robot_contact_tel', 'robot_contact_email',
+  // Uitbreiding 29 okt 2026
+  'trade_stand', 'trades_vorige_maand', 'journal_gebruik', 'zekerheid', 'grootste_knelpunt',
+  'gebruik', 'gebruik_waarom_niet', 'live_moment', 'sessie_ritme', 'feedback_concreet',
+  'vooruithelpen', 'een_ding_veranderen', 'feedbackpanel',
 ]);
+
+/** Sleutels die alleen in de 1-op-1-flow bestaan. */
+export const ALLEEN_1OP1 = Object.freeze(['mentor_score', 'sessie_ritme', 'feedback_concreet']);
 
 /** Leesbare labels — dezelfde woorden als op de website. */
 export const LABELS = Object.freeze({
@@ -52,6 +84,19 @@ export const LABELS = Object.freeze({
   begeleiding_contact: { ja: 'Ja, graag', nee: 'Nee, alles goed' },
   robot_interesse: { ja_interesse: 'Ja, bel mij', nee: 'Nee, nu niet' },
   robot_belmoment: { voormiddag: 'Voormiddag', namiddag: 'Namiddag', avond: 'Avond', weekend: 'Zaterdag' },
+  trade_stand: { niet_gestart: 'Nog niet gestart met traden', demo: 'Demo', eigen_live: 'Live met eigen geld', challenge_bezig: 'Bezig met een challenge', funded: 'Funded' },
+  trades_vorige_maand: { 0: '0', '1_5': '1–5', '6_15': '6–15', '15_plus': '15+' },
+  journal_gebruik: { altijd: 'Altijd', soms: 'Soms', nooit: 'Nooit' },
+  zekerheid: { h4_impuls: 'H4-context & geldige impuls', fib_71: 'Fibonacci & de 71%-zone', bevestiging_15m: '15M-bevestiging (sweep, BOS, volume)', risk: 'Stop, target & positiegrootte (1%, 1:3)', discipline: 'Discipline: wachten, geen trades rond nieuws of na 21u' },
+  grootste_knelpunt: { strategie: 'De strategie zelf', geduld_discipline: 'Geduld & discipline', emoties_na_verlies: 'Emoties na een verlies', tijd: 'Tijd', risk_management: 'Risk management', propfirm_regels: 'De regels van de propfirm', weet_niet_waar_beginnen: 'Ik weet niet waar te beginnen' },
+  gebruik: { live_sessies: 'Live sessies (do 19u / zo 10u)', sunday_markups: 'Sunday mark-ups', opgenomen_trainingen: 'Opgenomen trainingen', trade_recaps: 'Trade recaps', lessen_pdfs: "Lessen & pdf's", discord: 'Discord', journal_lms: 'Journal in het LMS', the_lab: 'The Lab', een_op_een: '1-op-1 sessies' },
+  gebruik_niveau: { vaak: 'Vaak', soms: 'Soms', nooit: 'Nooit' },
+  gebruik_waarom_niet: { wist_niet: 'Wist niet dat het bestond', tijdstip_past_niet: 'Tijdstip past niet', te_moeilijk: 'Te moeilijk', niet_nuttig: 'Niet nuttig voor mij' },
+  live_moment: { weekavond: 'Een weekavond', zaterdag: 'Zaterdag', zondagochtend: 'Zondagochtend', maakt_niet_uit: 'Maakt niet uit' },
+  sessie_ritme: { te_weinig: 'Te weinig', goed: 'Goed', te_veel: 'Te veel' },
+  feedback_concreet: { ja: 'Ja', soms: 'Soms', nee: 'Nee' },
+  vooruithelpen: { feedback_eigen_trades: 'Feedback op mijn eigen trades', live_meetraden: 'Live meetraden', oefeningen_backtesten: 'Oefeningen & backtesten', propfirm_begeleiding: 'Begeleiding bij de propfirm', psychologie_routine: 'Psychologie & routine', studiebuddy: 'Een studiebuddy', kortere_videos: "Kortere video's", stappenplan_beginners: 'Een stappenplan voor beginners' },
+  feedbackpanel: { ja: 'Ja, graag', nee: 'Liever niet' },
 });
 
 export const VRAAG = Object.freeze({
@@ -71,6 +116,19 @@ export const VRAAG = Object.freeze({
   robot_belmoment: 'Belmoment Autopilot',
   robot_contact_tel: 'Ander nummer (Autopilot)',
   robot_contact_email: 'Ander e-mailadres (Autopilot)',
+  trade_stand: 'Waar sta je met traden?',
+  trades_vorige_maand: 'Trades vorige maand',
+  journal_gebruik: 'Journal bijhouden',
+  zekerheid: 'Zekerheid per stap (1-5)',
+  grootste_knelpunt: 'Grootste knelpunt',
+  gebruik: 'Gebruik per onderdeel',
+  gebruik_waarom_niet: 'Waarom niet',
+  live_moment: 'Beste moment voor live',
+  sessie_ritme: 'Ritme van de sessies',
+  feedback_concreet: 'Feedback concreet genoeg',
+  vooruithelpen: 'Zou vooruithelpen',
+  een_ding_veranderen: 'Eén ding veranderen',
+  feedbackpanel: 'Feedbackpanel',
 });
 
 /** product_soort (hlms_student) → flow. Alles behalve mentorship = membership. */
@@ -105,12 +163,23 @@ function geheel(v, min, max) {
   return Number.isInteger(v) && v >= min && v <= max;
 }
 
+/** Een object met enkel toegelaten sleutels en geldige waarden, in vaste volgorde. */
+function objectVan(waarde, sleutels, geldig) {
+  if (!waarde || typeof waarde !== 'object' || Array.isArray(waarde)) return { ok: false };
+  for (const [k, v] of Object.entries(waarde)) {
+    if (!sleutels.includes(k) || !geldig(v)) return { ok: false };
+  }
+  const uit = {};
+  for (const k of sleutels) if (waarde[k] !== undefined) uit[k] = waarde[k];
+  return { ok: true, waarde: uit };
+}
+
 /** De sleutels van de Autopilot-stap — alleen als de campagne hem aanzet. */
 export const AUTOPILOT_SLEUTELS = Object.freeze(['robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email']);
 
 /** Mag deze sleutel in deze flow/opties? */
 function sleutelMag(sleutel, flow, opties) {
-  if (sleutel === 'mentor_score') return flow === '1op1';
+  if (ALLEEN_1OP1.includes(sleutel)) return flow === '1op1';
   if (sleutel === 'payout' || sleutel === 'payout_delen') return opties.payout_vraag;
   if (AUTOPILOT_SLEUTELS.includes(sleutel)) return opties.autopilot_stap;
   return CHECKIN_SLEUTELS.includes(sleutel);
@@ -151,6 +220,28 @@ function valideerWaarde(sleutel, waarde, flow) {
       const t = waarde.replace(/\u0000/g, '').trim();
       return t.length <= MAX_VERBETER ? { ok: true, waarde: t } : { ok: false };
     }
+    case 'een_ding_veranderen': {
+      if (typeof waarde !== 'string') return { ok: false };
+      const t = waarde.replace(/\u0000/g, '').trim();
+      return t.length <= MAX_EEN_DING ? { ok: true, waarde: t } : { ok: false };
+    }
+    case 'trade_stand': return TRADE_STAND.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'trades_vorige_maand': return TRADES_VORIGE_MAAND.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'journal_gebruik': return JOURNAL_GEBRUIK.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'grootste_knelpunt': return GROOTSTE_KNELPUNT.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'live_moment': return LIVE_MOMENT.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'sessie_ritme': return SESSIE_RITME.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'feedback_concreet': return FEEDBACK_CONCREET.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'feedbackpanel': return JA_NEE.includes(waarde) ? { ok: true, waarde } : { ok: false };
+    case 'vooruithelpen': {
+      const s = subset(waarde, VOORUITHELPEN, MAX_VOORUITHELPEN);
+      return s ? { ok: true, waarde: s } : { ok: false };
+    }
+    // De objecten: elk deel apart gecontroleerd, in een vaste volgorde. Een
+    // deelobject mag tijdens het invullen (bewaren); volledig is pas bij versturen nodig.
+    case 'zekerheid': return objectVan(waarde, ZEKERHEID_STAPPEN, (v) => geheel(v, 1, 5));
+    case 'gebruik': return objectVan(waarde, gebruikOnderdelen(flow), (v) => GEBRUIK_NIVEAU.includes(v));
+    case 'gebruik_waarom_niet': return objectVan(waarde, gebruikOnderdelen(flow), (v) => WAAROM_NIET.includes(v));
     default: return { ok: false };
   }
 }
@@ -193,23 +284,38 @@ export function schoneAntwoorden(antwoorden, { flow = '1op1', opties = STANDAARD
   }
   if (uit.robot_contact_tel === '') delete uit.robot_contact_tel;
   if (uit.robot_contact_email === '') delete uit.robot_contact_email;
+  // "Waarom niet" alleen voor wat op "nooit" staat.
+  if (uit.gebruik_waarom_niet) {
+    const w = {};
+    for (const [k, v] of Object.entries(uit.gebruik_waarom_niet)) if (uit.gebruik?.[k] === 'nooit') w[k] = v;
+    if (Object.keys(w).length) uit.gebruik_waarom_niet = w; else delete uit.gebruik_waarom_niet;
+  }
+  if (uit.een_ding_veranderen === '') delete uit.een_ding_veranderen;
   return uit;
 }
 
 /** Verplicht bij versturen, per flow en opties. */
 export function verplicht(flow, opties = STANDAARD_OPTIES) {
   const o = { ...STANDAARD_OPTIES, ...opties };
-  const lijst = ['fase', 'doel_3m', 'nps', 'knelpunt', 'hulp', 'begeleiding_contact'];
-  if (flow === '1op1') lijst.push('mentor_score');
+  const lijst = ['fase', 'doel_3m', 'trade_stand', 'trades_vorige_maand', 'journal_gebruik',
+    'zekerheid', 'grootste_knelpunt', 'gebruik', 'gebruik_waarom_niet', 'live_moment',
+    'nps', 'knelpunt', 'hulp', 'vooruithelpen', 'feedbackpanel', 'begeleiding_contact'];
+  if (flow === '1op1') lijst.push('mentor_score', 'sessie_ritme', 'feedback_concreet');
   if (o.autopilot_stap) lijst.push('robot_interesse');
   return lijst;
 }
 
-/** Welke verplichte sleutels ontbreken nog? */
+/** Welke verplichte sleutels ontbreken nog? De objecten moeten VOLLEDIG zijn. */
 export function ontbrekend(flow, opties, antwoorden) {
   const a = schoneAntwoorden(antwoorden, { flow, opties });
   return verplicht(flow, opties).filter((k) => {
     const v = a[k];
+    if (k === 'zekerheid') return ZEKERHEID_STAPPEN.some((s) => !Number.isInteger(v?.[s]));
+    if (k === 'gebruik') return gebruikOnderdelen(flow).some((o) => !v?.[o]);
+    // Per onderdeel op "nooit" één reden; niets op "nooit" = niets te vragen.
+    if (k === 'gebruik_waarom_niet') {
+      return gebruikOnderdelen(flow).some((o) => a.gebruik?.[o] === 'nooit' && !v?.[o]);
+    }
     if (Array.isArray(v)) return v.length === 0;
     return v === undefined || v === null || v === '';
   });
@@ -218,12 +324,21 @@ export function ontbrekend(flow, opties, antwoorden) {
 // ── Het begeleidingssignaal naar de hoofdmentor ─────────────────────────────
 const RANG = { geel: 1, oranje: 2, rood: 3 };
 
+/** De trechterstappen met zekerheid ≤ 2, in vaste volgorde. PUUR. */
+export function zwakkeStappen(zekerheid) {
+  const z = zekerheid && typeof zekerheid === 'object' ? zekerheid : {};
+  return ZEKERHEID_STAPPEN.filter((s) => Number.isInteger(z[s]) && z[s] <= 2);
+}
+
 /**
  * Moet er een begeleidingssignaal komen, en hoe zwaar? PUUR.
  *   · begeleiding_contact = ja            → oranje
  *   · nps ≤ 6                             → geel (rood bij ≤ 3)
  *   · mentor_score ≤ 2                    → oranje
  *   · knelpunt bevat 'volgende_stap'      → geel
+ *   · grootste_knelpunt weet_niet_waar_beginnen → geel
+ *   · zekerheid ≤ 2 op ≥ 3 trechterstappen → geel
+ *   · sessie_ritme te_weinig / feedback_concreet nee (1-op-1) → oranje
  * Eén signaal per toewijzing: de hoogste zwaarte wint.
  *
  * Staat bewust LOS van de automation-interesse: een begeleidingssignaal mag
@@ -244,6 +359,14 @@ export function signaalVoor(antwoorden) {
   if (Array.isArray(a.knelpunt) && a.knelpunt.includes('volgende_stap')) {
     treffers.push(['geel', 'Ziet geen duidelijke volgende stap']);
   }
+  // Uitbreiding 29 okt 2026 — dezelfde kaart, extra redenen.
+  if (a.grootste_knelpunt === 'weet_niet_waar_beginnen') treffers.push(['geel', 'Weet niet waar te beginnen']);
+  const zwak = zwakkeStappen(a.zekerheid);
+  if (zwak.length >= 3) {
+    treffers.push(['geel', `Weinig zekerheid over de methode (≤ 2 op ${zwak.length} stappen: ${zwak.map((s) => LABELS.zekerheid[s]).join(', ')})`]);
+  }
+  if (a.sessie_ritme === 'te_weinig') treffers.push(['oranje', 'Vindt het sessieritme te laag']);
+  if (a.feedback_concreet === 'nee') treffers.push(['oranje', 'Vindt de feedback niet concreet']);
   if (!treffers.length) return null;
   const zwaarte = treffers.reduce((m, [z]) => (RANG[z] > RANG[m] ? z : m), 'geel');
   return { zwaarte, redenen: treffers.map(([, r]) => r) };
@@ -271,7 +394,15 @@ export function signaalBewijs({ antwoorden, redenen, campagneSlug, toewijzingId,
   if (a.fase) b[VRAAG.fase] = label('fase', a.fase);
   if (a.knelpunt?.length) b[VRAAG.knelpunt] = label('knelpunt', a.knelpunt);
   if (a.hulp) b[VRAAG.hulp] = label('hulp', a.hulp);
+  if (a.trade_stand) b[VRAAG.trade_stand] = label('trade_stand', a.trade_stand);
+  if (a.grootste_knelpunt) b[VRAAG.grootste_knelpunt] = label('grootste_knelpunt', a.grootste_knelpunt);
+  const zwak = zwakkeStappen(a.zekerheid);
+  if (zwak.length) b['Weinig zekerheid (≤ 2)'] = zwak.map((s) => `${LABELS.zekerheid[s]}: ${a.zekerheid[s]}`);
+  if (a.sessie_ritme) b[VRAAG.sessie_ritme] = label('sessie_ritme', a.sessie_ritme);
+  if (a.feedback_concreet) b[VRAAG.feedback_concreet] = label('feedback_concreet', a.feedback_concreet);
+  if (a.vooruithelpen?.length) b[VRAAG.vooruithelpen] = label('vooruithelpen', a.vooruithelpen);
   if (a.verbeter) b[VRAAG.verbeter] = a.verbeter;
+  if (a.een_ding_veranderen) b[VRAAG.een_ding_veranderen] = a.een_ding_veranderen;
   b.toewijzing_id = toewijzingId || null;
   if (isTest) b.test = true;
   return b;
