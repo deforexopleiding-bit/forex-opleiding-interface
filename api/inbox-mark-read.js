@@ -1,18 +1,25 @@
 // api/inbox-mark-read.js
-// POST → reset unread_count op een conversation en (optioneel) seint blauwe
-// vinkjes naar de klant via Meta's markAsRead voor het laatste inbound bericht.
+// POST → markeer het HELE gesprek als gelezen (WA + mail, in de databank) en
+// sein (optioneel) blauwe vinkjes naar de klant via Meta's markAsRead voor het
+// laatste inbound bericht. Wat "het hele gesprek" is: zie
+// _lib/gesprek-leesstand.js.
 // Permission: finance.inbox.view  (lezen-rechten volstaan; geen outbound send)
 //
 // Body:
 //   conversation_id  uuid required
+//   module           'finance'|'onboarding'|'events' optional — de mailbox
+//                    van die module wordt mee gelezen. Zonder module: enkel WA.
 //
 // Response: 200 { success: true, conversation_id, meta_read_sent: boolean,
+//                 wa_gemarkeerd: string[], mails_gemarkeerd: number,
 //                 meta_warning?: string }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { markAsRead, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { mailboxLabel } from './_lib/module-mailbox.js';
+import { markeerGesprekGelezen } from './_lib/gesprek-leesstand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -42,6 +49,9 @@ export default async function handler(req, res) {
   const convId = String(body.conversation_id || '').trim();
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
+  const moduleRaw = String(body.module || '').trim().toLowerCase();
+  const mbLabel = moduleRaw ? mailboxLabel(moduleRaw) : null;
+  if (moduleRaw && !mbLabel) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
 
   try {
     // Conversation bestaat-check. Fase 2b: phone_number_id + customer_id
@@ -62,14 +72,9 @@ export default async function handler(req, res) {
     });
     if (!acl.ok) return res.status(acl.status).json({ error: acl.error });
 
-    // Lokale reset (altijd doen, ook als Meta niet beschikbaar)
-    if ((conv.unread_count || 0) > 0) {
-      const { error: updErr } = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .update({ unread_count: 0 })
-        .eq('id', convId);
-      if (updErr) throw new Error('unread reset: ' + updErr.message);
-    }
+    // Lokale reset (altijd doen, ook als Meta niet beschikbaar): WA van deze
+    // klant op dit nummer + de ongelezen mail in de mailbox van de module.
+    const gelezen = await markeerGesprekGelezen(supabaseAdmin, { conv, mailboxLabel: mbLabel });
 
     // Probeer Meta markAsRead op het laatste inbound bericht (UX-nicety, optioneel)
     let metaReadSent = false;
@@ -110,7 +115,10 @@ export default async function handler(req, res) {
       }
     }
 
-    const response = { success: true, conversation_id: convId, meta_read_sent: metaReadSent };
+    const response = {
+      success: true, conversation_id: convId, meta_read_sent: metaReadSent,
+      wa_gemarkeerd: gelezen.wa_gemarkeerd, mails_gemarkeerd: gelezen.mails_gemarkeerd,
+    };
     if (metaWarning) response.meta_warning = metaWarning;
     return res.status(200).json(response);
   } catch (e) {
