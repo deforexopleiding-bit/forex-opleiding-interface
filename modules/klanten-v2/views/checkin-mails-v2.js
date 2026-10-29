@@ -42,7 +42,9 @@
 
   const mt = window.KVMailTeksten.maak({
     api: API, sleutel: 'cm',
-    codeUitleg: 'Een regel <span class="mono">{{checkin.code}}</span> = de persoonlijke code groot in een kader; een regel <span class="mono">[knop: …]</span> = een knop naar www.deforexopleiding.nl/checkin. Ook: <span class="mono">{{student.voornaam}}</span>.',
+    codeUitleg: 'Vaste opmaak (het goedgekeurde ontwerp): één regel per onderdeel, <span class="mono">[sleutel] tekst</span>; een regel zonder sleutel hoort bij de vorige. Onderdelen: <span class="mono">[preheader] [kop] [ondertitel] [aanhef] [tekst] [tegel] titel | uitleg [code-label] [knop] [onder-knop] [blok-label] [blok-titel] [blok-tekst] [noot] [groet] [ondertekening] [voet]</span> — wat ontbreekt valt weg; <span class="mono">[kop]</span> en <span class="mono">[knop]</span> zijn verplicht. <span class="mono">**vet**</span> mag. Ook: <span class="mono">{{voornaam}}</span> en <span class="mono">{{CODE}}</span>. De knop gaat altijd naar www.deforexopleiding.nl/checkin met de code.',
+    voorbeeld: true,
+    rijen: 22,
     data: () => st.data,
     zetInstellingen: (i) => { st.data.instellingen = i; },
     opnieuw: () => laad(),

@@ -397,6 +397,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Herinneringen). "Genegeerd" = niet verstuurd 14 dagen na `campagne.live_op` (los van de mails; het LMS-overzicht
   Betrokkenheid rekent hetzelfde). LIJN onboarding ↔ check-in: `lijn()` in checkin-beheer.js, `GET ?lijn=1`.
   Migratie docs/sql-migrations/2026-10-28-checkin-mails.sql.
+  OPMAAK (29 okt, ontwerp Maxim): `api/_lib/checkin-mail-opmaak.js` (puur, e-mailveilig) bouwt de mail uit
+  `[sleutel] tekst`-regels ([kop] [ondertitel] [tegel] titel | uitleg … [voet]; {{voornaam}} {{CODE}}). De hele tekst
+  wordt goedgekeurd; een bewaarde tekst in de OUDE platte vorm telt niet meer (→ concept). Voorvertoning = POST
+  {actie:'voorbeeld'} (dezelfde code als versturen), getoond als iframe in Studentencheck-in › Mails.
   UITBREIDING (29 okt, Maxim): nieuwe sleutels trade_stand · trades_vorige_maand · journal_gebruik · zekerheid
   (object, 5 trechterstappen 1–5) · grootste_knelpunt · gebruik (object vaak/soms/nooit; een_op_een enkel 1-op-1) ·
   gebruik_waarom_niet (enkel voor 'nooit', dan verplicht) · live_moment · sessie_ritme/feedback_concreet (1-op-1) ·

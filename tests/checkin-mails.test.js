@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import {
   besluitCheckinMail, genegeerd, normaliseerInstellingen, codeFmt, link, CONCEPT_TEKSTEN, SOORTEN, GENEGEERD_NA_DAGEN,
 } from '../api/_lib/checkin-mails.js';
-import { bouwOpmaakMail } from '../api/_lib/onboarding-mail-opmaak.js';
+import { bouwCheckinMail, ontleed, controleer, isOpmaakTekst } from '../api/_lib/checkin-mail-opmaak.js';
+import { maakCheckinMail } from '../api/_lib/checkin-mails-server.js';
 import { maakHandler, RECHT_GOEDKEUREN, RECHT_BEWERK } from '../api/checkin-mails.js';
 import { MAX_PER_LOOP } from '../api/cron/checkin-mails.js';
 
@@ -53,21 +54,99 @@ test('GENEGEERD: niet verstuurd 14 dagen na de Run — los van de mails', () => 
   assert.deepEqual(besluit('2026-11-20'), { actie: 'niets', waarom: 'genegeerd' });
 });
 
-test('TEKSTEN: concept, standaard UIT; code en knop; "Jouw code" in het kader', () => {
+test('TEKSTEN: concept in de vaste opmaak, standaard UIT en niet goedgekeurd', () => {
   const i = normaliseerInstellingen(null);
   assert.equal(i.aan, false);
   for (const s of SOORTEN) {
     assert.equal(i.teksten[s].goedgekeurd, false, s);
-    assert.match(CONCEPT_TEKSTEN[s].tekst, /^\{\{checkin\.code\}\}$/m, s);
-    assert.match(CONCEPT_TEKSTEN[s].tekst, /^\[knop: [^\]]+\]$/m, s);
+    assert.ok(isOpmaakTekst(CONCEPT_TEKSTEN[s].tekst), s);
+    assert.deepEqual(controleer(CONCEPT_TEKSTEN[s].tekst), [], s);
   }
+  assert.equal(CONCEPT_TEKSTEN.uitnodiging.onderwerp, 'Jouw check-in staat klaar, {{voornaam}}');
+  assert.equal(ontleed(CONCEPT_TEKSTEN.uitnodiging.tekst).tegel.length, 3);
+  for (const s of ['herinnering_5', 'herinnering_10']) assert.equal(ontleed(CONCEPT_TEKSTEN[s].tekst).tegel, undefined, s + ': geen tegels');
+  assert.match(ontleed(CONCEPT_TEKSTEN.herinnering_5.tekst).kop, /^Je check-in staat nog open$/);
+  assert.match(ontleed(CONCEPT_TEKSTEN.herinnering_10.tekst).kop, /^Laatste herinnering: je check-in$/);
   assert.equal(codeFmt('abcd2345'), 'ABCD-2345');
   assert.equal(link('ABCD2345'), 'https://www.deforexopleiding.nl/checkin?code=ABCD-2345');
-  const m = bouwOpmaakMail({ subject: 'x', body: 'Hi\n{{checkin.code}}\n[knop: Start]', waarden: { '{{checkin.code}}': 'ABCD-2345' }, link: link('ABCD2345'), codeLabel: 'Jouw code', codeRegel: '{{checkin.code}}' });
-  assert.match(m.html, /Jouw code/);
-  assert.doesNotMatch(m.html, /Jouw startcode/);
-  assert.match(m.html, /ABCD-2345/);
+});
+
+test('OUDE OPMAAK: een eerder goedgekeurde platte tekst telt niet meer → nieuw concept, niet goedgekeurd', () => {
+  const oud = 'Hi {{student.voornaam}},\n\n{{checkin.code}}\n[knop: Start mijn check-in]';
+  const ruw = { aan: true, teksten: { uitnodiging: { onderwerp: 'Oud', tekst: oud, goedgekeurd_op: '2026-10-29T11:41:19Z', goedgekeurd_onderwerp: 'Oud', goedgekeurd_tekst: oud } } };
+  const i = normaliseerInstellingen(ruw);
+  assert.equal(i.aan, true);
+  assert.equal(i.teksten.uitnodiging.goedgekeurd, false);
+  assert.equal(i.teksten.uitnodiging.tekst, CONCEPT_TEKSTEN.uitnodiging.tekst);
+  //  Een goedgekeurde tekst in de nieuwe opmaak blijft wel goedgekeurd.
+  const nieuw = CONCEPT_TEKSTEN.herinnering_5;
+  const ok = normaliseerInstellingen({ teksten: { herinnering_5: { ...nieuw, goedgekeurd_op: 'x', goedgekeurd_onderwerp: nieuw.onderwerp, goedgekeurd_tekst: nieuw.tekst } } });
+  assert.equal(ok.teksten.herinnering_5.goedgekeurd, true);
+});
+
+test('HET ONTWERP: kop, tegels, codekader, knop met de code-link, blok, Discord-vraag, groet, voet + tekstversie', () => {
+  const m = maakCheckinMail(CONCEPT_TEKSTEN.uitnodiging, { voornaam: 'Anna', code: 'abcd2345' });
+  assert.equal(m.onderwerp, 'Jouw check-in staat klaar, Anna');
+  const h = m.html;
+  assert.match(h, /^<!doctype html>/);
+  assert.match(h, /display:none;max-height:0;overflow:hidden;opacity:0;">4 minuten\. Jouw antwoorden bepalen/);
+  assert.match(h, /background:#05232B;padding:30px 36px 34px;/);
+  assert.match(h, /DE FOREX <span style="color:#3FBF8F;">OPLEIDING<\/span>/);
+  assert.match(h, /Hoe loopt jouw traject,<br>Anna\?/);
+  assert.match(h, /een korte <b>check-in<\/b>\./);
+  for (const x of ['4 min', 'Persoonlijk', 'Impact', 'jouw input = onze volgende stappen']) assert.ok(h.includes(x), x);
+  assert.match(h, /border:2px dashed #3FBF8F;[^>]*>ABCD-2345<\/div>/);
+  assert.match(h, /<a href="https:\/\/www\.deforexopleiding\.nl\/checkin\?code=ABCD-2345" style="display:inline-block;background:#3FBF8F;[^"]*">Start mijn check-in →<\/a>/);
+  assert.match(h, /color:#E2A64A;">OP HET EINDE/);
+  assert.match(h, /Wat wij zelf al jaren gebruiken/);
+  assert.match(h, /<b style="color:#2B3A47;">Kleine vraag:<\/b> houd je check-in/);
+  assert.match(h, /<b>Maxim<\/b> &amp; het team van De Forex Opleiding/);
+  assert.match(h, /background:#F3F7F6;padding:16px 36px;[^>]*>Je krijgt deze mail omdat/);
+  assert.doesNotMatch(h, /\{\{|<script|<link|<img|@import|https:\/\/fonts/i, 'geen plaatshouders, scripts, externe fonts of beelden');
+  //  Tekstversie.
+  assert.match(m.text, /^Hoe loopt jouw traject,\nAnna\?/);
+  assert.match(m.text, /JOUW PERSOONLIJKE CODE: ABCD-2345/);
+  assert.match(m.text, /Start mijn check-in: https:\/\/www\.deforexopleiding\.nl\/checkin\?code=ABCD-2345/);
+  assert.match(m.text, /Kleine vraag: houd je check-in/);
+  assert.doesNotMatch(m.text, /\*\*|<b>|\{\{/);
+});
+
+test('HERINNERINGEN: zelfde opmaak, andere kop, geen tegels en geen blok', () => {
+  const m = maakCheckinMail(CONCEPT_TEKSTEN.herinnering_10, { voornaam: '', code: 'ABCD2345' });
+  assert.equal(m.onderwerp, 'Laatste herinnering: je check-in, daar');
+  assert.match(m.html, /Laatste herinnering: je check-in<\/div>/);
+  assert.match(m.html, /border:2px dashed #3FBF8F;/);
   assert.match(m.html, /checkin\?code=ABCD-2345/);
+  assert.doesNotMatch(m.html, /Persoonlijk<\/div>|OP HET EINDE/);
+});
+
+test('OPMAAK-REGELS: escapen, vet, oude plaatshouders, fouten bij Bewaren', () => {
+  const m = bouwCheckinMail({ onderwerp: 'x {{student.voornaam}}', tekst: '[kop] <script>x</script> **{{student.voornaam}}**\n[knop] Ga {{checkin.code}}' }, { voornaam: 'Bo & Co', code: 'ABCD-2345', link: 'https://x/?code=ABCD-2345' });
+  assert.equal(m.onderwerp, 'x Bo & Co');
+  assert.match(m.html, /&lt;script&gt;x&lt;\/script&gt; <b>Bo &amp; Co<\/b>/);
+  assert.match(m.html, /Ga ABCD-2345<\/a>/);
+  assert.deepEqual(controleer('[kop] x'), ['De regel [knop] ontbreekt.']);
+  assert.ok(controleer('[kop] x\n[knop] y\n[tegel] zonder streep\n[vreemd] z').some((f) => /titel \| uitleg/.test(f)));
+  assert.ok(controleer('[kop] x\n[knop] y\n[vreemd] z').some((f) => /\[vreemd\]/.test(f)));
+});
+
+test('HET ENDPOINT: voorbeeld = exact de mail die vertrekt; Bewaren weigert een kapotte opmaak', async () => {
+  const db = {
+    from() {
+      const q = { select() { return q; }, eq() { return q; }, maybeSingle: async () => ({ data: { value: null }, error: null }) };
+      return q;
+    },
+  };
+  const h = maakHandler({ ingelogd: async () => ({ id: 'u', email: 'a@b.nl' }), mag: async () => true, db });
+  const res = nepRes();
+  await h({ method: 'POST', headers: {}, body: { actie: 'voorbeeld', soort: 'uitnodiging' } }, res);
+  assert.equal(res.code, 200);
+  assert.equal(res.body.html, maakCheckinMail(CONCEPT_TEKSTEN.uitnodiging, { voornaam: 'Maxim', code: 'K7QM4RPD' }).html);
+  assert.deepEqual(res.body.fouten, []);
+  const kapot = nepRes();
+  await h({ method: 'POST', headers: {}, body: { actie: 'tekst', soort: 'uitnodiging', onderwerp: 'x', tekst: 'gewoon een platte tekst' } }, kapot);
+  assert.equal(kapot.code, 400);
+  assert.match(kapot.body.error, /\[kop\] ontbreekt/);
 });
 
 test('DE CRON: geheim, schakelaar, droogloop, logboek, eerst claimen, hoogstens 40 per loop, in vercel.json', () => {

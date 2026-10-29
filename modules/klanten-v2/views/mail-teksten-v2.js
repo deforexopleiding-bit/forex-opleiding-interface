@@ -11,6 +11,9 @@
 //   d = { instellingen, soorten:[{soort,label}], rechten:{goedkeuren, bewerk?} }
 // De endpoints kennen: POST {actie:'tekst'|'goedkeuren'|'test', soort, …} en
 // {actie:'schakelaar', aan}. Na elke actie roept het `opnieuw()` aan.
+// Optie `voorbeeld: true` (check-in-mails, 29 okt 2026): onder elke tekst de
+// mail zoals hij vertrekt — POST {actie:'voorbeeld', soort, onderwerp, tekst}
+// geeft de HTML terug (de server bouwt hem, dezelfde code als het versturen).
 
 (function () {
   'use strict';
@@ -34,19 +37,33 @@
   }
 
   /**
-   * @param {{api: string, sleutel: string, codeUitleg: string, data: () => object, zetInstellingen: (i) => void, opnieuw?: () => void}} o
+   * @param {{api: string, sleutel: string, codeUitleg: string, data: () => object, zetInstellingen: (i) => void, opnieuw?: () => void, voorbeeld?: boolean, rijen?: number}} o
    *   sleutel = unieke naam voor de globale handlers (bv. 'oh', 'cm').
    */
   function maak(o) {
-    const st = { bezig: null, concept: {} };
+    const st = { bezig: null, concept: {}, voorbeeld: {} };
     const G = '__mt_' + o.sleutel;
     async function post(body, bezig) {
       st.bezig = bezig; rerender();
       try { return await window.KV.authedJson(o.api, { method: 'POST', body: JSON.stringify(body) }); }
       finally { st.bezig = null; rerender(); }
     }
+    async function laadVoorbeeld(soort) {
+      const t = o.data().instellingen.teksten[soort];
+      const c = st.concept[soort] || {};
+      st.voorbeeld[soort] = { ...(st.voorbeeld[soort] || {}), laden: true };
+      rerender();
+      try {
+        const j = await window.KV.authedJson(o.api, { method: 'POST', body: JSON.stringify({ actie: 'voorbeeld', soort, onderwerp: c.onderwerp ?? t.onderwerp, tekst: c.tekst ?? t.tekst }) });
+        st.voorbeeld[soort] = { laden: false, html: j.html, onderwerp: j.onderwerp, fouten: j.fouten || [] };
+      } catch (e) {
+        st.voorbeeld[soort] = { laden: false, fout: foutTekst(e, 'Voorbeeld mislukt.') };
+      }
+      rerender();
+    }
     window[G] = {
       veld: (soort, veld, waarde) => { st.concept[soort] = { ...(st.concept[soort] || {}), [veld]: waarde }; },
+      voorbeeld: (soort) => laadVoorbeeld(soort),
       bewaar: async (soort) => {
         const t = o.data().instellingen.teksten[soort];
         const c = st.concept[soort] || {};
@@ -54,6 +71,7 @@
           const j = await post({ actie: 'tekst', soort, onderwerp: c.onderwerp ?? t.onderwerp, tekst: c.tekst ?? t.tekst }, 'bewaar:' + soort);
           delete st.concept[soort]; o.zetInstellingen(j.instellingen);
           toast('Bewaard. De tekst staat weer op concept tot hij goedgekeurd is.');
+          if (o.voorbeeld) laadVoorbeeld(soort);
         } catch (e) { toast(foutTekst(e, 'Bewaren mislukt.')); }
       },
       goed: async (soort) => {
@@ -104,13 +122,28 @@
       else if (t.gewijzigd_op) h += `<span style="font-size:11.5px;color:var(--text-3)">gewijzigd door ${esc(t.gewijzigd_door || '?')} op ${esc(moment(t.gewijzigd_op))}</span>`;
       h += `</div>`;
       h += `<input type="text" value="${esc(c.onderwerp ?? t.onderwerp)}" ${magBewerk ? '' : 'disabled'} oninput="window.${G}.veld('${s.soort}','onderwerp',this.value)" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit;font-weight:600;margin-bottom:6px" aria-label="Onderwerp">`;
-      h += `<textarea rows="9" ${magBewerk ? '' : 'disabled'} oninput="window.${G}.veld('${s.soort}','tekst',this.value)" style="width:100%;padding:8px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit;font-family:inherit;font-size:13px;line-height:1.45" aria-label="Tekst">${esc(c.tekst ?? t.tekst)}</textarea>`;
+      h += `<textarea rows="${o.rijen || 9}" ${magBewerk ? '' : 'disabled'} oninput="window.${G}.veld('${s.soort}','tekst',this.value)" style="width:100%;padding:8px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit;font-family:inherit;font-size:13px;line-height:1.45" aria-label="Tekst">${esc(c.tekst ?? t.tekst)}</textarea>`;
       h += `<div style="font-size:11.5px;color:var(--text-3);margin:4px 0 8px">${o.codeUitleg}</div>`;
       h += `<div style="display:flex;gap:6px;flex-wrap:wrap">`;
       h += knop(st.bezig === 'bewaar:' + s.soort ? 'Bezig…' : 'Bewaren', `window.${G}.bewaar('${s.soort}')`, { uit: !magBewerk || !!st.bezig });
       h += knop(st.bezig === 'test:' + s.soort ? 'Bezig…' : 'Testmail naar mij', `window.${G}.test('${s.soort}')`, { uit: !magBewerk || !!st.bezig || gewijzigd, titel: 'Stuurt deze tekst naar jouw eigen adres, met een voorbeeldcode. Nooit naar een student.' });
       h += knop(st.bezig === 'goed:' + s.soort ? 'Bezig…' : 'Goedkeuren', `window.${G}.goed('${s.soort}')`, { p: true, uit: !mag || t.goedgekeurd || gewijzigd || !!st.bezig, titel: mag ? '' : 'Alleen met het goedkeur-recht (super_admin).' });
-      return h + `</div></div></div>`;
+      if (o.voorbeeld) h += knop(gewijzigd ? 'Voorbeeld van je wijziging' : 'Voorbeeld vernieuwen', `window.${G}.voorbeeld('${s.soort}')`, { uit: !!(st.voorbeeld[s.soort] && st.voorbeeld[s.soort].laden) });
+      h += `</div>`;
+      if (o.voorbeeld) {
+        const v = st.voorbeeld[s.soort];
+        if (!v) setTimeout(() => { if (!st.voorbeeld[s.soort]) laadVoorbeeld(s.soort); }, 0);
+        h += `<div style="margin-top:10px" data-testid="mt-voorbeeld-${esc(s.soort)}">`;
+        if (!v || (v.laden && !v.html)) h += `<div style="font-size:12px;color:var(--text-3)">Voorbeeld laden…</div>`;
+        else if (v.fout) h += `<div style="font-size:12px;color:var(--rose,#b42318)">${esc(v.fout)}</div>`;
+        else {
+          h += `<div style="font-size:12px;color:var(--text-2);margin-bottom:6px">Zo ziet de student hem (voorbeeld: Maxim, code K7QM-4RPD). Onderwerp: <b>${esc(v.onderwerp)}</b></div>`;
+          if (v.fouten && v.fouten.length) h += `<div style="font-size:12px;color:var(--rose,#b42318);margin-bottom:6px">${v.fouten.map(esc).join(' ')}</div>`;
+          h += `<iframe title="Voorbeeld van de mail" sandbox="allow-same-origin" srcdoc="${esc(v.html)}" style="width:100%;height:720px;border:1px solid var(--border);border-radius:10px;background:#EEF1F0" onload="try{this.style.height=(this.contentDocument.body.scrollHeight+8)+'px'}catch(e){}"></iframe>`;
+        }
+        h += `</div>`;
+      }
+      return h + `</div></div>`;
     }
 
     function teksten(d) {

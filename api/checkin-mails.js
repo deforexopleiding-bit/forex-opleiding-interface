@@ -13,6 +13,8 @@
 // GET  → { instellingen, soorten, rechten, logboek, campagnes, plan:{per_soort, overgeslagen}, genegeerd }
 // POST { actie: 'tekst', soort, onderwerp, tekst } | { actie: 'goedkeuren', soort }
 //      { actie: 'schakelaar', aan } | { actie: 'test', soort }
+//      { actie: 'voorbeeld', soort, onderwerp?, tekst? } → { onderwerp, html, text, fouten } (checkin.view;
+//        zonder onderwerp/tekst = de bewaarde tekst) — exact de mail die vertrekt.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -21,7 +23,8 @@ import { dagBrussel } from './_lib/onboarding-auto-afronden.js';
 import { keurGoed, bewerkTekst } from './_lib/onboarding-herinneringen.js';
 import { leesRuweInstellingen, bewaarInstellingen } from './_lib/onboarding-herinneringen-server.js';
 import { SETTING_KEY, SOORTEN, SOORT_LABEL, normaliseerInstellingen, GENEGEERD_NA_DAGEN } from './_lib/checkin-mails.js';
-import { leesInstellingen, planCheckinMails, stuurCheckinMail } from './_lib/checkin-mails-server.js';
+import { leesInstellingen, planCheckinMails, stuurCheckinMail, maakCheckinMail } from './_lib/checkin-mails-server.js';
+import { controleer } from './_lib/checkin-mail-opmaak.js';
 
 export const RECHT_VIEW = 'checkin.view';
 export const RECHT_BEWERK = 'checkin.run';
@@ -78,6 +81,17 @@ export function maakHandler(deps = {}) {
       const door = user.email || user.id;
       if (!SOORTEN.includes(b.soort) && b.actie !== 'schakelaar') return res.status(400).json({ error: 'Onbekende soort.' });
 
+      if (b.actie === 'voorbeeld') {
+        const inst = await leesInstellingen(d.db);
+        const t = inst.teksten[b.soort];
+        const tekst = {
+          onderwerp: typeof b.onderwerp === 'string' && b.onderwerp.trim() ? b.onderwerp.slice(0, 200) : t.onderwerp,
+          tekst: typeof b.tekst === 'string' && b.tekst.trim() ? b.tekst.replace(/\r\n/g, '\n').slice(0, 5000) : t.tekst,
+        };
+        const m = maakCheckinMail(tekst, { voornaam: 'Maxim', code: 'K7QM4RPD' });
+        return res.status(200).json({ onderwerp: m.onderwerp, html: m.html, text: m.text, fouten: controleer(tekst.tekst) });
+      }
+
       if (b.actie === 'tekst' || b.actie === 'test') {
         if (!(await d.mag(req, RECHT_BEWERK))) return res.status(403).json({ error: `Geen rechten (${RECHT_BEWERK})` });
         if (b.actie === 'test') {
@@ -88,6 +102,8 @@ export function maakHandler(deps = {}) {
         const onderwerp = String(b.onderwerp || '').trim().slice(0, 200);
         const tekst = String(b.tekst || '').replace(/\r\n/g, '\n').trim().slice(0, 5000);
         if (!onderwerp || !tekst) return res.status(400).json({ error: 'Onderwerp en tekst zijn verplicht.' });
+        const fouten = controleer(tekst);
+        if (fouten.length) return res.status(400).json({ error: 'De opmaak klopt niet: ' + fouten.join(' '), fouten });
         const ruw = bewerkTekst(await leesRuweInstellingen(d.db, SETTING_KEY), b.soort, { onderwerp, tekst }, door);
         await bewaarInstellingen(d.db, ruw, user.id, SETTING_KEY);
         return res.status(200).json({ ok: true, instellingen: normaliseerInstellingen(ruw) });
