@@ -73,12 +73,16 @@ test('valideerPatch: mentorvragen alleen bij mentorship, optionele stappen allee
 });
 
 test('verplicht + ontbrekend per flow', () => {
-  assert.deepEqual(verplicht('1op1'), ['fase', 'doel_3m', 'nps', 'knelpunt', 'hulp', 'begeleiding_contact', 'mentor_score', 'robot_interesse']);
-  assert.deepEqual(verplicht('membership'), ['fase', 'doel_3m', 'nps', 'knelpunt', 'hulp', 'begeleiding_contact', 'robot_interesse']);
-  assert.deepEqual(verplicht('membership', { autopilot_stap: false }), ['fase', 'doel_3m', 'nps', 'knelpunt', 'hulp', 'begeleiding_contact']);
-  const vol = { fase: 'demo', doel_3m: 'routine', nps: 0, knelpunt: ['tijd'], hulp: 'niets', begeleiding_contact: 'nee', robot_interesse: 'nee' };
+  const basis = ['fase', 'doel_3m', 'trade_stand', 'trades_vorige_maand', 'journal_gebruik', 'zekerheid', 'grootste_knelpunt',
+    'gebruik', 'gebruik_waarom_niet', 'live_moment', 'nps', 'knelpunt', 'hulp', 'vooruithelpen', 'feedbackpanel', 'begeleiding_contact'];
+  assert.deepEqual(verplicht('1op1'), [...basis, 'mentor_score', 'sessie_ritme', 'feedback_concreet', 'robot_interesse']);
+  assert.deepEqual(verplicht('membership'), [...basis, 'robot_interesse']);
+  assert.deepEqual(verplicht('membership', { autopilot_stap: false }), basis);
+  const gebruik = { live_sessies: 'vaak', sunday_markups: 'soms', opgenomen_trainingen: 'vaak', trade_recaps: 'vaak', lessen_pdfs: 'vaak', discord: 'soms', journal_lms: 'vaak', the_lab: 'soms' };
+  const vol = { fase: 'demo', doel_3m: 'routine', nps: 0, knelpunt: ['tijd'], hulp: 'niets', begeleiding_contact: 'nee', robot_interesse: 'nee', ...NIEUW_GEMEEN, gebruik };
   assert.deepEqual(ontbrekend('membership', {}, vol), []);
-  assert.deepEqual(ontbrekend('1op1', {}, vol), ['mentor_score']);
+  //  1-op-1: de mentorvragen én het onderdeel 1-op-1 in het gebruik-raster.
+  assert.deepEqual(ontbrekend('1op1', {}, vol), ['gebruik', 'mentor_score', 'sessie_ritme', 'feedback_concreet']);
   assert.deepEqual(ontbrekend('membership', {}, { ...vol, knelpunt: [] }), ['knelpunt']);
   // nps 0 is een antwoord, geen "leeg".
   assert.ok(!ontbrekend('membership', {}, vol).includes('nps'));
@@ -137,7 +141,9 @@ test('elke keuzesleutel heeft labels voor elke waarde (CRM-overzicht, CSV, bewij
   for (const k of ['fase', 'doel_3m', 'payout', 'helpt', 'knelpunt', 'hulp', 'robot_interesse', 'robot_belmoment']) {
     assert.ok(LABELS[k], k);
   }
-  assert.equal(CHECKIN_SLEUTELS.length, 16); // + robot_contact_tel/-email (Autopilot v3, 28 okt)
+  assert.equal(CHECKIN_SLEUTELS.length, 29); // + robot_contact_tel/-email (Autopilot v3, 28 okt) + 13 (uitbreiding 29 okt)
+  for (const k of ['trade_stand', 'trades_vorige_maand', 'journal_gebruik', 'zekerheid', 'grootste_knelpunt', 'gebruik', 'gebruik_niveau',
+    'gebruik_waarom_niet', 'live_moment', 'sessie_ritme', 'feedback_concreet', 'vooruithelpen', 'feedbackpanel']) assert.ok(LABELS[k], k);
 });
 
 // ── Een nep-LMS met dezelfde semantiek als de databankfuncties ─────────────
@@ -222,9 +228,17 @@ function maak(lms, { kaarten = [] } = {}) {
   };
 }
 
+const NIEUW_GEMEEN = {
+  trade_stand: 'demo', trades_vorige_maand: '1_5', journal_gebruik: 'soms',
+  zekerheid: { h4_impuls: 4, fib_71: 3, bevestiging_15m: 4, risk: 5, discipline: 3 }, grootste_knelpunt: 'tijd',
+  live_moment: 'weekavond', vooruithelpen: ['feedback_eigen_trades'], feedbackpanel: 'ja',
+};
 const VOL_1OP1 = {
   fase: 'demo', doel_3m: 'routine', uren_per_week: 5, nps: 9, helpt: ['mentor'], knelpunt: ['tijd'],
   hulp: 'feedback', mentor_score: 5, begeleiding_contact: 'nee', robot_interesse: 'nee',
+  ...NIEUW_GEMEEN,
+  gebruik: { live_sessies: 'vaak', sunday_markups: 'soms', opgenomen_trainingen: 'vaak', trade_recaps: 'vaak', lessen_pdfs: 'vaak', discord: 'soms', journal_lms: 'vaak', the_lab: 'soms', een_op_een: 'vaak' },
+  sessie_ritme: 'goed', feedback_concreet: 'ja',
 };
 
 test('open: live → dossier zonder e-mail, telefoon of achternaam', async () => {
@@ -332,7 +346,9 @@ test('submit: onvolledig → 400 met de ontbrekende sleutels', async () => {
   await api({ action: 'save', sessie: lms.t.sessie, huidige_stap: 1, antwoorden: { fase: 'demo' } });
   const r = await api({ action: 'submit', sessie: lms.t.sessie });
   assert.equal(r.statusCode, 400);
-  assert.deepEqual(r.body.missing, ['doel_3m', 'nps', 'knelpunt', 'hulp', 'begeleiding_contact', 'mentor_score', 'robot_interesse']);
+  assert.deepEqual(r.body.missing, ['doel_3m', 'trade_stand', 'trades_vorige_maand', 'journal_gebruik', 'zekerheid', 'grootste_knelpunt',
+    'gebruik', 'live_moment', 'nps', 'knelpunt', 'hulp', 'vooruithelpen', 'feedbackpanel', 'begeleiding_contact',
+    'mentor_score', 'sessie_ritme', 'feedback_concreet', 'robot_interesse']);
   assert.equal(lms.t.status, 'bezig');
 });
 
@@ -549,4 +565,85 @@ test('Autopilot v3: Daves kaart belt het opgegeven nummer; leeg → terug naar h
   assert.equal(k.telefoon, '+32470000000');
   assert.equal(k.bron_ref.contact_tel, null);
   assert.doesNotMatch(k.notitie, /OPGEGEVEN/);
+});
+
+// ── Uitbreiding 29 okt 2026 (Maxim keurde goed) ────────────────────────────
+import {
+  gebruikOnderdelen, zwakkeStappen, ZEKERHEID_STAPPEN, MAX_EEN_DING,
+} from '../api/_lib/checkin-portal.js';
+import { csv as beheerCsv, CSV_VRAGEN, csvKop } from '../api/_lib/checkin-beheer.js';
+
+test('UITBREIDING: whitelist voor de nieuwe sleutels — waarden, objecten, 1-op-1-only, max 2, max 500 tekens', () => {
+  const ok = (patch, flow = '1op1') => valideerPatch(patch, { flow }).ok;
+  assert.ok(ok({ trade_stand: 'funded', trades_vorige_maand: '15_plus', journal_gebruik: 'nooit', live_moment: 'zondagochtend', feedbackpanel: 'nee' }));
+  assert.ok(!ok({ trade_stand: 'live' }));
+  assert.ok(!ok({ trades_vorige_maand: 0 }), 'een getal is geen keuze');
+  //  Zekerheid: 1..5, deelobject mag tijdens het invullen.
+  assert.ok(ok({ zekerheid: { h4_impuls: 1, risk: 5 } }));
+  assert.ok(!ok({ zekerheid: { h4_impuls: 0 } }));
+  assert.ok(!ok({ zekerheid: { h4_impuls: 3, onbekend: 3 } }));
+  assert.ok(!ok({ zekerheid: [3, 3] }));
+  //  Gebruik: 1-op-1 enkel in de mentorship-flow.
+  assert.ok(ok({ gebruik: { een_op_een: 'vaak' } }));
+  assert.ok(!ok({ gebruik: { een_op_een: 'vaak' } }, 'membership'));
+  assert.ok(!ok({ gebruik: { discord: 'altijd' } }));
+  assert.ok(ok({ gebruik_waarom_niet: { discord: 'wist_niet' } }));
+  assert.ok(!ok({ gebruik_waarom_niet: { discord: 'saai' } }));
+  //  Sessieritme en concrete feedback alleen 1-op-1.
+  assert.ok(ok({ sessie_ritme: 'te_weinig', feedback_concreet: 'soms' }));
+  assert.ok(!ok({ sessie_ritme: 'goed' }, 'membership'));
+  assert.ok(!ok({ feedback_concreet: 'soms' }, 'membership'));
+  //  Vooruithelpen: max 2, vaste volgorde.
+  assert.deepEqual(valideerPatch({ vooruithelpen: ['studiebuddy', 'live_meetraden'] }, { flow: '1op1' }).schoon.vooruithelpen, ['live_meetraden', 'studiebuddy']);
+  assert.ok(!ok({ vooruithelpen: ['studiebuddy', 'live_meetraden', 'kortere_videos'] }));
+  assert.ok(ok({ een_ding_veranderen: 'x'.repeat(MAX_EEN_DING) }));
+  assert.ok(!ok({ een_ding_veranderen: 'x'.repeat(MAX_EEN_DING + 1) }));
+  assert.equal(gebruikOnderdelen('membership').includes('een_op_een'), false);
+});
+
+test('UITBREIDING: "waarom niet" enkel voor onderdelen op nooit, en dan per onderdeel verplicht', () => {
+  const g = Object.fromEntries(gebruikOnderdelen('membership').map((o) => [o, 'vaak']));
+  const a = { gebruik: { ...g, discord: 'nooit', the_lab: 'nooit' }, gebruik_waarom_niet: { discord: 'tijdstip_past_niet', live_sessies: 'wist_niet' } };
+  assert.deepEqual(schoneAntwoorden(a, { flow: 'membership' }).gebruik_waarom_niet, { discord: 'tijdstip_past_niet' });
+  assert.ok(ontbrekend('membership', {}, a).includes('gebruik_waarom_niet'), 'the_lab staat op nooit zonder reden');
+  const b = { ...a, gebruik_waarom_niet: { discord: 'tijdstip_past_niet', the_lab: 'niet_nuttig' } };
+  assert.ok(!ontbrekend('membership', {}, b).includes('gebruik_waarom_niet'));
+  //  Niets op nooit: niets te vragen.
+  assert.ok(!ontbrekend('membership', {}, { gebruik: g }).includes('gebruik_waarom_niet'));
+  //  Zekerheid moet volledig zijn.
+  assert.ok(ontbrekend('membership', {}, { zekerheid: { h4_impuls: 3 } }).includes('zekerheid'));
+  assert.ok(!ontbrekend('membership', {}, { zekerheid: Object.fromEntries(ZEKERHEID_STAPPEN.map((s) => [s, 3])) }).includes('zekerheid'));
+});
+
+test('UITBREIDING: extra redenen op dezelfde kaart — weet niet waar te beginnen, ≤ 2 op ≥ 3 stappen, ritme en feedback', () => {
+  assert.equal(signaalVoor({ nps: 9, grootste_knelpunt: 'strategie' }), null);
+  assert.deepEqual(signaalVoor({ nps: 9, grootste_knelpunt: 'weet_niet_waar_beginnen' }), { zwaarte: 'geel', redenen: ['Weet niet waar te beginnen'] });
+  //  ≤ 2 op twee stappen: nog geen signaal; op drie wel.
+  assert.equal(signaalVoor({ nps: 9, zekerheid: { h4_impuls: 2, fib_71: 1, risk: 5 } }), null);
+  const s = signaalVoor({ nps: 9, zekerheid: { h4_impuls: 2, fib_71: 1, bevestiging_15m: 2, risk: 5, discipline: 3 } });
+  assert.equal(s.zwaarte, 'geel');
+  assert.match(s.redenen[0], /≤ 2 op 3 stappen/);
+  assert.deepEqual(zwakkeStappen({ h4_impuls: 2, fib_71: 1, bevestiging_15m: 2, risk: 5 }), ['h4_impuls', 'fib_71', 'bevestiging_15m']);
+  assert.equal(signaalVoor({ nps: 9, sessie_ritme: 'te_weinig' }).zwaarte, 'oranje');
+  assert.equal(signaalVoor({ nps: 9, feedback_concreet: 'nee' }).zwaarte, 'oranje');
+  //  Eén kaart met alle redenen.
+  assert.equal(signaalVoor({ nps: 2, grootste_knelpunt: 'weet_niet_waar_beginnen', feedback_concreet: 'nee' }).redenen.length, 3);
+  const b = signaalBewijs({ antwoorden: { nps: 9, grootste_knelpunt: 'weet_niet_waar_beginnen', een_ding_veranderen: 'Meer live' }, redenen: ['x'] });
+  assert.equal(b['Grootste knelpunt'], 'Ik weet niet waar te beginnen');
+  assert.equal(b['Eén ding veranderen'], 'Meer live');
+});
+
+test('UITBREIDING: de CSV heeft elke sleutel als kolom, de objecten per deel; oude inzendingen blijven leesbaar', () => {
+  assert.ok(CSV_VRAGEN.includes('zekerheid.fib_71') && CSV_VRAGEN.includes('gebruik.discord') && CSV_VRAGEN.includes('gebruik_waarom_niet.discord'));
+  assert.equal(csvKop('zekerheid.fib_71'), 'Zekerheid per stap (1-5) – Fibonacci & de 71%-zone');
+  const nieuw = { naam: 'A', ruw: { ...VOL_1OP1, gebruik: { ...VOL_1OP1.gebruik, discord: 'nooit' }, gebruik_waarom_niet: { discord: 'wist_niet' } } };
+  const oud = { naam: 'B', ruw: { fase: 'demo', nps: 8 } };
+  const regels = beheerCsv([nieuw, oud]).trim().split('\r\n');
+  const kop = regels[0].split(';');
+  const kol = (r, naam) => regels[r].split(';')[kop.indexOf(naam)];
+  assert.equal(kol(1, csvKop('zekerheid.risk')), '5');
+  assert.equal(kol(1, csvKop('gebruik.discord')), 'Nooit');
+  assert.equal(kol(1, csvKop('gebruik_waarom_niet.discord')), 'Wist niet dat het bestond');
+  assert.equal(kol(2, csvKop('zekerheid.risk')), '');
+  assert.equal(kol(2, 'Aanbevelen (0-10)'), '8');
 });

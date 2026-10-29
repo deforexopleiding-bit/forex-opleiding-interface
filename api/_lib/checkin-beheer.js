@@ -29,7 +29,7 @@
 //   gekoppeld).
 
 import { onboardingKlaar } from './onboarding-einde.js';
-import { LABELS, VRAAG, signaalVoor } from './checkin-portal.js';
+import { LABELS, VRAAG, signaalVoor, ZEKERHEID_STAPPEN, GEBRUIK_ONDERDELEN } from './checkin-portal.js';
 
 /**
  * De testaccounts: Maxims eigen studentlogins. Gemeten 27 okt 2026 in dfo-lms:
@@ -256,7 +256,66 @@ export function antwoordenLeesbaar(a) {
   voeg('robot_contact_tel', x.robot_contact_tel || null);
   voeg('robot_contact_email', x.robot_contact_email || null);
   voeg('verbeter', x.verbeter || null);
+  // Uitbreiding 29 okt 2026.
+  voeg('trade_stand', lbl('trade_stand', x.trade_stand));
+  voeg('trades_vorige_maand', lbl('trades_vorige_maand', x.trades_vorige_maand));
+  voeg('journal_gebruik', lbl('journal_gebruik', x.journal_gebruik));
+  voeg('zekerheid', objectLeesbaar(x.zekerheid, ZEKERHEID_STAPPEN, 'zekerheid', (v) => `${v}/5`));
+  voeg('grootste_knelpunt', lbl('grootste_knelpunt', x.grootste_knelpunt));
+  voeg('gebruik', objectLeesbaar(x.gebruik, GEBRUIK_ONDERDELEN, 'gebruik', (v) => lbl('gebruik_niveau', v)));
+  voeg('gebruik_waarom_niet', objectLeesbaar(x.gebruik_waarom_niet, GEBRUIK_ONDERDELEN, 'gebruik', (v) => lbl('gebruik_waarom_niet', v)));
+  voeg('live_moment', lbl('live_moment', x.live_moment));
+  voeg('sessie_ritme', lbl('sessie_ritme', x.sessie_ritme));
+  voeg('feedback_concreet', lbl('feedback_concreet', x.feedback_concreet));
+  voeg('vooruithelpen', lbl('vooruithelpen', x.vooruithelpen));
+  voeg('een_ding_veranderen', x.een_ding_veranderen || null);
+  voeg('feedbackpanel', lbl('feedbackpanel', x.feedbackpanel));
   return rijen;
+}
+
+/** Een object (zekerheid, gebruik) als lijst "Onderdeel: waarde", of null. */
+function objectLeesbaar(o, sleutels, labelSleutel, waarde) {
+  if (!o || typeof o !== 'object') return null;
+  const uit = sleutels.filter((k) => o[k] != null).map((k) => `${LABELS[labelSleutel]?.[k] || k}: ${waarde(o[k])}`);
+  return uit.length ? uit : null;
+}
+
+/**
+ * De kolommen van de CSV: elke sleutel één kolom, de objecten per deel
+ * (zekerheid.h4_impuls, gebruik.discord, …). Ook de Inzichten-export gebruikt dit.
+ */
+export const CSV_VRAGEN = Object.freeze([
+  'fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'trade_stand', 'trades_vorige_maand', 'journal_gebruik',
+  ...ZEKERHEID_STAPPEN.map((k) => 'zekerheid.' + k), 'grootste_knelpunt',
+  ...GEBRUIK_ONDERDELEN.map((k) => 'gebruik.' + k), ...GEBRUIK_ONDERDELEN.map((k) => 'gebruik_waarom_niet.' + k), 'live_moment',
+  'nps', 'helpt', 'knelpunt', 'verbeter', 'hulp', 'mentor_score', 'sessie_ritme', 'feedback_concreet', 'vooruithelpen',
+  'een_ding_veranderen', 'feedbackpanel', 'begeleiding_contact',
+  'robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email',
+]);
+
+/** De kop van een CSV-kolom in gewone taal. */
+export function csvKop(k) {
+  const [hoofd, deel] = k.split('.');
+  if (!deel) return VRAAG[k] || k;
+  const naam = LABELS[hoofd === 'zekerheid' ? 'zekerheid' : 'gebruik']?.[deel] || deel;
+  return `${VRAAG[hoofd] || hoofd} – ${naam}`;
+}
+
+/** De waarde van een CSV-kolom uit de RUWE antwoorden, leesbaar. */
+export function csvWaarde(a, k) {
+  const x = a || {};
+  const [hoofd, deel] = k.split('.');
+  if (deel) {
+    const v = x[hoofd]?.[deel];
+    if (v == null) return '';
+    if (hoofd === 'zekerheid') return v;
+    return lbl(hoofd === 'gebruik' ? 'gebruik_niveau' : 'gebruik_waarom_niet', v);
+  }
+  const v = x[k];
+  if (v == null || v === '') return '';
+  if (k === 'uren_per_week') return v === 10 ? '10+' : v;
+  if (Number.isInteger(v)) return v;
+  return lbl(k, v);
 }
 
 /**
@@ -304,6 +363,7 @@ export function rijenVan({ toewijzingen, mentorNamen = new Map(), signalen = new
       payout_delen: a.payout_delen || null,
       verbeter: a.verbeter || null,
       antwoorden: antwoordenLeesbaar(a),
+      ruw: a,
       signaal: sig ? { id: sig.id, status: sig.status || null, zwaarte: sig.zwaarte || null } : null,
       signaal_redenen: verwacht ? verwacht.redenen : [],
       kaart: kaart ? { id: kaart.id, status: kaart.status || null } : null,
@@ -378,14 +438,12 @@ function csvVeld(v) {
 
 /** De export: één regel per toewijzing, met alle antwoorden leesbaar. Puntkomma (Excel NL/BE). */
 export function csv(rijen) {
-  const vragen = ['fase', 'doel_3m', 'uren_per_week', 'payout', 'payout_delen', 'nps', 'helpt', 'knelpunt', 'hulp', 'mentor_score', 'begeleiding_contact', 'robot_interesse', 'robot_belmoment', 'robot_contact_tel', 'robot_contact_email', 'verbeter'];
-  const kop = [...CSV_KOLOMMEN.map(([, l]) => l), ...vragen.map((k) => VRAAG[k] || k), 'Begeleidingssignaal', 'Automation-kaart'];
+  const kop = [...CSV_KOLOMMEN.map(([, l]) => l), ...CSV_VRAGEN.map(csvKop), 'Begeleidingssignaal', 'Automation-kaart'];
   const regels = [kop.map(csvVeld).join(';')];
   for (const x of rijen || []) {
-    const per = new Map(x.antwoorden.map((a) => [a.sleutel, a.antwoord]));
     regels.push([
       ...CSV_KOLOMMEN.map(([k]) => x[k]),
-      ...vragen.map((k) => per.get(k) ?? ''),
+      ...CSV_VRAGEN.map((k) => csvWaarde(x.ruw, k)),
       x.signaal ? (x.signaal.zwaarte || 'ja') : '',
       x.kaart ? (x.kaart.status || 'ja') : '',
     ].map(csvVeld).join(';'));

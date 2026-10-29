@@ -397,6 +397,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Herinneringen). "Genegeerd" = niet verstuurd 14 dagen na `campagne.live_op` (los van de mails; het LMS-overzicht
   Betrokkenheid rekent hetzelfde). LIJN onboarding ↔ check-in: `lijn()` in checkin-beheer.js, `GET ?lijn=1`.
   Migratie docs/sql-migrations/2026-10-28-checkin-mails.sql.
+  UITBREIDING (29 okt, Maxim): nieuwe sleutels trade_stand · trades_vorige_maand · journal_gebruik · zekerheid
+  (object, 5 trechterstappen 1–5) · grootste_knelpunt · gebruik (object vaak/soms/nooit; een_op_een enkel 1-op-1) ·
+  gebruik_waarom_niet (enkel voor 'nooit', dan verplicht) · live_moment · sessie_ritme/feedback_concreet (1-op-1) ·
+  vooruithelpen (max 2) · een_ding_veranderen (≤500) · feedbackpanel. Whitelist + verplicht in checkin-portal.js
+  (objecten pas VOLLEDIG bij versturen); extra signaalredenen op dezelfde kaart. CSV: elke sleutel een kolom
+  (`CSV_VRAGEN`, objecten per deel). De website (dfo-website lib/checkin-portal.ts) kent dezelfde waarden.
   CRM-SECTIE "Studentencheck-in" (MODS-item `checkin` in Leren & Events, GEEN rollen, permKey `checkin.view`;
   knoppen vragen `checkin.run`): `views/studentencheckin-v2.js` + `api/checkin-beheer.js` (rekenkern
   `api/_lib/checkin-beheer.js`). Campagnekaart (Voorbeeld als teststudent · Testtoewijzingen · Run · Pauzeren/
