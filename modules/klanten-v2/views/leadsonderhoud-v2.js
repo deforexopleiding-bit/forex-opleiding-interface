@@ -4799,7 +4799,112 @@
     </div>`;
   }
 
+  // ── Meta-koppeling-tab (2026-10-29): self-service beheer van de Meta-Lead-koppeling ──
+  // Per-funnel aan/uit + testmodus + read-only consent-info + overzicht uit meta_lead_events.
+  // De consent-gate (beslisMetaLead) blijft hard in de code; hier alleen read-only.
+  async function fetchMetaKoppeling(force) {
+    const st = (_live.metakoppeling = _live.metakoppeling || {});
+    if (!force && (st.loading || (st.fetched && !st.error))) return;
+    st.loading = true; st.error = null;
+    const seq = (st._seq = (st._seq || 0) + 1);
+    if (window.DFO?.render) window.DFO.render();
+    const [cfg, ev] = await Promise.all([
+      tryFetch('meta-settings', '/api/meta-lead-settings-get'),
+      tryFetch('meta-events', '/api/meta-lead-events'),
+    ]);
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!cfg) { st.error = 'Kon Meta-instellingen niet laden'; if (window.DFO?.render) window.DFO.render(); return; }
+    st.connectie = cfg.connectie || {};
+    if (!st.form || force) {
+      const s = cfg.settings || {};
+      const fn = s.funnels || {};
+      st.form = {
+        funnels: { opstartsessie: fn.opstartsessie !== false, webinar: fn.webinar !== false, lab: fn.lab !== false },
+        testmode: s.testmode === true,
+        test_event_code: typeof s.test_event_code === 'string' ? s.test_event_code : '',
+      };
+    }
+    st.events = (ev && asArr(ev.events)) || [];
+    st.tellers = (ev && ev.tellers) || { verstuurd: 0, geen_toestemming: 0, al_geteld: 0 };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsMetaToggleFunnel = function (k) {
+    const st = _live.metakoppeling; if (!st || !st.form) return;
+    st.form.funnels[k] = !st.form.funnels[k];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsMetaToggleTestmode = function () {
+    const st = _live.metakoppeling; if (!st || !st.form) return;
+    st.form.testmode = !st.form.testmode;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsMetaSetCode = function (el) {
+    const st = _live.metakoppeling; if (!st || !st.form) return;
+    st.form.test_event_code = String(el.value || '');   // geen re-render: focus behouden
+  };
+  window._lsMetaSave = async function () {
+    const st = _live.metakoppeling; if (!st || !st.form) return;
+    st.saving = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/meta-lead-settings-set', {
+        method: 'POST',
+        body: JSON.stringify({ funnels: st.form.funnels, testmode: st.form.testmode, test_event_code: st.form.test_event_code }),
+      });
+      window.KV.toast('Meta-instellingen opgeslagen.', 'ok');
+      st.saving = false;
+      fetchMetaKoppeling(true);
+    } catch (e) {
+      st.saving = false;
+      window.KV.toast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  function _metaSwitch(aan, onclick, label, sub) {
+    const knop = `<button onclick="${onclick}" role="switch" aria-checked="${aan}" style="position:relative;width:40px;height:22px;border-radius:999px;border:none;cursor:pointer;background:${aan ? '#16a34a' : 'var(--border)'};transition:.15s;flex:0 0 auto"><span style="position:absolute;top:2px;left:${aan ? '20px' : '2px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s"></span></button>`;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0">${knop}<div><div style="font-size:13.5px;font-weight:600">${label}</div>${sub ? `<div style="font-size:11.5px;color:var(--text-3)">${sub}</div>` : ''}</div><span style="margin-left:auto;font-size:11.5px;font-weight:700;color:${aan ? '#16a34a' : 'var(--text-3)'}">${aan ? 'AAN' : 'UIT'}</span></div>`;
+  }
+  function metaKoppelingView() {
+    const st = _live.metakoppeling;
+    if (!st || (!st.fetched && !st.loading && !st.error)) queueMicrotask(() => fetchMetaKoppeling(false));
+    if (st && st.error) return `<div style="max-width:860px"><div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12.5px">${esc(st.error)}</div></div>`;
+    if (!st || !st.form) return `<div style="max-width:860px;color:var(--text-3);font-size:13px;padding:14px">Meta-instellingen laden...</div>`;
+    const card = (inner, titel, extra) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">${titel ? `<div style="font-size:14px;font-weight:700;margin-bottom:4px">${titel}</div>` : ''}${extra || ''}${inner}</div>`;
+    const c = st.connectie || {};
+    const statusregel = `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12.5px;margin-bottom:14px"><span style="display:inline-flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:50%;background:${c.token_actief ? '#16a34a' : 'var(--rose)'}"></span>${c.token_actief ? 'Verbonden met Meta' : 'Token niet actief'}</span><span style="color:var(--text-3)">Pixel-ID: <code>${esc(c.pixel_id || 'onbekend')}</code></span></div>`;
+    const f = st.form.funnels;
+    const blok1 = card(
+      _metaSwitch(f.opstartsessie, "window._lsMetaToggleFunnel('opstartsessie')", 'Opstartsessie', 'Directe opstartsessie-boeking') +
+      _metaSwitch(f.webinar, "window._lsMetaToggleFunnel('webinar')", 'Webinar', 'Webinar-vangnet') +
+      _metaSwitch(f.lab, "window._lsMetaToggleFunnel('lab')", 'The Lab', 'Lab-aanmelding'),
+      'Per funnel: Lead naar Meta', '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Staat een funnel uit, dan wordt er geen Lead verstuurd en komt er status <b>Overgeslagen</b> (reden: funnel uitgezet) in het overzicht.</div>'
+    );
+    const blok2 = card(
+      _metaSwitch(st.form.testmode, 'window._lsMetaToggleTestmode()', 'Testmodus', 'Events gaan naar Meta Test Events (tellen niet mee)') +
+      (st.form.testmode ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--text-3);display:block;margin-bottom:4px">Test-event-code (uit Meta Events Manager &rarr; Test Events)</label><input type="text" value="${esc(st.form.test_event_code)}" oninput="window._lsMetaSetCode(this)" placeholder="TESTxxxxx" style="width:220px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px"></div>` : ''),
+      'Testmodus', '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Vervangt het handmatig zetten van META_CAPI_TEST_EVENT_CODE in Vercel. Uit = live.</div>'
+    );
+    const blok3 = `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-start"><span style="font-size:18px;line-height:1">&#128274;</span><div><div style="font-size:13.5px;font-weight:700;margin-bottom:3px">Toestemming (vergrendeld)</div><div style="font-size:12px;color:var(--text-3);line-height:1.5">Leads zonder advertentie-toestemming worden <b>nooit</b> naar Meta verstuurd (AVG/cookiewet). De lead blijft gewoon in het CRM staan. Dit staat vast in de code en is bewust niet uit te zetten.</div></div></div>`;
+    const opslaan = `<div style="margin:4px 0 20px"><button class="btn btn-primary btn-sm" style="font-size:13px;padding:8px 16px" onclick="window._lsMetaSave()" ${st.saving ? 'disabled' : ''}>${st.saving ? 'Opslaan...' : 'Instellingen opslaan'}</button></div>`;
+    const t = st.tellers || {};
+    const teller = (n, l, kleur) => `<div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px"><div style="font-size:22px;font-weight:800;color:${kleur}">${n == null ? 0 : n}</div><div style="font-size:11.5px;color:var(--text-3)">${l}</div></div>`;
+    const tellers = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${teller(t.verstuurd, 'Verstuurd (vandaag)', '#16a34a')}${teller(t.geen_toestemming, 'Geen toestemming', 'var(--amber)')}${teller(t.al_geteld, 'Al geteld (dedup)', 'var(--text-3)')}</div>`;
+    const pill = (ev) => {
+      if (ev.status === 'sent') return '<span style="font-size:11px;font-weight:700;color:#16a34a;background:#e7f6ee;padding:2px 8px;border-radius:999px">Verstuurd</span>';
+      if (ev.status === 'failed' || ev.status === 'error') return '<span style="font-size:11px;font-weight:700;color:var(--rose);background:var(--rose-soft);padding:2px 8px;border-radius:999px">Fout</span>';
+      return '<span style="font-size:11px;font-weight:700;color:var(--amber);background:var(--amber-soft);padding:2px 8px;border-radius:999px">Overgeslagen</span>';
+    };
+    const tijd = (iso) => { try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return '-'; } };
+    const evRows = asArr(st.events).map((ev) => `<tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 10px">${pill(ev)}</td><td style="padding:7px 10px">${esc(ev.bron || '-')}</td><td style="padding:7px 10px;color:var(--text-3)">${esc(ev.skip_reason || '-')}</td><td style="padding:7px 10px;text-align:center">${ev.match != null ? `${ev.match}/${ev.match_totaal}` : '-'}</td><td style="padding:7px 10px;color:var(--text-3)"><code>${esc(String(ev.event_id || '').slice(0, 16))}</code></td><td style="padding:7px 10px;color:var(--text-3);white-space:nowrap">${tijd(ev.aangemaakt)}</td></tr>`).join('');
+    const overzicht = card(
+      tellers + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)"><th style="padding:7px 10px">Status</th><th style="padding:7px 10px">Bron</th><th style="padding:7px 10px">Reden</th><th style="padding:7px 10px;text-align:center">Match</th><th style="padding:7px 10px">Event-id</th><th style="padding:7px 10px">Tijd</th></tr></thead><tbody>${evRows || '<tr><td colspan="6" style="padding:12px;color:var(--text-3);text-align:center">Nog geen events.</td></tr>'}</tbody></table></div>`,
+      'Recente leads naar Meta'
+    );
+    return `<div style="max-width:860px">${statusregel}${blok1}${blok2}${blok3}${opslaan}${overzicht}</div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
+  window.DFO.VIEWS['leadsonderhoud/Meta-koppeling']    = metaKoppelingView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
   window.DFO.VIEWS['leadsonderhoud/Funnels']        = funnelsView;
   window.DFO.VIEWS['leadsonderhoud/E-mails']        = emailsView;

@@ -33,8 +33,9 @@ import { zorgVoorLabAccount, maakLoginSleutel, LabAccountFout } from './_lib/dfo
 import { mailWelkom, mailNieuweLink, mailAlToegang, stuurLabMail, stuurLabWhatsApp } from './_lib/lab-berichten.js';
 import { labLoginLink, LAB_SLUG } from './_lib/lab-config.js';
 import { stuurLabEvent, labUserData } from './_lib/lab-meta.js';
-import { beslisMetaLead } from './_lib/meta-lead-poort.js';
+import { beslisMetaLead, metaLeadEventId } from './_lib/meta-lead-poort.js';
 import { legToestemmingVast, toestemmingUitBody } from './_lib/advertentie-toestemming.js';
+import { leesMetaLeadSettings, funnelAan, effectieveTestCode } from './_lib/meta-lead-settings.js';
 import { maakBoektoken } from './_lib/lab-boektoken.js';
 
 export const BERICHT_OK = 'Gelukt! Check je mailbox: je link naar The Lab is onderweg.';
@@ -211,19 +212,30 @@ export default async function handler(req, res) {
   // Toestemming advertentiecookies uit het formulier (alleen true telt) → op de lead + de poort.
   const advToestemming = toestemmingUitBody(req.body);
   await legToestemmingVast(supabaseAdmin, leadId, advToestemming, 'lab-aanmelding');
-  const metaLead = await beslisMetaLead(supabaseAdmin, { leadId, email: d.email, userAgent, isTest: d.is_test, toestemming: advToestemming });
-  const eventId = metaLead.eventId;
-  if (!eventId) console.log('[lab-aanmelding] geen Meta-Lead', { aanmelding: aanmeldingId, reden: metaLead.reden });
-  else await stuurLabEvent({
-    eventName: 'Lead', eventId, aanmeldingId: bewaard ? aanmeldingId : null,
-    userData: labUserData({
-      email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam, achternaam: d.achternaam,
-      externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
-    }),
-    bronUrl: d.landingspagina,
-    toestemming: advToestemming,
-    customData: { content_name: 'The Lab', content_category: LAB_SLUG, funnel: d.funnel || LAB_SLUG },
-  });
+  const metaSettings = await leesMetaLeadSettings(supabaseAdmin);
+  if (!funnelAan(metaSettings, 'lab')) {
+    // Lab-Lead door de operator uitgezet (Meta-koppeling-paneel) → niets sturen, wel loggen.
+    await supabaseAdmin.from('lab_meta_events').insert({
+      aanmelding_id: bewaard ? aanmeldingId : null, event_name: 'Lead',
+      event_id: leadId ? metaLeadEventId(leadId) : `lab_lead_${aanmeldingId}`,
+      status: 'skipped', skip_reason: 'funnel uitgezet',
+    }).then(() => {}).catch((e) => console.warn('[lab-aanmelding] lab-uit log (soft):', e.message));
+  } else {
+    const metaLead = await beslisMetaLead(supabaseAdmin, { leadId, email: d.email, userAgent, isTest: d.is_test, toestemming: advToestemming });
+    const eventId = metaLead.eventId;
+    if (!eventId) console.log('[lab-aanmelding] geen Meta-Lead', { aanmelding: aanmeldingId, reden: metaLead.reden });
+    else await stuurLabEvent({
+      eventName: 'Lead', eventId, aanmeldingId: bewaard ? aanmeldingId : null,
+      userData: labUserData({
+        email: d.email, telefoonE164: d.telefoon_e164, voornaam: d.voornaam, achternaam: d.achternaam,
+        externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
+      }),
+      bronUrl: d.landingspagina,
+      toestemming: advToestemming,
+      customData: { content_name: 'The Lab', content_category: LAB_SLUG, funnel: d.funnel || LAB_SLUG },
+      testCode: effectieveTestCode(metaSettings),
+    });
+  }
 
   console.log('[lab-aanmelding]', { aanmelding: aanmeldingId, lead: leadId, funnel: d.funnel, resultaat: uitkomst.resultaat, mail: uitkomst.mail_status, wa: uitkomst.wa_status, hook: d.hook, test: d.is_test });
   // Boektoken voor de bedankpagina van de funnels (meteen de sessie plannen).

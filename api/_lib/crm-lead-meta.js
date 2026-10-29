@@ -20,10 +20,11 @@
 // Alles fail-soft: gooit nooit (nooit een boeking/aanmelding breken).
 
 import { supabaseAdmin } from '../supabase.js';
-import { beslisMetaLead } from './meta-lead-poort.js';
+import { beslisMetaLead, metaLeadEventId } from './meta-lead-poort.js';
 import { leadHeeftToestemming, legToestemmingVast } from './advertentie-toestemming.js';
 import { labUserData, labMetaConfig, verstuurMetHerhaling } from './lab-meta.js';
 import { computeAppsecretProof, META_API_VERSION } from './meta-capi.js';
+import { leesMetaLeadSettings, funnelAan, effectieveTestCode } from './meta-lead-settings.js';
 
 const LOG_TABEL = 'meta_lead_events';
 
@@ -42,6 +43,17 @@ async function log(rij) {
   return error;
 }
 
+// Log een uitkomst zonder verzending (consent/dedup/funnel-uit), zodat het
+// overzicht klopt. event_id = lead_<id> zodat een latere echte verzending
+// diezelfde rij naar 'sent' bijwerkt (UNIQUE event_name+event_id; 23505 soft).
+async function logUitkomst({ leadId, bron, status, skip_reason }) {
+  if (!leadId) return;
+  await log({
+    bron: bron || null, referentie_id: leadId, event_name: 'Lead',
+    event_id: metaLeadEventId(leadId), match_keys: null, status, skip_reason: skip_reason || null,
+  });
+}
+
 // Strip querystring (geen PII/fbclid in event_source_url of logs).
 function schoonUrl(u) {
   if (!u) return null;
@@ -52,7 +64,7 @@ function schoonUrl(u) {
  * Stuurt één 'Lead'-event. Idempotent op (event_name,event_id); een id dat al
  * als 'sent' gelogd staat wordt niet opnieuw verstuurd. Gooit nooit.
  */
-async function stuurLeadEvent({ eventId, userData, bronUrl = null, customData = null, bron = null, referentieId = null }) {
+async function stuurLeadEvent({ eventId, userData, bronUrl = null, customData = null, bron = null, referentieId = null, testCode = null }) {
   const cfg = labMetaConfig();
   const basis = { bron, referentie_id: referentieId, event_name: 'Lead', event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!eventId) return { ok: false, status: 'ongeldig' };
@@ -79,7 +91,9 @@ async function stuurLeadEvent({ eventId, userData, bronUrl = null, customData = 
   // Token (+ appsecret_proof) in de BODY: nooit in URL/log.
   const body = { data: [event], access_token: cfg.token };
   if (cfg.appSecret) body.appsecret_proof = computeAppsecretProof(cfg.token, cfg.appSecret);
-  if (cfg.testCode) body.test_event_code = cfg.testCode;
+  // Testmode/code komt uit de Meta-koppeling-instelling (env als fallback);
+  // zie api/_lib/meta-lead-settings.js (effectieveTestCode).
+  if (testCode) body.test_event_code = testCode;
 
   const { ok, resp } = await verstuurMetHerhaling(url, body);
   if (al) {
@@ -128,17 +142,33 @@ export async function bewaarFbCookies(sb, leadId, { fbp = null, fbc = null } = {
 export async function meldCrmLead(sb, p = {}) {
   try {
     const { leadId, email, telefoonE164, voornaam, achternaam, userAgent, fbp, fbc, clientIp, referer, bron } = p;
+
+    const settings = await leesMetaLeadSettings(sb);
+    // Funnel door de operator uitgezet → niets sturen, wel loggen.
+    if (!funnelAan(settings, bron)) {
+      await logUitkomst({ leadId, bron, status: 'skipped', skip_reason: 'funnel uitgezet' });
+      return { verstuurd: false, reden: 'funnel_uit' };
+    }
+
     let consent = p.toestemming;
     if (consent !== true && consent !== false) consent = await leadHeeftToestemming(sb, { leadId });
 
     const { eventId, reden } = await beslisMetaLead(sb, { leadId, email, userAgent, toestemming: consent === true });
-    if (!eventId) return { verstuurd: false, reden };
+    if (!eventId) {
+      // Consent- en dedup-skips (en de rest) expliciet loggen i.p.v. stil overslaan.
+      const skip_reason = reden === 'geen_toestemming' ? 'geen advertentie-toestemming'
+        : reden === 'al_gemeld' ? 'al geteld (dedup)'
+          : `overgeslagen (${reden})`;
+      await logUitkomst({ leadId, bron, status: 'skipped', skip_reason });
+      return { verstuurd: false, reden };
+    }
 
     const userData = labUserData({ email, telefoonE164, voornaam, achternaam, externalId: leadId, fbp, fbc, ip: clientIp, userAgent });
     const r = await stuurLeadEvent({
       eventId, userData, bronUrl: schoonUrl(referer),
       customData: bron ? { content_category: String(bron) } : null,
       bron: bron || null, referentieId: leadId,
+      testCode: effectieveTestCode(settings),
     });
     return { verstuurd: r.ok, status: r.status, eventId };
   } catch (e) {

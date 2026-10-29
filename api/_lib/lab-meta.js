@@ -131,7 +131,7 @@ export async function verstuurMetHerhaling(url, body, { fetchFn = fetch, wacht =
  * @param {object|null} [p.customData] custom_data (content_category, funnel, ...)
  * @param {boolean} p.toestemming     toestemming advertentiecookies — VERPLICHT; zonder gaat er niets naar Meta
  */
-export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null, customData = null, toestemming = false }) {
+export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, userData, bronUrl = null, tijd = null, customData = null, toestemming = false, testCode }) {
   const cfg = labMetaConfig();
   const basis = { aanmelding_id: aanmeldingId, event_name: eventName, event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!LAB_EVENTS.includes(eventName) || !eventId) return { ok: false, status: 'ongeldig' };
@@ -163,7 +163,11 @@ export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, u
   // Token (+ appsecret_proof) in de BODY: nooit in een URL, log of foutmelding.
   const body = { data: [event], access_token: cfg.token };
   if (cfg.appSecret) body.appsecret_proof = computeAppsecretProof(cfg.token, cfg.appSecret);
-  if (cfg.testCode) body.test_event_code = cfg.testCode;
+  // testCode niet meegegeven (undefined) → env (cfg.testCode); wél meegegeven
+  // (incl. null = live) → die waarde. Zo stuurt de Meta-koppeling-instelling ook
+  // het Lab aan, terwijl andere callers ongewijzigd op de env blijven.
+  const effTestCode = testCode === undefined ? cfg.testCode : testCode;
+  if (effTestCode) body.test_event_code = effTestCode;
 
   const { ok, resp } = await verstuurMetHerhaling(url.toString(), body);
   if (al) {
