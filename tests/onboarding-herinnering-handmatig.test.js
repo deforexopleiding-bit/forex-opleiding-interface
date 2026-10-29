@@ -191,6 +191,7 @@ test('DE BRUG: zonder migratie (kolommen handmatig/door/tekst) vertrekt er niets
   assert.match(route, /body\?\.bevestigd !== true/);
   assert.match(route, /migratie_ontbreekt/);
   assert.match(route, /HERINNERING_NU_MAX = 100/);
+  assert.match(route, /HERINNERING_NU_MAX_VERSTUREN = 10/);
   const srv = readFileSync(new URL('../api/_lib/onboarding-herinneringen-server.js', import.meta.url), 'utf8');
   assert.match(srv, /if \(!plan\.logboek \|\| !plan\.kolommen\) return \{ \.\.\.plan, migratie_ontbreekt: true \}/);
   //  Eerst claimen, dan mailen.

@@ -380,8 +380,11 @@ async function meldHoofdmentoren(ob, sess) {
   }
 }
 
-/** Hoeveel studenten één verzoek "herinnering nu" mag bevatten. */
+/** Hoeveel studenten één verzoek "herinnering nu" mag bevatten: voorvertoning / versturen.
+ *  Versturen in kleine porties (het LMS stuurt ze na elkaar), zodat één verzoek
+ *  nooit tegen de tijdslimiet van de functie aanloopt. */
 export const HERINNERING_NU_MAX = 100;
+export const HERINNERING_NU_MAX_VERSTUREN = 10;
 
 /**
  * "HERINNERING NU VERSTUREN" vanaf het onboardingbord (29 okt 2026). Het LMS
@@ -395,8 +398,9 @@ async function herinneringNu(res, body) {
   if (!ids.length || ids.some((id) => !UUID_RE.test(id))) {
     return antwoord(res, 400, false, 'ongeldig_verzoek', 'onboarding_ids ontbreekt of bevat iets anders dan uuids.');
   }
-  if (ids.length > HERINNERING_NU_MAX) {
-    return antwoord(res, 400, false, 'te_veel', `Hoogstens ${HERINNERING_NU_MAX} studenten per keer.`);
+  const max = body?.bevestigd === true ? HERINNERING_NU_MAX_VERSTUREN : HERINNERING_NU_MAX;
+  if (ids.length > max) {
+    return antwoord(res, 400, false, 'te_veel', `Hoogstens ${max} studenten per keer.`);
   }
   const doorEmail = typeof body?.door_email === 'string' ? body.door_email.trim().slice(0, 200) : '';
   try {
