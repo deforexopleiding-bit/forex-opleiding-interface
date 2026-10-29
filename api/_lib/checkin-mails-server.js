@@ -5,11 +5,9 @@
 // checkin-mails.js (puur).
 
 import { SETTING_KEY, besluitCheckinMail, codeFmt, link, genegeerd, normaliseerInstellingen } from './checkin-mails.js';
-import { bouwOpmaakMail } from './onboarding-mail-opmaak.js';
+import { bouwCheckinMail } from './checkin-mail-opmaak.js';
 import { sendMail } from '../mailer.js';
 import { ontbreekt } from './onboarding-herinneringen-server.js';
-
-const CODE_REGEL = '{{checkin.code}}';
 
 export async function leesInstellingen(db) {
   const { data, error } = await db.from('app_settings').select('value').eq('key', SETTING_KEY).maybeSingle();
@@ -97,19 +95,17 @@ export async function planCheckinMails({ db, lms, vandaag }) {
   return { log, campagnes, plan, genegeerd: aantalGenegeerd };
 }
 
-/** Bouw en verstuur één check-in-mail (vanaf info@). */
+/** De mail zoals hij vertrekt (ook de voorvertoning in het CRM). PUUR. */
+export function maakCheckinMail(tekst, { voornaam, code }) {
+  const url = link(code);
+  return bouwCheckinMail(tekst, { voornaam: String(voornaam || '').trim() || 'daar', code: codeFmt(code), link: url });
+}
+
+/** Bouw en verstuur één check-in-mail (vanaf info@; antwoorden komen daar binnen). */
 export async function stuurCheckinMail(tekst, { naar, voornaam, code, onderwerpPrefix = '' }) {
   if (!naar) return { ok: false, overgeslagen: 'geen_email' };
-  const url = link(code);
-  const waarden = {
-    '{{student.voornaam}}': String(voornaam || '').trim() || 'daar',
-    [CODE_REGEL]: codeFmt(code),
-    '{{checkin.link}}': url,
-  };
-  const mail = bouwOpmaakMail({ subject: tekst.onderwerp, body: tekst.tekst, waarden, link: url, codeLabel: 'Jouw code', codeRegel: CODE_REGEL });
-  let onderwerp = String(tekst.onderwerp);
-  for (const [k, v] of Object.entries(waarden)) onderwerp = onderwerp.split(k).join(v);
-  const res = await sendMail({ to: naar, subject: onderwerpPrefix + onderwerp, text: mail.text, html: mail.html });
+  const mail = maakCheckinMail(tekst, { voornaam, code });
+  const res = await sendMail({ to: naar, subject: onderwerpPrefix + mail.onderwerp, text: mail.text, html: mail.html });
   if (!res || res.success === false) return { ok: false, naar, fout: res?.error || 'mail mislukt' };
   return { ok: true, naar };
 }

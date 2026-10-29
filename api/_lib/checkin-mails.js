@@ -22,6 +22,7 @@
 
 import { dagVan, dagPlus } from './onboarding-auto-afronden.js';
 import { normaliseerTekstInstellingen } from './onboarding-herinneringen.js';
+import { isOpmaakTekst } from './checkin-mail-opmaak.js';
 
 export const SETTING_KEY = 'checkin_mails';
 export const SOORTEN = ['uitnodiging', 'herinnering_5', 'herinnering_10'];
@@ -34,53 +35,77 @@ export const SOORT_LABEL = {
   herinnering_10: 'Herinnering na 10 dagen',
 };
 
+//  Sinds 29 okt 2026 in de vaste opmaak van het goedgekeurde ontwerp
+//  (api/_lib/checkin-mail-opmaak.js): één regel per onderdeel, `[sleutel] tekst`.
+//  Teksten in de oude, platte vorm tellen niet meer (zie normaliseerInstellingen).
+const VOET = '[voet] Je krijgt deze mail omdat je student bent bij De Forex Opleiding. Je check-in blijft openstaan tot je hem verstuurt; daarna krijg je hierover geen mails meer.';
+const GROET = ['[groet] Bedankt om mee te bouwen,', '[ondertekening] **Maxim** & het team van De Forex Opleiding'];
 export const CONCEPT_TEKSTEN = {
   uitnodiging: {
-    onderwerp: 'Hoe loopt jouw traject, {{student.voornaam}}?',
+    onderwerp: 'Jouw check-in staat klaar, {{voornaam}}',
     tekst: [
-      'Hi {{student.voornaam}},',
-      '',
-      'We willen graag weten hoe jouw traject bij De Forex Opleiding loopt: wat goed gaat, wat beter kan, en waar we je nog mee kunnen helpen. Het duurt een paar minuten.',
-      '',
-      'Je persoonlijke code:',
-      '{{checkin.code}}',
-      '[knop: Start mijn check-in]',
-      '',
-      'Bedankt!',
-      'Team De Forex Opleiding',
+      '[preheader] 4 minuten. Jouw antwoorden bepalen hoe we de opleiding de komende maanden verbeteren.',
+      '[kop] Hoe loopt jouw traject,',
+      '{{voornaam}}?',
+      '[ondertitel] We willen weten wat jou vooruithelpt en waar je op vastloopt. Daar bouwen we de komende maanden op verder.',
+      '[aanhef] Hi {{voornaam}},',
+      '[tekst] Vanaf vandaag krijg je bij het inloggen in het LMS een korte **check-in**. Geen examen: we vragen hoe je traject tot nu toe verloopt, wat goed werkt en wat beter kan. Elk antwoord leest ons team zelf.',
+      '[tegel] 4 min | vooral aantikken, weinig typen',
+      '[tegel] Persoonlijk | gekoppeld aan jouw account',
+      '[tegel] Impact | jouw input = onze volgende stappen',
+      '[code-label] JOUW PERSOONLIJKE CODE',
+      '[knop] Start mijn check-in →',
+      '[onder-knop] Of log in op het LMS: je check-in staat daar klaar.',
+      '[blok-label] OP HET EINDE',
+      '[blok-titel] Wat wij zelf al jaren gebruiken',
+      '[blok-tekst] Aan het einde van je check-in tonen we hoe ons eigen geld automatisch voor ons werkt. Daar willen we je graag meer over vertellen. Interesse? Vink het aan en we nemen persoonlijk contact met je op.',
+      '[noot] **Kleine vraag:** houd je check-in en wat je erin ziet voor jezelf, en bespreek het niet in de Discord. Heb je een vraag of wil je iets weten? Antwoord gewoon op deze mail, dan nemen we persoonlijk contact op.',
+      ...GROET,
+      VOET,
     ].join('\n'),
   },
   herinnering_5: {
-    onderwerp: 'Je check-in staat nog klaar',
+    onderwerp: 'Je check-in staat nog open, {{voornaam}}',
     tekst: [
-      'Hi {{student.voornaam}},',
-      '',
-      'Je check-in staat nog open. Met jouw antwoorden kunnen we je begeleiding beter afstemmen — het duurt maar een paar minuten.',
-      '',
-      '{{checkin.code}}',
-      '[knop: Naar mijn check-in]',
-      '',
-      'Team De Forex Opleiding',
+      '[preheader] Nog 4 minuten: jouw antwoorden helpen ons de opleiding beter te maken.',
+      '[kop] Je check-in staat nog open',
+      '[ondertitel] Het duurt maar 4 minuten, en jouw antwoorden bepalen mee wat we de komende maanden verbeteren.',
+      '[aanhef] Hi {{voornaam}},',
+      '[tekst] Je hebt je check-in nog niet verstuurd. Vooral aantikken, weinig typen: in een paar minuten ben je klaar.',
+      '[code-label] JOUW PERSOONLIJKE CODE',
+      '[knop] Start mijn check-in →',
+      '[onder-knop] Of log in op het LMS: je check-in staat daar klaar.',
+      ...GROET,
+      VOET,
     ].join('\n'),
   },
   herinnering_10: {
-    onderwerp: 'Laatste herinnering: jouw DFO-check-in',
+    onderwerp: 'Laatste herinnering: je check-in, {{voornaam}}',
     tekst: [
-      'Hi {{student.voornaam}},',
-      '',
-      'Dit is de laatste herinnering voor je check-in. Laat ons even weten hoe het gaat — ook als alles goed loopt.',
-      '',
-      '{{checkin.code}}',
-      '[knop: Naar mijn check-in]',
-      '',
-      'Team De Forex Opleiding',
+      '[preheader] Laatste herinnering: 4 minuten voor je check-in.',
+      '[kop] Laatste herinnering: je check-in',
+      '[ondertitel] Ook als alles goed loopt, willen we het graag van jou horen.',
+      '[aanhef] Hi {{voornaam}},',
+      '[tekst] Dit is de laatste mail over je check-in. Neem er even 4 minuten voor: elk antwoord leest ons team zelf.',
+      '[code-label] JOUW PERSOONLIJKE CODE',
+      '[knop] Start mijn check-in →',
+      '[onder-knop] Of log in op het LMS: je check-in staat daar klaar.',
+      ...GROET,
+      VOET,
     ].join('\n'),
   },
 };
 
 /** De instellingen (hoofdschakelaar + teksten concept/goedgekeurd). PURE. */
 export function normaliseerInstellingen(waarde) {
-  return normaliseerTekstInstellingen(waarde, CONCEPT_TEKSTEN);
+  //  Een bewaarde tekst in de OUDE, platte vorm (vóór het ontwerp van 29 okt)
+  //  telt niet meer: dan geldt het nieuwe concept, en dat is NIET goedgekeurd.
+  const v = waarde && typeof waarde === 'object' ? waarde : {};
+  const teksten = {};
+  for (const [s, t] of Object.entries(v.teksten && typeof v.teksten === 'object' ? v.teksten : {})) {
+    if (t && isOpmaakTekst(t.tekst)) teksten[s] = t;
+  }
+  return normaliseerTekstInstellingen({ ...v, teksten }, CONCEPT_TEKSTEN);
 }
 
 /** XXXX-XXXX zoals de balk hem toont. PURE. */
