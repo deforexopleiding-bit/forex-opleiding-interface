@@ -10,7 +10,7 @@
 
 import {
   SETTING_KEY, SIGNAAL, normaliseerInstellingen, besluitHerinnering, besluitOudDossier, isKlaar, isOudDossier,
-  tekstVoorFlow, heeftFlowRegels,
+  tekstVoorFlow, heeftFlowRegels, besluitHandmatig, waaromLabel, SOORT_LABEL,
 } from './onboarding-herinneringen.js';
 import { resolveFlowType } from './onboarding-wizard-default.js';
 import { linkVoorOnboarding, portalBasis } from './onboarding-link.js';
@@ -57,13 +57,26 @@ export async function leesRuweInstellingen(db, key = SETTING_KEY) {
  * dubbel" niet te garanderen.
  * @returns {Promise<Map<string, Array>|null>}
  */
+const LOG_KOLOMMEN = 'onboarding_id, soort, status, naar, fout, aangemaakt_op';
+//  Met de hand (29 okt 2026): wie, welke tekst. Zonder migratie
+//  2026-10-29-onboarding-herinnering-handmatig.sql vallen we terug op LOG_KOLOMMEN.
+const LOG_KOLOMMEN_HANDMATIG = LOG_KOLOMMEN + ', handmatig, door, tekst';
+
 export async function leesLog(db, ids) {
   const kaart = new Map();
   const uniek = [...new Set((ids || []).filter(Boolean))];
+  let kolommen = LOG_KOLOMMEN_HANDMATIG;
   for (let i = 0; i < uniek.length || i === 0; i += 200) {
     const deel = uniek.slice(i, i + 200);
-    const q = db.from('onboarding_herinneringen').select('onboarding_id, soort, status, naar, fout, aangemaakt_op');
-    const { data, error } = deel.length ? await q.in('onboarding_id', deel) : await q.limit(1);
+    const lees = (k) => {
+      const q = db.from('onboarding_herinneringen').select(k);
+      return deel.length ? q.in('onboarding_id', deel) : q.limit(1);
+    };
+    let { data, error } = await lees(kolommen);
+    if (error && kolommen === LOG_KOLOMMEN_HANDMATIG && ontbreekt(error)) {
+      kolommen = LOG_KOLOMMEN;
+      ({ data, error } = await lees(kolommen));
+    }
     if (error) {
       if (ontbreekt(error)) return null;
       throw new Error('herinneringen-log: ' + error.message);
@@ -307,4 +320,110 @@ export async function stuurTestHerinnering(tekst, { naar, voornaam = 'Maxim' }) 
     if (!res || res.success === false) return { ok: false, fout: res?.error || 'mail mislukt' };
   }
   return { ok: true, naar, versies: versies.length };
+}
+
+/**
+ * Bestaan de kolommen voor "met de hand" (handmatig, door, tekst)? Zonder die
+ * migratie vertrekt er met de hand NIETS: het logboek moet zeggen wie het deed.
+ */
+export async function heeftHandmatigKolommen(db) {
+  const { error } = await db.from('onboarding_herinneringen').select('handmatig, door, tekst').limit(1);
+  if (!error) return true;
+  if (ontbreekt(error)) return false;
+  throw new Error('herinneringen-log: ' + error.message);
+}
+
+/**
+ * "HERINNERING NU VERSTUREN" — de voorvertoning: per gevraagde onboarding wie
+ * wel en wie niet (en waarom), met naam, mailadres en welke tekst. Leest alles
+ * zelf; gelooft van de aanvrager enkel de ids.
+ *
+ * @param {{db, lms, rijen: object[], ids: string[], vandaag: string}} p
+ *   rijen = bouwOverzichtRijen({scope:'active'})
+ */
+export async function planHandmatig({ db, lms, rijen, ids, vandaag }) {
+  const gevraagd = [...new Set((ids || []).filter(Boolean))];
+  const opId = new Map((rijen || []).map((r) => [r.id, r]));
+  const gevonden = gevraagd.map((id) => opId.get(id)).filter(Boolean);
+  const [log, oude, inst, kolommen] = await Promise.all([
+    leesLog(db, gevonden.map((r) => r.id)), oudeAutomation(db, gevonden.map((r) => r.id)), leesInstellingen(db), heeftHandmatigKolommen(db),
+  ]);
+  if (!lms) throw new Error('De koppeling met het LMS is niet geconfigureerd: zonder de signalen ("wil annuleren") vertrekt er niets.');
+  const sig = await openSignalen(lms, gevonden);
+  const custIds = [...new Set(gevonden.map((r) => r.customer_id).filter(Boolean))];
+  const mail = new Map();
+  for (let i = 0; i < custIds.length; i += 200) {
+    const { data, error } = await db.from('customers').select('id, email').in('id', custIds.slice(i, i + 200));
+    if (error) throw new Error('klanten: ' + error.message);
+    for (const c of data || []) mail.set(c.id, String(c.email || '').trim() || null);
+  }
+  const items = gevraagd.map((id) => {
+    const r = opId.get(id);
+    if (!r) return { onboarding_id: id, naam: null, email: null, besluit: { actie: 'niets', waarom: 'niet_gevonden' } };
+    const eigen = log ? (log.get(r.id) || []) : [];
+    //  De oude automation mailde al op dag 15: die telt als herinnering_1.
+    const overgenomen = !eigen.some((l) => l.soort === 'herinnering_1') && oude.gemaild.has(r.id)
+      ? { soort: 'herinnering_1', status: 'overgenomen', aangemaakt_op: oude.gemaild.get(r.id) } : null;
+    const ctxLog = overgenomen ? [...eigen, overgenomen] : eigen;
+    let besluit = besluitHandmatig(r, { vandaag, log: ctxLog, wilAnnuleren: sig.wilAnnuleren.has(r.id), teksten: inst.teksten });
+    const email = mail.get(r.customer_id) || null;
+    if (besluit.actie === 'mail' && !email) besluit = { actie: 'niets', waarom: 'geen_email' };
+    return { onboarding_id: id, naam: r.customer_name || null, email, rij: r, overgenomen, besluit };
+  });
+  return { logboek: log !== null, kolommen, inst, items };
+}
+
+/** Het antwoord voor het LMS (zonder de interne rij). PURE. */
+export function handmatigVoorLms(items) {
+  return (items || []).map((it) => ({
+    onboarding_id: it.onboarding_id,
+    naam: it.naam,
+    email: it.email,
+    mag: it.besluit.actie === 'mail',
+    tekst: it.besluit.actie === 'mail' ? it.besluit.tekst : (it.besluit.tekst || null),
+    tekst_label: it.besluit.tekst ? (SOORT_LABEL[it.besluit.tekst] || it.besluit.tekst) : null,
+    waarom: it.besluit.actie === 'mail' ? null : it.besluit.waarom,
+    waarom_label: it.besluit.actie === 'mail' ? null : waaromLabel(it.besluit),
+    uitkomst: it.uitkomst || null,
+    fout: it.fout || null,
+  }));
+}
+
+/**
+ * En versturen: opnieuw plannen (de stand van NU, niet die van de
+ * voorvertoning), dan per student eerst claimen, dan mailen. Nooit dubbel: de
+ * unieke sleutel (onboarding, soort) is de grendel.
+ * @param {{db, lms, rijen, ids, vandaag, door: string}} p
+ */
+export async function stuurHandmatig({ db, lms, rijen, ids, vandaag, door }) {
+  const plan = await planHandmatig({ db, lms, rijen, ids, vandaag });
+  if (!plan.logboek || !plan.kolommen) return { ...plan, migratie_ontbreekt: true };
+  for (const it of plan.items) {
+    const b = it.besluit;
+    if (b.actie !== 'mail') continue;
+    try {
+      if (it.overgenomen && await claim(db, it.rij.id, 'herinnering_1')) {
+        await markeer(db, it.rij.id, 'herinnering_1', { status: 'overgenomen', aangemaakt_op: it.overgenomen.aangemaakt_op });
+      }
+      if (!(await claim(db, it.rij.id, b.soort, { handmatig: true, door, tekst: b.tekst }))) {
+        it.besluit = { actie: 'niets', waarom: 'recent', sinds: vandaag };
+        it.uitkomst = 'overgeslagen';
+        continue;
+      }
+      const m = await stuurHerinnering(db, it.rij, plan.inst.teksten[b.tekst]);
+      if (m.ok) {
+        await markeer(db, it.rij.id, b.soort, { status: 'verstuurd', naar: m.naar });
+        it.uitkomst = 'verstuurd';
+      } else {
+        await markeer(db, it.rij.id, b.soort, { status: 'mislukt', naar: m.naar || null, fout: (m.fout || m.overgeslagen || '').slice(0, 300) });
+        it.uitkomst = 'mislukt';
+        it.fout = m.fout || m.overgeslagen || 'mail mislukt';
+      }
+    } catch (e) {
+      it.uitkomst = 'mislukt';
+      it.fout = (e?.message || String(e)).slice(0, 300);
+      console.error('[onboarding-herinneringen] met de hand', it.onboarding_id, it.fout);
+    }
+  }
+  return plan;
 }

@@ -475,7 +475,7 @@ export async function bouwOverzichtRijen(opts = {}) {
         geen_herinneringen_op: r.geen_herinneringen_op || null,
         geen_herinneringen:    r.geen_herinneringen_op ? { op: r.geen_herinneringen_op, door: r.geen_herinneringen_door || null } : null,
         herinneringen:         herinneringenByOb === null ? null
-          : (herinneringenByOb.get(r.id) || []).map((h) => ({ soort: h.soort, status: h.status, op: h.aangemaakt_op })),
+          : (herinneringenByOb.get(r.id) || []).map((h) => ({ soort: h.soort, status: h.status, op: h.aangemaakt_op, handmatig: h.handmatig === true, door: h.door || null, tekst: h.tekst || null })),
         auto_afgerond_reden:   r.auto_afgerond_reden || null,
         persoonlijke_link:     linkByOb.get(r.id) || null,
         // Intake (Fase 1+ + Fase A nog_geen_mentor):

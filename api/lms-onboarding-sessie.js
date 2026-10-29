@@ -18,6 +18,8 @@
 //   POST { actie: 'koppel_student',     onboarding_id, student_id, door_email }  (7 okt 2026)
 //   POST { actie: 'terug_activeren',    onboarding_id, start_datum, door_email } (6 okt 2026)
 //   POST { actie: 'geen_herinneringen', onboarding_id, aan: true|false, door_email } (28 okt 2026)
+//   POST { actie: 'herinnering_nu', onboarding_ids: [..], bevestigd: true|false, door_email } (29 okt 2026)
+//        bevestigd false = voorvertoning (wie wel/niet en waarom), true = versturen.
 // Die lopen door DEZELFDE functies als de CRM-schermen
 // (api/_lib/onboarding-acties.js): dezelfde controles, dezelfde meldingen aan
 // mentoren, dezelfde spiegel. Annuleren en archiveren kunnen hier NIET — die
@@ -62,7 +64,9 @@ import {
   wijsMentorToe, zetStartdatumOnboarding, zetStartstatus, schrijfOnboardingNotitie,
 } from './_lib/onboarding-acties.js';
 import { rondOnboardingHandmatigAf } from './_lib/onboarding-handmatig.js';
-import { zetGeenHerinneringen } from './_lib/onboarding-herinneringen-server.js';
+import { zetGeenHerinneringen, planHandmatig, stuurHandmatig, handmatigVoorLms } from './_lib/onboarding-herinneringen-server.js';
+import { bouwOverzichtRijen } from './_lib/onboarding-overzicht-rijen.js';
+import { dagBrussel } from './_lib/onboarding-auto-afronden.js';
 import { zetNaarIncasso, activeerUitIncasso } from './_lib/onboarding-incasso.js';
 import { crmMentorVoorLmsId, crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
 
@@ -108,6 +112,7 @@ export default async function handler(req, res) {
   const actie = String(body?.actie || '');
   const studentId = String(body?.student_id || '').trim();
   const onboardingId = String(body?.onboarding_id || '').trim();
+  if (actie === 'herinnering_nu') return herinneringNu(res, body);
   if (actie !== 'sessie_afgerond' && !ONBOARDING_ACTIES.has(actie)) {
     return antwoord(res, 400, false, 'ongeldige_actie',
       'Onbekende actie. Verwacht: sessie_afgerond, startdatum, mentor_toewijzen, startstatus, notitie, handmatig_afronden, naar_incasso, terug_activeren, koppel_student of geen_herinneringen.');
@@ -372,5 +377,58 @@ async function meldHoofdmentoren(ob, sess) {
     }
   } catch (e) {
     console.warn('[lms-onboarding-sessie] ontvangers bepalen mislukt: ' + (e?.message || e));
+  }
+}
+
+/** Hoeveel studenten één verzoek "herinnering nu" mag bevatten: voorvertoning / versturen.
+ *  Versturen in kleine porties (het LMS stuurt ze na elkaar), zodat één verzoek
+ *  nooit tegen de tijdslimiet van de functie aanloopt. */
+export const HERINNERING_NU_MAX = 100;
+export const HERINNERING_NU_MAX_VERSTUREN = 10;
+
+/**
+ * "HERINNERING NU VERSTUREN" vanaf het onboardingbord (29 okt 2026). Het LMS
+ * zegt enkel OVER WIE; welke tekst en of het mag, beslist het CRM zelf met de
+ * regels van de cadans (besluitHandmatig). Het LMS controleert de rol
+ * (hoofdmentor/admin) vóór het deze brug aanroept.
+ */
+async function herinneringNu(res, body) {
+  const ids = Array.isArray(body?.onboarding_ids)
+    ? [...new Set(body.onboarding_ids.map((x) => String(x || '').trim()))] : [];
+  if (!ids.length || ids.some((id) => !UUID_RE.test(id))) {
+    return antwoord(res, 400, false, 'ongeldig_verzoek', 'onboarding_ids ontbreekt of bevat iets anders dan uuids.');
+  }
+  const max = body?.bevestigd === true ? HERINNERING_NU_MAX_VERSTUREN : HERINNERING_NU_MAX;
+  if (ids.length > max) {
+    return antwoord(res, 400, false, 'te_veel', `Hoogstens ${max} studenten per keer.`);
+  }
+  const doorEmail = typeof body?.door_email === 'string' ? body.door_email.trim().slice(0, 200) : '';
+  try {
+    const lms = getDfoLmsClient();
+    const rijen = await bouwOverzichtRijen({ scope: 'active' });
+    const vandaag = dagBrussel();
+    if (body?.bevestigd !== true) {
+      const plan = await planHandmatig({ db: supabaseAdmin, lms, rijen, ids, vandaag });
+      return antwoord(res, 200, true, 'voorvertoning', 'Wie wel en wie niet.', {
+        items: handmatigVoorLms(plan.items), migratie_ontbreekt: !plan.logboek || !plan.kolommen,
+      });
+    }
+    const door = await crmGebruikerVoorEmail(doorEmail);
+    const wie = (door?.full_name || doorEmail || 'onbekend') + ' via het LMS' + (doorEmail ? ' (' + doorEmail + ')' : '');
+    const plan = await stuurHandmatig({ db: supabaseAdmin, lms, rijen, ids, vandaag, door: wie });
+    if (plan.migratie_ontbreekt) {
+      return antwoord(res, 503, false, 'migratie_ontbreekt',
+        'Er is niets verstuurd: draai eerst docs/sql-migrations/2026-10-29-onboarding-herinnering-handmatig.sql (het logboek moet bijhouden wie het deed).');
+    }
+    const items = handmatigVoorLms(plan.items);
+    const verstuurd = items.filter((i) => i.uitkomst === 'verstuurd').length;
+    const mislukt = items.filter((i) => i.uitkomst === 'mislukt').length;
+    console.log('[lms-onboarding-sessie] herinnering_nu', JSON.stringify({ door: doorEmail, gevraagd: ids.length, verstuurd, mislukt }));
+    return antwoord(res, 200, true, 'verstuurd',
+      `${verstuurd} herinnering${verstuurd === 1 ? '' : 'en'} verstuurd${mislukt ? `, ${mislukt} mislukt` : ''}.`,
+      { items, verstuurd, mislukt });
+  } catch (e) {
+    console.error('[lms-onboarding-sessie] herinnering_nu', e?.message || e);
+    return antwoord(res, 500, false, 'interne_fout', 'De herinnering kon niet verwerkt worden: ' + (e?.message || 'onbekende fout'));
   }
 }
