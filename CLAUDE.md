@@ -403,6 +403,10 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   vooruithelpen (max 2) · een_ding_veranderen (≤500) · feedbackpanel. Whitelist + verplicht in checkin-portal.js
   (objecten pas VOLLEDIG bij versturen); extra signaalredenen op dezelfde kaart. CSV: elke sleutel een kolom
   (`CSV_VRAGEN`, objecten per deel). De website (dfo-website lib/checkin-portal.ts) kent dezelfde waarden.
+  INZICHTEN (29 okt): tab Studentencheck-in › Inzichten (`views/checkin-inzichten-v2.js`, `GET /api/checkin-beheer?inzichten=1`
+  [&csv=1]) + machine-route voor het LMS `api/lms-checkin-inzichten.js` (x-dfo-secret; het LMS toont het ENKEL aan
+  hoofdmentor/admin, open antwoorden staan er met naam). Eén rekenkern `api/_lib/checkin-inzichten.js`: enkel verstuurd,
+  test enkel met test=1, filters traject/mentor('geen')/fase/trade_stand, <5 = "te weinig", zwakste trechterstap.
   CRM-SECTIE "Studentencheck-in" (MODS-item `checkin` in Leren & Events, GEEN rollen, permKey `checkin.view`;
   knoppen vragen `checkin.run`): `views/studentencheckin-v2.js` + `api/checkin-beheer.js` (rekenkern
   `api/_lib/checkin-beheer.js`). Campagnekaart (Voorbeeld als teststudent · Testtoewijzingen · Run · Pauzeren/

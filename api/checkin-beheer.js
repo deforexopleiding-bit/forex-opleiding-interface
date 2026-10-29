@@ -11,6 +11,8 @@
 //   GET                         → overzicht (recht checkin.view)
 //   GET ?csv=1                  → export (checkin.view)
 //   GET ?campagne=<slug>        → een andere campagne
+//   GET ?inzichten=1[&traject&mentor&fase&trade_stand&test=1]  → tab Inzichten (checkin.view)
+//   GET ?inzichten=1&csv=1      → één rij per inzending binnen die filter (checkin.view)
 //   POST { actie:'doelgroep' }  → wie zou Run raken + uitgesloten met reden (checkin.run)
 //   POST { actie:'test' }       → testtoewijzingen voor de testaccounts (checkin.run)
 //   POST { actie:'run', bevestiging:'ACTIVEER' } → activeer in het LMS (checkin.run)
@@ -32,6 +34,7 @@ import {
   doelgroep, doelgroepSamenvatting, doelgroepRegel, lijn, lijnSamenvatting, rijenVan, kpi, perMentor, payouts, csv,
   schoneOpties, runStand, testaccounts, PRODUCTEN, vandaag, UITSLUIT_REDEN,
 } from './_lib/checkin-beheer.js';
+import { inzichten, filterUit, filterRijen } from './_lib/checkin-inzichten.js';
 
 export const RECHT_VIEW = 'checkin.view';
 export const RECHT_RUN = 'checkin.run';
@@ -45,11 +48,13 @@ const LMS = 'https://lms.deforexopleiding.nl';
  * het bevestigingsvenster van Run exact toont wat de student gaat zien.
  */
 export const LMS_TEKST = Object.freeze({
+  //  Sinds 29 okt 2026 VERPLICHT: niet weg te klikken, het LMS blijft dicht tot verstuurd.
   popup: {
-    eyebrow: 'Persoonlijke check-in · ±3 min',
+    eyebrow: 'Persoonlijke check-in · ±4 min',
     titel: 'Hoe loopt jouw traject, <voornaam>?',
-    tekst: 'We willen weten wat jou vooruithelpt en waar je op vastloopt, zodat we jouw begeleiding scherper maken. Drie minuten, en je antwoorden gaan rechtstreeks naar het team.',
-    knoppen: ['Start mijn check-in', 'Later'],
+    tekst: 'Voor je verder gaat in het leerplatform: vertel ons in vier minuten waar je staat, wat je van ons gebruikt en wat jou vooruithelpt. Je antwoorden gaan rechtstreeks naar het team. Daarna ga je meteen verder.',
+    knoppen: ['Start mijn check-in'],
+    verplicht: 'Niet weg te klikken; het leerplatform blijft dicht tot de check-in verstuurd is. Uitloggen kan wel. "Lukt het niet? Mail info@deforexopleiding.nl."',
   },
   balk: {
     titel: 'Jouw check-in staat klaar.',
@@ -259,6 +264,7 @@ export function maakHandler(deps = {}) {
           return res.status(200).json({ lijn: await berekenLijn({ lms, crm: d.crm, nu: d.nu() }) });
         }
         const ov = await laadOverzicht({ lms, crm: d.crm, slug: typeof q.campagne === 'string' ? q.campagne : null });
+        if (String(q.inzichten || '') === '1') return stuurInzichten(res, ov, q);
         if (String(q.csv || '') === '1') {
           res.setHeader('Content-Type', 'text/csv; charset=utf-8');
           res.setHeader('Content-Disposition', `attachment; filename="checkin-${ov.campagne?.slug || 'export'}.csv"`);
@@ -343,3 +349,23 @@ export function maakHandler(deps = {}) {
 }
 
 export default maakHandler();
+
+/**
+ * Tab Inzichten — gedeeld met de machine-route voor het LMS
+ * (api/lms-checkin-inzichten.js): dezelfde rekenkern, dezelfde CSV.
+ */
+export function stuurInzichten(res, ov, q = {}) {
+  const f = filterUit(q);
+  if (String(q.csv || '') === '1') {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="checkin-inzichten-${ov.campagne?.slug || 'export'}.csv"`);
+    return res.status(200).send(csv(filterRijen(ov.rijen, f)));
+  }
+  res.setHeader('Content-Type', 'application/json');
+  return res.status(200).json({
+    campagne: ov.campagne ? { slug: ov.campagne.slug, naam: ov.campagne.naam, status: ov.campagne.status, live_op: ov.campagne.live_op } : null,
+    campagnes: ov.campagnes,
+    inzichten: inzichten(ov.rijen, f),
+    meldingen: ov.meldingen,
+  });
+}

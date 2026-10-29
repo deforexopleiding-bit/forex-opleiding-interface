@@ -276,7 +276,8 @@ test('doelgroep-voorbeeld: aantallen, uitgesloten met reden en de exacte LMS-tek
   assert.equal(r.statusCode, 200);
   assert.equal(r.body.samenvatting.totaal, 1);
   assert.deepEqual(r.body.samenvatting.uitgesloten.map((u) => u.reden).sort(), ['onboarding_loopt', 'testaccount']);
-  assert.match(r.body.lms_tekst.popup.tekst, /Drie minuten/);
+  assert.match(r.body.lms_tekst.popup.tekst, /vier minuten/);
+  assert.deepEqual(r.body.lms_tekst.popup.knoppen, ['Start mijn check-in'], 'verplicht: geen Later');
   assert.equal(r.body.bevestiging, 'ACTIVEER');
 });
 
