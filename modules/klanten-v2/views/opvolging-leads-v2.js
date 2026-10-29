@@ -289,6 +289,20 @@
 
   const LABEL_KLEUR = { heet: 't-red', warm: 't-amber', lauw: 't-blue', koud: 't-grey' };
 
+  /**
+   * De tag met de naam van de aparte lijst, naast de bestaande badge. Een
+   * verhuisde kaart houdt zijn oude badge ('Minicursus', '7-daagse'); zo ziet
+   * Maxim toch waarom hij in de lijst staat. Niet als de badge al de lijstnaam is.
+   */
+  function lijstTag(r) {
+    const k = r && r.kaart;
+    const naam = String((k && k.aparte_lijst_naam) || '').trim();
+    if (!naam) return '';
+    const zelfde = (v) => String(v || '').trim().toLowerCase() === naam.toLowerCase();
+    if (zelfde(k.badge_label) || zelfde(r.product_label)) return '';
+    return ' <span class="tag lb-lijsttag" title="Staat in de aparte lijst ' + esc(naam) + '">&#128203; ' + esc(naam) + '</span>';
+  }
+
   function leadRij(r, pot) {
     const k = r.kaart;
     const s = sleutel(r);
@@ -353,6 +367,7 @@
       (r.waarom ? '<div class="lb-waarom">' + esc(r.waarom) + '</div>' : '') +
       '<div class="nm">' + esc(r.naam) +
       (r.product_label ? ' <span class="tag t-grey">' + esc(r.product_label) + '</span>' : '') +
+      lijstTag(r) +
       (r.label ? ' <span class="tag ' + (LABEL_KLEUR[r.label.code] || 't-grey') + '">' + esc(r.label.tekst) + ' &middot; ' + esc(r.score) + '</span>' : '') +
       '</div>' +
       '<div class="lb-opener">' + esc(r.opener || '') + '</div>' +
@@ -1165,6 +1180,7 @@
 .opv.lb .lb-lh{font-size:14px;font-weight:700;margin:6px 0 8px}
 .opv.lb .lb-lh .n{font-size:12px;font-weight:700;background:#eef0f3;border-radius:999px;padding:0 8px}
 .opv .tag.t-teal{background:#d9f1f6;color:#0b4f60}
+.opv .tag.lb-lijsttag{background:#ecf8fb;color:#0b4f60;border:1px dashed #67b7c9}
 .opv .lb-keuzes{display:flex;flex-direction:column;gap:6px;margin:0 0 6px}
 .opv .lb-keuze{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--o-line);border-radius:10px;padding:8px 10px;cursor:pointer;font-size:13px}
 .opv .lb-keuze.on{border-color:#0e7490;background:#f3fbfd}

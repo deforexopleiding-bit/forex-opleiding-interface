@@ -15,7 +15,7 @@ import {
   aparteLijstVan, splitsKaarten, lijstTelling, aparteStaarten, naamBezet, lijstNaam,
   lijstWeergave, tabelOntbreekt, isLijstId,
 } from '../api/_lib/opvolging-leads-lijsten.js';
-import { stelPottenSamen, potVoorKaart, dagInZone, UITSLUITREDENEN } from '../api/_lib/opvolging-leads-pot.js';
+import { stelPottenSamen, potVoorKaart, dagInZone, UITSLUITREDENEN, kaartSamenvatting } from '../api/_lib/opvolging-leads-pot.js';
 import {
   leesCsv, maakVoorvertoning, importKaart, maakAparteVoorvertoning, verhuisdeBronRef, OVERSLAAN,
 } from '../api/_lib/opvolging-leads-import.js';
@@ -609,4 +609,40 @@ test('scherm: aparte voorvertoning toont nieuw / verhuisd / overgeslagen, bevest
 
   st.modal.vv = { ...st.modal.vv, aantallen: { geldig: 0, verhuis: 0, overgeslagen: 2 } };
   assert.doesNotMatch(window.DFO.VIEWS['opvolging/Leads bellen'](), /Bevestigen:/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIJSTTAG OP DE RIJ (verhuisde kaarten houden hun oude badge)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('kaartSamenvatting geeft de naam van de aparte lijst mee (enkel met een lijst-id)', () => {
+  assert.equal(kaartSamenvatting(kaart({ bron_ref: { import_label: 'Webiar 26/10', aparte_lijst_id: L1, aparte_lijst_naam: 'Webinar 26/10' } }), null, NU).aparte_lijst_naam, 'Webinar 26/10');
+  assert.equal(kaartSamenvatting(kaart(), null, NU).aparte_lijst_naam, null);
+  assert.equal(kaartSamenvatting(kaart({ bron_ref: { aparte_lijst_naam: 'X' } }), null, NU).aparte_lijst_naam, null, 'zonder id geen tag');
+  assert.equal(kaartSamenvatting(kaart({ bron_ref: null }), null, NU).aparte_lijst_naam, null);
+});
+
+test('scherm: lijsttag naast de oude badge, niet dubbel als de badge al de lijstnaam is', () => {
+  const { window } = laadView();
+  const st = window.__opvLeadsState;
+  const rijMet = (id, naam, badge, lijst) => ({
+    lead_id: 'l' + id, naam, product_label: badge, score: 0, label: null, chips: [], opener: '', sectie: 'opnieuw', pot: 'bezig',
+    kaart: { taak_id: id, status: 'open', badge_label: badge, aparte_lijst_naam: lijst, bel_totaal: 0, bel_dagen: 0, wa_totaal: 0, plan: { rondes: 0 } },
+  });
+  const items = [
+    rijMet('t1', 'Mats Van de Wynkele', 'Minicursus', 'Webinar 26/10'),
+    rijMet('t2', 'Klaas Verboom', 'Webinar 26/10', 'Webinar 26/10'),
+    rijMet('t3', 'Tanja Jong', '7-daagse', null),
+    rijMet('t4', 'Mike Denys', '7-daagse', '<b>x</b>'),
+  ];
+  st.telling.data = { aantallen: {}, belrij: {} };
+  st.pot = 'lijst:' + L1;
+  st.potten[st.pot] = { data: { lijst: { id: L1, naam: 'Webinar 26/10', status: 'actief', telling: {} }, items, secties: {}, lijst_belrij: {} } };
+  const html = window.DFO.VIEWS['opvolging/Leads bellen']();
+  const rijHtml = (naam) => html.slice(html.indexOf(naam), html.indexOf('</div>', html.indexOf(naam)));
+  assert.match(rijHtml('Mats Van de Wynkele'), /tag t-grey">Minicursus<\/span> <span class="tag lb-lijsttag"[^>]*>&#128203; Webinar 26\/10<\/span>/);
+  assert.doesNotMatch(rijHtml('Klaas Verboom'), /lb-lijsttag/, 'badge is al de lijstnaam');
+  assert.doesNotMatch(rijHtml('Tanja Jong'), /lb-lijsttag/, 'niet in een lijst');
+  assert.match(rijHtml('Mike Denys'), /&#128203; &lt;b&gt;x&lt;\/b&gt;/);
+  assert.doesNotMatch(html, /<b>x<\/b>/);
 });
