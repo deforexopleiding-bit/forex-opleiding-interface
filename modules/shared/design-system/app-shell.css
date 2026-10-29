@@ -119,6 +119,17 @@ input,select,textarea{font:inherit;color:inherit}
   border-bottom:2.5px solid transparent;margin-bottom:-1px;transition:color .14s}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--m);border-bottom-color:var(--m);font-weight:600}
+/* Tab-groep (dropdown in de tabbalk). .tab-drop is position:fixed (de .tabs-balk
+   heeft overflow-x:auto), via JS gepositioneerd onder de groep-knop. */
+.tab-group{position:relative;display:inline-flex}
+.tab-group-btn{display:inline-flex;align-items:center;gap:5px;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none}
+.tab-caret{font-size:9px;opacity:.65;transition:transform .14s}
+.tab-group.open .tab-caret{opacity:1;transform:rotate(180deg)}
+.tab-drop{position:fixed;z-index:1200;display:none;flex-direction:column;gap:1px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm,8px);box-shadow:0 10px 28px rgba(0,0,0,.16);padding:5px;min-width:160px;max-height:70vh;overflow-y:auto}
+.tab-group.open .tab-drop{display:flex}
+.tab-drop-item{padding:8px 12px;font-size:13px;color:var(--text-2);text-align:left;white-space:nowrap;border:none;background:none;border-radius:6px;cursor:pointer;transition:background .12s,color .12s}
+.tab-drop-item:hover{background:var(--surface-2,rgba(127,127,127,.12));color:var(--text)}
+.tab-drop-item.active{color:var(--m);font-weight:600}
 .content{flex:1;overflow-y:auto;overflow-x:hidden}
 .pad{padding:20px}
 
