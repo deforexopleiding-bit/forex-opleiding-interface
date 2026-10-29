@@ -243,8 +243,23 @@ export function uitsluiting(r, ctx = {}) {
   return null;
 }
 
+/**
+ * Een herinnering MET DE HAND die een tekst nog eens stuurt (bv. herinnering 2
+ * een tweede keer) krijgt als soort `handmatig:<YYYY-MM-DD>` — de unieke
+ * sleutel (onboarding, soort) blijft zo de grendel: hoogstens één zo'n mail per
+ * student per dag. De eerste keer van een tekst krijgt gewoon die soort, zodat
+ * de automatische cadans weet dat hij al vertrok.
+ */
+export const HANDMATIG_PREFIX = 'handmatig:';
+
+/** Telt deze logregel als een vertrokken mail? PURE. */
+export function isMailRij(l) {
+  const s = String(l?.soort || '');
+  return (SOORTEN.includes(s) || s.startsWith(HANDMATIG_PREFIX)) && l.status !== 'mislukt';
+}
+
 function laatsteMailDag(log) {
-  const dagen = (log || []).filter((l) => SOORTEN.includes(l.soort) && l.status !== 'mislukt').map((l) => dagVan(l.aangemaakt_op)).filter(Boolean);
+  const dagen = (log || []).filter(isMailRij).map((l) => dagVan(l.aangemaakt_op)).filter(Boolean);
   return dagen.length ? dagen.sort().at(-1) : null;
 }
 
@@ -322,4 +337,66 @@ export function besluitOudDossier(r, ctx) {
   if (!laatste) return { actie: 'laatste_mail' };
   if (dagenTussen(laatste, vandaag) >= OUD_AFRONDEN_NA_DAGEN) return { actie: 'afronden' };
   return { actie: 'niets', waarom: 'wacht_7_dagen' };
+}
+
+/**
+ * "HERINNERING NU VERSTUREN" — met de hand, vanaf het onboardingbord in het LMS
+ * (Maxim, 29 okt 2026), naast de automatische cadans. PURE.
+ *
+ * Welke tekst: een oud dossier krijgt de LAATSTE; anders herinnering 1 als die
+ * nog niet vertrok (ook niet via de oude automation), en anders herinnering 2.
+ *
+ * Dezelfde weigeringen als de cadans (uitsluiting: test, gearchiveerd,
+ * geannuleerd, klaar, incasso, "Geen herinneringen", open signaal "wil
+ * annuleren", bedenktijd loopt) — en NOOIT tijdens de bedenktijd: vóór dag 15
+ * (vervaldag + 1) niets. Plus: niet als er de laatste 3 dagen al een
+ * herinnering vertrok. De hoofdschakelaar geldt hier niet (dit is een mens die
+ * bevestigt), maar de tekst moet wél goedgekeurd zijn.
+ *
+ * @param {object} r rij uit bouwOverzichtRijen
+ * @param {{vandaag: string, log?: Array, wilAnnuleren?: boolean, teksten?: object}} ctx
+ * @returns {{actie: 'mail', tekst: string, soort: string} | {actie: 'niets', waarom: string, sinds?: string}}
+ */
+export function besluitHandmatig(r, ctx) {
+  const { vandaag } = ctx;
+  const log = ctx.log || [];
+  const weg = uitsluiting(r, ctx);
+  if (weg) return { actie: 'niets', waarom: weg };
+  const eerste = eersteDag(r);
+  if (!eerste) return { actie: 'niets', waarom: 'geen_aanmelddatum' };
+  if (vandaag < eerste) return { actie: 'niets', waarom: 'bedenktijd', sinds: eerste };
+  const laatste = laatsteMailDag(log);
+  if (laatste && dagenTussen(laatste, vandaag) <= TE_DICHT_DAGEN) return { actie: 'niets', waarom: 'recent', sinds: laatste };
+  let tekst;
+  if (isOudDossier(r, vandaag)) {
+    if (gehad(log, 'laatste')) return { actie: 'niets', waarom: 'laatste_al_verstuurd' };
+    tekst = 'laatste';
+  } else {
+    tekst = gehad(log, 'herinnering_1') ? 'herinnering_2' : 'herinnering_1';
+  }
+  if (ctx.teksten && !ctx.teksten[tekst]?.goedgekeurd) return { actie: 'niets', waarom: 'tekst_niet_goedgekeurd', tekst };
+  return { actie: 'mail', tekst, soort: gehad(log, tekst) ? HANDMATIG_PREFIX + vandaag : tekst };
+}
+
+/** De weigering in gewone taal (voor de voorvertoning in het LMS). PURE. */
+export function waaromLabel(b) {
+  const tekstNaam = b?.tekst ? (SOORT_LABEL[b.tekst] || b.tekst) : 'deze tekst';
+  const L = {
+    test: 'Testaccount',
+    gearchiveerd: 'Gearchiveerd',
+    geannuleerd: 'Geannuleerd',
+    klaar: 'Onboarding is klaar (ingevuld of afgerond)',
+    incasso: 'In incasso',
+    geen_herinneringen: '"Geen herinneringen" staat aan',
+    wil_annuleren: 'Open signaal: wil annuleren',
+    bedenktijd_loopt: 'De bedenktijd loopt nog',
+    bedenktijd: `Nog in de bedenktijd: vanaf ${b?.sinds || 'dag 15'} mag er een herinnering`,
+    geen_aanmelddatum: 'Geen aanmelddatum: de bedenktijd is niet te bepalen',
+    recent: `Er vertrok al een herinnering op ${b?.sinds || 'een recente dag'} (niet binnen ${TE_DICHT_DAGEN} dagen opnieuw)`,
+    laatste_al_verstuurd: 'Oud dossier: de laatste herinnering is al verstuurd',
+    tekst_niet_goedgekeurd: `De tekst "${tekstNaam}" is nog niet goedgekeurd`,
+    geen_email: 'Geen e-mailadres',
+    niet_gevonden: 'Niet gevonden (testaccount, gearchiveerd of verwijderd)',
+  };
+  return L[b?.waarom] || String(b?.waarom || 'onbekend');
 }
