@@ -16,7 +16,8 @@
 export const STANDAARD_INTERN_NUMMER = '+31655270212';
 
 export const INTERNE_TEMPLATES = Object.freeze([
-  'interne_nieuwe_lead_nl',      // lead-melding (UTILITY)
+  'interne_nieuwe_lead_v2_nl',   // lead-melding v2 (UTILITY, Naam/Traject/Bron)
+  'interne_nieuwe_lead_nl',      // lead-melding (UTILITY, terugval tot v2 goedgekeurd is)
   'nieuwe_lead',                 // oude lead-melding (terugval tot het nieuwe template goedgekeurd is)
   'interne_nieuwe_afspraak_nl',  // afspraak-melding
   'dfo_dagrapport',              // dagrapport

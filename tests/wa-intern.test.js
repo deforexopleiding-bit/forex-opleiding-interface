@@ -26,7 +26,7 @@ test('wa-intern: alleen interne templates naar interne nummers', () => {
   assert.equal(I.isInternNummer('31655270212', env), true);
   assert.equal(I.isInternNummer('+31612345678', env), false);
   assert.equal(I.isInternNummer('', env), false);
-  for (const t of ['interne_nieuwe_lead_nl', 'nieuwe_lead', 'interne_nieuwe_afspraak_nl', 'dfo_dagrapport']) {
+  for (const t of ['interne_nieuwe_lead_v2_nl', 'interne_nieuwe_lead_nl', 'nieuwe_lead', 'interne_nieuwe_afspraak_nl', 'dfo_dagrapport']) {
     assert.deepEqual(I.magTemplateNaar('+31655270212', t, env), { ok: true }, t);
   }
   const nee = I.magTemplateNaar('+31655270212', 'toegang_bevestiging_v3', env);
@@ -61,14 +61,24 @@ test('sendTemplate: lead-template naar het meldingsnummer → geweigerd vóór M
 
 test('template-endpoint, admin-knop en opruim-SQL', async () => {
   const T = await import(url('api/admin-lead-melding-template.js'));
+  // Standaard v2: leesbaar Naam / Traject / Bron, 3 variabelen met voorbeelden.
   const p = T.bouwPayload();
-  assert.equal(p.name, 'interne_nieuwe_lead_nl');
+  assert.equal(p.name, 'interne_nieuwe_lead_v2_nl');
   assert.equal(p.category, 'UTILITY');
   assert.equal(p.language, 'nl');
   const body = p.components.find((c) => c.type === 'BODY');
-  assert.equal((body.text.match(/\{\{\d\}\}/g) || []).length, 2, 'zelfde 2 variabelen als nieuwe_lead');
-  assert.doesNotMatch(body.text, /gratis|korting|aanbod|actie|cadeau/i, 'transactioneel, geen marketingtaal');
-  assert.match(lees('api/lead-melding.js'), /const TEMPLATE_NAAM = 'interne_nieuwe_lead_nl';/);
+  assert.equal(body.text, 'Er is een nieuwe aanmelding binnengekomen.\nNaam: {{1}}\nTraject: {{2}}\nBron: {{3}}\n\nOpen Leadsonderhoud om de lead op te volgen.');
+  assert.deepEqual(body.example.body_text, [['Rudy Jansen', 'webinar', 'webinar-v1']], 'voorbeelden mee, anders weigert Meta');
+  assert.equal(p.components.find((c) => c.type === 'FOOTER').text, 'De Forex Opleiding · interne melding');
+  // De eerste versie blijft ongewijzigd (goedgekeurd; nooit de body muteren).
+  const v1 = T.bouwPayload('interne_nieuwe_lead_nl');
+  assert.equal(v1.components[0].text, 'Nieuwe aanmelding in het CRM: {{1}}, via {{2}}. Open Leadsonderhoud om de lead op te volgen.');
+  assert.equal(T.bouwPayload('massa_aanbod'), null, 'alleen bekende templates');
+  for (const t of [p, v1]) {
+    const tekst = t.components.map((c) => c.text).join(' ');
+    assert.doesNotMatch(tekst, /gratis|korting|aanbod|actie|cadeau|whop|!/i, 'transactioneel, geen marketing- of juichtaal');
+  }
+  assert.match(lees('api/lead-melding.js'), /TEMPLATE_KETEN = Object\.freeze\(\['interne_nieuwe_lead_v2_nl', 'interne_nieuwe_lead_nl', 'nieuwe_lead'\]\)/);
   const admin = lees('modules/admin.html');
   assert.match(admin, /id="card-lead-melding"/);
   assert.match(admin, /apiRequest\('POST', '\/api\/admin-lead-melding-template'\)/);
@@ -80,4 +90,5 @@ test('template-endpoint, admin-knop en opruim-SQL', async () => {
   // Lead-modal en massa tonen het interne template niet (bestaande filter interne_).
   const L = await import(url('api/_lib/lead-bericht.js'));
   assert.equal(L.isLeadTemplate('interne_nieuwe_lead_nl'), false);
+  assert.equal(L.isLeadTemplate('interne_nieuwe_lead_v2_nl'), false);
 });

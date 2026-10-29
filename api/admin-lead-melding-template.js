@@ -1,36 +1,51 @@
 // api/admin-lead-melding-template.js
 //
-// Dient het WhatsApp-template 'interne_nieuwe_lead_nl' (UTILITY, nl) server-side
-// in via de 360dialog template-management-API, met de hoofdlijn-credentials (de
-// key leeft alleen in Vercel). Zelfde opzet als admin-dagrapport-template.js.
+// Dient een WhatsApp-template voor de lead-melding (UTILITY, nl) server-side in
+// via de 360dialog template-management-API, met de hoofdlijn-credentials (de key
+// leeft alleen in Vercel). Zelfde opzet als admin-dagrapport-template.js.
 //
 // Waarom (2026-10-29): de lead-melding ging met 'nieuwe_lead', dat bij Meta op
 // MARKETING stond. Marketing valt onder Meta's frequentiegrens per ontvanger; toen
 // die op het meldingsnummer bereikt was, kwamen de lead-meldingen niet meer aan
-// (de afspraak-melding, UTILITY, wel). Dit template is strikt transactioneel en
-// intern, zodat Meta het als UTILITY houdt. api/lead-melding.js gebruikt het
-// zodra het goedgekeurd is (tot dan valt die terug op 'nieuwe_lead').
+// (de afspraak-melding, UTILITY, wel). Deze templates zijn strikt transactioneel
+// en intern, zodat Meta ze als UTILITY houdt. Een goedgekeurde body NOOIT wijzigen:
+// nieuwe tekst = nieuwe naam (api/lead-melding.js valt terug zolang die in review is).
+//   interne_nieuwe_lead_v2_nl  (standaard) leesbaar: Naam / Traject / Bron (3 params)
+//   interne_nieuwe_lead_nl     (eerste versie, 2 params) — blijft de terugval
 //
-//   POST /api/admin-lead-melding-template          → indienen bij 360dialog
-//   POST /api/admin-lead-melding-template?dry=1     → alleen de payload teruggeven
+//   POST /api/admin-lead-melding-template                 → v2 indienen bij 360dialog
+//   POST /api/admin-lead-melding-template?template=<naam> → een andere uit TEMPLATES
+//   POST /api/admin-lead-melding-template?dry=1           → alleen de payload teruggeven
 //
 // Auth: ingelogde admin (Bearer user-JWT) OF CRON_SECRET (Bearer).
 
 import { verifyAdmin, checkCronAuth } from './supabase.js';
 import { WA_NUMMERS, D360_BASE_URL, apiKeyVan } from './_lib/wa-nummers.js';
 
-export const TEMPLATE_NAAM = 'interne_nieuwe_lead_nl';
 const TAAL = 'nl';
-export const BODY_TEKST = 'Nieuwe aanmelding in het CRM: {{1}}, via {{2}}. Open Leadsonderhoud om de lead op te volgen.';
 const FOOTER_TEKST = 'De Forex Opleiding · interne melding';
 
-export function bouwPayload() {
+export const TEMPLATES = Object.freeze({
+  interne_nieuwe_lead_v2_nl: Object.freeze({
+    body: 'Er is een nieuwe aanmelding binnengekomen.\nNaam: {{1}}\nTraject: {{2}}\nBron: {{3}}\n\nOpen Leadsonderhoud om de lead op te volgen.',
+    voorbeeld: ['Rudy Jansen', 'webinar', 'webinar-v1'],
+  }),
+  interne_nieuwe_lead_nl: Object.freeze({
+    body: 'Nieuwe aanmelding in het CRM: {{1}}, via {{2}}. Open Leadsonderhoud om de lead op te volgen.',
+    voorbeeld: ['Sanne de Vries', 'minicursus'],
+  }),
+});
+export const TEMPLATE_NAAM = 'interne_nieuwe_lead_v2_nl';
+
+export function bouwPayload(naam = TEMPLATE_NAAM) {
+  const t = TEMPLATES[naam];
+  if (!t) return null;
   return {
-    name: TEMPLATE_NAAM,
+    name: naam,
     category: 'UTILITY',
     language: TAAL,
     components: [
-      { type: 'BODY', text: BODY_TEKST, example: { body_text: [['Sanne de Vries', 'minicursus']] } },
+      { type: 'BODY', text: t.body, example: { body_text: [[...t.voorbeeld]] } },
       { type: 'FOOTER', text: FOOTER_TEKST },
     ],
   };
@@ -49,7 +64,9 @@ export default async function handler(req, res) {
   const admin = cron.ok ? true : await verifyAdmin(req);
   if (!admin) return res.status(403).json({ error: 'Admin of CRON_SECRET vereist' });
 
-  const payload = bouwPayload();
+  const naam = String((req.query && req.query.template) || TEMPLATE_NAAM);
+  const payload = bouwPayload(naam);
+  if (!payload) return res.status(400).json({ error: `Onbekend template '${naam}'`, bekend: Object.keys(TEMPLATES) });
   if (req.query && (req.query.dry === '1' || req.query.dry === 'true')) {
     return res.status(200).json({ dry_run: true, payload });
   }
@@ -87,7 +104,7 @@ export default async function handler(req, res) {
     }
 
     const status = (json && (json.status || json.data?.status)) || 'submitted';
-    return res.status(200).json({ ok: true, status, name: TEMPLATE_NAAM, language: TAAL, channel: 'hoofdnummer', response: json });
+    return res.status(200).json({ ok: true, status, name: naam, language: TAAL, channel: 'hoofdnummer', response: json });
   } catch (e) {
     console.error('[admin-lead-melding-template] exception:', e?.message || e);
     return res.status(502).json({ ok: false, error: e?.message || String(e), fallback: 'hub', payload });
