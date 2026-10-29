@@ -10,21 +10,27 @@
 //   x-internal-token == LEAD_MELDING_SECRET   (verplicht)
 //
 // Body:
-//   { naam: string, traject: string,
+//   { naam: string, traject: string, lead_id?: uuid, bron?: string,
 //     score?: string, kwalificatie?: string, drempel?: string }
 //     naam    -> WhatsApp-template {{1}}  (voor- + achternaam van de lead)
 //     traject -> WhatsApp-template {{2}}  (traject of soort, bv. '7-daagse')
+//     bron    -> WhatsApp-template {{3}}  (funnelvariant, bv. 'webinar-v1'):
+//                leads.bron via lead_id, anders body.bron, anders 'onbekend'
 //     score/kwalificatie/drempel -> OPTIONEEL, alleen benut in de e-mail
-//       (vragenlijst-verrijking). Het WhatsApp-template blijft 2 params.
+//       (vragenlijst-verrijking).
 //
 // Verstuurt op DEZELFDE trigger twee onafhankelijke, fail-soft kanalen:
-//   1) WhatsApp-template 'interne_nieuwe_lead_nl' (UTILITY, nl, 2 params) naar
-//      LEAD_MELDING_NUMMER (default +31655270212) via de env-default afzendlijn.
-//      2026-10-29: was 'nieuwe_lead', maar dat stond bij Meta op MARKETING en viel
-//      onder de marketinggrens per ontvanger (meldingen kwamen niet meer aan).
-//      Kent Meta het nieuwe template nog niet (132xxx: nog niet goedgekeurd), dan
-//      één keer opnieuw met 'nieuwe_lead'. Indienen: Admin → Integraties
-//      (api/admin-lead-melding-template.js). Override: env LEAD_MELDING_TEMPLATE;
+//   1) WhatsApp naar LEAD_MELDING_NUMMER (default +31655270212) via de env-default
+//      afzendlijn, met de eerste bruikbare UTILITY-template uit TEMPLATE_KETEN:
+//        interne_nieuwe_lead_v2_nl (3 params, leesbaar: Naam/Traject/Bron)
+//        → interne_nieuwe_lead_nl  (2 params)
+//        → nieuwe_lead             (2 params, staat bij Meta op MARKETING)
+//      Door naar de volgende ALLEEN bij een templateprobleem (Meta 132xxx: bestaat
+//      niet / nog niet goedgekeurd), zodat de melding nooit stilvalt zolang een
+//      nieuwe template in review is. 2026-10-29: 'nieuwe_lead' viel onder Meta's
+//      marketinggrens per ontvanger. Indienen: Admin → Integraties → Lead-melding
+//      (api/admin-lead-melding-template.js). Override van de eerste: env
+//      LEAD_MELDING_TEMPLATE;
 //   2) interne e-mail (verrijkt) VANAF welkom@deforexopleiding.nl NAAR
 //      LEAD_MELDING_EMAIL (default leads@deforexopleiding.nl) via
 //      mailer.sendWelkomMail (welkom@-transport, IMAP_PASS_WELKOM vereist).
@@ -39,12 +45,43 @@
 
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendWelkomMail, wrapEmailHtml } from './mailer.js';
+import { supabaseAdmin } from './supabase.js';
 
-const TEMPLATE_NAAM = 'interne_nieuwe_lead_nl';
-const TEMPLATE_TERUGVAL = 'nieuwe_lead';
+// Volgorde van de templates (zie de kop). Aantal variabelen per template.
+export const TEMPLATE_KETEN = Object.freeze(['interne_nieuwe_lead_v2_nl', 'interne_nieuwe_lead_nl', 'nieuwe_lead']);
+const AANTAL_VARS = Object.freeze({ interne_nieuwe_lead_v2_nl: 3 });
 const TAAL = 'nl';
 // Meta 132xxx = templateprobleem (bestaat niet / nog niet goedgekeurd / gepauzeerd).
 const isTemplateProbleem = (e) => String(e?.metaCode || '').startsWith('132') || /\b132\d{3}\b/.test(String(e?.message || ''));
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Keten met env LEAD_MELDING_TEMPLATE (indien gezet) vooraan. PURE. */
+export function templateKeten(env = process.env) {
+  const eerste = String(env.LEAD_MELDING_TEMPLATE || '').trim();
+  return eerste ? [eerste, ...TEMPLATE_KETEN.filter((t) => t !== eerste)] : [...TEMPLATE_KETEN];
+}
+
+/**
+ * WhatsApp-parameter veilig maken (PURE): Meta weigert regeleinden, tabs en 4+
+ * spaties op rij in een variabele, en een lege variabele. Leeg → fallback.
+ */
+export function waParam(v, fallback = '') {
+  const s = String(v ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 100);
+  return s || fallback;
+}
+
+/** leads.bron van deze lead (de funnelvariant). Fail-soft: null bij twijfel. */
+async function leesBron(leadId) {
+  if (!UUID_RE.test(String(leadId || ''))) return null;
+  try {
+    const { data, error } = await supabaseAdmin.from('leads').select('bron').eq('id', leadId).maybeSingle();
+    if (error) { console.warn('[lead-melding] leads.bron lezen mislukt (soft):', error.message); return null; }
+    return data?.bron || null;
+  } catch (e) {
+    console.warn('[lead-melding] leads.bron lezen exception (soft):', e?.message || e);
+    return null;
+  }
+}
 const STANDAARD_NUMMER = '+31655270212';
 // Verzendlijn: standaard de bestaande Esmee-lijn (leadsonderhoud, actief onder
 // WABA 990429800401598). Override via env LEAD_MELDING_AFZENDLIJN.
@@ -65,12 +102,13 @@ function escapeHtml(s) {
 
 // Bouwt de interne lead-melding-mail. naam/traject verplicht; score/kwalificatie/
 // drempel optioneel (verrijking uit de vragenlijst). Retourneert {subject,text,html}.
-function bouwLeadMail({ naam, traject, score, kwalificatie, drempel }) {
+function bouwLeadMail({ naam, traject, bron, score, kwalificatie, drempel }) {
   const subject = `Nieuwe lead: ${naam}${traject ? ` — ${traject}` : ''}`;
   const rijen = [
     ['Naam', naam],
     ['Traject', traject],
   ];
+  if (bron)         rijen.push(['Bron', bron]);
   if (score)        rijen.push(['Vragenlijst-score', score]);
   if (kwalificatie) rijen.push(['Kwalificatie', drempel ? `${kwalificatie} (drempel ${drempel})` : kwalificatie]);
 
@@ -118,30 +156,36 @@ export default async function handler(req, res) {
   const score        = schoon(body.score);
   const kwalificatie = schoon(body.kwalificatie);
   const drempel      = schoon(body.drempel);
+  // Funnelvariant: leads.bron (gezaghebbend) → meegestuurde bron → 'onbekend'.
+  const bron = waParam(await leesBron(body.lead_id), waParam(body.bron, 'onbekend'));
 
   const to = process.env.LEAD_MELDING_NUMMER || STANDAARD_NUMMER;
   const phoneNumberId = process.env.LEAD_MELDING_AFZENDLIJN || STANDAARD_AFZENDLIJN;
 
-  // ---- Kanaal 1: WhatsApp (2-param template, ongewijzigd). Fail-soft. ----
+  // ---- Kanaal 1: WhatsApp (eerste bruikbare template uit de keten). Fail-soft. ----
   let whatsapp = { ok: false };
+  const params = [waParam(naam, 'onbekend'), waParam(traject, 'onbekend'), bron];
   const verstuur = (templateName) => sendTemplate({
     to,
     templateName,
     languageCode: TAAL,
-    variables: [naam, traject], // exact 2 params: {{1}}=naam, {{2}}=traject
+    // {{1}}=naam, {{2}}=traject, en bij de v2-template {{3}}=bron.
+    variables: params.slice(0, AANTAL_VARS[templateName] || 2),
     phoneNumberId,              // Esmee-lijn (of env-override)
   });
-  const templateNaam = process.env.LEAD_MELDING_TEMPLATE || TEMPLATE_NAAM;
   try {
-    let template = templateNaam;
-    let wamid;
-    try {
-      ({ wamid } = await verstuur(templateNaam));
-    } catch (e1) {
-      if (templateNaam === TEMPLATE_TERUGVAL || !isTemplateProbleem(e1)) throw e1;
-      console.warn(`[lead-melding] template '${templateNaam}' nog niet bruikbaar, terugval op '${TEMPLATE_TERUGVAL}':`, e1.message);
-      template = TEMPLATE_TERUGVAL;
-      ({ wamid } = await verstuur(TEMPLATE_TERUGVAL));
+    const keten = templateKeten();
+    let template = null;
+    let wamid = null;
+    for (let i = 0; i < keten.length; i++) {
+      try {
+        ({ wamid } = await verstuur(keten[i]));
+        template = keten[i];
+        break;
+      } catch (e1) {
+        if (i === keten.length - 1 || !isTemplateProbleem(e1)) throw e1;
+        console.warn(`[lead-melding] template '${keten[i]}' nog niet bruikbaar, verder met '${keten[i + 1]}':`, e1.message);
+      }
     }
     whatsapp = { ok: true, wamid, template };
   } catch (e) {
@@ -158,7 +202,7 @@ export default async function handler(req, res) {
   let email = { ok: false };
   const mailTo = process.env.LEAD_MELDING_EMAIL || STANDAARD_MAIL;
   try {
-    const { subject, text, html } = bouwLeadMail({ naam, traject, score, kwalificatie, drempel });
+    const { subject, text, html } = bouwLeadMail({ naam, traject, bron, score, kwalificatie, drempel });
     const r = await sendWelkomMail({ to: mailTo, subject, text, html });
     email = (r && r.success)
       ? { ok: true, messageId: r.messageId }

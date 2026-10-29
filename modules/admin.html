@@ -476,7 +476,7 @@
               <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-bell"></i></div>
               <div style="flex:1;min-width:0">
                 <div style="font-size:15px;font-weight:700">Lead-melding (WhatsApp)</div>
-                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Dien het UTILITY-template <span class="mono">interne_nieuwe_lead_nl</span> in. Zodra Meta het goedkeurt, gaat de melding bij een nieuwe lead daarmee; tot dan via het oude template.</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Dien het UTILITY-template <span class="mono">interne_nieuwe_lead_v2_nl</span> in (Naam / Traject / Bron). Zodra Meta het goedkeurt, gaat de melding bij een nieuwe lead daarmee; tot dan via <span class="mono">interne_nieuwe_lead_nl</span>.</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                   <button class="btn btn-sm" onclick="leadMeldingTemplateIndienen(this)">WhatsApp-template indienen</button>
                 </div>
@@ -1670,7 +1670,7 @@ async function dagrapportTemplateIndienen(btn){
 
 // ── Lead-melding: UTILITY-template indienen via de admin-sessie ─────────────
 async function leadMeldingTemplateIndienen(btn){
-  if (!confirm('WhatsApp-template "interne_nieuwe_lead_nl" (Utility) indienen bij 360dialog?')) return;
+  if (!confirm('WhatsApp-template "interne_nieuwe_lead_v2_nl" (Utility) indienen bij 360dialog?')) return;
   const zet = (html) => { const el = document.getElementById('leadMeldingStatus'); if (el) el.innerHTML = html; };
   if (btn) btn.disabled = true;
   zet('Template indienen&hellip;');
