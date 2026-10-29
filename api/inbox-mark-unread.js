@@ -15,7 +15,7 @@
 // Body:
 //   conversation_id  uuid required
 //   module           'finance'|'onboarding'|'events' optional — zonder module
-//                    kijkt het enkel naar WA (gedrag van vóór 29 okt).
+//                    de mailboxen van de modules op het nummer van het gesprek.
 //
 // Response: 200 { success: true, conversation_id, unread_count,
 //                 kanaal: 'email'|'wa', email_id }
@@ -24,7 +24,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { mailboxLabel } from './_lib/module-mailbox.js';
-import { markeerGesprekOngelezen } from './_lib/gesprek-leesstand.js';
+import { markeerGesprekOngelezen, mailboxenVoorGesprek } from './_lib/gesprek-leesstand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -53,8 +53,7 @@ export default async function handler(req, res) {
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
   const moduleRaw = String(body.module || '').trim().toLowerCase();
-  const mbLabel = moduleRaw ? mailboxLabel(moduleRaw) : null;
-  if (moduleRaw && !mbLabel) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
+  if (moduleRaw && !mailboxLabel(moduleRaw)) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
 
   try {
     // Conversation bestaat-check + ACL-context (phone_number_id + customer_id
@@ -75,7 +74,9 @@ export default async function handler(req, res) {
 
     // Laatste inkomende bericht (WA of mail) terug op ongelezen. Bij WA:
     // unread_count = max(1, huidige) — dubbele klik overschrijft niets.
-    const r = await markeerGesprekOngelezen(supabaseAdmin, { conv, mailboxLabel: mbLabel });
+    const r = await markeerGesprekOngelezen(supabaseAdmin, {
+      conv, mailboxLabel: await mailboxenVoorGesprek(supabaseAdmin, { conv, module: moduleRaw }),
+    });
 
     return res.status(200).json({
       success: true, conversation_id: convId,

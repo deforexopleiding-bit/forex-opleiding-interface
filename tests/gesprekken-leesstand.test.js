@@ -17,7 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  markeerGesprekGelezen, markeerGesprekOngelezen, kiesOngelezenKanaal,
+  markeerGesprekGelezen, markeerGesprekOngelezen, kiesOngelezenKanaal, mailboxenVoorGesprek,
 } from '../api/_lib/gesprek-leesstand.js';
 
 /* ── Een kleine nep-databank die de gebruikte PostgREST-ketens uitvoert ──── */
@@ -52,6 +52,7 @@ function nepDb(tabellen) {
         select() { return b; },
         eq(k, v) { filters.push((r) => r[k] === v); return b; },
         gt(k, v) { filters.push((r) => Number(r[k]) > v); return b; },
+        in(k, arr) { filters.push((r) => arr.includes(r[k])); return b; },
         not(k, op, pat) {
           assert.equal(op, 'ilike');
           const re = new RegExp('^' + pat.replace(/[.]/g, '\\.').replace(/%/g, '.*') + '$', 'i');
@@ -128,6 +129,47 @@ test('een databankfout wordt een fout, geen stille ok', async () => {
   await assert.rejects(markeerGesprekGelezen(kapot, { conv: { id: 'x' }, mailboxLabel: 'administratie' }), /RLS/);
 });
 
+/* ── 1b. zonder module: de mailbox volgt uit het nummer (29 okt, productie) ── */
+//
+// Nameting op productie: POST /api/inbox-mark-read {conversation_id} zonder
+// module gaf mails_gemarkeerd=0, en de browser draaide nog v=69 uit de cache,
+// die ook geen module meestuurt. "Gelezen" mag niet afhangen van wat de client
+// meestuurt.
+
+function config() {
+  return [
+    { module: 'finance',    phone_number_id: KLANTNUMMER, is_active: true },
+    { module: 'onboarding', phone_number_id: KLANTNUMMER, is_active: true },
+    { module: 'events',     phone_number_id: HOOFDNUMMER, is_active: true },
+    { module: 'oud',        phone_number_id: KLANTNUMMER, is_active: false },
+  ];
+}
+
+test('mailboxenVoorGesprek: met module die ene mailbox, zonder module die van het nummer', async () => {
+  const sb = nepDb({ whatsapp_module_config: config() });
+  const conv = { id: 'g', phone_number_id: KLANTNUMMER };
+  assert.deepEqual(await mailboxenVoorGesprek(sb, { conv, module: 'finance' }), ['administratie']);
+  assert.deepEqual((await mailboxenVoorGesprek(sb, { conv, module: '' })).sort(), ['administratie', 'onboarding']);
+  assert.deepEqual(await mailboxenVoorGesprek(sb, { conv: { id: 'h', phone_number_id: HOOFDNUMMER } }), ['events']);
+  assert.deepEqual(await mailboxenVoorGesprek(sb, { conv: { id: 'x', phone_number_id: null } }), []);
+});
+
+test('Kyven zonder module: de mail in administratie@ gaat op gelezen', async () => {
+  const sb = nepDb({
+    whatsapp_module_config: config(),
+    whatsapp_conversations: [{ id: '9a116fbe', customer_id: 'kyven', phone_number_id: KLANTNUMMER, unread_count: 0 }],
+    email_messages: [
+      { id: '183fcedc', customer_id: 'kyven', mailbox: 'administratie', is_read: false, from_address: 'KReigina@hotmail.com' },
+      { id: 'oud',      customer_id: 'kyven', mailbox: 'administratie', is_read: true,  from_address: 'KReigina@hotmail.com' },
+    ],
+  });
+  const conv = sb.db.whatsapp_conversations[0];
+  const mbs = await mailboxenVoorGesprek(sb, { conv, module: '' });
+  const r = await markeerGesprekGelezen(sb, { conv, mailboxLabel: mbs });
+  assert.equal(r.mails_gemarkeerd, 1);
+  assert.equal(sb.db.email_messages[0].is_read, true);
+});
+
 /* ── 2. ongelezen: het laatste inkomende bericht, WA of mail ──────────────── */
 
 test('kiesOngelezenKanaal: het laatst binnengekomen kanaal', () => {
@@ -181,7 +223,11 @@ test('de endpoints gebruiken de gedeelde leesstand en de module-mailbox', () => 
   const onl  = code('api/inbox-mark-unread.js');
   assert.ok(lees.includes('markeerGesprekGelezen(supabaseAdmin'));
   assert.ok(onl.includes('markeerGesprekOngelezen(supabaseAdmin'));
-  for (const s of [lees, onl]) assert.ok(s.includes("mailboxLabel(moduleRaw)"));
+  for (const s of [lees, onl]) {
+    assert.ok(s.includes("mailboxLabel(moduleRaw)"));
+    assert.ok(s.includes('mailboxenVoorGesprek(supabaseAdmin, { conv, module: moduleRaw })'),
+      'de mailbox komt server-side, ook zonder module in de body');
+  }
   assert.ok(onl.includes('last_inbound_at'), 'mark-unread heeft het laatste WA-moment nodig');
 });
 
@@ -203,4 +249,20 @@ test('Inbox en Onboarding-inbox geven de module mee en tonen mail-ongelezen ook'
   const ob = code('modules/klanten-v2/views/onboarding-v2.js');
   assert.ok(ob.includes("{ conversation_id: convId, module: 'onboarding' }"));
   assert.ok(ob.includes('row.total_unread ?? row.unread_count'));
+});
+
+test('email-actions mark-read zet ook echt is_read (oudere, gecachte clients)', () => {
+  const s = code('api/email-actions.js');
+  assert.ok(s.includes("action === 'mark-read' && UUID_RE.test(String(email_id))"));
+  assert.ok(/\.from\('email_messages'\)\s*\.update\(\{ is_read: true \}\)\s*\.eq\('id', email_id\)/.test(s));
+  assert.ok(s.includes('requireCrmStaff(req)'), 'service role pas na de rolpoort');
+});
+
+test('de CRM-pagina zelf wordt niet gecachet (anders laadt de browser oude ?v=)', () => {
+  const v = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  for (const pad of ['/modules/klanten-v2/', '/modules/klanten-v2']) {
+    const regel = v.headers.find((h) => h.source === pad);
+    assert.ok(regel, 'geen header-regel voor ' + pad);
+    assert.match(regel.headers.find((h) => h.key === 'Cache-Control').value, /no-store/);
+  }
 });
