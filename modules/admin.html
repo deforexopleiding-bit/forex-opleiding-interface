@@ -471,6 +471,20 @@
             </div>
           </div>
 
+          <div class="integration-card" id="card-lead-melding" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
+            <div style="display:flex;align-items:flex-start;gap:14px">
+              <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-bell"></i></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:15px;font-weight:700">Lead-melding (WhatsApp)</div>
+                <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:10px">Dien het UTILITY-template <span class="mono">interne_nieuwe_lead_nl</span> in. Zodra Meta het goedkeurt, gaat de melding bij een nieuwe lead daarmee; tot dan via het oude template.</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn btn-sm" onclick="leadMeldingTemplateIndienen(this)">WhatsApp-template indienen</button>
+                </div>
+                <div id="leadMeldingStatus" style="font-size:12.5px;color:var(--text-faint);margin-top:10px"></div>
+              </div>
+            </div>
+          </div>
+
           <div class="integration-card" id="card-webhooks" style="border:1px solid var(--border);border-radius:10px;padding:18px;margin-top:12px">
             <div style="display:flex;align-items:flex-start;gap:14px">
               <div style="font-size:26px;color:var(--text-dim);line-height:1"><i class="ti ti-webhook"></i></div>
@@ -1651,6 +1665,25 @@ async function dagrapportTemplateIndienen(btn){
     }
   } catch (e) {
     dagSetStatus('Mislukt: ' + dagEsc(e.message || e));
+  } finally { if (btn) btn.disabled = false; }
+}
+
+// ── Lead-melding: UTILITY-template indienen via de admin-sessie ─────────────
+async function leadMeldingTemplateIndienen(btn){
+  if (!confirm('WhatsApp-template "interne_nieuwe_lead_nl" (Utility) indienen bij 360dialog?')) return;
+  const zet = (html) => { const el = document.getElementById('leadMeldingStatus'); if (el) el.innerHTML = html; };
+  if (btn) btn.disabled = true;
+  zet('Template indienen&hellip;');
+  try {
+    const data = await apiRequest('POST', '/api/admin-lead-melding-template');
+    if (data && data.ok) {
+      zet('Ingediend. Status: <strong>' + dagEsc(String(data.status || 'submitted')) + '</strong>. De review van Meta loopt (minuten tot uren). Controleer in de Hub dat de categorie Utility blijft.');
+    } else {
+      const extra = (data && data.fallback === 'hub') ? ' Val terug op de 360dialog-Hub (categorie Utility).' : '';
+      zet('Niet gelukt: ' + dagEsc(String((data && data.error) || 'onbekende fout')) + extra);
+    }
+  } catch (e) {
+    zet('Mislukt: ' + dagEsc(e.message || e));
   } finally { if (btn) btn.disabled = false; }
 }
 

@@ -42,6 +42,7 @@ import {
   standaardNummer, moduleMagViaNummer, templateNaamVoor, nummerStatus, NOOIT_VIA_WILDCARD,
   nummerVoorVervangenLijn,
 } from './wa-nummers.js';
+import { magTemplateNaar, WaInternNummerError } from './wa-intern.js';
 
 const META_API_VERSION = 'v20.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -479,6 +480,13 @@ export async function sendText({ to, body, phoneNumberId, module } = {}) {
  */
 export async function sendTemplate({ to, templateName, languageCode = 'nl', variables = [], components = null, phoneNumberId, module } = {}) {
   if (!to || !templateName) throw new Error('sendTemplate: to + templateName vereist');
+  // Vangnet: een intern nummer (meldingsnummer van het team) krijgt alleen interne
+  // meldingen, nooit lead-/nurture-templates (api/_lib/wa-intern.js).
+  const intern = magTemplateNaar(to, templateName);
+  if (!intern.ok) {
+    console.warn('[meta-whatsapp] sendTemplate overgeslagen:', intern.reden);
+    throw new WaInternNummerError(intern.reden);
+  }
 
   // Twee aanroep-stijlen ondersteund:
   //  1. variables: ['Jeffrey', 'EUR 80,00']  → bouw één 'body'-component met text-parameters.

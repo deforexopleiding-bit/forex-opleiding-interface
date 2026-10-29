@@ -18,8 +18,13 @@
 //       (vragenlijst-verrijking). Het WhatsApp-template blijft 2 params.
 //
 // Verstuurt op DEZELFDE trigger twee onafhankelijke, fail-soft kanalen:
-//   1) WhatsApp-template 'nieuwe_lead' (UTILITY, nl, 2 params) naar
-//      LEAD_MELDING_NUMMER (default +31655270212) via de env-default afzendlijn;
+//   1) WhatsApp-template 'interne_nieuwe_lead_nl' (UTILITY, nl, 2 params) naar
+//      LEAD_MELDING_NUMMER (default +31655270212) via de env-default afzendlijn.
+//      2026-10-29: was 'nieuwe_lead', maar dat stond bij Meta op MARKETING en viel
+//      onder de marketinggrens per ontvanger (meldingen kwamen niet meer aan).
+//      Kent Meta het nieuwe template nog niet (132xxx: nog niet goedgekeurd), dan
+//      één keer opnieuw met 'nieuwe_lead'. Indienen: Admin → Integraties
+//      (api/admin-lead-melding-template.js). Override: env LEAD_MELDING_TEMPLATE;
 //   2) interne e-mail (verrijkt) VANAF welkom@deforexopleiding.nl NAAR
 //      LEAD_MELDING_EMAIL (default leads@deforexopleiding.nl) via
 //      mailer.sendWelkomMail (welkom@-transport, IMAP_PASS_WELKOM vereist).
@@ -35,8 +40,11 @@
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendWelkomMail, wrapEmailHtml } from './mailer.js';
 
-const TEMPLATE_NAAM = 'nieuwe_lead';
+const TEMPLATE_NAAM = 'interne_nieuwe_lead_nl';
+const TEMPLATE_TERUGVAL = 'nieuwe_lead';
 const TAAL = 'nl';
+// Meta 132xxx = templateprobleem (bestaat niet / nog niet goedgekeurd / gepauzeerd).
+const isTemplateProbleem = (e) => String(e?.metaCode || '').startsWith('132') || /\b132\d{3}\b/.test(String(e?.message || ''));
 const STANDAARD_NUMMER = '+31655270212';
 // Verzendlijn: standaard de bestaande Esmee-lijn (leadsonderhoud, actief onder
 // WABA 990429800401598). Override via env LEAD_MELDING_AFZENDLIJN.
@@ -116,15 +124,26 @@ export default async function handler(req, res) {
 
   // ---- Kanaal 1: WhatsApp (2-param template, ongewijzigd). Fail-soft. ----
   let whatsapp = { ok: false };
+  const verstuur = (templateName) => sendTemplate({
+    to,
+    templateName,
+    languageCode: TAAL,
+    variables: [naam, traject], // exact 2 params: {{1}}=naam, {{2}}=traject
+    phoneNumberId,              // Esmee-lijn (of env-override)
+  });
+  const templateNaam = process.env.LEAD_MELDING_TEMPLATE || TEMPLATE_NAAM;
   try {
-    const { wamid } = await sendTemplate({
-      to,
-      templateName: TEMPLATE_NAAM,
-      languageCode: TAAL,
-      variables: [naam, traject], // exact 2 params: {{1}}=naam, {{2}}=traject
-      phoneNumberId,              // Esmee-lijn (of env-override)
-    });
-    whatsapp = { ok: true, wamid };
+    let template = templateNaam;
+    let wamid;
+    try {
+      ({ wamid } = await verstuur(templateNaam));
+    } catch (e1) {
+      if (templateNaam === TEMPLATE_TERUGVAL || !isTemplateProbleem(e1)) throw e1;
+      console.warn(`[lead-melding] template '${templateNaam}' nog niet bruikbaar, terugval op '${TEMPLATE_TERUGVAL}':`, e1.message);
+      template = TEMPLATE_TERUGVAL;
+      ({ wamid } = await verstuur(TEMPLATE_TERUGVAL));
+    }
+    whatsapp = { ok: true, wamid, template };
   } catch (e) {
     if (e instanceof MetaNotConfiguredError) {
       whatsapp = { ok: false, skipped: true, reason: 'meta-not-configured' };
