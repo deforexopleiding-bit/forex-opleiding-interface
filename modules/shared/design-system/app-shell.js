@@ -168,7 +168,7 @@
     { g: 'Groei',                  id: 'contentmachine',   naam: 'Contentmachine',    icon: I.sparkle,  color: 'amber',   roles: SAMMK, permKey: 'content.machine', tabs: ['Overzicht', 'Nieuwe drop', 'Bibliotheek'] },
     { g: 'Groei',                  id: 'trainingdrops',    naam: 'Trainingdrops',     icon: I.video,    color: 'amber',   roles: SAMMK.concat('sales'),tabs: [] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'The Lab', 'E-mails', 'Vragenlijst', 'Statistieken', 'Meta-koppeling'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
