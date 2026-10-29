@@ -215,6 +215,7 @@ const FEATURE_REGISTRY = [
     { key:'softphone.use', label:'Softphone/click-to-dial gebruiken (bellen via Voys — NL + BE)' },
   ]},
   { moduleKey:'onboarding', moduleLabel:'Onboarding', moduleIcon:'ti-user-plus', features:[
+    { key:'onboarding.create',           label:'Onboarding aanmelden (knop na getekende offerte)' },
     { key:'onboarding.admin',            label:'Onboarding-admin (ziet alles + student annuleren — onomkeerbaar)' },
     { key:'onboarding.assign_mentor',    label:'Student aan mentor (her)toewijzen — dropdown in overzicht' },
     { key:'onboarding.wizard.edit',     label:'Tab: Wizard (bewerken)' },
