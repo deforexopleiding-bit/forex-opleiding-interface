@@ -742,9 +742,12 @@ function _kvEscHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (
 function _kvSetNotifBadge(n) {
   const badge = document.getElementById('kvNotifBadge'); if (!badge) return;
   const v = Number(n) || 0;
-  if (v <= 0) { badge.hidden = true; return; }
-  badge.textContent = v > 99 ? '99+' : String(v);
-  badge.hidden = false;
+  if (v <= 0) { if (!badge.hidden) badge.hidden = true; return; }
+  // Alleen schrijven bij verschil: textContent vervangt anders elke minuut de
+  // tekstnode, ook als het getal gelijk bleef.
+  const tekst = v > 99 ? '99+' : String(v);
+  if (badge.textContent !== tekst) badge.textContent = tekst;
+  if (badge.hidden) badge.hidden = false;
 }
 // v=1es: notification link_url → v2-shell route mapping. Entity_type heeft
 // voorrang (auteurs zetten die netjes bij createNotification), fallback op
@@ -1000,10 +1003,13 @@ function renderTopbarActions() {
   // Dashboard heeft z'n eigen + Nieuw-knop in de hero-band (naast de
   // periode-schakelaar); verberg de topbar-versie daar om dubbeling
   // te vermijden. Andere modules tonen 'em altijd.
-  if (window.DFO.S.mod === 'dashboard') { host.innerHTML = ''; return; }
+  // Alleen schrijven bij verschil: dit draait na elke DFO.render(), en de knop
+  // is bijna altijd dezelfde.
+  const zet = (html) => { if (host.__kvHtml !== html) { host.innerHTML = html; host.__kvHtml = html; } };
+  if (window.DFO.S.mod === 'dashboard') { zet(''); return; }
   const svg  = window.DFO.svg;
   const I    = window.DFO.I;
-  host.innerHTML = `<button class="btn btn-primary" onclick="DFO.KV.newAction('nieuw')" title="Nieuw">${svg(I.plus)}<span>Nieuw</span></button>`;
+  zet(`<button class="btn btn-primary" onclick="DFO.KV.newAction('nieuw')" title="Nieuw">${svg(I.plus)}<span>Nieuw</span></button>`);
 }
 
 // Topbar-acties bedrading: DFO.KV.newAction(kind) delegeert naar de
