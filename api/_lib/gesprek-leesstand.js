@@ -26,13 +26,41 @@
 // UIDs en backfill doet ignoreDuplicates, dus niets zet is_read ooit terug
 // vanuit IMAP. Alle CRM-schermen lezen is_read uit de databank.
 
+import { mailboxLabel as labelVoorModule } from './module-mailbox.js';
+
 const ONZE_DOMEIN_ILIKE = '%@deforexopleiding.nl';
+
+// Eén label, een lijst of niets → een lijst zonder lege waarden.
+function labels(mailboxLabel) {
+  const arr = Array.isArray(mailboxLabel) ? mailboxLabel : [mailboxLabel];
+  return [...new Set(arr.filter((x) => typeof x === 'string' && x))];
+}
+
+/**
+ * Welke mailbox(en) horen bij dit gesprek?
+ * Met module (zoals de schermen die meesturen): de mailbox van die module.
+ * Zonder module (een oudere, gecachte client of een directe aanroep): de
+ * mailboxen van de modules die op het nummer van het gesprek draaien, uit
+ * whatsapp_module_config. Zo hangt "gelezen" niet af van wat de browser
+ * meestuurt (29 okt: v=69 uit de cache stuurde geen module → 0 mails).
+ */
+export async function mailboxenVoorGesprek(sb, { conv, module }) {
+  if (module) return labels(labelVoorModule(module));
+  if (!conv?.phone_number_id) return [];
+  const { data, error } = await sb
+    .from('whatsapp_module_config')
+    .select('module')
+    .eq('phone_number_id', conv.phone_number_id)
+    .eq('is_active', true);
+  if (error) throw new Error('module-config: ' + error.message);
+  return labels((data || []).map((r) => labelVoorModule(r.module)));
+}
 
 /**
  * Markeer een heel gesprek als gelezen.
  * @param sb           supabase admin-client
  * @param conv         { id, customer_id, phone_number_id }
- * @param mailboxLabel short label uit module-mailbox.js, of null (dan geen mail)
+ * @param mailboxLabel short label(s) uit module-mailbox.js (string of lijst), of null (dan geen mail)
  * @returns { wa_gemarkeerd: string[], mails_gemarkeerd: number }
  */
 export async function markeerGesprekGelezen(sb, { conv, mailboxLabel }) {
@@ -61,12 +89,13 @@ export async function markeerGesprekGelezen(sb, { conv, mailboxLabel }) {
   }
 
   let mails = 0;
-  if (conv.customer_id && mailboxLabel) {
+  const mbs = labels(mailboxLabel);
+  if (conv.customer_id && mbs.length) {
     const { data: gelezen, error: mErr } = await sb
       .from('email_messages')
       .update({ is_read: true })
       .eq('customer_id', conv.customer_id)
-      .eq('mailbox', mailboxLabel)
+      .in('mailbox', mbs)
       .eq('is_read', false)
       .select('id');
     if (mErr) throw new Error('mail is_read: ' + mErr.message);
@@ -99,12 +128,13 @@ export async function markeerGesprekOngelezen(sb, { conv, mailboxLabel }) {
   const cur = Number(conv.unread_count || 0);
 
   let laatsteMail = null;
-  if (conv.customer_id && mailboxLabel) {
+  const mbs = labels(mailboxLabel);
+  if (conv.customer_id && mbs.length) {
     const { data, error } = await sb
       .from('email_messages')
       .select('id, date_received, is_read')
       .eq('customer_id', conv.customer_id)
-      .eq('mailbox', mailboxLabel)
+      .in('mailbox', mbs)
       .not('from_address', 'ilike', ONZE_DOMEIN_ILIKE)
       .order('date_received', { ascending: false, nullsFirst: false })
       .limit(1)

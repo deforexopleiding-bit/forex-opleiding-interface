@@ -1,5 +1,8 @@
-import { createUserClient } from './supabase.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
 import { safeError } from './_lib/safe-error.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /*
   Supabase table (run once in SQL editor):
@@ -70,6 +73,24 @@ export default async function handler(req, res) {
       set_at: new Date().toISOString()
     });
     if (dbErr) throw dbErr;
+
+    // 'mark-read' was tot 29 okt ALLEEN deze auditregel: 200 {ok:true} en
+    // email_messages.is_read bleef false, dus de badge kwam terug na herladen.
+    // Nu zet het ook echt de leesstand (email_id = email_messages.id, uuid).
+    // Service role na een rolpoort (zelfde als /api/mark-read). Een fout is
+    // een fout: geen ok zonder dat het geschreven is.
+    if (action === 'mark-read' && UUID_RE.test(String(email_id))) {
+      if (!(await requireCrmStaff(req))) {
+        return res.status(403).json({ error: 'Toegang geweigerd. CRM-rol vereist.' });
+      }
+      const { data: gelezen, error: rErr } = await supabaseAdmin
+        .from('email_messages')
+        .update({ is_read: true })
+        .eq('id', email_id)
+        .select('id');
+      if (rErr) throw rErr;
+      return res.status(200).json({ ok: true, is_read_gezet: (gelezen || []).length });
+    }
 
     return res.status(200).json({ ok: true });
   } catch (err) {

@@ -8,7 +8,8 @@
 // Body:
 //   conversation_id  uuid required
 //   module           'finance'|'onboarding'|'events' optional — de mailbox
-//                    van die module wordt mee gelezen. Zonder module: enkel WA.
+//                    van die module wordt mee gelezen. Zonder module: de
+//                    mailboxen van de modules op het nummer van het gesprek.
 //
 // Response: 200 { success: true, conversation_id, meta_read_sent: boolean,
 //                 wa_gemarkeerd: string[], mails_gemarkeerd: number,
@@ -19,7 +20,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { checkOnboardingConvAccess } from './_lib/onboardingScope.js';
 import { markAsRead, getConfigStatus, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { mailboxLabel } from './_lib/module-mailbox.js';
-import { markeerGesprekGelezen } from './_lib/gesprek-leesstand.js';
+import { markeerGesprekGelezen, mailboxenVoorGesprek } from './_lib/gesprek-leesstand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -50,8 +51,7 @@ export default async function handler(req, res) {
   if (!convId) return res.status(400).json({ error: 'conversation_id vereist' });
   if (!UUID_RE.test(convId)) return res.status(400).json({ error: 'conversation_id moet geldige uuid zijn' });
   const moduleRaw = String(body.module || '').trim().toLowerCase();
-  const mbLabel = moduleRaw ? mailboxLabel(moduleRaw) : null;
-  if (moduleRaw && !mbLabel) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
+  if (moduleRaw && !mailboxLabel(moduleRaw)) return res.status(400).json({ error: 'onbekende module: ' + moduleRaw });
 
   try {
     // Conversation bestaat-check. Fase 2b: phone_number_id + customer_id
@@ -74,7 +74,9 @@ export default async function handler(req, res) {
 
     // Lokale reset (altijd doen, ook als Meta niet beschikbaar): WA van deze
     // klant op dit nummer + de ongelezen mail in de mailbox van de module.
-    const gelezen = await markeerGesprekGelezen(supabaseAdmin, { conv, mailboxLabel: mbLabel });
+    const gelezen = await markeerGesprekGelezen(supabaseAdmin, {
+      conv, mailboxLabel: await mailboxenVoorGesprek(supabaseAdmin, { conv, module: moduleRaw }),
+    });
 
     // Probeer Meta markAsRead op het laatste inbound bericht (UX-nicety, optioneel)
     let metaReadSent = false;
