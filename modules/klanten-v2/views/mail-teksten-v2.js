@@ -63,7 +63,7 @@
       },
       test: async (soort) => {
         if (st.concept[soort]) return toast('Bewaar eerst je wijziging; de testmail gebruikt de bewaarde tekst.');
-        try { const j = await post({ actie: 'test', soort }, 'test:' + soort); toast('Testmail verstuurd naar ' + j.naar + '.'); }
+        try { const j = await post({ actie: 'test', soort }, 'test:' + soort); toast('Testmail verstuurd naar ' + j.naar + (j.versies > 1 ? ' (' + j.versies + ' versies: 1-op-1 en membership).' : '.')); }
         catch (e) { toast(foutTekst(e, 'Testmail mislukt.')); }
       },
       schakel: async (aan) => {

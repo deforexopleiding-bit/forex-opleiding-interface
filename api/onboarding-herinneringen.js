@@ -107,7 +107,7 @@ export function maakHandler(deps = {}) {
         if (!SOORTEN.includes(b.soort)) return res.status(400).json({ error: 'Onbekende soort.' });
         const inst = await leesInstellingen(d.db);
         const m = await stuurTestHerinnering(inst.teksten[b.soort], { naar: user.email });
-        return res.status(m.ok ? 200 : 502).json(m.ok ? { ok: true, naar: m.naar } : { error: 'Testmail niet verstuurd: ' + m.fout });
+        return res.status(m.ok ? 200 : 502).json(m.ok ? { ok: true, naar: m.naar, versies: m.versies } : { error: 'Testmail niet verstuurd: ' + m.fout });
       }
 
       if (b.actie === 'tekst') {

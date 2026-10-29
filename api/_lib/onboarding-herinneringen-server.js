@@ -10,7 +10,9 @@
 
 import {
   SETTING_KEY, SIGNAAL, normaliseerInstellingen, besluitHerinnering, besluitOudDossier, isKlaar, isOudDossier,
+  tekstVoorFlow, heeftFlowRegels,
 } from './onboarding-herinneringen.js';
+import { resolveFlowType } from './onboarding-wizard-default.js';
 import { linkVoorOnboarding, portalBasis } from './onboarding-link.js';
 import { formatteer as formatteerStartcode } from './onboarding-startcode.js';
 import { bouwOpmaakMail } from './onboarding-mail-opmaak.js';
@@ -200,8 +202,16 @@ export async function stuurHerinnering(db, ob, tekst, { naar = null, onderwerpPr
   if (error) return { ok: false, fout: 'klant: ' + error.message };
   const adres = naar || cust?.email || null;
   if (!adres) return { ok: false, overgeslagen: 'geen_email' };
-  const { data: vers, error: vErr } = await db.from('onboardings').select('id, token, startcode').eq('id', ob.id).maybeSingle();
+  const { data: vers, error: vErr } = await db.from('onboardings').select('id, token, startcode, traject_id').eq('id', ob.id).maybeSingle();
   if (vErr) return { ok: false, fout: 'onboarding: ' + vErr.message };
+  //  1-op-1 of membership: de regels met [1-op-1]/[membership] (een membership heeft geen mentor).
+  let trajectType = ob.traject_type;
+  if (trajectType === undefined && vers?.traject_id) {
+    const { data: t, error: tErr } = await db.from('onboarding_trajecten').select('type').eq('id', vers.traject_id).maybeSingle();
+    if (tErr) return { ok: false, fout: 'traject: ' + tErr.message };
+    trajectType = t?.type || null;
+  }
+  const body = tekstVoorFlow(tekst.tekst, resolveFlowType(trajectType));
   //  Kent zo nodig een startcode toe; achter de vlag de portal, anders de wizard.
   const persoonlijk = await linkVoorOnboarding(db, { id: ob.id, token: vers?.token, startcode: vers?.startcode || null });
   if (!persoonlijk.startcode) return { ok: false, fout: 'geen startcode' };
@@ -212,7 +222,7 @@ export async function stuurHerinnering(db, ob, tekst, { naar = null, onderwerpPr
     '{{onboarding.persoonlijke_link}}': persoonlijk.link,
     '{{onboarding.wizard_link}}': persoonlijk.link,
   };
-  const mail = bouwOpmaakMail({ subject: tekst.onderwerp, body: tekst.tekst, waarden, link: persoonlijk.link });
+  const mail = bouwOpmaakMail({ subject: tekst.onderwerp, body, waarden, link: persoonlijk.link });
   let onderwerp = String(tekst.onderwerp);
   for (const [k, v] of Object.entries(waarden)) onderwerp = onderwerp.split(k).join(v);
   const res = await sendOnboardingMail({ to: adres, subject: onderwerpPrefix + onderwerp, text: mail.text, html: mail.html });
@@ -275,7 +285,8 @@ export async function zetGeenHerinneringen(db, { onboardingId, aan, door }) {
 /**
  * Een TESTMAIL van één tekst — altijd naar de ingelogde gebruiker zelf, met
  * een voorbeeldcode. Zo ziet Maxim de mail zoals een student hem krijgt,
- * zonder dat er één student iets ontvangt.
+ * zonder dat er één student iets ontvangt. Staan er regels per traject in,
+ * dan twee mails: de versie voor 1-op-1 en die voor membership.
  */
 export async function stuurTestHerinnering(tekst, { naar, voornaam = 'Maxim' }) {
   if (!naar) return { ok: false, fout: 'geen e-mailadres voor de testmail' };
@@ -285,10 +296,15 @@ export async function stuurTestHerinnering(tekst, { naar, voornaam = 'Maxim' }) 
     '{{onboarding.startcode}}': 'TEST-CODE',
     '{{onboarding.persoonlijke_link}}': link, '{{onboarding.wizard_link}}': link,
   };
-  const mail = bouwOpmaakMail({ subject: tekst.onderwerp, body: tekst.tekst, waarden, link });
   let onderwerp = String(tekst.onderwerp);
   for (const [k, v] of Object.entries(waarden)) onderwerp = onderwerp.split(k).join(v);
-  const res = await sendOnboardingMail({ to: naar, subject: '[TEST] ' + onderwerp, text: mail.text, html: mail.html });
-  if (!res || res.success === false) return { ok: false, fout: res?.error || 'mail mislukt' };
-  return { ok: true, naar };
+  const versies = heeftFlowRegels(tekst.tekst)
+    ? [['1op1', '[TEST 1-op-1] '], ['membership', '[TEST membership] ']]
+    : [['1op1', '[TEST] ']];
+  for (const [flow, prefix] of versies) {
+    const mail = bouwOpmaakMail({ subject: tekst.onderwerp, body: tekstVoorFlow(tekst.tekst, flow), waarden, link });
+    const res = await sendOnboardingMail({ to: naar, subject: prefix + onderwerp, text: mail.text, html: mail.html });
+    if (!res || res.success === false) return { ok: false, fout: res?.error || 'mail mislukt' };
+  }
+  return { ok: true, naar, versies: versies.length };
 }
