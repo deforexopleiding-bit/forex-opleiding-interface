@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   besluitHerinnering, besluitOudDossier, eersteDag, normaliseerInstellingen, uitsluiting, isOudDossier,
-  CONCEPT_TEKSTEN, SOORTEN, SIGNAAL,
+  CONCEPT_TEKSTEN, SOORTEN, SIGNAAL, tekstVoorFlow, heeftFlowRegels,
 } from '../api/_lib/onboarding-herinneringen.js';
 import { dagPlus } from '../api/_lib/onboarding-auto-afronden.js';
 import { maakHandler, RECHT_GOEDKEUREN } from '../api/onboarding-herinneringen.js';
@@ -188,4 +188,31 @@ test('DE LMS-ROUTE kent "geen_herinneringen" en de rijen dragen de schakelaar en
   const rijen = readFileSync(new URL('../api/_lib/onboarding-overzicht-rijen.js', import.meta.url), 'utf8');
   assert.match(rijen, /geen_herinneringen:\s+r\.geen_herinneringen_op \?/);
   assert.match(rijen, /herinneringen:\s+herinneringenByOb === null \? null/);
+});
+
+test('PER TRAJECT: een membership krijgt nooit "je mentor"; 1-op-1 wel, en geen label blijft staan', () => {
+  for (const s of SOORTEN) {
+    const t = CONCEPT_TEKSTEN[s].tekst;
+    assert.ok(heeftFlowRegels(t), s + ': regels per traject');
+    const een = tekstVoorFlow(t, '1op1');
+    const mem = tekstVoorFlow(t, 'membership');
+    assert.match(een, /je mentor/, s + ': 1-op-1 noemt de mentor');
+    assert.doesNotMatch(mem, /mentor/i, s + ': membership noemt geen mentor');
+    for (const v of [een, mem]) {
+      assert.doesNotMatch(v, /\[(1-op-1|membership)\]/i, s + ': geen label in de mail');
+      assert.match(v, /^\{\{onboarding\.startcode\}\}$/m, s + ': de code blijft');
+      assert.match(v, /^\[knop: [^\]]+\]$/m, s + ': de knop blijft');
+    }
+    assert.equal(een.split('\n').length, mem.split('\n').length, s + ': elk één van de twee regels');
+  }
+  assert.equal(tekstVoorFlow('a\n[membership] b\n[1-op-1] c', null), 'a\nc', 'onbekend traject = 1-op-1');
+  assert.equal(tekstVoorFlow('a\n  [Membership]  b', 'membership'), 'a\n b', 'hoofdletters en inspringen');
+  assert.equal(heeftFlowRegels('gewoon\n[knop: x]'), false);
+});
+
+test('PER TRAJECT: de mail volgt traject_type; de testmail stuurt beide versies', () => {
+  const src = readFileSync(new URL('../api/_lib/onboarding-herinneringen-server.js', import.meta.url), 'utf8');
+  assert.match(src, /tekstVoorFlow\(tekst\.tekst, resolveFlowType\(trajectType\)\)/);
+  assert.match(src, /bouwOpmaakMail\(\{ subject: tekst\.onderwerp, body, waarden/);
+  assert.match(src, /\[TEST membership\] /);
 });
