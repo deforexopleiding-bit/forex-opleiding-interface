@@ -4921,7 +4921,8 @@
       const nvtBlok = nvt.length
         ? `<div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Geen Lead-koppeling (n.v.t.)</div><div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Deze funnels sturen geen <code>lead_&lt;id&gt;</code>-Lead-event (de Event-funnel sleutelt op <code>event_&lt;id&gt;</code>), dus hier is geen dekking% te berekenen.</div>${nvt.map((f) => `<div style="font-size:12px;display:flex;justify-content:space-between;padding:2px 0"><span>${esc(f.label)}</span><span style="color:var(--text-3)">${f.ad_leads} ad-leads</span></div>`).join('')}</div>`
         : '';
-      const fout = asArr(data.bronfouten).length ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Let op: bron(nen) niet geladen (${asArr(data.bronfouten).map(esc).join(', ')}). Overige cijfers blijven geldig.</div>` : '';
+      const foutDet = asArr(data.bronfout_details).map((d) => `${d.label}: ${d.code ? '[' + d.code + '] ' : ''}${d.message || ''}`.trim());
+      const fout = asArr(data.bronfouten).length ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Let op: bron(nen) niet geladen (${asArr(data.bronfouten).map(esc).join(', ')}). Overige cijfers blijven geldig.${foutDet.length ? `<div style="margin-top:3px;color:var(--text-3)">${foutDet.map(esc).join('<br>')}</div>` : ''}</div>` : '';
       const periodeRegel = data.periode ? `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Periode: ${esc(data.periode.start)} t/m ${esc(data.periode.eind)}</div>` : '';
       body = periodeRegel + tabel + nvtBlok + fout;
     }
