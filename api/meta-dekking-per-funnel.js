@@ -128,19 +128,27 @@ function chunk(arr, n) {
 }
 const BATCH = 300;
 
-// Paginerend lezen (zelfde patroon als aanmeldingen-per-funnel.js).
+// Paginerend lezen (zelfde patroon als aanmeldingen-per-funnel.js). De echte
+// foutmelding (code + message) wordt gelogd EN in `foutDetails` bewaard, zodat
+// een gefaalde bron zwart-op-wit te zien is i.p.v. stil ingeslikt.
 const PAGINA = 1000;
 const MAX_PAGINAS = 50;
-async function leesAlles(maakQuery, label, fouten) {
+function noteerFout(foutDetails, label, err) {
+  const code = err?.code || null;
+  const message = err?.message || String(err || 'onbekend');
+  console.error(`[meta-dekking] ${label} faalde:`, code || '', message, err?.details || '', err?.hint || '');
+  foutDetails.push({ label, code, message });
+}
+async function leesAlles(maakQuery, label, foutDetails) {
   const uit = [];
   for (let p = 0; p < MAX_PAGINAS; p += 1) {
     try {
       const { data, error } = await maakQuery().range(p * PAGINA, p * PAGINA + PAGINA - 1);
-      if (error) { console.warn(`[meta-dekking] ${label}:`, error.message); fouten.push(label); return uit; }
+      if (error) { noteerFout(foutDetails, label, error); return uit; }
       uit.push(...(data || []));
       if (!data || data.length < PAGINA) return uit;
     } catch (e) {
-      console.warn(`[meta-dekking] ${label} exception:`, e?.message || e); fouten.push(label); return uit;
+      noteerFout(foutDetails, label, e); return uit;
     }
   }
   return uit;
@@ -161,28 +169,47 @@ export default async function handler(req, res) {
   const periode = bepaalPeriode(req.query?.period);
   const vanIso = periode.start.toISOString();
   const totIso = periode.endExclusive.toISOString();
-  const fouten = [];
+  const foutDetails = [];
 
   try {
     // ── 1) Periode-leads (noemer-basis = leads.aangemaakt). ───────────────────
+    // Eerst ALLEEN de kleine kolommen (exact de bewezen vorm uit
+    //   aanmeldingen-per-funnel.js). De jsonb-kolom source_ref NIET over deze
+    //   range-scan ophalen (dat deed de oude query en liet de leads-bron falen);
+    //   die halen we hierna per-id op via de pk-index (goedkoop, zoals
+    //   leadsonderhoud-opstartsessie-create.js dat doet).
     const leads = await leesAlles(
       () => supabaseAdmin.from('leads')
-        .select('id, email, bron, traject, source_ref')
+        .select('id, email, bron, traject')
         .is('verwijderd_op', null)
         .gte('aangemaakt', vanIso).lt('aangemaakt', totIso)
         .order('id', { ascending: true }),
-      'leads', fouten,
+      'leads', foutDetails,
     );
     // Test-adressen tellen nergens mee (zelfde conventie als de funnel-telling).
     const echteLeads = leads.filter((l) => l && l.id && !isTestEmail(l.email));
+
+    // source_ref->>'ghl_contact_id' per-id in batches ophalen (pk-index).
+    const ghlPerLead = new Map(); // lead-id -> ghl_contact_id
+    for (const stuk of chunk(echteLeads.map((l) => String(l.id)), BATCH)) {
+      const rows = await leesAlles(
+        () => supabaseAdmin.from('leads').select('id, source_ref')
+          .in('id', stuk).order('id', { ascending: true }),
+        'leads(source_ref)', foutDetails,
+      );
+      for (const r of rows) {
+        const g = (r.source_ref && typeof r.source_ref === 'object' && r.source_ref.ghl_contact_id)
+          ? String(r.source_ref.ghl_contact_id) : null;
+        if (g) ghlPerLead.set(String(r.id), g);
+      }
+    }
 
     // Lead -> funnel + de join-sleutels verzamelen.
     const perLead = new Map(); // id -> { funnel, ghlId, email }
     const ghlIds = new Set();
     const emails = new Set();
     for (const l of echteLeads) {
-      const ghlId = (l.source_ref && typeof l.source_ref === 'object' && l.source_ref.ghl_contact_id)
-        ? String(l.source_ref.ghl_contact_id) : null;
+      const ghlId = ghlPerLead.get(String(l.id)) || null;
       const email = l.email ? String(l.email) : null;
       perLead.set(String(l.id), { funnel: funnelVanLead(l), ghlId, email });
       if (ghlId) ghlIds.add(ghlId);
@@ -200,7 +227,7 @@ export default async function handler(req, res) {
             .select('ghl_contact_id, email, fbclid, utm_source')
             .in(kolom, stuk)
             .order('ghl_contact_id', { ascending: true }),
-          label, fouten,
+          label, foutDetails,
         );
         for (const r of rows) {
           if (!isAdAttributie(r)) continue;
@@ -242,7 +269,7 @@ export default async function handler(req, res) {
           () => supabaseAdmin.from('meta_lead_events')
             .select('event_id, status, skip_reason')
             .in('event_id', stuk).order('event_id', { ascending: true }),
-          'meta_lead_events', fouten,
+          'meta_lead_events', foutDetails,
         );
         for (const r of rows) {
           if (r.status === 'sent') sentSet.add(String(r.event_id));
@@ -255,7 +282,7 @@ export default async function handler(req, res) {
           () => supabaseAdmin.from('lab_meta_events')
             .select('event_id, status, skip_reason')
             .eq('event_name', 'Lead').in('event_id', stuk).order('event_id', { ascending: true }),
-          'lab_meta_events', fouten,
+          'lab_meta_events', foutDetails,
         );
         for (const r of rows) {
           if (r.status === 'sent') sentSet.add(String(r.event_id));
@@ -269,7 +296,7 @@ export default async function handler(req, res) {
             .select('event_id, status')
             .eq('event_name', 'Lead').eq('status', 'verstuurd')
             .in('event_id', stuk).order('event_id', { ascending: true }),
-          'meta_capi_uitgaand', fouten,
+          'meta_capi_uitgaand', foutDetails,
         );
         for (const r of rows) sentSet.add(String(r.event_id));
       }
@@ -325,7 +352,8 @@ export default async function handler(req, res) {
       nvt,
       nvt_ad_leads: nvtAdLeads,
       totaal: { ...totaal, dekking_pct: dekkingTotaal },
-      bronfouten: [...new Set(fouten)],
+      bronfouten: [...new Set(foutDetails.map((d) => d.label))],
+      bronfout_details: foutDetails,
     });
   } catch (e) {
     console.error('[meta-dekking-per-funnel]', e?.message || e);
