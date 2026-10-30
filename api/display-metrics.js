@@ -361,9 +361,10 @@ export default async function handler(req, res) {
                 .eq('lijst', 'dag').gte('gearchiveerd_at', dayStartIso).lt('gearchiveerd_at', dayEndIso),
       /*28 */ // Feed "Nieuwe call gepland" — follow_up_appointments met created_at
               //   in NL-vandaag. Echte nieuwe boekingen: reschedule-kinderen
-              //   (parent_appointment_id) eruit; test-afspraken JS-side gefilterd.
+              //   (parent_appointment_id) eruit; test-afspraken + inactieve
+              //   statussen (cancelled/verplaatst/verwijderd) JS-side gefilterd.
               supabaseAdmin.from('follow_up_appointments')
-                .select('id, lead_name, scheduled_at, created_at, booking_source, is_test')
+                .select('id, lead_name, scheduled_at, created_at, booking_source, is_test, status')
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
                 .is('parent_appointment_id', null)
                 .order('created_at', { ascending: false }).limit(20),
@@ -767,6 +768,10 @@ export default async function handler(req, res) {
     // ts = created_at (wanneer geboekt); in de tekst het geplande moment + bron.
     for (const a of (feedNewCallsRes.data || [])) {
       if (a.is_test === true) continue;
+      // Geannuleerde/verplaatste/verwijderde calls zijn geen geldige "geplande"
+      //   boeking meer. Zelfde actieve-afspraken-definitie als follow-up-metrics.js.
+      //   JS-side i.p.v. .not('status','in',...) (PostgREST-array-not.in is brittle).
+      if (['cancelled', 'verplaatst', 'verwijderd'].includes(a.status)) continue;
       const naam    = (a.lead_name && String(a.lead_name).trim()) || '—';
       const wanneer = fmtNlDateTime(a.scheduled_at);
       const bron    = a.booking_source ? ' · ' + (trainingLabel(a.booking_source) || a.booking_source) : '';
