@@ -4860,13 +4860,77 @@
       if (window.DFO?.render) window.DFO.render();
     }
   };
+  // ── Meta-dekking per funnel (read-only overzicht uit /api/meta-dekking-per-funnel) ──
+  async function fetchMetaDekking(force) {
+    const st = (_live.metakoppeling = _live.metakoppeling || {});
+    const d = (st.dekking = st.dekking || { period: '30d' });
+    if (!force && (d.loading || (d.fetched && !d.error))) return;
+    d.loading = true; d.error = null;
+    const seq = (d._seq = (d._seq || 0) + 1);
+    if (window.DFO?.render) window.DFO.render();
+    const r = await tryFetch('meta-dekking', '/api/meta-dekking-per-funnel?period=' + encodeURIComponent(d.period || '30d'));
+    if (seq !== d._seq) return;
+    d.loading = false; d.fetched = true;
+    if (!r) { d.error = 'Kon Meta-dekking niet laden'; if (window.DFO?.render) window.DFO.render(); return; }
+    d.data = r;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsMetaSetDekkingPeriode = function (p) {
+    const st = _live.metakoppeling; if (!st) return;
+    const d = (st.dekking = st.dekking || { period: '30d' });
+    if (d.period === p) return;
+    d.period = p; d.fetched = false;
+    fetchMetaDekking(true);
+  };
   function _metaSwitch(aan, onclick, label, sub) {
     const knop = `<button onclick="${onclick}" role="switch" aria-checked="${aan}" style="position:relative;width:40px;height:22px;border-radius:999px;border:none;cursor:pointer;background:${aan ? '#16a34a' : 'var(--border)'};transition:.15s;flex:0 0 auto"><span style="position:absolute;top:2px;left:${aan ? '20px' : '2px'};width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s"></span></button>`;
     return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0">${knop}<div><div style="font-size:13.5px;font-weight:600">${label}</div>${sub ? `<div style="font-size:11.5px;color:var(--text-3)">${sub}</div>` : ''}</div><span style="margin-left:auto;font-size:11.5px;font-weight:700;color:${aan ? '#16a34a' : 'var(--text-3)'}">${aan ? 'AAN' : 'UIT'}</span></div>`;
   }
+  function _metaDekkingSectie(st) {
+    const d = st.dekking || { period: '30d' };
+    const per = d.period || '30d';
+    const perKnop = (k, lbl) => `<button onclick="window._lsMetaSetDekkingPeriode('${k}')" style="font-size:11.5px;padding:5px 10px;border-radius:999px;border:1px solid ${per === k ? '#16a34a' : 'var(--border)'};background:${per === k ? '#e7f6ee' : 'var(--surface)'};color:${per === k ? '#16a34a' : 'var(--text-2)'};font-weight:${per === k ? '700' : '500'};cursor:pointer">${lbl}</button>`;
+    const kiezer = `<div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">${perKnop('30d', 'Laatste 30 dagen')}${perKnop('maand', 'Deze maand')}${perKnop('vorige-maand', 'Vorige maand')}</div>`;
+    const uitleg = '<div style="font-size:11.5px;color:var(--text-3);line-height:1.5;margin-bottom:10px">Ad-lead = lead met Meta-attributie (<code>fbclid</code> of <code>utm_source</code> ∈ facebook/instagram/ig/fb/meta). Verstuurd = ad-lead met een Lead-event (event_id <code>lead_&lt;id&gt;</code>) in de drie logtabellen samen. <b>Let op:</b> de laatste ~2-3 dagen onderrapporteren (attributie komt na-ijlend uit GHL); een afgeronde maand geeft de stevigste meting. Leads zonder GHL-contact/attributie-e-mail tellen niet als ad-lead → lichte onderschatting.</div>';
+    let body;
+    if (d.loading && !d.data) body = '<div style="color:var(--text-3);font-size:13px;padding:10px">Dekking laden...</div>';
+    else if (d.error) body = `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12.5px">${esc(d.error)}</div>`;
+    else if (!d.data) body = '<div style="color:var(--text-3);font-size:13px;padding:10px">Nog geen gegevens.</div>';
+    else {
+      const data = d.data;
+      const dekPill = (pct) => {
+        if (pct == null) return '<span style="color:var(--text-3)">n.v.t.</span>';
+        const kleur = pct >= 90 ? '#16a34a' : pct >= 60 ? 'var(--amber)' : 'var(--rose)';
+        return `<span style="font-weight:800;color:${kleur}">${pct}%</span>`;
+      };
+      const reden = (r) => {
+        if (!r) return '';
+        const d1 = [];
+        if (r.geen_toestemming) d1.push(`${r.geen_toestemming}× geen toestemming`);
+        if (r.al_geteld) d1.push(`${r.al_geteld}× al geteld`);
+        if (r.onbekend) d1.push(`${r.onbekend}× onbekend`);
+        return d1.length ? `<span style="font-size:11px;color:var(--text-3)">${d1.join(' · ')}</span>` : '';
+      };
+      const rij = (f) => `<tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 10px;font-weight:600">${esc(f.label)}</td><td style="padding:7px 10px;text-align:right">${f.ad_leads}</td><td style="padding:7px 10px;text-align:right">${f.verstuurd}</td><td style="padding:7px 10px;text-align:right">${f.gemist}</td><td style="padding:7px 10px;text-align:right">${dekPill(f.dekking_pct)}</td><td style="padding:7px 10px">${reden(f.redenen)}</td></tr>`;
+      const senderRijen = asArr(data.funnels).map(rij).join('');
+      const tot = data.totaal || {};
+      const totRij = `<tr style="border-top:2px solid var(--border);font-weight:700;background:var(--surface-2)"><td style="padding:8px 10px">Totaal (gekoppelde funnels)</td><td style="padding:8px 10px;text-align:right">${tot.ad_leads || 0}</td><td style="padding:8px 10px;text-align:right">${tot.verstuurd || 0}</td><td style="padding:8px 10px;text-align:right">${tot.gemist || 0}</td><td style="padding:8px 10px;text-align:right">${dekPill(tot.dekking_pct)}</td><td style="padding:8px 10px">${reden({ geen_toestemming: tot.geen_toestemming, al_geteld: tot.al_geteld, onbekend: tot.onbekend })}</td></tr>`;
+      const tabel = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)"><th style="padding:7px 10px">Funnel</th><th style="padding:7px 10px;text-align:right">Ad-leads</th><th style="padding:7px 10px;text-align:right">Verstuurd</th><th style="padding:7px 10px;text-align:right">Gemist</th><th style="padding:7px 10px;text-align:right">Dekking</th><th style="padding:7px 10px">Reden gemist</th></tr></thead><tbody>${senderRijen || '<tr><td colspan="6" style="padding:12px;color:var(--text-3);text-align:center">Geen ad-leads in deze periode.</td></tr>'}${senderRijen ? totRij : ''}</tbody></table></div>`;
+      // n.v.t.-funnels (geen lead_<id>-sender) apart, zonder dekking%.
+      const nvt = asArr(data.nvt).filter((f) => f.ad_leads > 0);
+      const nvtBlok = nvt.length
+        ? `<div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">Geen Lead-koppeling (n.v.t.)</div><div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Deze funnels sturen geen <code>lead_&lt;id&gt;</code>-Lead-event (de Event-funnel sleutelt op <code>event_&lt;id&gt;</code>), dus hier is geen dekking% te berekenen.</div>${nvt.map((f) => `<div style="font-size:12px;display:flex;justify-content:space-between;padding:2px 0"><span>${esc(f.label)}</span><span style="color:var(--text-3)">${f.ad_leads} ad-leads</span></div>`).join('')}</div>`
+        : '';
+      const fout = asArr(data.bronfouten).length ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">Let op: bron(nen) niet geladen (${asArr(data.bronfouten).map(esc).join(', ')}). Overige cijfers blijven geldig.</div>` : '';
+      const periodeRegel = data.periode ? `<div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Periode: ${esc(data.periode.start)} t/m ${esc(data.periode.eind)}</div>` : '';
+      body = periodeRegel + tabel + nvtBlok + fout;
+    }
+    return kiezer + uitleg + body;
+  }
   function metaKoppelingView() {
     const st = _live.metakoppeling;
     if (!st || (!st.fetched && !st.loading && !st.error)) queueMicrotask(() => fetchMetaKoppeling(false));
+    if (st && (!st.dekking || (!st.dekking.fetched && !st.dekking.loading))) queueMicrotask(() => fetchMetaDekking(false));
     if (st && st.error) return `<div style="max-width:860px"><div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12.5px">${esc(st.error)}</div></div>`;
     if (!st || !st.form) return `<div style="max-width:860px;color:var(--text-3);font-size:13px;padding:14px">Meta-instellingen laden...</div>`;
     const card = (inner, titel, extra) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">${titel ? `<div style="font-size:14px;font-weight:700;margin-bottom:4px">${titel}</div>` : ''}${extra || ''}${inner}</div>`;
@@ -4900,7 +4964,8 @@
       tellers + `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)"><th style="padding:7px 10px">Status</th><th style="padding:7px 10px">Herkomst</th><th style="padding:7px 10px">Reden</th><th style="padding:7px 10px;text-align:center">Match</th><th style="padding:7px 10px">Event-id</th><th style="padding:7px 10px">Tijd</th></tr></thead><tbody>${evRows || '<tr><td colspan="6" style="padding:12px;color:var(--text-3);text-align:center">Nog geen events.</td></tr>'}</tbody></table></div>`,
       'Recente leads naar Meta'
     );
-    return `<div style="max-width:860px">${statusregel}${blok1}${blok2}${blok3}${opslaan}${overzicht}</div>`;
+    const dekking = card(_metaDekkingSectie(st), 'Meta-dekking per funnel');
+    return `<div style="max-width:860px">${statusregel}${blok1}${blok2}${blok3}${opslaan}${dekking}${overzicht}</div>`;
   }
 
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
