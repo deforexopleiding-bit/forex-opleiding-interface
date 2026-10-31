@@ -294,12 +294,20 @@
    * verhuisde kaart houdt zijn oude badge ('Minicursus', '7-daagse'); zo ziet
    * Maxim toch waarom hij in de lijst staat. Niet als de badge al de lijstnaam is.
    */
+  // Vergelijken zoals een mens leest: unicode gelijkgetrokken (NFKC), elke
+  // witruimte (ook harde spatie / zero-width) als één spatie, getrimd en
+  // hoofdletterongevoelig.
+  const zelfdeTekst = (a, b) => {
+    const n = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/[\s\u200b-\u200d\ufeff]+/g, ' ').trim().toLowerCase();
+    return n(a) !== '' && n(a) === n(b);
+  };
   function lijstTag(r) {
     const k = r && r.kaart;
     const naam = String((k && k.aparte_lijst_naam) || '').trim();
     if (!naam) return '';
-    const zelfde = (v) => String(v || '').trim().toLowerCase() === naam.toLowerCase();
-    if (zelfde(k.badge_label) || zelfde(r.product_label)) return '';
+    // De grijze badge op de rij is r.product_label (bij een importkaart =
+    // badge_label van de kaart, bij een leadkaart het product van de lead).
+    if (zelfdeTekst(r.product_label, naam) || zelfdeTekst(k.badge_label, naam)) return '';
     return ' <span class="tag lb-lijsttag" title="Staat in de aparte lijst ' + esc(naam) + '">&#128203; ' + esc(naam) + '</span>';
   }
 

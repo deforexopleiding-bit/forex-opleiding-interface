@@ -646,3 +646,50 @@ test('scherm: lijsttag naast de oude badge, niet dubbel als de badge al de lijst
   assert.match(rijHtml('Mike Denys'), /&#128203; &lt;b&gt;x&lt;\/b&gt;/);
   assert.doesNotMatch(html, /<b>x<\/b>/);
 });
+
+test('echt API-pad: GET ?pot=lijst → scherm. Badge = lijstnaam (Mieke) geeft GEEN dubbele tag; verhuisde leadkaart wel', async (t) => {
+  t.after(() => mock.reset());
+  const LIJST = 'c2b64d93-d543-4fd0-b939-3af731642423';
+  const vandaag = dagInZone(Date.now());
+  // Mieke: de rij zoals ze op 29 okt in productie staat (badge + import_label gecorrigeerd).
+  const mieke = {
+    id: '81617df1-8e21-46f7-886e-a43674f2eef5', naam: 'Mieke', email: 'info@voorbeeld.be', telefoon: '+32485558080',
+    reden: 'lead_bellen', reden_code: null, bron: 'import', lijst: 'leads', lead_id: null, status: 'open', due: vandaag,
+    badge_label: 'Webinar 26/10', notitie: '2026-10-27 · Opgeladen in Leads bellen (Webiar 26/10).',
+    bron_ref: { product: null, import_op: '2026-10-27T12:42:55.759Z', import_label: 'Webinar 26/10',
+      aparte_lijst_id: LIJST, aparte_lijst_naam: 'Webinar 26/10', aparte_lijst_verhuisd_op: '2026-10-27T16:45:39.320Z' },
+    created_at: '2026-10-27T12:42:56.467759+00:00', uitkomst_log: [],
+  };
+  // Zelfde naam met een harde spatie en andere hoofdletters: telt ook als dezelfde.
+  const nbsp = { ...mieke, id: 'k-nbsp', naam: 'Nina', telefoon: '+32485558081', badge_label: ' webinar 26/10 ' };
+  // Verhuisde leadkaart zonder lead in de pot: badge 'Minicursus' → tag erbij.
+  const mats = { ...mieke, id: 'k-mats', naam: 'Mats Van de Wynkele', telefoon: '+32485558082', bron: 'lead', badge_label: 'Minicursus',
+    bron_ref: { lead_id: null, product: 'Minicursus', aparte_lijst_id: LIJST, aparte_lijst_naam: 'Webinar 26/10' } };
+  const db = basisDb({
+    opvolging_taken: [mieke, nbsp, mats],
+    opvolging_leads_lijsten: [{ id: LIJST, naam: 'Webinar 26/10', status: 'actief', created_at: '2026-10-27T12:42:00Z' }],
+  });
+  const h = await laad('api/opvolging-leads.js', db);
+  const r = nepRes();
+  await h({ method: 'GET', headers: {}, query: { pot: 'lijst', lijst: LIJST } }, r);
+  assert.equal(r._uit.code, 200);
+  const rijen = [...r._uit.body.items, ...Object.values(r._uit.body.secties).flat()];
+  const m = rijen.find((x) => x.naam === 'Mieke');
+  // Wat de grijze badge toont, en waarmee vergeleken wordt.
+  assert.equal(m.product_label, 'Webinar 26/10');
+  assert.equal(m.kaart.aparte_lijst_naam, 'Webinar 26/10');
+
+  // De JSON zoals de browser hem krijgt, door het echte scherm.
+  const { window } = laadView();
+  const st = window.__opvLeadsState;
+  const data = JSON.parse(JSON.stringify(r._uit.body));
+  st.telling.data = data;
+  st.pot = 'lijst:' + LIJST;
+  st.potten[st.pot] = { data };
+  const html = window.DFO.VIEWS['opvolging/Leads bellen']();
+  const rij = (naam) => { const i = html.indexOf('<div class="nm">' + naam); return html.slice(i, html.indexOf('</div>', i)); };
+  assert.match(rij('Mieke'), /tag t-grey">Webinar 26\/10<\/span>/);
+  assert.doesNotMatch(rij('Mieke'), /lb-lijsttag/, 'geen dubbele tag als de badge al de lijstnaam is');
+  assert.doesNotMatch(rij('Nina'), /lb-lijsttag/, 'ook niet met harde spatie / andere hoofdletters');
+  assert.match(rij('Mats Van de Wynkele'), /tag t-grey">Minicursus<\/span> <span class="tag lb-lijsttag"[^>]*>&#128203; Webinar 26\/10/);
+});
