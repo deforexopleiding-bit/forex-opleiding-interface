@@ -37,6 +37,8 @@ import {
   mapGhlError,
 } from './_lib/create-appointment-from-lead.js';
 import { telefoonE164 } from './_lib/lms-provisioning.js';
+import { leesSettings, telOpDag, isDicht } from './_lib/agenda-beschikbaarheid.js';
+import { nlDateString } from './_lib/nl-period.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /.+@.+\..+/;
@@ -252,6 +254,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // Niet-blokkerende waarschuwing (admin-override): de handmatige CRM-boeking
+    //   wordt NOOIT geblokkeerd, maar als de gekozen dag dichtstaat of (al) vol
+    //   was voor de publieke funnel, geven we dat als `waarschuwing` terug zodat
+    //   de UI het kan tonen. FAIL-OPEN: bij een leesfout geen waarschuwing.
+    let waarschuwing = null;
+    try {
+      const dag = nlDateString(new Date(scheduledAt));
+      const { max_per_dag, gesloten_dagen } = await leesSettings();
+      if (isDicht(dag, gesloten_dagen)) {
+        waarschuwing = 'Let op: deze dag staat dichtgezet voor opstartsessies. De boeking is toch gemaakt (admin-override).';
+      } else if (max_per_dag > 0) {
+        // telOpDag telt inclusief deze zojuist gemaakte boeking; was de dag
+        // vóór deze boeking al vol (aantal-1 >= max), dan had de publieke funnel
+        // geblokkeerd → admin-override.
+        const aantal = await telOpDag(dag);
+        if (aantal - 1 >= max_per_dag) {
+          waarschuwing = `Let op: deze dag zat al op het maximum van ${max_per_dag} calls (nu ${aantal}). De boeking is toch gemaakt (admin-override).`;
+        }
+      }
+    } catch (e) {
+      console.warn('[opstartsessie-create] beschikbaarheid-waarschuwing (soft):', e?.message || e);
+    }
+
     return res.status(200).json({
       ok: true,
       follow_up_appointment_id: apptId,
@@ -259,6 +284,7 @@ export default async function handler(req, res) {
       lead_id:                  leadRow.id,
       zoom_meeting_id:          result?.zoom_meeting_id || null,
       zoom_join_url:            result?.zoom_join_url   || null,
+      waarschuwing,
     });
   } catch (e) {
     console.error('[opstartsessie-create] exception:', e?.message || e);

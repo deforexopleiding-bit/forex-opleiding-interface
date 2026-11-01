@@ -3104,7 +3104,9 @@
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-      _lsInbToast('Call ingepland.', 'ok');
+      // Niet-blokkerende agenda-waarschuwing (dichte/volle dag, admin-override).
+      if (j && j.waarschuwing) _lsInbToast(j.waarschuwing, 'warn');
+      else _lsInbToast('Call ingepland.', 'ok');
       window._lsOpCreateClose();
       fetchOpstartsessies(true);
     } catch (e) {
