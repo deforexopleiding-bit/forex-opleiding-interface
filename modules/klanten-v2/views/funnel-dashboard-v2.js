@@ -52,8 +52,6 @@
     rij: {},    // uitgeklapte regels in het compacte overzicht (2026-10-21)
     // Boek-flow A/B-schakelaar (app_settings.opstartsessie_flow).
     flowCfg: null, flowFetched: false, flowErr: null, flowSaving: false,
-    // Agenda-beschikbaarheid (app_settings.agenda_beschikbaarheid).
-    agendaCfg: null, agendaFetched: false, agendaErr: null, agendaSaving: false,
   };
 
   // Welke funnels gebruiken de boek-flow (en krijgen dus een A/B-schakelaar):
@@ -190,124 +188,6 @@
     // Globaal: zet default en wis alle per-funnel-afwijkingen (echt alles op A, B of C).
     saveFlow({ default: normFlow(flow), per_funnel: {} });
   };
-
-  // ── Agenda-beschikbaarheid (app_settings.agenda_beschikbaarheid) ──────────
-  async function fetchAgenda(force) {
-    if (!force && st.agendaFetched && !st.agendaErr) return;
-    try {
-      const j = await window.KV.authedJson('/api/agenda-beschikbaarheid-get');
-      st.agendaCfg = {
-        max_per_dag: Number(j.max_per_dag) || 0,
-        gesloten_dagen: Array.isArray(j.gesloten_dagen) ? j.gesloten_dagen : [],
-        gesloten_ranges: Array.isArray(j.gesloten_ranges) ? j.gesloten_ranges : [],
-      };
-      st.agendaErr = null;
-    } catch (e) {
-      st.agendaErr = (e && e.status === 403) ? 'Geen rechten om de agenda-instellingen te zien.' : 'Kon agenda-beschikbaarheid niet laden.';
-      if (!st.agendaCfg) st.agendaCfg = { max_per_dag: 0, gesloten_dagen: [], gesloten_ranges: [] };
-    }
-    st.agendaFetched = true;
-  }
-  async function saveAgenda(cfg) {
-    st.agendaSaving = true; rerender();
-    try {
-      const j = await window.KV.authedJson('/api/agenda-beschikbaarheid-set', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
-      });
-      st.agendaCfg = {
-        max_per_dag: Number(j.max_per_dag) || 0,
-        gesloten_dagen: Array.isArray(j.gesloten_dagen) ? j.gesloten_dagen : [],
-        gesloten_ranges: Array.isArray(j.gesloten_ranges) ? j.gesloten_ranges : [],
-      };
-      st.agendaErr = null;
-    } catch (e) {
-      st.agendaErr = (e && e.status === 403) ? 'Geen rechten om de agenda-instellingen te wijzigen (leads.update).' : 'Opslaan van de agenda-instellingen mislukte.';
-    }
-    st.agendaSaving = false; rerender();
-  }
-  const agCfg = () => st.agendaCfg || { max_per_dag: 0, gesloten_dagen: [], gesloten_ranges: [] };
-  const AG_ISO = /^\d{4}-\d{2}-\d{2}$/;
-  window.__agMaxSet = function (el) {
-    if (st.agendaSaving) return;
-    const c = agCfg();
-    let n = Math.floor(Number(el && el.value));
-    if (!isFinite(n) || n < 0) n = 0;
-    if (n > 1000) n = 1000;
-    saveAgenda({ max_per_dag: n, gesloten_dagen: c.gesloten_dagen, gesloten_ranges: c.gesloten_ranges });
-  };
-  window.__agAddDag = function () {
-    if (st.agendaSaving) return;
-    const el = document.getElementById('ag-dag');
-    const d = el && el.value;
-    if (!AG_ISO.test(d || '')) return;
-    const c = agCfg();
-    const dagen = c.gesloten_dagen.includes(d) ? c.gesloten_dagen : c.gesloten_dagen.concat(d);
-    saveAgenda({ max_per_dag: c.max_per_dag, gesloten_dagen: dagen, gesloten_ranges: c.gesloten_ranges });
-  };
-  window.__agAddRange = function () {
-    if (st.agendaSaving) return;
-    const van = (document.getElementById('ag-range-van') || {}).value;
-    const tot = (document.getElementById('ag-range-tot') || {}).value;
-    if (!AG_ISO.test(van || '') || !AG_ISO.test(tot || '') || van > tot) return;
-    const c = agCfg();
-    saveAgenda({ max_per_dag: c.max_per_dag, gesloten_dagen: c.gesloten_dagen, gesloten_ranges: c.gesloten_ranges.concat({ van, tot }) });
-  };
-  window.__agDelDag = function (d) {
-    if (st.agendaSaving) return;
-    const c = agCfg();
-    saveAgenda({ max_per_dag: c.max_per_dag, gesloten_dagen: c.gesloten_dagen.filter((x) => x !== d), gesloten_ranges: c.gesloten_ranges });
-  };
-  window.__agDelRange = function (i) {
-    if (st.agendaSaving) return;
-    const c = agCfg();
-    saveAgenda({ max_per_dag: c.max_per_dag, gesloten_dagen: c.gesloten_dagen, gesloten_ranges: c.gesloten_ranges.filter((_, k) => k !== Number(i)) });
-  };
-  function agendaPanelHtml(open) {
-    const c = agCfg();
-    const saving = st.agendaSaving;
-    const dagRows = (c.gesloten_dagen || []).slice().sort().map((d) =>
-      `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:3px 6px 3px 10px;font-size:11.5px">${esc(d)}<button class="btn btn-sm btn-ghost" style="padding:0 6px;font-size:13px;line-height:1" ${saving ? 'disabled' : ''} onclick="window.__agDelDag('${esc(d)}')" title="Verwijderen">×</button></span>`
-    ).join('');
-    const rangeRows = (c.gesloten_ranges || []).map((r, i) =>
-      `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px"><span>${esc(r.van)} t/m ${esc(r.tot)}</span><button class="btn btn-sm btn-ghost" style="padding:0 8px;font-size:13px" ${saving ? 'disabled' : ''} onclick="window.__agDelRange(${i})" title="Verwijderen">×</button></div>`
-    ).join('');
-    const veld = 'padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:16px';
-    return `<details class="fd-agenda"${open ? ' open' : ''} style="margin-bottom:16px;border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;background:var(--surface)">
-      <summary style="cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
-        Agenda-beschikbaarheid <span style="font-weight:400;color:var(--text-3);font-size:11.5px">· opstartsessie-agenda (gezamenlijk) · dichte dagen + max. per dag</span>
-        ${saving ? '<span style="margin-left:auto;color:var(--text-3);font-size:11px">Opslaan…</span>' : ''}
-      </summary>
-      <div style="margin-top:10px;display:flex;flex-direction:column;gap:14px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <label style="font-size:12px;font-weight:600">Max. calls per dag</label>
-          <input type="number" min="0" max="1000" step="1" value="${c.max_per_dag || 0}" ${saving ? 'disabled' : ''} onchange="window.__agMaxSet(this)" style="width:90px;${veld}">
-          <span style="font-size:11px;color:var(--text-3)">0 = geen limiet</span>
-        </div>
-        <div>
-          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Losse dag dichtzetten</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="date" id="ag-dag" ${saving ? 'disabled' : ''} style="${veld};max-width:160px">
-            <button class="btn btn-sm btn-primary" style="color:#fff;font-size:11.5px;padding:5px 12px" ${saving ? 'disabled' : ''} onclick="window.__agAddDag()">Dag toevoegen</button>
-          </div>
-        </div>
-        <div>
-          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Periode dichtzetten</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <label style="font-size:11.5px;color:var(--text-3)">van <input type="date" id="ag-range-van" ${saving ? 'disabled' : ''} style="${veld};max-width:150px"></label>
-            <label style="font-size:11.5px;color:var(--text-3)">tot <input type="date" id="ag-range-tot" ${saving ? 'disabled' : ''} style="${veld};max-width:150px"></label>
-            <button class="btn btn-sm btn-primary" style="color:#fff;font-size:11.5px;padding:5px 12px" ${saving ? 'disabled' : ''} onclick="window.__agAddRange()">Periode toevoegen</button>
-          </div>
-        </div>
-        ${(dagRows || rangeRows) ? `<div>
-          <div style="font-size:12px;font-weight:600;margin-bottom:6px">Dichtgezette dagen</div>
-          ${dagRows ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">${dagRows}</div>` : ''}
-          ${rangeRows || ''}
-        </div>` : '<div style="font-size:11.5px;color:var(--text-3)">Nog geen dichtgezette dagen.</div>'}
-        ${st.agendaErr ? `<div style="color:var(--amber);font-size:11.5px">${esc(st.agendaErr)}</div>` : ''}
-        <div style="font-size:10.5px;color:var(--text-3)">Geldt voor de publieke opstartsessie-funnel (vrije slots + boeken). Handmatig boeken in het CRM kan dit bewust overschrijven (je krijgt dan een waarschuwing). Wijziging is direct actief.</div>
-      </div>
-    </details>`;
-  }
 
   // ── Render-helpers ────────────────────────────────────────────────────────
   const fmtPct = (v) => (v == null ? '—' : String(v).replace('.', ',') + '%');
@@ -569,10 +449,6 @@
       const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
       q(() => fetchFlow(false).then(() => rerender()));
     }
-    if (!o.zonderFlow && !st.agendaFetched) {
-      const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
-      q(() => fetchAgenda(false).then(() => rerender()));
-    }
     const regBy = {};
     for (const r of registry || []) regBy[r.bron] = r;
     const data = st.data || {};
@@ -626,7 +502,7 @@
         ${custom}
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : esc(periodeTxt)}</span>
       </div>
-      ${o.zonderFlow ? '' : (flowPanelHtml(registry) + agendaPanelHtml(false))}
+      ${o.zonderFlow ? '' : flowPanelHtml(registry)}
       ${st.error ? `<div class="fd-fout" style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
       ${bannerHtml(meta)}
       ${groepen}
@@ -635,20 +511,13 @@
     </div>`;
   }
 
-  /** Subtab "Boek-flow (A/B/C)": de schakelaar + agenda-beschikbaarheid, open. */
+  /** Subtab "Boek-flow (A/B/C)": alleen de schakelaar, open. */
   function renderFlow(registry) {
     if (!st.flowFetched) {
       const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
       q(() => fetchFlow(false).then(() => rerender()));
     }
-    if (!st.agendaFetched) {
-      const q = typeof queueMicrotask === 'function' ? queueMicrotask : (f) => Promise.resolve().then(f);
-      q(() => fetchAgenda(false).then(() => rerender()));
-    }
-    return '<div class="fd-flow-tab" style="max-width:900px">'
-      + (flowPanelHtml(registry, true) || '<div style="color:var(--text-3)">Geen funnels met een boek-flow.</div>')
-      + agendaPanelHtml(true)
-      + '</div>';
+    return '<div class="fd-flow-tab" style="max-width:900px">' + (flowPanelHtml(registry, true) || '<div style="color:var(--text-3)">Geen funnels met een boek-flow.</div>') + '</div>';
   }
 
   window.DFOFunnelDashboard = { render, renderFlow, state: st, presetRange, nlVandaag, plusDagen, fetchStats };

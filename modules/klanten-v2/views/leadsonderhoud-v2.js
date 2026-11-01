@@ -4971,6 +4971,219 @@
     return `<div style="max-width:860px">${statusregel}${blok1}${blok2}${blok3}${opslaan}${dekking}${overzicht}</div>`;
   }
 
+  // ── Agenda-tab (2026-11-01): admin-beschikbaarheid van de gezamenlijke ──────
+  //    opstartsessie-agenda: max. calls per dag + dagen/periodes dichtzetten,
+  //    met een maandkalender. Wijzigingen worden lokaal gestaged en in één keer
+  //    opgeslagen via /api/agenda-beschikbaarheid-set. De kalender toont per dag
+  //    geboekt/max uit /api/agenda-beschikbaarheid-telling-get (fail-soft).
+  const _AG_MND = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  const _AG_RE = /^\d{4}-\d{2}-\d{2}$/;
+  function _agYmd(y, m0, d) { return y + '-' + String(m0 + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+  function _agToday() {
+    const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    const g = (t) => p.find((x) => x.type === t).value;
+    return g('year') + '-' + g('month') + '-' + g('day');
+  }
+  function _agExpand(cfg) {
+    const set = new Set();
+    for (const d of asArr(cfg && cfg.gesloten_dagen)) if (_AG_RE.test(d)) set.add(d);
+    for (const r of asArr(cfg && cfg.gesloten_ranges)) {
+      if (!r || !_AG_RE.test(r.van || '') || !_AG_RE.test(r.tot || '')) continue;
+      let cur = Date.UTC(+r.van.slice(0, 4), +r.van.slice(5, 7) - 1, +r.van.slice(8, 10));
+      const eind = Date.UTC(+r.tot.slice(0, 4), +r.tot.slice(5, 7) - 1, +r.tot.slice(8, 10));
+      let g = 0;
+      while (cur <= eind && g < 400) { const dt = new Date(cur); set.add(_agYmd(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate())); cur += 86400000; g += 1; }
+    }
+    return set;
+  }
+  function _agSig(s) { return (s.max_per_dag || 0) + '|' + [...s.dicht].sort().join(','); }
+  function _agState() { return (_live.agenda = _live.agenda || {}); }
+  async function fetchAgendaCfg(force) {
+    const a = _agState();
+    if (!force && (a.cfgLoading || (a.cfgFetched && !a.cfgErr))) return;
+    a.cfgLoading = true; a.cfgErr = null;
+    if (window.DFO?.render) window.DFO.render();
+    const j = await tryFetch('agenda-cfg', '/api/agenda-beschikbaarheid-get');
+    a.cfgLoading = false; a.cfgFetched = true;
+    if (!j) { a.cfgErr = 'Kon agenda-instellingen niet laden'; if (window.DFO?.render) window.DFO.render(); return; }
+    a.staged = { max_per_dag: Number(j.max_per_dag) || 0, dicht: _agExpand(j) };
+    a.saved = _agSig(a.staged);
+    if (a.viewY == null) { const t = _agToday(); a.viewY = +t.slice(0, 4); a.viewM = +t.slice(5, 7) - 1; }
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchAgendaTelling(maandKey) {
+    const a = _agState();
+    a.telling = a.telling || {};
+    if (a.telling[maandKey] || (a._tellingBezig && a._tellingBezig[maandKey])) return;
+    a._tellingBezig = a._tellingBezig || {};
+    a._tellingBezig[maandKey] = true;
+    const j = await tryFetch('agenda-telling', '/api/agenda-beschikbaarheid-telling-get?maand=' + encodeURIComponent(maandKey));
+    a._tellingBezig[maandKey] = false;
+    // Fail-soft: geen/ongeldige telling → kalender zonder tellers.
+    a.telling[maandKey] = (j && j.ok && j.per_dag && typeof j.per_dag === 'object') ? j.per_dag : null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsAgMaxStep = function (delta) {
+    const a = _live.agenda; if (!a || !a.staged || a.saving) return;
+    let n = (Number(a.staged.max_per_dag) || 0) + delta;
+    if (n < 0) n = 0; if (n > 1000) n = 1000;
+    a.staged.max_per_dag = n;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsAgMaxInput = function (el) {
+    const a = _live.agenda; if (!a || !a.staged) return;
+    let n = Math.floor(Number(el && el.value));
+    if (!isFinite(n) || n < 0) n = 0; if (n > 1000) n = 1000;
+    a.staged.max_per_dag = n;
+    // geen re-render tijdens typen (focus behouden); stepper/opslaan leest de waarde
+  };
+  window._lsAgNav = function (delta) {
+    const a = _live.agenda; if (!a) return;
+    let m = (a.viewM || 0) + delta, y = a.viewY || (+_agToday().slice(0, 4));
+    if (m < 0) { m = 11; y -= 1; } else if (m > 11) { m = 0; y += 1; }
+    a.viewM = m; a.viewY = y;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsAgToggle = function (dateStr) {
+    const a = _live.agenda; if (!a || !a.staged || a.saving || !_AG_RE.test(dateStr || '')) return;
+    if (dateStr < _agToday()) return; // verleden niet togglen
+    if (a.staged.dicht.has(dateStr)) a.staged.dicht.delete(dateStr); else a.staged.dicht.add(dateStr);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsAgRange = function (close) {
+    const a = _live.agenda; if (!a || !a.staged || a.saving) return;
+    const van = (document.getElementById('ag-van') || {}).value;
+    const tot = (document.getElementById('ag-tot') || {}).value;
+    if (!_AG_RE.test(van || '') || !_AG_RE.test(tot || '') || van > tot) { _lsInbToast('Kies een geldige periode (van t/m tot).', 'warn'); return; }
+    let cur = Date.UTC(+van.slice(0, 4), +van.slice(5, 7) - 1, +van.slice(8, 10));
+    const eind = Date.UTC(+tot.slice(0, 4), +tot.slice(5, 7) - 1, +tot.slice(8, 10));
+    const vandaag = _agToday();
+    let g = 0;
+    while (cur <= eind && g < 400) {
+      const dt = new Date(cur); const k = _agYmd(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
+      if (k >= vandaag) { if (close) a.staged.dicht.add(k); else a.staged.dicht.delete(k); }
+      cur += 86400000; g += 1;
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsAgSave = async function () {
+    const a = _live.agenda; if (!a || !a.staged || a.saving) return;
+    a.saving = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      const body = { max_per_dag: Number(a.staged.max_per_dag) || 0, gesloten_dagen: [...a.staged.dicht].sort(), gesloten_ranges: [] };
+      const j = await window.KV.authedJson('/api/agenda-beschikbaarheid-set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      a.staged = { max_per_dag: Number(j.max_per_dag) || 0, dicht: _agExpand(j) };
+      a.saved = _agSig(a.staged);
+      _lsInbToast('Agenda-instellingen opgeslagen.', 'ok');
+    } catch (e) {
+      _lsInbToast((e && e.status === 403) ? 'Geen rechten om de agenda te wijzigen (leads.update).' : ('Opslaan mislukt: ' + (e?.message || 'onbekend')), 'warn');
+    }
+    a.saving = false; if (window.DFO?.render) window.DFO.render();
+  };
+  function _agKalenderHtml(a) {
+    const y = a.viewY, m = a.viewM;
+    const maandKey = y + '-' + String(m + 1).padStart(2, '0');
+    const telling = (a.telling && a.telling[maandKey]) || null; // null = geen tellers
+    const mx = Number(a.staged.max_per_dag) || 0;
+    const vandaag = _agToday();
+    const first = new Date(Date.UTC(y, m, 1));
+    const startOffset = (first.getUTCDay() + 6) % 7; // ma = 0
+    const dim = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const cell = 'border:1px solid var(--border);border-radius:11px;padding:7px 8px;display:flex;flex-direction:column;min-height:62px;position:relative';
+    let cells = '';
+    for (let i = 0; i < startOffset; i += 1) cells += '<div></div>';
+    for (let d = 1; d <= dim; d += 1) {
+      const ds = _agYmd(y, m, d);
+      const dow = new Date(Date.UTC(y, m, d)).getUTCDay();
+      const weekend = (dow === 0 || dow === 6);
+      const past = ds < vandaag;
+      const cnt = telling ? (telling[ds] || 0) : null;
+      const dicht = a.staged.dicht.has(ds);
+      const vol = !dicht && mx > 0 && cnt != null && cnt >= mx;
+      // teller-tekst: alleen als er een telling is.
+      const tellerTxt = cnt == null ? '' : (mx > 0 ? (cnt + '/' + mx) : String(cnt));
+      let bg = 'var(--surface)', tellerKleur = 'var(--emerald, #10B981)', nKleur = 'var(--text)';
+      if (past) { bg = 'var(--surface-2)'; tellerKleur = 'var(--text-3)'; nKleur = 'var(--text-3)'; }
+      else if (dicht) { bg = 'var(--rose-soft)'; tellerKleur = 'var(--rose)'; nKleur = 'var(--rose)'; }
+      else if (vol) { bg = 'var(--amber-soft)'; tellerKleur = 'var(--amber)'; }
+      const dim2 = (weekend && !dicht && !vol) ? 'opacity:.72;' : '';
+      const klik = past ? '' : `onclick="window._lsAgToggle('${ds}')" style="cursor:pointer;"`;
+      const lock = dicht ? '<span style="position:absolute;top:5px;right:7px;font-size:11px;color:var(--rose)">&#128274;</span>' : '';
+      const teller = tellerTxt ? `<div style="margin-top:auto;font-size:11px;font-weight:600;color:${tellerKleur}">${tellerTxt}</div>` : '<div style="margin-top:auto"></div>';
+      cells += `<div class="ag-day" ${klik} title="${esc(ds)}${past ? ' (verleden)' : dicht ? ' - dichtgezet' : vol ? ' - vol' : ''}" style="${cell};background:${bg};${dim2}${past ? 'cursor:default;' : ''}">
+        ${lock}<div style="font-size:14px;font-weight:700;color:${nKleur}">${d}</div>${teller}
+      </div>`;
+    }
+    const dowKop = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<span style="text-align:center;font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">${x}</span>`).join('');
+    const navBtn = (richting, teken) => `<button onclick="window._lsAgNav(${richting})" style="width:34px;height:34px;border:1px solid var(--border);background:var(--surface);border-radius:9px;cursor:pointer;color:var(--text-2);font-size:15px">${teken}</button>`;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:15.5px;font-weight:700">${_AG_MND[m]} ${y}</div>
+        <div style="display:flex;gap:6px">${navBtn(-1, '&lsaquo;')}${navBtn(1, '&rsaquo;')}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-bottom:7px">${dowKop}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px">${cells}</div>
+      ${telling ? '' : '<div style="font-size:11px;color:var(--text-3);margin-top:8px">Geboekt-aantallen konden niet geladen worden. De kalender werkt wel; alleen de tellers ontbreken.</div>'}`;
+  }
+  function agendaView() {
+    const a = _agState();
+    if (!a.cfgFetched && !a.cfgLoading && !a.cfgErr) queueMicrotask(() => fetchAgendaCfg(false));
+    if (a.cfgErr) return `<div style="max-width:720px"><div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12.5px">${esc(a.cfgErr)} <button class="btn btn-ghost btn-sm" onclick="window._lsAgRetry()">Opnieuw</button></div></div>`;
+    if (!a.staged) return `<div style="max-width:720px;color:var(--text-3);font-size:13px;padding:14px">Agenda-instellingen laden…</div>`;
+    const maandKey = (a.viewY) + '-' + String((a.viewM || 0) + 1).padStart(2, '0');
+    if (!a.telling || !(maandKey in (a.telling || {}))) queueMicrotask(() => fetchAgendaTelling(maandKey));
+    const dirty = _agSig(a.staged) !== a.saved;
+    const card = (inner, titel, sub) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:18px 20px;margin-bottom:13px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--brand,#0A7490);margin-bottom:10px">${titel}</div>${sub || ''}${inner}</div>`;
+    const veld = 'border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:16px;color:var(--text);background:var(--surface)';
+    // Max per dag (stepper)
+    const maxBlok = card(
+      `<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px"><b style="font-size:14.5px;display:block">Max. aantal calls per dag</b><span style="font-size:12.5px;color:var(--text-3)">Zodra een dag dit aantal bereikt, is er geen slot meer boekbaar. 0 = geen limiet.</span></div>
+        <div style="display:flex;align-items:center;border:1.5px solid var(--border);border-radius:11px;overflow:hidden">
+          <button onclick="window._lsAgMaxStep(-1)" ${a.saving ? 'disabled' : ''} style="width:38px;height:42px;border:none;background:var(--surface-2);font-size:19px;color:var(--brand,#0A7490);cursor:pointer;font-weight:700">&minus;</button>
+          <input value="${a.staged.max_per_dag || 0}" inputmode="numeric" onchange="window._lsAgMaxInput(this);window._lsAgMaxStep(0)" oninput="window._lsAgMaxInput(this)" style="width:54px;height:42px;border:none;border-left:1px solid var(--border);border-right:1px solid var(--border);text-align:center;font-size:17px;font-weight:700;color:var(--text);background:var(--surface)">
+          <button onclick="window._lsAgMaxStep(1)" ${a.saving ? 'disabled' : ''} style="width:38px;height:42px;border:none;background:var(--surface-2);font-size:19px;color:var(--brand,#0A7490);cursor:pointer;font-weight:700">+</button>
+        </div>
+      </div>`,
+      'Maximum per dag',
+    );
+    // Periode dichtzetten
+    const periodeBlok = card(
+      `<div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div><label style="font-size:12px;font-weight:600;color:var(--text-2);display:block;margin-bottom:5px">Van</label><input type="date" id="ag-van" style="${veld};max-width:160px"></div>
+        <div><label style="font-size:12px;font-weight:600;color:var(--text-2);display:block;margin-bottom:5px">Tot en met</label><input type="date" id="ag-tot" style="${veld};max-width:160px"></div>
+        <button class="btn btn-primary btn-sm" ${a.saving ? 'disabled' : ''} onclick="window._lsAgRange(true)" style="color:#fff;font-size:13px;padding:10px 14px">Periode dichtzetten</button>
+        <button class="btn btn-ghost btn-sm" ${a.saving ? 'disabled' : ''} onclick="window._lsAgRange(false)" style="font-size:13px;padding:10px 14px">Weer openen</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Handig om bijvoorbeeld een hele week dicht te zetten, zodat boekingen naar de week erna gaan. (Dit stage je; klik daarna op Opslaan.)</div>`,
+      'Periode dichtzetten',
+    );
+    // Kalender
+    const legenda = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;font-size:12px;color:var(--text-2)">
+      <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:4px;background:var(--surface);border:1px solid var(--emerald,#10B981)"></i> Open</span>
+      <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:4px;background:var(--amber-soft);border:1px solid var(--amber)"></i> Vol (limiet bereikt)</span>
+      <span style="display:flex;align-items:center;gap:6px"><i style="width:12px;height:12px;border-radius:4px;background:var(--rose-soft);border:1px solid var(--rose)"></i> Dichtgezet</span>
+    </div>`;
+    const kalBlok = card(
+      _agKalenderHtml(a) + legenda + `<div style="font-size:11.5px;color:var(--text-3);margin-top:10px">Klik op een dag om 'm dicht of weer open te zetten. Het getal toont de geboekte calls t.o.v. het maximum. Verleden dagen zijn niet aanpasbaar.</div>`,
+      'Dagen dichtzetten',
+    );
+    const opslaan = `<div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:4px">
+      ${dirty ? '<span style="font-size:12px;color:var(--amber)">Niet-opgeslagen wijzigingen</span>' : ''}
+      <button class="btn btn-primary" ${a.saving || !dirty ? 'disabled' : ''} onclick="window._lsAgSave()" style="font-size:14px;padding:11px 18px;color:#fff">${a.saving ? 'Opslaan…' : 'Instellingen opslaan'}</button>
+    </div>`;
+    const uitleg = `<div style="font-size:11.5px;color:var(--text-3);margin-top:14px">Geldt voor de publieke opstartsessie-funnel (vrije slots + boeken). Handmatig boeken in het CRM kan dit bewust overschrijven.</div>`;
+    return `<div style="max-width:720px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:2px">Agenda beheren</div>
+      <div style="color:var(--text-3);font-size:13px;margin-bottom:16px">Bepaal het maximum aantal calls per dag en zet dagen dicht voor nieuwe boekingen. Eén gezamenlijke opstartsessie-agenda.</div>
+      ${maxBlok}${periodeBlok}${kalBlok}${opslaan}${uitleg}
+    </div>`;
+  }
+  window._lsAgRetry = function () { const a = _live.agenda; if (a) { a.cfgFetched = false; a.cfgErr = null; } fetchAgendaCfg(true); };
+
+  window.DFO.VIEWS['leadsonderhoud/Agenda']            = agendaView;
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Meta-koppeling']    = metaKoppelingView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
