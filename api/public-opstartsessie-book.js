@@ -45,6 +45,8 @@ import { verwerkLeadMeta } from './_lib/crm-lead-meta.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { isScanBron, scanGhlTitel, leesScanAssessor, maakScanConcept } from './_lib/strategiescan-boeking.js';
 import { isTrainingBron } from './_lib/training-bron.js';
+import { leesSettings, telOpDag, isDicht } from './_lib/agenda-beschikbaarheid.js';
+import { nlDateString } from './_lib/nl-period.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE  = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -216,6 +218,31 @@ export default async function handler(req, res) {
   const isTraining = isTrainingBron(source);
   const scanAssessor = (isScan || isTraining) ? await leesScanAssessor() : null;
   if (scanAssessor?.id) leadRow.owner_id = scanAssessor.id;
+
+  // CHOKEPOINT (b): agenda-beschikbaarheid: laatste check vlak vóór boeken.
+  //   Hard afdwingen op de publieke funnel: is de dag van scheduledAt
+  //   dichtgezet OF zit 'ie op/over de daglimiet, dan 409 en NIET boeken.
+  //   createAppointmentForLead zelf blijft ongemoeid (universele schrijver,
+  //   8 callers): de check zit hier, in het opstartsessie-pad.
+  //   FAIL-OPEN: faalt het lezen van de settings of de telling, dan NOOIT
+  //   blokkeren (een settings-glitch mag niet alle boekingen stilleggen).
+  //   RACE (v1, bewust near-enough): dit is een tel-dan-boek-check met een
+  //   klein racevenster: twee gelijktijdige boekingen op een dag met
+  //   count = max-1 kunnen beide slagen (→ max+1). Later te verharden naar
+  //   een atomaire count+insert (RPC/advisory-lock op de dag-sleutel) zonder
+  //   createAppointmentForLead of de andere callers te raken.
+  try {
+    const dag = nlDateString(new Date(scheduledAt));
+    const { max_per_dag, gesloten_dagen } = await leesSettings();
+    if (isDicht(dag, gesloten_dagen)) {
+      return res.status(409).json({ code: 'DAG_GESLOTEN', error: 'Deze dag is gesloten voor opstartsessies. Kies een andere dag.' });
+    }
+    if (max_per_dag > 0 && (await telOpDag(dag)) >= max_per_dag) {
+      return res.status(409).json({ code: 'DAG_VOL', error: 'Deze dag zit vol. Kies een andere dag.' });
+    }
+  } catch (e) {
+    console.warn('[public-opstartsessie-book] beschikbaarheid-check overgeslagen (fail-open):', e?.message || e);
+  }
 
   // 3) Afspraak aanmaken (GHL contact-upsert + appointment + follow_up-row +
   //    booking_source + fail-soft GHL-tag).

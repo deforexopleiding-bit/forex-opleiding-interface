@@ -30,6 +30,7 @@
 // 0 incasso-writes. Read-only richting GHL, GEEN DB-writes.
 
 import fetch from 'node-fetch';
+import { leesSettings, telPerDag, isDicht } from './_lib/agenda-beschikbaarheid.js';
 
 const GHL_BASE    = 'https://services.leadconnectorhq.com';
 const GHL_VERSION = '2021-04-15';
@@ -192,7 +193,29 @@ export default async function handler(req, res) {
 
   try {
     const raw = await fetchGhlSlots({ calendarId, token, startMs, endMs });
-    const slots = normaliseer(raw);
+    let slots = normaliseer(raw);
+
+    // CHOKEPOINT (a): agenda-beschikbaarheid: dichte en volle dagen verbergen.
+    //   Dichte dagen (losse datums + ranges) en dagen die op/over de daglimiet
+    //   zitten tonen we niet. FAIL-OPEN: faalt het lezen van de settings of de
+    //   telling, dan filteren we niet (een glitch mag de agenda niet dichtzetten).
+    try {
+      const { max_per_dag, gesloten_dagen } = await leesSettings();
+      const capAan = max_per_dag > 0;
+      if (capAan || gesloten_dagen.size) {
+        const perDag = capAan
+          ? await telPerDag({ startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() })
+          : new Map();
+        slots = slots.filter((d) => {
+          if (isDicht(d.date, gesloten_dagen)) return false;
+          if (capAan && (perDag.get(d.date) || 0) >= max_per_dag) return false;
+          return true;
+        });
+      }
+    } catch (e) {
+      console.warn('[public-opstartsessie-free-slots] beschikbaarheid-filter overgeslagen (fail-open):', e?.message || e);
+    }
+
     // v=3 diagnose-log: ALTIJD loggen wat het effectieve venster is dat GHL
     // teruggeeft — zowel bij lege als niet-lege response. Zo zie je in de
     // Vercel-logs of GHL zelf minder ver vooruit aanbiedt dan wij vragen
