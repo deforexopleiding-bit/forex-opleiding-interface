@@ -246,7 +246,17 @@
     if (window.DFO?.render) window.DFO.render();
   };
 
+  // 2026-11-02: een getekende sale die geannuleerd werd (deal gearchiveerd /
+  // afgewezen na tekenen / alle abonnementen gestopt) blijft zichtbaar met
+  // een rood label — zie annuleringVanDeal in api/_lib/setter-calls.js.
+  function _geannuleerdLabel(g) {
+    if (!g) return '';
+    const titel = (g.label || 'Geannuleerd') + (g.op ? ' op ' + fmtDate(g.op) : '');
+    return `<span title="${esc(titel)}" style="display:inline-block;padding:1px 7px;border-radius:999px;background:var(--rose-soft, rgba(225,29,72,.1));color:var(--rose);font-size:11px;font-weight:600;white-space:nowrap">✕ Geannuleerd</span>`;
+  }
+
   function _offerteChip(s) {
+    if (s.geannuleerd) return `${_geannuleerdLabel(s.geannuleerd)} <span style="font-size:11px;color:var(--text-3)">${esc(s.geannuleerd.label || '')}</span>`;
     if (!s.in_afwachting) return '<span style="color:var(--emerald);font-weight:600">✓ geaccepteerd</span>';
     return `<span style="color:var(--amber);font-weight:600">◔ ${esc(s.offerte_status_label || 'in afwachting')}</span>`;
   }
@@ -299,7 +309,8 @@
       </tr>`).join('');
     const ontvangenBlok = heeftOntvangen ? _ontvangenTabel(s) : '';
     return `<div style="padding:14px 16px;background:var(--surface-2, var(--surface));border-top:1px dashed var(--border)">
-      ${s.in_afwachting ? `<div style="margin-bottom:10px;font-size:12px;color:var(--amber)">Offerte is nog niet geaccepteerd — commissie ontstaat pas na acceptatie én betaling.</div>` : ''}
+      ${s.geannuleerd ? `<div style="margin-bottom:10px;font-size:12px;color:var(--rose)">${_geannuleerdLabel(s.geannuleerd)} ${esc(s.geannuleerd.label || '')}${s.geannuleerd.op ? ' op ' + esc(fmtDate(s.geannuleerd.op)) : ''} — telt niet in de forecast; de nog niet ontvangen commissie staat bij "Vervallen door annulering".</div>` : ''}
+      ${!s.geannuleerd && s.in_afwachting ? `<div style="margin-bottom:10px;font-size:12px;color:var(--amber)">Offerte is nog niet geaccepteerd — commissie ontstaat pas na acceptatie én betaling.</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:14px 22px;margin-bottom:12px">${info}</div>
       <div style="font-size:12.5px;font-weight:600;color:var(--text-1);margin:6px 0">Gepland betaalschema · jouw ${esc(pct.toFixed(2).replace('.', ','))}% per betaling</div>
       <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse">
@@ -386,14 +397,16 @@
       const waarschuwing = s.plan?.aansluiting?.status === 'mismatch' || s.plan?.aansluiting?.status === 'geen_plan'
         ? ' <span title="Betaalplan sluit niet aan op het offertebedrag" style="color:var(--rose)">⚠</span>' : '';
       return `<tr style="border-bottom:1px solid var(--border);cursor:pointer${open ? ';background:var(--surface-2, transparent)' : ''}" onclick="window.__spToggleSale('${esc(s.deal_id)}')">
-        <td style="padding:7px 10px;font-size:12px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(s.customer || '—')}${waarschuwing}</td>
+        <td style="padding:7px 10px;font-size:12px"><span style="color:var(--text-3);margin-right:6px">${open ? '▾' : '▸'}</span>${esc(s.customer || '—')}${waarschuwing}${s.geannuleerd ? ' ' + _geannuleerdLabel(s.geannuleerd) : ''}</td>
         <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.bedrag))}</td>
         <td style="padding:7px 10px;font-size:12px">${esc(s.traject || '—')}</td>
         <td style="padding:7px 10px;font-size:12px;color:var(--text-2)">${esc(fmtDate(s.eerste_termijn))}</td>
         <td style="padding:7px 10px;font-size:12px;text-align:center">${esc(String(s.aantal_termijnen || 0))}</td>
         <td style="padding:7px 10px;font-size:11.5px">${_offerteChip(s)}</td>
         <td style="padding:7px 10px;font-size:12px;${_num}">${esc(eur(s.betaald))}</td>
-        <td style="padding:7px 10px;font-size:12px;${_num};font-weight:600;color:var(--brand)">${esc(eur(s.verwachte_commissie))}</td>
+        <td style="padding:7px 10px;font-size:12px;${_num};font-weight:600;color:var(--brand)">${s.geannuleerd
+          ? `<s style="color:var(--text-3);font-weight:400">${esc(eur(s.verwachte_commissie))}</s> <span style="font-size:11px;color:var(--rose);font-weight:600">vervallen</span>`
+          : esc(eur(s.verwachte_commissie))}</td>
       </tr>${open ? `<tr><td colspan="${COLS}" style="padding:0">${_saleDetail(s)}</td></tr>` : ''}`;
     }).join('');
     return `<div style="margin-bottom:20px">
@@ -695,7 +708,9 @@
     let sale = '';
     if (c.sale && c.sale.gekoppeld) {
       sale = `<span style="font-size:12px;font-weight:600;color:var(--text-1);${_num}">${esc(eur(c.sale.bedrag))} <span style="font-weight:400;color:var(--text-3)">incl. btw</span></span>`
-        + (c.sale.in_afwachting ? ` <span style="font-size:11.5px;color:var(--amber)">offerte ${esc(c.sale.offerte_status_label || 'in afwachting')}</span>` : '');
+        + (c.sale.geannuleerd
+          ? ` ${_geannuleerdLabel(c.sale.geannuleerd)} <span style="font-size:11.5px;color:var(--text-3)">${esc(c.sale.geannuleerd.label || '')}</span>`
+          : (c.sale.in_afwachting ? ` <span style="font-size:11.5px;color:var(--amber)">offerte ${esc(c.sale.offerte_status_label || 'in afwachting')}</span>` : ''));
     } else if (c.sale) {
       sale = `<span style="font-size:11.5px;color:var(--text-3)">bedrag onbekend (geen deal gevonden)</span>`;
     }

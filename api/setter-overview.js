@@ -7,8 +7,9 @@
 //   - deze_maand_te_ontvangen — sum(amount) WHERE status='vrijgegeven'
 //   - forecast_nog_te_verwachten — (deal.total_amount − ontvangen) × pct over
 //                                  GEACCEPTEERDE sales (incl. BTW)
-//   - vervallen_door_annulering — idem, deals waarvan alle abonnementen zijn
-//                                  geannuleerd
+//   - vervallen_door_annulering — idem, GEANNULEERDE sales: getekend en daarna
+//                                  gearchiveerd/afgewezen, of alle abonnementen
+//                                  gestopt (sale.geannuleerd, sinds 2026-11-02)
 //   (+ in_afwachting_offerte — idem, offerte nog niet geaccepteerd)
 // Plus ledger-regels en de saleslijst met per sale het betaalplan
 // (_lib/setter-sale-plan.js) voor het detail.
@@ -27,6 +28,7 @@ import { parseSetterPeriod } from './_lib/setter-period.js';
 import { betaaldBedrag } from './_lib/factuur-betaald.js';
 import { isUitgeslotenDeal, bouwSaleRegel, klantNaam, SETTER_DEAL_COLS } from './_lib/setter-sale-plan.js';
 import { laadCommissieData, koppelFacturenAanDeals } from './_lib/setter-commissie-core.js';
+import { annuleringVanDeal, isGetekendeDeal } from './_lib/setter-calls.js';
 
 const BRON_LABEL = { deal: 'factuur', abonnement: 'termijn (abonnement)', reserveringsfee: 'reserveringsfee' };
 
@@ -100,14 +102,17 @@ export default async function handler(req, res) {
     // price_includes_vat=true). Vroeger: Σ facturen óf Σ abonnement×termijnen
     // (EXCL. BTW) → een sale zonder abonnement (offerte geaccepteerd, wizard
     // nog niet gedraaid) stond op € 0. Gearchiveerde deals en afgewezen
-    // offertes vallen eruit (isUitgeslotenDeal).
+    // offertes vallen eruit (isUitgeslotenDeal) — BEHALVE als ze getekend
+    // waren: dan is de sale geannuleerd en blijft hij staan met
+    // `geannuleerd` (2026-11-02, annuleringVanDeal in _lib/setter-calls.js),
+    // buiten de forecast en meegeteld in "vervallen door annulering".
     const { data: dealsRaw, error: dealsErr } = await supabaseAdmin
       .from('deals')
       .select(SETTER_DEAL_COLS)
       .eq('setter_user_id', targetSetter)
       .order('created_at', { ascending: false });
     if (dealsErr) throw new Error('deals: ' + dealsErr.message);
-    const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d));
+    const deals = (dealsRaw || []).filter((d) => !isUitgeslotenDeal(d) || isGetekendeDeal(d));
     const dealIds = deals.map((d) => d.id);
 
     const ontvangenByDeal = {};
@@ -195,29 +200,29 @@ export default async function handler(req, res) {
     // ── Sales-lijst — per deal: plan (aanbetaling/fee/termijnen), offerte-
     //    status, ontvangen, verwachte commissie. Het detail (klik op een rij)
     //    rendert uit sale.plan; ontvangen_regels vult fase B (facturen).
-    const sales = deals.map((d) => bouwSaleRegel({
+    const sales = deals.map((d) => ({ ...bouwSaleRegel({
       deal: d,
       klant: d.customer_id ? custRows[d.customer_id] : null,
       traject: d.traject_variant_id ? (trajectNaam[d.traject_variant_id] || null) : null,
       pct,
       ontvangen: ontvangenByDeal[d.id] || 0,
       ontvangenRegels: ontvangenRegelsByDeal[d.id] || [],
-    }));
+    }), geannuleerd: annuleringVanDeal(d, subsByDeal.get(d.id) || []) }));
 
     // ── Forecast / vervallen / in afwachting ─────────────────────────────
     //   forecast  = geaccepteerde sales: (totaal − ontvangen) × pct
     //   vervallen = idem, maar alle abonnementen van de deal zijn geannuleerd
     //   in_afwachting = offerte nog niet geaccepteerd (bv. alleen 'verstuurd')
-    const CANCELLED = new Set(['cancelled', 'deactivated', 'geannuleerd']);
+    //   geannuleerd (getekend, daarna gearchiveerd/afgewezen of alle
+    //   abonnementen gestopt) → altijd vervallen, nooit forecast.
     let forecast = 0;
     let vervallen = 0;
     let inAfwachting = 0;
     for (const s of sales) {
       const rest = round2(Math.max(0, s.bedrag - s.betaald) * pct / 100);
+      if (s.geannuleerd) { vervallen += rest; continue; }
       if (s.in_afwachting) { inAfwachting += rest; continue; }
-      const subs = subsByDeal.get(s.deal_id) || [];
-      const alleGeannuleerd = subs.length > 0 && subs.every((x) => CANCELLED.has(String(x.status || '').toLowerCase()));
-      if (alleGeannuleerd) vervallen += rest; else forecast += rest;
+      forecast += rest;
     }
 
     return res.status(200).json({

@@ -160,7 +160,9 @@ test('een setter krijgt geen setterkeuze', async () => {
 });
 
 test('versies opgehoogd en het dashboard verwijst naar de tab', () => {
-  assert.match(INDEX, /views\/setter-payout-v2\.js\?v=10"/);
+  // Minstens 10 (latere wijzigingen hogen hem verder op; 11 = annuleringslabel).
+  const spV = Number((INDEX.match(/views\/setter-payout-v2\.js\?v=(\d+)"/) || [])[1]);
+  assert.ok(spV >= 10, 'setter-payout-v2.js?v=' + spV);
   // Minstens 35 (latere wijzigingen hogen hem verder op).
   const dashV = Number((INDEX.match(/views\/dashboard-v2\.js\?v=(\d+)"/) || [])[1]);
   assert.ok(dashV >= 35, 'dashboard-v2.js?v=' + dashV);
