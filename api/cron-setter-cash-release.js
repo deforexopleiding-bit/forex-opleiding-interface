@@ -59,6 +59,9 @@ export default async function handler(req, res) {
       te_boeken_regels: plan.reduce((s, p) => s + p.mutaties.length, 0),
       te_boeken_bedrag: Math.round(plan.reduce((s, p) => s + p.te_boeken, 0) * 100) / 100,
       overgeslagen: plan.reduce((s, p) => s + p.overgeslagen.length, 0),
+      // Facturen zonder deal/abonnement die de terugval NIET koppelde (meerdere
+      // getekende deals bij de klant, of factuur ouder dan de deal) — te controleren.
+      te_controleren: [...new Map(plan.flatMap((p) => p.te_controleren || []).map((t) => [t.invoice_id, t])).values()],
       created: 0, skipped: 0, errors: [],
       per_setter: plan.map((p) => ({
         setter_user_id: p.setter_user_id,
@@ -71,6 +74,8 @@ export default async function handler(req, res) {
           idempotency_key: m.idempotency_key, note: m.note,
         })),
         overgeslagen: p.overgeslagen.map((o) => ({ invoice_id: o.invoice_id, factuurnummer: o.factuurnummer, ontvangen: o.ontvangen, reden: o.reden })),
+        gekoppeld_via_terugval: p.facturen.filter((f) => f.bron === 'enige_deal_klant').map((f) => ({ invoice_id: f.invoice_id, factuurnummer: f.factuurnummer, deal_id: f.deal_id, ontvangen: f.ontvangen, reden: f.reden })),
+        te_controleren: p.te_controleren || [],
       })),
     };
 
@@ -84,6 +89,7 @@ export default async function handler(req, res) {
       summary.errors.push(...r.errors.map((e) => ({ setter_user_id: p.setter_user_id, ...e })));
     }
     if (summary.errors.length) console.error('[cron-setter-cash-release] fouten:', summary.errors.slice(0, 3));
+    if (summary.te_controleren.length) console.warn('[cron-setter-cash-release] te controleren (niet gekoppeld):', summary.te_controleren.slice(0, 3).map((t) => `${t.factuurnummer || t.invoice_id}: ${t.reden}`));
     return res.status(200).json(summary);
   } catch (e) {
     console.error('[cron-setter-cash-release]', e?.message || e);
