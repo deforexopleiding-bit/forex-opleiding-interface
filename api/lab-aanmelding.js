@@ -231,7 +231,8 @@ export default async function handler(req, res) {
         externalId: leadId || aanmeldingId, fbc: d.fbc, fbp: d.fbp, ip, userAgent,
       }),
       bronUrl: d.landingspagina,
-      toestemming: advToestemming,
+      // Er is een eventId, dus de poort keurde dit goed (toestemming na de testtool).
+      toestemming: true,
       customData: { content_name: 'The Lab', content_category: LAB_SLUG, funnel: d.funnel || LAB_SLUG },
       testCode: effectieveTestCode(metaSettings),
     });

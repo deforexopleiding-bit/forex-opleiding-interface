@@ -137,10 +137,13 @@ export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, u
   const basis = { aanmelding_id: aanmeldingId, event_name: eventName, event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!LAB_EVENTS.includes(eventName) || !eventId) return { ok: false, status: 'ongeldig' };
   // Geen toestemming voor advertentiecookies → niets naar Meta (2026-10-25),
-  // na de override van de testtool (_lib/meta-testtool.js).
+  // na de override van de testtool (_lib/meta-testtool.js). Hier is geen e-mail
+  // bekend: de override geldt alleen SITEBREED; bij 'alleen testadressen' rekenen
+  // de callers al met de juiste toestemming (poort / leadHeeftToestemming).
   const tt = await haalTesttool();
-  if (effectieveToestemming(tt, toestemming) !== true) {
-    const nooit = tt.modus === 'nooit';
+  const ttHier = tt.alleenTestadressen ? { ...tt, modus: 'normaal' } : tt;
+  if (effectieveToestemming(ttHier, toestemming) !== true) {
+    const nooit = ttHier.modus === 'nooit';
     await log({ ...basis, status: 'skipped', skip_reason: nooit ? 'testtool: nooit naar Meta' : 'geen_toestemming' });
     return { ok: false, status: nooit ? 'testtool_nooit' : 'geen_toestemming' };
   }
