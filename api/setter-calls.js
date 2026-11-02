@@ -39,7 +39,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { MAX_KETEN_DIEPTE } from './_lib/setter-keten.js';
 import { SETTER_DEAL_COLS, isUitgeslotenDeal } from './_lib/setter-sale-plan.js';
 import { leesCallRapportageStart } from './_lib/call-rapportage-start.js';
-import { bouwCallsOverzicht } from './_lib/setter-calls.js';
+import { bouwCallsOverzicht, isGetekendeDeal } from './_lib/setter-calls.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,14 +93,20 @@ export async function laadKetenRijen(db, setterId) {
   return [...perId.values()];
 }
 
-/** Deals van de setter met de klant erbij (alleen e-mail en telefoon). */
+/**
+ * Deals van de setter met de klant erbij (alleen e-mail en telefoon) en de
+ * status van hun abonnementen. Gearchiveerde/afgewezen deals blijven erin als
+ * ze GETEKEND waren — dan is de sale geannuleerd en toont het scherm dat
+ * (annuleringVanDeal in _lib/setter-calls.js). Nooit getekend → weg, zoals
+ * voorheen.
+ */
 export async function laadDealsMetKlant(db, setterId) {
   const { data: deals, error } = await db
     .from('deals')
     .select(SETTER_DEAL_COLS)
     .eq('setter_user_id', setterId);
   if (error) throw new Error('deals: ' + error.message);
-  const tellend = (deals || []).filter((d) => !isUitgeslotenDeal(d));
+  const tellend = (deals || []).filter((d) => !isUitgeslotenDeal(d) || isGetekendeDeal(d));
   const custIds = [...new Set(tellend.map((d) => d.customer_id).filter(Boolean))];
   const klantPerId = new Map();
   for (const deel of chunks(custIds, IN_CHUNK)) {
@@ -109,7 +115,19 @@ export async function laadDealsMetKlant(db, setterId) {
     if (cErr) throw new Error('customers: ' + cErr.message);
     for (const k of (klanten || [])) klantPerId.set(k.id, k);
   }
-  return tellend.map((d) => ({ deal: d, klant: klantPerId.get(d.customer_id) || null }));
+  // Abonnementen (alleen status): "abonnement gestopt" = geannuleerd.
+  // Fail-soft: zonder deze data geen annuleringslabel, de rest blijft.
+  const subsPerDeal = new Map();
+  for (const deel of chunks(tellend.map((d) => d.id), IN_CHUNK)) {
+    const { data: subs, error: sErr } = await db
+      .from('subscriptions').select('deal_id, status').in('deal_id', deel);
+    if (sErr) { console.warn('[setter-calls] abonnementen lezen faalde (soft):', sErr.message); break; }
+    for (const s of (subs || [])) {
+      if (!subsPerDeal.has(s.deal_id)) subsPerDeal.set(s.deal_id, []);
+      subsPerDeal.get(s.deal_id).push(s);
+    }
+  }
+  return tellend.map((d) => ({ deal: d, klant: klantPerId.get(d.customer_id) || null, subs: subsPerDeal.get(d.id) || [] }));
 }
 
 export default async function handler(req, res) {

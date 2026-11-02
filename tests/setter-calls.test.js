@@ -297,7 +297,7 @@ test('sale zonder koppelbare deal: gekoppeld=false, geen verzonnen bedrag', () =
   assert.equal(matchSaleDeal(zonderGegevens, [{ deal: deal(), klant: { email: '', phone: '' } }]), null);
 });
 
-test('sale: gearchiveerde en afgewezen deals tellen niet; bij meerdere wint de deal het dichtst bij de call', () => {
+test('sale: actieve deals eerst (gearchiveerd/afgewezen tellen dan niet); bij meerdere wint de deal het dichtst bij de call', () => {
   const a = appt({ uitkomst: 'sale', status: 'completed', lead_email: 'x@x.nl', scheduled_at: '2026-10-05T12:00:00Z' });
   const klant = { email: 'x@x.nl', phone: null };
   const archief = deal({ archived_at: '2026-10-06T00:00:00Z', created_at: '2026-10-05T12:05:00Z' });
@@ -306,7 +306,11 @@ test('sale: gearchiveerde en afgewezen deals tellen niet; bij meerdere wint de d
   const dichtbij = deal({ created_at: '2026-10-05T15:00:00Z' });
   const r = matchSaleDeal(a, [archief, afgewezen, ver, dichtbij].map((d) => ({ deal: d, klant })));
   assert.equal(r.id, dichtbij.id);
-  assert.equal(matchSaleDeal(a, [archief, afgewezen].map((d) => ({ deal: d, klant }))), null);
+  // Sinds 2026-11-02: zonder actieve deal wint de GETEKENDE gearchiveerde deal
+  // (de sale is geannuleerd, zie tests/setter-annulering.test.js). De afgewezen
+  // offerte zonder acceptatiedatum was nooit getekend en telt nog steeds niet.
+  assert.equal(matchSaleDeal(a, [archief, afgewezen].map((d) => ({ deal: d, klant }))).id, archief.id);
+  assert.equal(matchSaleDeal(a, [afgewezen].map((d) => ({ deal: d, klant }))), null);
 });
 
 test('alleen een sale krijgt een sale-blok', () => {

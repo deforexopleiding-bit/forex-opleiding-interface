@@ -70,6 +70,46 @@ export function telefoon9(v) {
 
 const mailNorm = (v) => String(v || '').trim().toLowerCase();
 
+// ── ANNULERING ZICHTBAAR (2026-11-02) ──────────────────────────────────────
+// Een getekende sale die daarna geannuleerd werd, verdween stil uit het
+// setter-scherm (gearchiveerde/afgewezen deals werden weggefilterd) of bleef
+// zonder melding staan (abonnement gestopt). Nu: de deal blijft zichtbaar met
+// het label "Geannuleerd" en de reden. Alleen voor deals die GETEKEND waren:
+// een concept of verstuurde offerte die gearchiveerd werd, was nooit een sale
+// en blijft — zoals voorheen — weg. De commissieberekening verandert niet.
+// Zelfde regel voor "Mijn calls" (api/setter-calls.js) en het Overzicht
+// (api/setter-overview.js).
+export const ABONNEMENT_GESTOPT = new Set(['cancelled', 'deactivated', 'geannuleerd']);
+const GETEKEND = new Set(['accepted', 'signed']);
+export const ANNULERING_LABEL = Object.freeze({
+  gearchiveerd: 'Deal gearchiveerd',
+  afgewezen: 'Offerte afgewezen na tekenen',
+  abonnement_gestopt: 'Abonnement gestopt',
+});
+
+/** Was deze deal getekend (status accepted/signed of een acceptatiedatum)? */
+export function isGetekendeDeal(deal) {
+  if (!deal) return false;
+  return GETEKEND.has(String(deal.tl_quotation_status || '').toLowerCase()) || !!deal.tl_quotation_accepted_at;
+}
+
+/**
+ * Is deze getekende sale geannuleerd? PURE.
+ * @param {object} deal
+ * @param {Array<{status:string}>} subs  abonnementen van de deal
+ * @returns {?{ reden: 'gearchiveerd'|'afgewezen'|'abonnement_gestopt', label: string, op: ?string }}
+ *   null = niet geannuleerd (of nooit getekend).
+ */
+export function annuleringVanDeal(deal, subs = []) {
+  if (!isGetekendeDeal(deal)) return null;
+  const maak = (reden, op = null) => ({ reden, label: ANNULERING_LABEL[reden], op });
+  if (deal.archived_at) return maak('gearchiveerd', String(deal.archived_at).slice(0, 10));
+  if (String(deal.tl_quotation_status || '').toLowerCase() === 'declined') return maak('afgewezen');
+  const lijst = (Array.isArray(subs) ? subs : []).filter(Boolean);
+  if (lijst.length && lijst.every((x) => ABONNEMENT_GESTOPT.has(String(x.status || '').toLowerCase()))) return maak('abonnement_gestopt');
+  return null;
+}
+
 /**
  * Welke rijen zijn van deze setter? Gebruikt setterUitKeten op een kaart van
  * alle meegegeven rijen (haar eigen rijen + de opgehaalde opvolgers).
@@ -95,9 +135,11 @@ export function rijenVanSetter(rijen, setterId) {
 /**
  * Koppel een sale-call aan een deal van de setter. Zelfde sleutel als de
  * setter-attributie in api/sales-deal-create.js: e-mail (hoofdletterongevoelig),
- * anders de laatste 9 cijfers van het telefoonnummer. Alleen deals die in het
- * setter-overzicht meetellen (niet gearchiveerd, niet afgewezen). Meerdere
- * treffers: de deal die het dichtst bij het call-moment is aangemaakt.
+ * anders de laatste 9 cijfers van het telefoonnummer. Eerst de deals die in het
+ * setter-overzicht meetellen (niet gearchiveerd, niet afgewezen); is er geen,
+ * dan een GETEKENDE deal die gearchiveerd/afgewezen werd (de sale is dan
+ * geannuleerd — zie annuleringVanDeal). Meerdere treffers: de deal die het
+ * dichtst bij het call-moment is aangemaakt.
  *
  * @param {object} appt  rij met lead_email, lead_phone, scheduled_at
  * @param {Array<{deal:object, klant:?object}>} dealsMetKlant
@@ -109,20 +151,23 @@ export function matchSaleDeal(appt, dealsMetKlant) {
   const tel = telefoon9(appt.lead_phone);
   if (!mail && !tel) return null;
   const callMs = Date.parse(appt.scheduled_at);
-  let beste = null;
-  let besteAfstand = Infinity;
-  for (const x of (Array.isArray(dealsMetKlant) ? dealsMetKlant : [])) {
-    const deal = x && x.deal;
-    if (!deal || isUitgeslotenDeal(deal)) continue;
-    const k = x.klant || {};
-    const viaMail = mail && mailNorm(k.email) === mail;
-    const viaTel = tel && telefoon9(k.phone) === tel;
-    if (!viaMail && !viaTel) continue;
-    const dealMs = Date.parse(deal.created_at);
-    const afstand = Number.isFinite(callMs) && Number.isFinite(dealMs) ? Math.abs(dealMs - callMs) : Infinity;
-    if (!beste || afstand < besteAfstand) { beste = deal; besteAfstand = afstand; }
-  }
-  return beste;
+  const zoek = (magDeal) => {
+    let beste = null;
+    let besteAfstand = Infinity;
+    for (const x of (Array.isArray(dealsMetKlant) ? dealsMetKlant : [])) {
+      const deal = x && x.deal;
+      if (!deal || !magDeal(deal)) continue;
+      const k = x.klant || {};
+      const viaMail = mail && mailNorm(k.email) === mail;
+      const viaTel = tel && telefoon9(k.phone) === tel;
+      if (!viaMail && !viaTel) continue;
+      const dealMs = Date.parse(deal.created_at);
+      const afstand = Number.isFinite(callMs) && Number.isFinite(dealMs) ? Math.abs(dealMs - callMs) : Infinity;
+      if (!beste || afstand < besteAfstand) { beste = deal; besteAfstand = afstand; }
+    }
+    return beste;
+  };
+  return zoek((d) => !isUitgeslotenDeal(d)) || zoek((d) => isUitgeslotenDeal(d) && isGetekendeDeal(d));
 }
 
 /** Is de call nog niet voorbij (zelfde klok als afspraakStaat: start + duur + 15 min)? */
@@ -167,6 +212,8 @@ export function bouwCallRegel(appt, o) {
     const d = matchSaleDeal(appt, o.dealsMetKlant);
     if (d) {
       const q = quotationStatus(d);
+      const x = (Array.isArray(o.dealsMetKlant) ? o.dealsMetKlant : []).find((y) => y && y.deal === d);
+      const annulering = annuleringVanDeal(d, x && x.subs);
       sale = {
         gekoppeld: true,
         deal_id: d.id,
@@ -174,6 +221,7 @@ export function bouwCallRegel(appt, o) {
         offerte_status: q.key,
         offerte_status_label: q.label,
         in_afwachting: q.pending,
+        ...(annulering ? { geannuleerd: annulering } : {}),
       };
     } else {
       sale = { gekoppeld: false };
