@@ -7,6 +7,12 @@
 // GET ?dashboard=1        → trechter per funnel (webinar-v1/v2 + totaal):
 //                           aanmeldingen → calls → sales → commissie setter
 //                           (fase 3; api/_lib/webinar-dashboard.js)
+// GET ?boekingen=<sessie_id|voor> → { boekingen: [...] } — de afspraken die via de
+//                           QR (/agenda/webinar) zijn ingepland en onder die week
+//                           vallen (koppeling op het BOEKmoment in Brussel, zie
+//                           api/_lib/webinar-boekingen.js). 'voor' = vóór het eerste webinar.
+//                           De gewone GET geeft per sessie `ingepland` + `boekingen`
+//                           (totaal = in de tabel + andere weken + vóór het eerste).
 // GET ?qr=1               → { url, png, svg } — QR van de boekingslink voor de
 //                           webinar (fase 2, 2026-10-12). Karl deelt 'm tijdens
 //                           het webinar; boekingen via die link krijgen
@@ -25,6 +31,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import QRCode from 'qrcode';
 import { haalReeks, zorgVoorSessies, slaSessieOver, nlNaarUtc, MIN } from './_lib/webinar.js';
 import { laadDashboard } from './_lib/webinar-dashboard.js';
+import { laadBoekingen, samenvatting, VOOR_EERSTE } from './_lib/webinar-boekingen.js';
 
 /** De boekingslink achter de QR (booking_sources.slug 'webinar'). */
 export const WEBINAR_BOEKINGSLINK = 'https://deforexopleiding.nl/agenda/webinar';
@@ -105,6 +112,16 @@ export default async function handler(req, res) {
       const reeks = await haalReeks(supabaseAdmin);
       if (!reeks) return res.status(200).json({ reeks: null, sessies: [], migratie_nodig: true });
 
+      const boekSleutel = req.query?.boekingen;
+      if (boekSleutel) {
+        const k = String(boekSleutel);
+        if (k !== VOOR_EERSTE && !UUID_RE.test(k)) return res.status(400).json({ error: 'Ongeldige week' });
+        const { verdeling } = await laadBoekingen(supabaseAdmin, reeks.id);
+        if (k === VOOR_EERSTE) return res.status(200).json({ boekingen: verdeling.voorEerste });
+        if (!verdeling.perSessie[k]) return res.status(404).json({ error: 'Sessie niet gevonden' });
+        return res.status(200).json({ boekingen: verdeling.perSessie[k] });
+      }
+
       const sessieId = req.query?.sessie_id;
       if (sessieId) {
         if (!UUID_RE.test(String(sessieId))) return res.status(400).json({ error: 'Ongeldige sessie_id' });
@@ -125,9 +142,16 @@ export default async function handler(req, res) {
         .eq('reeks_id', reeks.id).gte('starts_at', vanaf).order('starts_at', { ascending: true }).limit(12);
       if (error) throw new Error(error.message);
       const tellingen = await telAanmeldingen((sessies || []).map((s) => s.id));
+      // Ingepland via de QR: fail-soft — lukt het niet, dan blijft de rest staan.
+      let verdeling = null;
+      try { ({ verdeling } = await laadBoekingen(supabaseAdmin, reeks.id)); } catch (e) { console.error('[webinar-admin] boekingen laden:', e?.message || e); }
       return res.status(200).json({
         reeks,
-        sessies: (sessies || []).map((s) => ({ ...s, aantal: tellingen[s.id] || 0 })),
+        sessies: (sessies || []).map((s) => ({
+          ...s, aantal: tellingen[s.id] || 0,
+          ingepland: verdeling ? (verdeling.perSessie[s.id] || []).length : null,
+        })),
+        boekingen: verdeling ? samenvatting(verdeling, (sessies || []).map((s) => s.id)) : null,
       });
     }
 

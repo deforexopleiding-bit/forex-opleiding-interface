@@ -18,6 +18,10 @@
 //   - Fase 2 (2026-10-12): QR-code van de boekingslink /agenda/webinar (gratis
 //     strategie-scan met Dave), groot te tonen en te downloaden als PNG. De
 //     link staat in Leadsonderhoud → Bronnen op setter Karl → zijn 3%.
+//   - 2026-11-02: kolom "Ingepland" + klik op de datumrij → de afspraken die
+//     via de QR (/agenda/webinar) zijn ingepland, per dag van BOEKEN (Brussel);
+//     een dag zonder webinar valt onder het laatste webinar ervoor
+//     (GET /api/webinar-admin?boekingen=<sessie_id|voor>, api/_lib/webinar-boekingen.js).
 // Data: GET/POST /api/webinar-admin (events.event.view / events.event.edit).
 (function () {
   'use strict';
@@ -36,7 +40,9 @@
     open: null, aanm: { loading: false, error: null, rows: [] }, bezig: false, _seq: 0,
     qr: { loading: false, fout: null, data: null }, qrGroot: false,
     dash: { loading: false, fout: null, data: null },
+    boekSamen: null, openBoek: null, boek: { loading: false, error: null, rows: [] },
   };
+  if (!('openBoek' in st)) { st.boekSamen = null; st.openBoek = null; st.boek = { loading: false, error: null, rows: [] }; }
 
   function rerender() { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); }
   function toast(m) { if (window.KV && typeof window.KV.toast === 'function') window.KV.toast(m); }
@@ -52,6 +58,7 @@
       st.reeks = j.reeks || null;
       st.sessies = Array.isArray(j.sessies) ? j.sessies : [];
       st.migratieNodig = !!j.migratie_nodig;
+      st.boekSamen = j.boekingen || null;
     } catch (e) {
       if (seq !== st._seq) return;
       st.error = e && e.status === 403 ? 'Geen rechten om het webinar te bekijken (events.event.view).'
@@ -105,6 +112,20 @@
     rerender();
   }
 
+  async function laadBoekingen(sleutel) {
+    st.boek = { loading: true, error: null, rows: [] };
+    rerender();
+    try {
+      const j = await window.KV.authedJson('/api/webinar-admin?boekingen=' + encodeURIComponent(sleutel));
+      if (st.openBoek !== sleutel) return;
+      st.boek = { loading: false, error: null, rows: Array.isArray(j.boekingen) ? j.boekingen : [] };
+    } catch (e) {
+      console.error('[webinar-v2] boekingen laden mislukt:', e && e.status, e && (e.body || e.message));
+      st.boek = { loading: false, error: 'Kon de ingeplande afspraken niet laden', rows: [] };
+    }
+    rerender();
+  }
+
   async function post(body, okTekst) {
     if (st.bezig) return null;
     st.bezig = true; rerender();
@@ -120,6 +141,7 @@
       st.bezig = false;
       await laad(true);
       if (st.open) laadAanmelders(st.open);
+      if (st.openBoek) laadBoekingen(st.openBoek);
     }
   }
 
@@ -159,6 +181,11 @@
     await post({ actie: 'sessie_zoom', sessie_id: id, zoom_url: nieuw }, nieuw.trim() ? 'Zoom-link voor deze week opgeslagen' : 'Standaard Zoom-link hersteld');
   };
   window.__wbQrGroot = function (aan) { st.qrGroot = !!aan; rerender(); };
+  window.__wbBoek = function (sleutel, ev) {
+    if (ev && ev.target && ev.target.closest && ev.target.closest('button,a,input')) return; // knoppen in de rij niet
+    st.openBoek = st.openBoek === sleutel ? null : sleutel;
+    if (st.openBoek) laadBoekingen(st.openBoek); else rerender();
+  };
   window.__wbOpen = function (id) {
     st.open = st.open === id ? null : id;
     if (st.open) laadAanmelders(st.open); else rerender();
@@ -274,13 +301,54 @@
       <div style="font-size:11px;color:var(--text-3);padding:6px 2px">✉ = mail · WA = WhatsApp · ✓ verstuurd · ✗ mislukt · – overgeslagen (bv. template nog niet goedgekeurd of geen telefoon). Nudge 1/2 = opvolging na het webinar voor wie geen call boekte ("overgeslagen" = al geboekt of al een afspraak). Hover voor details.</div>`;
   }
 
+  const BOEK_STATUS = {
+    gepland: ['pill-ok', 'gepland'], verplaatst: ['pill-warn', 'verplaatst'], geannuleerd: ['pill-neutral', 'geannuleerd'],
+    'no-show': ['pill-warn', 'no-show'], gehad: ['pill-ok', 'gehad'], verwijderd: ['pill-neutral', 'verwijderd'],
+  };
+  function boekStatusPill(b) {
+    const [cls, tekst] = BOEK_STATUS[b.status] || ['pill-neutral', b.status || '—'];
+    const titel = b.verzet && b.eerst_gepland_op ? `Eerst gepland op ${fmtMoment(b.eerst_gepland_op)}` : '';
+    return `<span class="pill ${cls} nodot"${titel ? ` title="${esc(titel)}"` : ''}>${esc(tekst)}</span>`;
+  }
+  function boekSaleHtml(b) {
+    if (b.deal) {
+      const ref = b.deal.referentie ? ' ' + esc(b.deal.referentie) : '';
+      return `<a href="/modules/offerte-detail-v2.html?id=${encodeURIComponent(b.deal.id)}" target="_blank" rel="noopener">${esc(b.deal.label)}${ref}</a>`;
+    }
+    if (b.sale_uitkomst) return '<span title="Uitkomst van de call; nog geen offerte gekoppeld">Sale (uitkomst call)</span>';
+    return '<span style="color:var(--text-3)">—</span>';
+  }
+  function boekingenHtml() {
+    if (st.boek.loading) return '<div style="padding:12px;color:var(--text-3);font-size:12px">Ingeplande afspraken laden…</div>';
+    if (st.boek.error) return `<div style="padding:12px;color:var(--rose);font-size:12px">${esc(st.boek.error)}</div>`;
+    if (!st.boek.rows.length) return '<div style="padding:12px;color:var(--text-3);font-size:12px">Nog niemand ingepland via de QR in deze week.</div>';
+    return `<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr><th>Naam</th><th>E-mail</th><th>Telefoon</th><th title="Moment waarop de afspraak via /agenda/webinar werd geboekt">Geboekt op</th><th>Call</th><th>Status</th><th>Sale / offerte</th></tr></thead>
+      <tbody>${st.boek.rows.map((b) => `<tr${b.is_test ? ' style="opacity:.55"' : ''}>
+        <td>${esc(b.naam || '—')}${b.is_test ? ' <span class="pill pill-neutral nodot">test</span>' : ''}</td>
+        <td class="mono">${esc(b.email || '—')}</td><td class="mono">${esc(b.telefoon || '—')}</td>
+        <td>${esc(fmtMoment(b.geboekt_op))}</td><td>${esc(fmtMoment(b.call_op))}</td>
+        <td>${boekStatusPill(b)}</td><td>${boekSaleHtml(b)}</td>
+      </tr>`).join('')}</tbody></table></div>
+      <div style="font-size:11px;color:var(--text-3);padding:6px 2px">Per dag van boeken (Brussel), niet de dag van de call. Een boeking op een dag zonder webinar staat onder het laatste webinar ervoor. Verzet = één boeking, met de nieuwe call. Geannuleerde boekingen blijven staan.</div>`;
+  }
+  function boekSamenHtml() {
+    const b = st.boekSamen;
+    if (!b) return '';
+    const delen = [`<b>${b.totaal}</b> boekingen via de QR in totaal`, `${b.in_tabel} in deze weken`];
+    if (b.andere_weken) delen.push(`${b.andere_weken} in eerdere weken (niet in deze lijst)`);
+    if (b.voor_eerste) delen.push(`<a href="#" onclick="event.preventDefault();__wbBoek('voor')">${b.voor_eerste} vóór het eerste webinar</a>`);
+    return `<div style="font-size:11.5px;color:var(--text-3);padding:8px 12px">${delen.join(' · ')}</div>
+      ${st.openBoek === 'voor' ? `<div style="padding:0 8px 8px">${boekingenHtml()}</div>` : ''}`;
+  }
+
   function sessiesHtml(r) {
     const nu = Date.now();
     if (!st.sessies.length) return '<div class="card"><div class="card-body" style="color:var(--text-3);font-size:12.5px">Nog geen weken gepland. Zet het webinar op actief; de planning vult zich automatisch aan.</div></div>';
     return `<div class="card"><div class="card-head"><div class="card-title">Weken</div>
       <button class="btn btn-ghost btn-sm" onclick="window.__wbState.fetched=false;window.DFO.render()">Vernieuwen</button></div>
       <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
-      <thead><tr><th>Datum</th><th>Tijd</th><th>Status</th><th class="r">Aanmeldingen</th><th>Zoom</th><th class="r">Acties</th></tr></thead>
+      <thead><tr><th>Datum</th><th>Tijd</th><th>Status</th><th class="r">Aanmeldingen</th><th class="r" title="Afspraken ingepland via de QR (/agenda/webinar), geteld op de dag van boeken. Klik op de rij voor de lijst.">Ingepland</th><th>Zoom</th><th class="r">Acties</th></tr></thead>
       <tbody>${st.sessies.map((s) => {
         const voorbij = new Date(s.starts_at).getTime() <= nu;
         const over = s.status === 'overgeslagen';
@@ -295,10 +363,13 @@
           !voorbij && !over ? `<button class="btn btn-ghost btn-sm" ${st.bezig ? 'disabled' : ''} onclick="__wbOverslaan('${esc(s.id)}', '${esc(dag)}', ${Number(s.aantal) || 0})">Overslaan</button>` : '',
           !voorbij && over ? `<button class="btn btn-ghost btn-sm" ${st.bezig ? 'disabled' : ''} onclick="__wbHerstellen('${esc(s.id)}')">Herstellen</button>` : '',
         ].join(' ');
-        return `<tr${voorbij ? ' style="opacity:.6"' : ''}><td>${esc(dag)}</td><td>${esc(fmtTijd(s.starts_at))}</td><td>${pill}</td>
-          <td class="r"><b>${Number(s.aantal) || 0}</b></td><td>${zoom}</td><td class="r" style="white-space:nowrap">${acties}</td></tr>
-          ${st.open === s.id ? `<tr><td colspan="6" style="background:var(--surface-2,transparent);padding:8px">${aanmeldersHtml()}</td></tr>` : ''}`;
-      }).join('')}</tbody></table></div></div>`;
+        const ingepland = s.ingepland == null ? '<span style="color:var(--text-3)" title="Kon niet geteld worden">—</span>' : `<b>${Number(s.ingepland) || 0}</b>`;
+        const openB = st.openBoek === s.id;
+        return `<tr onclick="__wbBoek('${esc(s.id)}', event)" title="Klik voor de ingeplande afspraken" style="cursor:pointer${voorbij && !openB ? ';opacity:.6' : ''}${openB ? ';background:var(--surface-2,transparent)' : ''}"><td>${openB ? '▾' : '▸'} ${esc(dag)}</td><td>${esc(fmtTijd(s.starts_at))}</td><td>${pill}</td>
+          <td class="r"><b>${Number(s.aantal) || 0}</b></td><td class="r">${ingepland}</td><td>${zoom}</td><td class="r" style="white-space:nowrap">${acties}</td></tr>
+          ${openB ? `<tr><td colspan="7" style="background:var(--surface-2,transparent);padding:8px"><div style="font-size:12px;font-weight:600;margin:0 0 6px 2px">Ingepland via de QR, geboekt vanaf ${esc(dag)}</div>${boekingenHtml()}</td></tr>` : ''}
+          ${st.open === s.id ? `<tr><td colspan="7" style="background:var(--surface-2,transparent);padding:8px">${aanmeldersHtml()}</td></tr>` : ''}`;
+      }).join('')}</tbody></table></div>${boekSamenHtml()}</div>`;
   }
 
   function webinarView() {
