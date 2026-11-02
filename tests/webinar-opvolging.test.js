@@ -90,22 +90,25 @@ test('besluit: een andere AANKOMENDE afspraak (welke bron ook) → overslaan; af
 });
 
 // ── 3. Mail ──────────────────────────────────────────────────────────────────
-test('mail: onderwerpen, canonieke scan-tekst (€99, rapport, certificaat), knop, urgentie, afmeldlink, escaping', () => {
+test('mail: onderwerpen, feitelijke scan-tekst (20 min via Zoom, ons team, actieplan), knop, afmeldlink, escaping — geen schaarste of resultaatbelofte', () => {
   const m1 = O.bouwOpvolgMail('opvolging_1', { voornaam: 'Pieter', voorkeurenLink: 'https://www.deforexopleiding.nl/voorkeuren?token=T' });
   assert.equal(m1.subject, 'Jouw gratis strategie-scan staat klaar');
   assert.match(m1.html, /Hoi Pieter, bedankt voor je aanmelding voor onze webinar\./);
   assert.match(m1.html, /gratis strategie-scan \(t\.w\.v\. €99\)/);
-  assert.match(m1.html, /In 15-20 minuten ontdek je samen met ons precies waar je staat, welke stappen je kunt zetten en wat jouw mogelijkheden zijn\. Je ontvangt daarna een persoonlijk, uitgebreid rapport én een certificaat van De Forex Opleiding\./);
+  assert.match(m1.html, /20 minuten via Zoom met ons team\. Je gaat weg met een persoonlijk actieplan\./);
   assert.match(m1.html, /<a href="https:\/\/deforexopleiding\.nl\/agenda\/webinar"[^>]*>Plan je gratis scan<\/a>/);
-  assert.match(m1.html, /Er zijn maar 3 gratis scan-plekken per webinar/);
   assert.match(m1.html, /voorkeuren\?token=T[^>]*>Voorkeuren aanpassen of afmelden/);
   assert.match(m1.text, /Plan je gratis scan: https:\/\/deforexopleiding\.nl\/agenda\/webinar/);
-  assert.doesNotMatch(m1.html, /90 dagen/, 'oude framing niet in de mail');
   const m2 = O.bouwOpvolgMail('opvolging_2', { voornaam: '<b>x</b>' });
-  assert.equal(m2.subject, 'Laatste kans: je gratis scan-plek');
-  assert.match(m2.html, /de gratis scan-plekken van deze week zijn bijna vol/);
-  assert.match(m2.html, /Plan dan vandaag nog je gratis strategie-scan in\./);
+  assert.equal(m2.subject, 'Plan je gratis strategie-scan');
+  assert.match(m2.html, /nog niet ingepland: 20 minuten via Zoom met ons team\. Je gaat weg met een persoonlijk actieplan\./);
   assert.match(m2.html, /Hoi &lt;b&gt;x&lt;\/b&gt;/, 'voornaam ge-escaped');
+  // Beslissing Maxim 2 nov: geen schaarste, geen resultaatbelofte.
+  for (const m of [m1, m2]) {
+    const alles = m.subject + m.html + m.text;
+    assert.doesNotMatch(alles, /plekken|bijna vol|laatste kans|90 dagen|90-dagen|winst|⏳/i);
+  }
+  assert.equal(O.URGENTIE, undefined, 'URGENTIE bestaat niet meer');
   assert.equal(O.SCAN_OMSCHRIJVING, 'Gratis strategie-scan (t.w.v. €99). In 15-20 minuten ontdek je samen met ons precies waar je staat, welke stappen je kunt zetten en wat jouw mogelijkheden zijn. Je ontvangt daarna een persoonlijk, uitgebreid rapport én een certificaat van De Forex Opleiding.');
 });
 
@@ -204,7 +207,7 @@ test('ronde: nudge 2 de dag erna — overgeslagen voor wie tussendoor boekte; bu
   const { uit } = await ronde(db, '2026-10-20T08:05:00Z');
   assert.equal(uit.opvolging_2, 1);
   assert.equal(uit.opvolging_overgeslagen, 1);
-  assert.deepEqual(verzonden.mails.map((m) => [m.to, m.subject]), [['nog@example.com', 'Laatste kans: je gratis scan-plek']]);
+  assert.deepEqual(verzonden.mails.map((m) => [m.to, m.subject]), [['nog@example.com', 'Plan je gratis strategie-scan']]);
   assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_opvolging_2']);
   assert.equal(a.berichten.opvolging_2.overgeslagen, 'geboekt');
 });
