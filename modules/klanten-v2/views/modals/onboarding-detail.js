@@ -293,8 +293,8 @@ function renderOverzichtTab() {
         </button>
       </div>
       <div class="kv-onb-action-row" style="margin-top:14px">
-        <button type="button" class="ds-btn ds-btn-primary ds-btn-sm kv-onb-danger" data-kv-onb-cancel-preview ${state.savingAction || o.status === 'geannuleerd' ? 'disabled' : ''} title="${o.status === 'geannuleerd' ? 'Al geannuleerd' : 'Preview de cascade (crediteert facturen, deactiveert abo, sluit LMS-toegang)'}">
-          ${state.savingAction === 'cancel-preview' ? 'Preview laden…' : 'Student annuleren'}
+        <button type="button" class="ds-btn ds-btn-primary ds-btn-sm kv-onb-danger" data-kv-onb-cancel-preview ${state.savingAction || (o.status === 'geannuleerd' && !o.dfo_lms_student_id) ? 'disabled' : ''} title="${o.status === 'geannuleerd' ? (o.dfo_lms_student_id ? 'Al geannuleerd: het LMS-account kan nog verwijderd worden' : 'Al geannuleerd') : 'Preview de cascade (crediteert facturen, deactiveert abo, sluit LMS-toegang)'}">
+          ${state.savingAction === 'cancel-preview' ? 'Preview laden…' : (o.status === 'geannuleerd' ? 'Account verwijderen' : 'Student annuleren')}
         </button>
       </div>
     </div>`;
@@ -951,29 +951,93 @@ const CANCEL_WARNING_TEXT = 'Dit is een onomkeerbare cascade: alle openstaande f
 let _cancelPreview = null;
 let _cancelReason  = '';
 let _cancelSaving  = false;
+// 2 nov 2026: dezelfde flow als het studentdossier en Hoofdmentor › Onboarding —
+// "Account ook verwijderen" staat standaard aan, gebeurt pas NA een geslaagde
+// annulering en nooit bij incasso. Na afloop het verslag per stap.
+let _cancelAccountWeg = true;
+let _cancelUitkomst   = null;
+
+const CANCEL_STAP_LABEL = [
+  ['cancellation_record', 'Annulering vastgelegd'],
+  ['invoices_credit', 'Facturen gecrediteerd'],
+  ['subscriptions_deactivate', 'Abonnementen stopgezet'],
+  ['offertes_cancel', 'Offertes geannuleerd'],
+  ['onboarding_status', 'Onboarding op geannuleerd'],
+  ['automaties_gestopt', 'Lopende automaties gestopt'],
+  ['lms_toegang', 'LMS-toegang dicht'],
+  ['lms_markering', 'Geannuleerd in het LMS'],
+  ['notify_mentor', 'Mentor op de hoogte'],
+  ['notify_management', 'Management op de hoogte'],
+  ['account_verwijderen', 'Account verwijderd (LMS + inlog)'],
+];
+const CANCEL_REDEN = {
+  'niet-gekozen': 'niet gekozen', 'geen-lms-student': 'geen LMS-account', 'geen-mentor': 'geen mentor',
+  'al-verlopen': 'stond al dicht', 'geen-onboarding': 'geen onboarding', 'geen-open-onboarding': 'geen open onboarding',
+  'niet-gekozen-incasso': 'niet bij incasso', 'annulering-mislukt': 'annulering lukte niet, dus niets verwijderd',
+  'al-verwijderd': 'was al verwijderd', 'lms-student-niet-gevonden': 'LMS-student niet gevonden',
+};
+
+/** Mag het account mee weg? Zelfde regel als het LMS (nooit bij incasso of personeel). PURE. */
+export function accountKeuze(p) {
+  const a = p?.account || null;
+  if (!p?.lms_student_id || !a) return { kan: false, reden: 'Geen LMS-account gekoppeld: er is niets te verwijderen.' };
+  if (a.bestaat === false) return { kan: false, reden: 'Het LMS-account is al verwijderd.' };
+  if (a.bestaat == null) return { kan: false, reden: 'De stand van het LMS-account is niet te lezen' + (a.fout ? ' (' + a.fout + ')' : '') + '.' };
+  if (a.blokkade === 'in_incasso') return { kan: false, reden: 'Niet bij incasso: het merkteken en de incasso-kaart hangen aan het dossier. Verwijder het later in Studentenbeheer.' };
+  if (a.blokkade === 'personeel') return { kan: false, reden: 'Dit account is ook personeel: het wordt niet verwijderd.' };
+  return { kan: true, reden: null };
+}
 
 function openCancelConfirmModal(preview) {
   _cancelPreview = preview || {};
   _cancelReason  = '';
   _cancelSaving  = false;
+  _cancelAccountWeg = true;
+  _cancelUitkomst = null;
   cancelRerender();
 }
 function cancelRerender() {
+  const al = !!_cancelPreview.already_cancelled;
   D().openModal({
-    head: `<div class="kv-edit-head"><div><div class="kv-edit-head-eyebrow" style="color:var(--rose,#C22B3E)">Student annuleren · destructief</div><div class="kv-edit-head-name">${esc(_cancelPreview.customer_name || 'Onboarding')}</div></div><button type="button" class="ds-icon-btn" data-kv-onbc-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>`,
-    body: cancelBody(),
+    head: `<div class="kv-edit-head"><div><div class="kv-edit-head-eyebrow" style="color:var(--rose,#C22B3E)">${al ? 'Al geannuleerd · account verwijderen' : 'Student annuleren · destructief'}</div><div class="kv-edit-head-name">${esc(_cancelPreview.customer_name || 'Onboarding')}</div></div><button type="button" class="ds-icon-btn" data-kv-onbc-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>`,
+    body: _cancelUitkomst ? cancelVerslag() : cancelBody(),
     foot: cancelFoot(),
   });
   cancelWire();
+}
+function accountBlok(p, al) {
+  const k = accountKeuze(p);
+  const a = p.account || {};
+  if (!k.kan) return `<div class="kv-onb-cancel-row" data-kv-onbc-account-uit>Account: ${esc(k.reden)}</div>`;
+  const tel = a.sessies_afgerond ? ` <span style="color:var(--text-3)">(${a.sessies_afgerond} afgeronde sessie${a.sessies_afgerond === 1 ? '' : 's'} verdwijnen mee)</span>` : '';
+  if (al) return `<div class="kv-onb-cancel-row">Het LMS-account bestaat nog${tel}. Verwijderen: de student verdwijnt uit elke lijst (inlog, rol, journals, sessies, intake); er blijft alleen een auditrij.</div>`;
+  return `<label class="kv-onb-cancel-row" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer">
+      <input type="checkbox" data-kv-onbc-account ${_cancelAccountWeg ? 'checked' : ''} ${_cancelSaving ? 'disabled' : ''}>
+      <span>Account ook verwijderen: na een geslaagde annulering verdwijnt de student uit elke lijst (inlog, rol, journals, sessies, intake). Er blijft alleen een auditrij.${tel}</span>
+    </label>`;
 }
 function cancelBody() {
   const p = _cancelPreview;
   const invoices = Array.isArray(p.invoices) ? p.invoices : [];
   const subs     = Array.isArray(p.subscriptions) ? p.subscriptions : [];
   const offs     = Array.isArray(p.offertes) ? p.offertes : [];
+  if (p.already_cancelled) {
+    const op = p.eerdere?.created_at || p.eerdere?.cancelled_at || null;
+    return `
+    <form class="kv-edit-form" novalidate>
+      <div class="kv-edit-banner" data-kv-onbc-al>Deze student is al geannuleerd${op ? ' op ' + fmtDT(op) : ''}. Er wordt niets opnieuw gecrediteerd of stopgezet.</div>
+      <div class="kv-onb-cancel-summary">${accountBlok(p, true)}</div>
+      ${accountKeuze(p).kan ? `<div class="kv-edit-field">
+        <label>Reden voor verwijderen <span class="kv-edit-req">*</span> <span style="color:var(--text-3);font-weight:400">(min. 10 tekens)</span></label>
+        <textarea class="ib-input" rows="2" data-kv-onbc-reason placeholder="Bv. Geannuleerd in bedenktijd — account niet meer nodig">${esc(_cancelReason)}</textarea>
+      </div>` : ''}
+    </form>`;
+  }
+  const toegang = p.lms_student_id
+    ? (_cancelAccountWeg && accountKeuze(p).kan ? '<b>wordt gesloten</b> en daarna het account verwijderd' : '<b>wordt gesloten</b> (einddatum gisteren); het account blijft bestaan')
+    : '— (geen LMS-student gekoppeld)';
   return `
     <form class="kv-edit-form" novalidate>
-      ${p.already_cancelled ? `<div class="kv-edit-banner">Deze onboarding is al geannuleerd op ${fmtDT(p.already_cancelled)}.</div>` : ''}
       <div class="kv-edit-banner" style="background:var(--rose-soft,#FBEAED); color:var(--rose,#C22B3E); border-color:var(--rose-line,#F1B4BE); line-height:1.5;">
         <b>⚠ Waarschuwing</b><br>${esc(CANCEL_WARNING_TEXT)}
       </div>
@@ -981,7 +1045,8 @@ function cancelBody() {
         <div class="kv-onb-cancel-row"><b>${invoices.length}</b> facturen worden gecrediteerd</div>
         <div class="kv-onb-cancel-row"><b>${subs.length}</b> abonnementen worden gedeactiveerd${p.subscription_value != null ? ` <span style="color:var(--text-3)">(waarde ${p.subscription_value})</span>` : ''}</div>
         <div class="kv-onb-cancel-row"><b>${offs.length}</b> offertes gemarkeerd als geannuleerd</div>
-        <div class="kv-onb-cancel-row">LMS-toegang ${p.lms_student_id ? '<b>wordt gesloten</b> (einddatum gisteren)' : '— (geen LMS-student gekoppeld)'}</div>
+        <div class="kv-onb-cancel-row" data-kv-onbc-toegang>LMS-toegang ${toegang}</div>
+        ${accountBlok(p, false)}
       </div>
       <div class="kv-edit-field">
         <label>Reden voor annulering <span class="kv-edit-req">*</span> <span style="color:var(--text-3);font-weight:400">(min. 10 tekens)</span></label>
@@ -989,13 +1054,36 @@ function cancelBody() {
       </div>
     </form>`;
 }
+/** Het verslag per stap, ✗ in het rood. PURE (geeft HTML). */
+export function verslagHtml(steps) {
+  const st = steps && typeof steps === 'object' ? steps : {};
+  return CANCEL_STAP_LABEL.filter(([k]) => st[k] && typeof st[k] === 'object').map(([k, label]) => {
+    const v = st[k];
+    const nok = v.ok === false;
+    const reden = v.reason ? (CANCEL_REDEN[v.reason] || v.reason) : null;
+    const fout = typeof v.error === 'string' ? v.error : (nok && typeof v.message === 'string' ? v.message : null);
+    return `<div class="kv-onb-cancel-row" data-kv-onbc-stap="${esc(k)}" data-ok="${nok ? 'nee' : 'ja'}" style="${nok ? 'color:var(--rose,#C22B3E)' : ''}">${nok ? '✗' : '✓'} ${esc(label)}${v.skipped ? ' — overgeslagen' + (reden ? ' (' + esc(reden) + ')' : '') : ''}${fout ? ' — ' + esc(fout) : ''}</div>`;
+  }).join('');
+}
+function cancelVerslag() {
+  const u = _cancelUitkomst;
+  const mislukt = Object.values(u.steps || {}).some((v) => v && typeof v === 'object' && v.ok === false);
+  return `<div class="kv-edit-form">
+    <div class="kv-edit-banner" style="${mislukt ? 'background:var(--rose-soft,#FBEAED);color:var(--rose,#C22B3E);border-color:var(--rose-line,#F1B4BE)' : ''}" data-kv-onbc-melding>${esc(u.tekst)}${mislukt ? ' Wat mislukte, moet met de hand.' : ''}</div>
+    <div class="kv-onb-cancel-summary" data-kv-onbc-verslag>${verslagHtml(u.steps)}</div>
+  </div>`;
+}
 function cancelFoot() {
-  const canConfirm = (_cancelReason || '').trim().length >= 10;
+  if (_cancelUitkomst) {
+    return `<div class="kv-edit-foot" style="justify-content:flex-end"><button type="button" class="ds-btn ds-btn-primary" data-kv-onbc-klaar>Sluiten</button></div>`;
+  }
+  const al = !!_cancelPreview.already_cancelled;
+  const canConfirm = (_cancelReason || '').trim().length >= 10 && (!al || accountKeuze(_cancelPreview).kan);
   return `<div class="kv-edit-foot" style="justify-content:space-between">
     <button type="button" class="ds-btn ds-btn-ghost" data-kv-onbc-close ${_cancelSaving ? 'disabled' : ''}>Terug</button>
-    <button type="button" class="ds-btn ds-btn-primary kv-onb-danger" data-kv-onbc-execute ${(_cancelSaving || !canConfirm) ? 'disabled' : ''}>
-      ${_cancelSaving ? 'Uitvoeren…' : 'Student definitief annuleren'}
-    </button>
+    ${al && !accountKeuze(_cancelPreview).kan ? '' : `<button type="button" class="ds-btn ds-btn-primary kv-onb-danger" data-kv-onbc-execute ${(_cancelSaving || !canConfirm) ? 'disabled' : ''}>
+      ${_cancelSaving ? 'Uitvoeren…' : (al ? 'Account definitief verwijderen' : 'Student definitief annuleren')}
+    </button>`}
   </div>`;
 }
 function cancelWire() {
@@ -1005,23 +1093,37 @@ function cancelWire() {
     // Terug naar detail-modal
     if (state) rerender(); else D().closeModal();
   }));
+  box.querySelector('[data-kv-onbc-klaar]')?.addEventListener('click', () => {
+    if (typeof state?.onSuccess === 'function') state.onSuccess();
+    D().closeModal();
+  });
   // Uncontrolled input: geen re-render bij typen (voorkomt cursor-jump).
   // Alleen re-render bij een debounce-tick vanuit blur/click op execute.
   box.querySelector('[data-kv-onbc-reason]')?.addEventListener('input', (e) => { _cancelReason = e.target.value; });
   box.querySelector('[data-kv-onbc-reason]')?.addEventListener('blur',  () => cancelRerender());
+  box.querySelector('[data-kv-onbc-account]')?.addEventListener('change', (e) => { _cancelAccountWeg = !!e.target.checked; cancelRerender(); });
   box.querySelector('[data-kv-onbc-execute]')?.addEventListener('click', async () => {
     if (_cancelSaving) return;
     _cancelSaving = true; cancelRerender();
+    const al = !!_cancelPreview.already_cancelled;
     try {
-      await K().authedJson('/api/onboarding-cancel', {
+      const j = await K().authedJson('/api/onboarding-cancel', {
         method: 'POST',
-        body: JSON.stringify({ onboarding_id: state.id, reason: _cancelReason.trim(), confirm: true }),
+        body: JSON.stringify(al
+          ? { onboarding_id: state.id, actie: 'account_verwijderen', reason: _cancelReason.trim() }
+          : { onboarding_id: state.id, reason: _cancelReason.trim(), confirm: true,
+              account_verwijderen: _cancelAccountWeg && accountKeuze(_cancelPreview).kan }),
       });
-      K().toast('Onboarding geannuleerd — cascade voltooid');
-      if (typeof state.onSuccess === 'function') state.onSuccess();
-      D().closeModal();
+      const steps = { ...(j?.steps || {}) };
+      if (j?.account_verwijderen) steps.account_verwijderen = j.account_verwijderen;
+      _cancelUitkomst = {
+        steps,
+        tekst: al ? 'Account verwijderd.' : (j?.already_cancelled ? 'Deze student was al geannuleerd: er is niets opnieuw gedaan.' : 'Geannuleerd.'),
+      };
+      _cancelSaving = false;
+      cancelRerender();
     } catch (e) {
-      alert('Annuleren mislukt: ' + (e?.message || 'onbekende fout'));
+      alert((al ? 'Verwijderen' : 'Annuleren') + ' mislukt: ' + (e?.message || 'onbekende fout'));
       _cancelSaving = false; cancelRerender();
     }
   });

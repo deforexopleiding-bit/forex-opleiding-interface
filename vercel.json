@@ -37,6 +37,14 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/onboarding-cancel.js": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "api/lms-geannuleerde-studenten.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/commissie-overzicht.js": {
       "maxDuration": 60,
       "memory": 1024

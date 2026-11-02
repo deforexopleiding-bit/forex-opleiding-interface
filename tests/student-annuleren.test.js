@@ -26,8 +26,10 @@ function nepDb(tabellen, { rpc = null } = {}) {
   const log = { updates: [], inserts: [], deletes: [], rpc: [] };
   let teller = 0;
   const waarde = (r, k) => {
-    const m = /^(\w+)->>(\w+)$/.exec(k);
-    return m ? (r[m[1]]?.[m[2]] ?? null) : r[k];
+    const m = /^(\w+)(?:->(\w+))?->>(\w+)$/.exec(k);
+    if (!m) return r[k];
+    const tussen = m[2] ? r[m[1]]?.[m[2]] : r[m[1]];
+    return tussen?.[m[3]] ?? null;
   };
   const db = {
     log, tabellen,
@@ -42,6 +44,7 @@ function nepDb(tabellen, { rpc = null } = {}) {
         if (op === 'in') return v.map(String).includes(String(w));
         if (op === 'is') return (w ?? null) === v;
         if (op === 'ilike') return String(w || '').toLowerCase() === String(v).toLowerCase();
+        if (op === 'notnull') return w != null;
         if (op === 'or') return v.split(',').some((d) => { const [kk, , vv] = d.split('.'); return String(r[kk] ?? '') === vv; });
         return true;
       });
@@ -80,6 +83,8 @@ function nepDb(tabellen, { rpc = null } = {}) {
         is(k, v) { st.filters.push(['is', k, v]); return q; },
         ilike(k, v) { st.filters.push(['ilike', k, v]); return q; },
         or(v) { st.filters.push(['or', null, v]); return q; },
+        not(k, o, v) { if (o === 'is' && v === null) st.filters.push(['notnull', k, null]); return q; },
+        range() { return q; },
         update(p) { st.patch = p; return q; },
         insert(r) { st.insert = r; return q; },
         delete() { st.del = true; return q; },
@@ -147,8 +152,14 @@ async function laad(stand, { rpc = null, mentor = { user_id: 'crm-mentor-proef' 
   mock.module(url('api/_lib/lms-mentor-brug.js'), {
     namedExports: { crmMentorVoorLmsId: async () => mentor, crmGebruikerVoorEmail: async (e) => (e === 'maxim@dfo.test' ? gebruiker : null) },
   });
+  // Vers geladen tegen deze nep-databanken (anders blijft een eerder geladen
+  // exemplaar aan een vorige toets hangen).
+  const ontk = await import(url('api/_lib/lms-student-ontkoppelen.js') + t);
+  mock.module(url('api/_lib/lms-student-ontkoppelen.js'), { namedExports: { ...ontk } });
+  const acc = await import(url('api/_lib/lms-account-verwijderen.js') + t);
+  mock.module(url('api/_lib/lms-account-verwijderen.js'), { namedExports: { ...acc } });
   const mod = await import(url('api/_lib/onboarding-annuleren.js') + t);
-  return { mod, crm, lms, tl, meldingen, spiegel, t };
+  return { mod, crm, lms, tl, meldingen, spiegel, t, acc, ontk };
 }
 
 const ALLES_UIT = { facturen_crediteren: [], abonnementen_stoppen: [], offertes_annuleren: [], automaties_stoppen: false, lms_toegang_dicht: false, incasso: false };
@@ -289,6 +300,26 @@ test('EERDERE CREDIT: wat een onboarding-annulering al crediteerde, komt niet op
   assert.deepEqual(v.body.invoices.map((i) => i.id), ['f-open2']);
 });
 
+test('LMS-MIGRATIE NOG NIET GEDRAAID (bugfix 2 nov): ook zonder incasso een ZICHTBARE fout, nooit ok/overgeslagen', async (t) => {
+  t.after(() => mock.reset());
+  const w = await laad(basis(), { rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) });
+  const { status, body } = await w.mod.voerAnnuleringUit({ studentId: STUDENT, opties: ALLES_UIT, reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(status, 200);
+  assert.equal(body.steps.lms_markering.ok, false);
+  assert.notEqual(body.steps.lms_markering.skipped, true);
+  assert.equal(body.steps.lms_markering.code, 'lms_migratie_ontbreekt');
+  assert.match(body.steps.lms_markering.error, /hlms_student_annulering\.sql/);
+  // Het record zegt hetzelfde.
+  assert.equal(w.crm.tabellen.onboarding_cancellations[0].steps.lms_markering.ok, false);
+  // En op onboarding-niveau net zo.
+  mock.reset();
+  const stand = basis({ metOnboarding: true });
+  const w2 = await laad(stand, { rpc: async () => ({ data: null, error: { code: '42883', message: 'function does not exist' } }) });
+  const ob = await w2.mod.voerAnnuleringUit({ onboardingId: 'ob-1', reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(ob.body.steps.lms_markering.ok, false);
+  assert.equal(ob.body.steps.lms_markering.code, 'lms_migratie_ontbreekt');
+});
+
 test('LMS-MIGRATIE NOG NIET GEDRAAID: markering overgeslagen, de rest gaat door; bij incasso een zichtbare fout', async (t) => {
   t.after(() => mock.reset());
   const w = await laad(basis(), { rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) });
@@ -353,4 +384,177 @@ test('GEEN TWEEDE IMPLEMENTATIE: de dossier-route roept dezelfde kern aan', () =
   assert.doesNotMatch(route, /tlFetch|invoices\.credit|from\('onboardings'\)\s*\.update/);
   // De bekende fout: crmGebruikerVoorEmail geeft { id, naam }, geen full_name.
   assert.doesNotMatch(lees('api/lms-onboarding-annuleren.js'), /door\.full_name/);
+});
+
+test('DUBBEL ANNULEREN (Blerim Racaj): eerst via de onboarding, dan het dossier → al geannuleerd, niets opnieuw', async (t) => {
+  t.after(() => mock.reset());
+  const stand = basis({ metOnboarding: true });
+  const w = await laad(stand);
+  const eerst = await w.mod.voerAnnuleringUit({ onboardingId: 'ob-1', reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(eerst.status, 200);
+  const rec = w.crm.tabellen.onboarding_cancellations[0];
+  // Sinds 2 nov: ook het onboarding-record draagt de student.
+  assert.equal(rec.steps.lms_student_id, STUDENT);
+  assert.equal(rec.steps.niveau, 'onboarding');
+  const tlVoor = w.tl.length;
+  const v = await w.mod.studentAnnuleringVoorbeeld({ studentId: STUDENT });
+  assert.equal(v.body.already_cancelled, true);
+  const tweede = await w.mod.voerAnnuleringUit({ studentId: STUDENT, opties: { ...ALLES_UIT, facturen_crediteren: ['f-open'] }, reden: 'Nog eens', doorUserId: 'u' });
+  assert.equal(tweede.body.already_cancelled, true);
+  assert.equal(w.tl.length, tlVoor);
+  assert.equal(w.crm.tabellen.onboarding_cancellations.length, 1);
+});
+
+test('DUBBEL ANNULEREN: een OUD record zonder lms_student_id (vóór 2 nov) wordt gevonden via de onboarding', async (t) => {
+  t.after(() => mock.reset());
+  const stand = basis({ metOnboarding: true });
+  stand.crm.onboardings[0].status = 'geannuleerd';
+  stand.crm.onboarding_cancellations.push({ id: 'oud-ob', onboarding_id: 'ob-1', customer_id: KLANT, created_at: '2026-10-19T08:56:55Z', steps: { lms_toegang: { ok: true } } });
+  const w = await laad(stand);
+  const v = await w.mod.studentAnnuleringVoorbeeld({ studentId: STUDENT });
+  assert.equal(v.body.already_cancelled, true);
+  assert.equal(v.body.eerdere.id, 'oud-ob');
+});
+
+test('DUBBEL ANNULEREN omgekeerd: eerst het dossier, dan de onboarding-knop → niets opnieuw, alleen de onboarding mee dicht', async (t) => {
+  t.after(() => mock.reset());
+  const stand = basis({ metOnboarding: true });
+  const w = await laad(stand);
+  await w.mod.voerAnnuleringUit({ studentId: STUDENT, opties: { ...ALLES_UIT, onboardings_annuleren: false }, reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(w.crm.tabellen.onboardings[0].status, 'bezig');
+  const tlVoor = w.tl.length;
+  const v = await w.mod.annuleringVoorbeeld('ob-1');
+  assert.equal(v.already_cancelled, true);
+  const uit = await w.mod.voerAnnuleringUit({ onboardingId: 'ob-1', reden: 'Annuleren', doorUserId: 'u' });
+  assert.equal(uit.body.already_cancelled, true);
+  assert.equal(uit.body.onboarding_gesloten.ok, true);
+  assert.equal(w.crm.tabellen.onboardings[0].status, 'geannuleerd');
+  assert.equal(w.crm.tabellen.onboarding_automation_runs[0].status, 'cancelled');
+  assert.equal(w.tl.length, tlVoor);
+  assert.equal(w.crm.tabellen.onboarding_cancellations.length, 1);
+});
+
+test('ACCOUNT: de regel van alle drie de knoppen — pas na een geslaagde annulering, nooit bij incasso', async (t) => {
+  t.after(() => mock.reset());
+  const { accountMagMeeWeg } = await import(url('api/_lib/lms-account-verwijderen.js') + '?t=' + Math.random());
+  assert.deepEqual(accountMagMeeWeg({ annuleringGeslaagd: false, incasso: false, studentId: STUDENT }).reason, 'annulering-mislukt');
+  assert.deepEqual(accountMagMeeWeg({ annuleringGeslaagd: true, incasso: true, studentId: STUDENT }).reason, 'niet-gekozen-incasso');
+  assert.deepEqual(accountMagMeeWeg({ annuleringGeslaagd: true, incasso: false, studentId: null }).reason, 'geen-lms-student');
+  assert.equal(accountMagMeeWeg({ annuleringGeslaagd: true, incasso: false, studentId: STUDENT }).mag, true);
+});
+
+test('ACCOUNT VERWIJDEREN via de LMS-machine-ingang; daarna de CRM-koppeling los', async (t) => {
+  t.after(() => { mock.reset(); delete process.env.DFO_LMS_PUSH_SECRET; });
+  const stand = basis({ metOnboarding: true });
+  const w = await laad(stand, {
+    rpc: async (naam) => (naam === 'hlms_student_verwijder_voorbeeld'
+      ? { data: { gevonden: true, naam: 'Arno Proefmans', heeft_account: true, blokkade: null, sessies_afgerond: 0 }, error: null }
+      : { data: { annulering: 'nieuw' }, error: null }),
+  });
+  process.env.DFO_LMS_PUSH_SECRET = 'geheim-voor-de-toets';
+  const oproepen = [];
+  const echteFetch = globalThis.fetch;
+  globalThis.fetch = async (u, o) => { oproepen.push({ u, o }); return { ok: true, status: 200, json: async () => ({ ok: true, code: 'verwijderd', message: 'Verwijderd', data: { audit_id: 'a1' } }) }; };
+  t.after(() => { globalThis.fetch = echteFetch; });
+  const mod = w.acc;
+  const uit = await mod.accountNaAnnulering({ annuleringGeslaagd: true, incasso: false, studentId: STUDENT, reden: 'Wil stoppen', door: 'maxim via het CRM' });
+  assert.equal(uit.ok, true);
+  assert.equal(oproepen.length, 1);
+  assert.match(oproepen[0].u, new RegExp('/api/admin/studenten/' + STUDENT + '/verwijderen/$'));
+  assert.equal(oproepen[0].o.headers['x-dfo-secret'], 'geheim-voor-de-toets');
+  const body = JSON.parse(oproepen[0].o.body);
+  assert.equal(body.naam, 'Arno Proefmans');
+  assert.match(body.reden, /^Geannuleerd: Wil stoppen/);
+  // De onboarding wijst niet langer naar de verdwenen student.
+  assert.equal(w.crm.tabellen.onboardings[0].dfo_lms_student_id, null);
+  assert.equal(w.crm.tabellen.onboardings[0].dfo_lms_provisioned, false);
+  assert.match(w.crm.tabellen.onboardings[0].dfo_lms_provision_error, /verwijderd/);
+
+  // In incasso (blokkade): niets verstuurd, overgeslagen met de reden.
+  mock.reset();
+  const w2 = await laad(basis(), { rpc: async () => ({ data: { gevonden: true, naam: 'Arno Proefmans', blokkade: 'in_incasso' }, error: null }) });
+  const mod2 = w2.acc;
+  const nee = await mod2.accountNaAnnulering({ annuleringGeslaagd: true, incasso: false, studentId: STUDENT, reden: 'x', door: 'x' });
+  assert.equal(nee.skipped, true);
+  assert.equal(nee.reason, 'niet-gekozen-incasso');
+  assert.equal(oproepen.length, 1);
+});
+
+test('ONTKOPPELEN: alleen met de auditrij als bewijs; een student die gewoon ontbreekt blijft gekoppeld', async (t) => {
+  t.after(() => mock.reset());
+  const stand = basis({ metOnboarding: true });
+  stand.lms.hlms_student = [];
+  stand.lms.hlms_student_verwijderd = [];
+  const w = await laad(stand);
+  const mod = w.ontk;
+  const zonder = await mod.ruimVerwijderdeKoppelingenOp();
+  assert.equal(zonder.losgemaakt, 0);
+  assert.equal(w.crm.tabellen.onboardings[0].dfo_lms_student_id, STUDENT);
+  w.lms.tabellen.hlms_student_verwijderd.push({ student_id: STUDENT, verwijderd_op: '2026-11-02T16:58:07Z' });
+  const met = await mod.ruimVerwijderdeKoppelingenOp();
+  assert.equal(met.fout, null, JSON.stringify(met));
+  assert.equal(met.losgemaakt, 1);
+  assert.equal(w.crm.tabellen.onboardings[0].dfo_lms_student_id, null);
+  assert.match(w.crm.tabellen.onboardings[0].dfo_lms_provision_error, /2026-11-02/);
+  assert.equal(w.crm.tabellen.onboarding_mentor_updates.length, 1);
+});
+
+test('GEANNULEERDEN: één rij per student, testonboardings niet, en de waarschuwingen abonnement / opnieuw gestart', async () => {
+  const { groepeerGeannuleerden } = await import(url('api/_lib/geannuleerde-studenten.js') + '?t=' + Math.random());
+  const onboardings = [
+    { id: 'o1', customer_id: 'k1', dfo_lms_student_id: 's1', status: 'geannuleerd', created_at: '2026-10-01' },
+    { id: 'o2', customer_id: 'k2', dfo_lms_student_id: 's2', status: 'geannuleerd', created_at: '2026-10-01' },
+    { id: 'o2b', customer_id: 'k2', dfo_lms_student_id: null, status: 'aangemeld', created_at: '2026-10-30' },
+    { id: 'ot', customer_id: 'kt', dfo_lms_student_id: 'st', status: 'geannuleerd', is_test: true, created_at: '2026-10-01' },
+    { id: 'o4', customer_id: 'k4', dfo_lms_student_id: null, bubble_user_id: 'b4', status: 'gearchiveerd', created_at: '2026-07-01' },
+  ];
+  const records = [
+    { id: 'r1', created_at: '2026-10-19', onboarding_id: 'o1', customer_id: 'k1', customer_name: 'Een', steps: {} },
+    { id: 'r1b', created_at: '2026-10-29', onboarding_id: null, customer_id: 'k1', customer_name: 'Een', steps: { niveau: 'student', lms_student_id: 's1' } },
+    { id: 'r2', created_at: '2026-10-20', onboarding_id: 'o2', customer_id: 'k2', steps: {} },
+    { id: 'rt', created_at: '2026-10-20', onboarding_id: 'ot', customer_id: 'kt', steps: {} },
+    { id: 'r3', created_at: '2026-10-21', onboarding_id: null, customer_id: 'k3', steps: { lms_toegang: { student_id: 's3' }, opties: { incasso: true } } },
+    { id: 'r4', created_at: '2026-07-18', onboarding_id: 'o4', customer_id: 'k4', steps: {} },
+    { id: 'r5', created_at: '2026-06-30', onboarding_id: null, customer_id: 'k5', steps: {} },
+  ];
+  const { rijen, zonder_student } = groepeerGeannuleerden({ records, onboardings, actieveKlanten: new Set(['k3']) });
+  assert.equal(zonder_student, 1);
+  const per = Object.fromEntries(rijen.map((r) => [r.student_id || 'bubble:' + r.bubble_user_id, r]));
+  assert.deepEqual(Object.keys(per).sort(), ['bubble:b4', 's1', 's2', 's3']);
+  assert.equal(per.s1.annuleringen.length, 2);
+  assert.equal(per.s2.nieuwere_onboarding, true);
+  assert.equal(per.s1.nieuwere_onboarding, false);
+  assert.equal(per.s3.actief_abonnement, true);
+  assert.equal(per.s3.incasso, true);
+});
+
+test('CRM-VENSTER: tekst klopt met de keuze, verslag toont een mislukte markering in het rood', async () => {
+  globalThis.window = { KV: { esc: (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) } };
+  const mod = await import(url('modules/klanten-v2/views/modals/onboarding-detail.js') + '?t=' + Math.random());
+  assert.equal(mod.accountKeuze({ lms_student_id: STUDENT, account: { bestaat: true, blokkade: null } }).kan, true);
+  assert.equal(mod.accountKeuze({ lms_student_id: STUDENT, account: { bestaat: true, blokkade: 'in_incasso' } }).kan, false);
+  assert.equal(mod.accountKeuze({ lms_student_id: STUDENT, account: { bestaat: false } }).kan, false);
+  const html = mod.verslagHtml({ lms_markering: { ok: false, error: 'migratie ontbreekt' }, account_verwijderen: { ok: true, skipped: true, reason: 'niet-gekozen-incasso' } });
+  assert.match(html, /data-kv-onbc-stap="lms_markering" data-ok="nee"/);
+  assert.match(html, /migratie ontbreekt/);
+  assert.match(html, /overgeslagen \(niet bij incasso\)/);
+  const bron = lees('modules/klanten-v2/views/modals/onboarding-detail.js');
+  // Geen "het account blijft" naast "Account ook verwijderen" zonder voorwaarde.
+  assert.match(bron, /_cancelAccountWeg && accountKeuze\(p\)\.kan \? '<b>wordt gesloten<\/b> en daarna het account verwijderd'/);
+});
+
+test('ACCOUNT VERWIJDEREN van een al geannuleerde student: een nog open onboarding gaat eerst mee dicht, zonder Teamleader', async (t) => {
+  t.after(() => mock.reset());
+  const w = await laad(basis({ metOnboarding: true }));
+  const nog = await w.mod.sluitOnboardingVanGeannuleerdeStudent('ob-1', 'u');
+  assert.equal(nog.code, 'niet_geannuleerd');
+  assert.equal(w.crm.tabellen.onboardings[0].status, 'bezig');
+  await w.mod.voerAnnuleringUit({ studentId: STUDENT, opties: { ...ALLES_UIT, onboardings_annuleren: false }, reden: 'Annuleren', doorUserId: 'u' });
+  const tlVoor = w.tl.length;
+  const uit = await w.mod.sluitOnboardingVanGeannuleerdeStudent('ob-1', 'u');
+  assert.equal(uit.ok, true);
+  assert.equal(uit.lms_student_id, STUDENT);
+  assert.equal(w.crm.tabellen.onboardings[0].status, 'geannuleerd');
+  assert.equal(w.tl.length, tlVoor);
+  assert.equal((await w.mod.sluitOnboardingVanGeannuleerdeStudent('ob-1', 'u')).code, 'al_dicht');
 });

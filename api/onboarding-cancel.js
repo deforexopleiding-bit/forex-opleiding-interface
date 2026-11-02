@@ -31,7 +31,8 @@
 
 import { createUserClient } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { gatherContext, voerAnnuleringUit } from './_lib/onboarding-annuleren.js';
+import { gatherContext, voerAnnuleringUit, annuleringVoorbeeld, sluitOnboardingVanGeannuleerdeStudent } from './_lib/onboarding-annuleren.js';
+import { accountNaAnnulering, verwijderLmsAccount } from './_lib/lms-account-verwijderen.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,6 +71,31 @@ export default async function handler(req, res) {
   if (!UUID_RE.test(onboardingId)) {
     return res.status(400).json({ error: 'onboarding_id (uuid) is verplicht.' });
   }
+  // ACCOUNT VERWIJDEREN VAN EEN AL GEANNULEERDE STUDENT (2 nov 2026):
+  // { onboarding_id, actie: 'account_verwijderen', reason } — alleen als de
+  // onboarding (of de student op een ander niveau) al geannuleerd is.
+  if (body.actie === 'account_verwijderen') {
+    const reden = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reden.length < 5) return res.status(400).json({ error: 'Geef een reden (minstens 5 tekens).', code: 'reden_verplicht' });
+    try {
+      const v = await annuleringVoorbeeld(onboardingId);
+      if (!v) return res.status(404).json({ error: 'Onboarding niet gevonden.' });
+      if (!v.already_cancelled) {
+        return res.status(409).json({ error: 'Deze student is nog niet geannuleerd: annuleer eerst (met "Account ook verwijderen").', code: 'niet_geannuleerd' });
+      }
+      if (!v.lms_student_id) return res.status(422).json({ error: 'Geen LMS-account gekoppeld: er is niets te verwijderen.', code: 'geen_lms_student' });
+      // Staat deze onboarding zelf nog open (de student werd via het dossier
+      // geannuleerd), dan gaat ze eerst mee dicht.
+      const dicht = await sluitOnboardingVanGeannuleerdeStudent(onboardingId, user.id);
+      if (!dicht.ok) return res.status(422).json({ error: 'De onboarding kon niet mee dicht: ' + (dicht.error || dicht.code) + '. Er is niets verwijderd.', code: 'onboarding_niet_dicht' });
+      const uit = await verwijderLmsAccount({ studentId: v.lms_student_id, reden: 'Geannuleerd: ' + reden, door: String(user.email || user.id) + ' via het CRM' });
+      return res.status(uit.ok ? 200 : 422).json({ ok: uit.ok, account_verwijderen: uit, ...(uit.ok ? {} : { error: uit.message }) });
+    } catch (e) {
+      console.error('[onboarding-cancel] account verwijderen', e?.message || e);
+      return res.status(500).json({ error: e?.message || 'Interne fout' });
+    }
+  }
+
   const isPreview = body.preview === true;
   const isExecute = body.confirm === true;
   if (!isPreview && !isExecute) {
@@ -129,6 +155,20 @@ export default async function handler(req, res) {
       doorLabel: String(user.email || user.id),
       via: 'crm',
     });
+    // ACCOUNT OOK VERWIJDEREN (2 nov 2026): dezelfde regel als het dossier en
+    // Hoofdmentor › Onboarding — standaard aan in het venster, pas NA een
+    // geslaagde annulering, nooit bij incasso. Ook als de student al
+    // geannuleerd was (dan gebeurde er verder niets opnieuw).
+    if (body.account_verwijderen === true) {
+      const studentId = uit?.steps?.lms_student_id || uit?.eerdere?.steps?.lms_student_id || ctx.ob.dfo_lms_student_id || null;
+      uit.account_verwijderen = await accountNaAnnulering({
+        annuleringGeslaagd: status >= 200 && status < 300 && uit?.ok === true,
+        incasso: false,
+        studentId,
+        reden: String(body.reason || ''),
+        door: String(user.email || user.id) + ' via het CRM',
+      });
+    }
     return res.status(status).json(uit);
   } catch (e) {
     console.error('[onboarding-cancel]', e?.message || e);

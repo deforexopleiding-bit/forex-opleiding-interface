@@ -19,7 +19,7 @@
 
 import { machineToegang } from './lms-onboarding-sessie.js';
 import { crmGebruikerVoorEmail } from './_lib/lms-mentor-brug.js';
-import { annuleringVoorbeeld, voerAnnuleringUit } from './_lib/onboarding-annuleren.js';
+import { annuleringVoorbeeld, voerAnnuleringUit, sluitOnboardingVanGeannuleerdeStudent } from './_lib/onboarding-annuleren.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,8 +57,18 @@ export default async function handler(req, res) {
       if (!v) return antwoord(res, 404, false, 'niet_gevonden', 'Onboarding niet gevonden.');
       return antwoord(res, 200, true, 'voorbeeld', 'Wat er gaat gebeuren.', v);
     }
+    // 2 nov 2026: een al geannuleerde student — vóór "Account verwijderen"
+    // (dat doet het LMS zelf) gaat een nog open onboarding mee dicht. Geen
+    // Teamleader, idempotent. Geeft de LMS-student terug.
+    if (body.stap === 'sluiten_voor_verwijderen') {
+      const door = await crmGebruikerVoorEmail(typeof body.door_email === 'string' ? body.door_email.trim().slice(0, 200) : '');
+      if (!door?.id) return antwoord(res, 422, false, 'geen_crm_gebruiker', 'Je e-mailadres is geen actieve gebruiker in het CRM. Er is niets gewijzigd.');
+      const uit = await sluitOnboardingVanGeannuleerdeStudent(onboardingId, door.id);
+      return antwoord(res, uit.ok ? 200 : (uit.code === 'niet_geannuleerd' ? 409 : uit.code === 'niet_gevonden' ? 404 : 500), uit.ok, uit.code,
+        uit.ok ? 'De onboarding staat op geannuleerd.' : (uit.error || 'Mislukt.'), uit);
+    }
     if (body.stap !== 'uitvoeren') {
-      return antwoord(res, 400, false, 'ongeldig_verzoek', "stap moet 'voorbeeld' of 'uitvoeren' zijn.");
+      return antwoord(res, 400, false, 'ongeldig_verzoek', "stap moet 'voorbeeld', 'uitvoeren' of 'sluiten_voor_verwijderen' zijn.");
     }
 
     const reden = typeof body.reden === 'string' ? body.reden.trim() : '';
