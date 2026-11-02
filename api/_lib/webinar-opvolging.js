@@ -34,6 +34,7 @@ import { sendEmailViaSmtp } from './send-email-core.js';
 import { renderAfspraakMail, platteTekstAfspraak } from './mail-shell-afspraak.js';
 import { magOntvangen, zorgVoorkeur, voorkeurenUrl, afmeldUrl } from './mail-voorkeuren.js';
 import { MAIL_VAN, MIN, nlDatum, nlNaarUtc, plusDagen, verstuurWa } from './webinar.js';
+import { OPVOLG_V2_VOOR } from './webinar-templates.js';
 
 export const AGENDA_URL = 'https://deforexopleiding.nl/agenda/webinar';
 /** Canonieke scan-omschrijving — kopie van SCAN_OMSCHRIJVING in dfo-website lib/agenda-bron-tekst.ts. */
@@ -192,7 +193,7 @@ export async function verwerkOpvolging(sb, { aanmelding, opv, data, nu = new Dat
   const alsFout = (e) => ({ ok: false, fout: String(e?.message || e).slice(0, 300) });
   const [mail, wa] = await Promise.all([
     verstuurOpvolgMail(sb, aanmelding, opv).catch(alsFout),
-    verstuurWa(sb, { telefoon: aanmelding.telefoon, templateNaam: opv.template, ctx: { voornaam: String(aanmelding.voornaam || '').trim() || 'daar' }, wachtMs }).catch(alsFout),
+    verstuurWa(sb, { telefoon: aanmelding.telefoon, templateNaam: opv.template, nieuwereNaam: OPVOLG_V2_VOOR[opv.template] || null, ctx: { voornaam: String(aanmelding.voornaam || '').trim() || 'daar' }, wachtMs }).catch(alsFout),
   ]);
   if (!mail.ok && mail.fout) console.error(`[webinar-opvolging] mail ${opv.key} mislukt`, { aanmelding: aanmelding.id, fout: mail.fout });
   if (!wa.ok && wa.fout) console.error(`[webinar-opvolging] WA ${opv.key} mislukt`, { aanmelding: aanmelding.id, fout: wa.fout });
