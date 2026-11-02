@@ -4805,17 +4805,18 @@
   }
 
   // ── Meta-koppeling-tab (2026-10-29): self-service beheer van de Meta-Lead-koppeling ──
-  // Per-funnel aan/uit + testmodus + read-only consent-info + overzicht uit meta_lead_events.
-  // De consent-gate (beslisMetaLead) blijft hard in de code; hier alleen read-only.
+  // Per-funnel aan/uit + testmodus + testtool toestemming (2026-11-02) + overzicht uit meta_lead_events.
+  // De consent-gate (beslisMetaLead) volgt de testtool (_lib/meta-testtool.js); normaal = de cookiekeuze.
   async function fetchMetaKoppeling(force) {
     const st = (_live.metakoppeling = _live.metakoppeling || {});
     if (!force && (st.loading || (st.fetched && !st.error))) return;
     st.loading = true; st.error = null;
     const seq = (st._seq = (st._seq || 0) + 1);
     if (window.DFO?.render) window.DFO.render();
-    const [cfg, ev] = await Promise.all([
+    const [cfg, ev, tt] = await Promise.all([
       tryFetch('meta-settings', '/api/meta-lead-settings-get'),
       tryFetch('meta-events', '/api/meta-lead-events'),
+      tryFetch('meta-testtool', '/api/meta-testtool'),
     ]);
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
@@ -4830,6 +4831,9 @@
         test_event_code: typeof s.test_event_code === 'string' ? s.test_event_code : '',
       };
     }
+    // Testtool (2026-11-02): opgeslagen stand + bewerkformulier.
+    st.tt = (tt && tt.stand) ? tt : null;
+    if (st.tt && (!st.ttForm || force)) st.ttForm = { ...st.tt.stand };
     st.events = (ev && asArr(ev.events)) || [];
     st.tellers = (ev && ev.tellers) || { verstuurd: 0, geen_toestemming: 0, al_geteld: 0 };
     if (window.DFO?.render) window.DFO.render();
@@ -4865,6 +4869,70 @@
       if (window.DFO?.render) window.DFO.render();
     }
   };
+  // ── Meta-toestemming-testtool (2026-11-02): app_settings.meta_toestemming_testtool ──
+  // Sitebreed: website (banner, pixel, CAPI) én CRM-zenders lezen hem (~15 s cache).
+  window._lsMetaTtModus = function (m) {
+    const st = _live.metakoppeling; if (!st || !st.ttForm) return;
+    st.ttForm.modus = m;
+    if (m === 'normaal') st.ttForm.cookiebanner = 'aan';   // banner uit kan alleen met altijd/nooit
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsMetaTtBanner = function () {
+    const st = _live.metakoppeling; if (!st || !st.ttForm || st.ttForm.modus === 'normaal') return;
+    st.ttForm.cookiebanner = st.ttForm.cookiebanner === 'uit' ? 'aan' : 'uit';
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsMetaTtTestadressen = function () {
+    const st = _live.metakoppeling; if (!st || !st.ttForm) return;
+    st.ttForm.testadressen = !st.ttForm.testadressen;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsMetaTtCode = function (el) {
+    const st = _live.metakoppeling; if (!st || !st.ttForm) return;
+    st.ttForm.test_event_code = String(el.value || '');   // geen re-render: focus behouden
+  };
+  window._lsMetaTtSave = async function () {
+    const st = _live.metakoppeling; if (!st || !st.ttForm) return;
+    st.ttSaving = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/meta-testtool', { method: 'POST', body: JSON.stringify(st.ttForm) });
+      window.KV.toast('Testtool opgeslagen — binnen ~15 seconden actief op website en CRM.', 'ok');
+      st.ttSaving = false;
+      fetchMetaKoppeling(true);
+    } catch (e) {
+      st.ttSaving = false;
+      window.KV.toast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  const _TT_MODI = [
+    ['normaal', 'Normaal', 'Alleen naar Meta als de bezoeker advertentiecookies accepteerde.'],
+    ['altijd', 'Altijd naar Meta', 'Ook als de bezoeker cookies weigerde of nog niet koos.'],
+    ['nooit', 'Nooit naar Meta', 'Ook niet als de bezoeker alles accepteerde (geen pixel, geen CAPI).'],
+  ];
+  function _metaTesttoolKaart(st) {
+    if (!st.ttForm) return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;font-size:12.5px;color:var(--text-3)">Testtool kon niet geladen worden (/api/meta-testtool).</div>';
+    const f = st.ttForm;
+    const modusKnop = ([k, lbl, sub]) => {
+      const aan = f.modus === k;
+      return `<button onclick="window._lsMetaTtModus('${k}')" style="flex:1;min-width:180px;text-align:left;padding:10px 12px;border-radius:var(--r-sm);border:1.5px solid ${aan ? '#16a34a' : 'var(--border)'};background:${aan ? '#e7f6ee' : 'var(--surface)'};cursor:pointer"><div style="font-size:13px;font-weight:700;color:${aan ? '#16a34a' : 'var(--text)'}">${aan ? '&#9679; ' : ''}${lbl}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.4">${sub}</div></button>`;
+    };
+    const modi = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">${_TT_MODI.map(modusKnop).join('')}</div>`;
+    const bannerSub = f.modus === 'normaal'
+      ? 'Kies eerst &quot;Altijd&quot; of &quot;Nooit&quot; naar Meta.'
+      : (f.modus === 'altijd' ? 'Geen banner; iedereen telt als &quot;Alles accepteren&quot; (pixel + statistieken laden).' : 'Geen banner; iedereen telt als &quot;Alleen noodzakelijk&quot;.');
+    const banner = `<div style="${f.modus === 'normaal' ? 'opacity:.5;pointer-events:none' : ''}">${_metaSwitch(f.cookiebanner === 'uit', 'window._lsMetaTtBanner()', 'Cookiebanner uitschakelen', bannerSub)}</div>`;
+    const testadr = _metaSwitch(f.testadressen, 'window._lsMetaTtTestadressen()', 'Testadressen ook versturen', 'Adressen met +test, testdomeinen en testaccounts gaan normaal nooit naar Meta.');
+    const code = `<div style="margin-top:6px"><label style="font-size:12px;color:var(--text-3);display:block;margin-bottom:4px">Test-event-code (optioneel, voor website én CRM; leeg = zoals Testmodus/env)</label><input type="text" value="${esc(f.test_event_code || '')}" oninput="window._lsMetaTtCode(this)" placeholder="TESTxxxxx" style="width:220px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px"></div>`;
+    const s = st.tt && st.tt.stand;
+    const modusTekst = (m) => (_TT_MODI.find((x) => x[0] === m) || _TT_MODI[0])[1];
+    const nu = s ? `${modusTekst(s.modus)} · cookiebanner ${s.cookiebanner === 'uit' ? 'UIT' : 'aan'} · testadressen ${s.testadressen ? 'mee' : 'niet'}${s.test_event_code ? ' · test-code ' + esc(s.test_event_code) : ''}` : 'onbekend';
+    const door = st.tt && st.tt.gezet_op ? ` <span style="color:var(--text-3)">(gezet ${esc(new Date(st.tt.gezet_op).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}${st.tt.gezet_door ? ' door ' + esc(st.tt.gezet_door) : ''})</span>` : '';
+    const stand = `<div style="font-size:12px;margin-bottom:8px"><b>Nu actief:</b> ${nu}${door}</div>`;
+    const opslaan = `<div style="margin-top:12px"><button class="btn btn-primary btn-sm" style="font-size:13px;padding:8px 16px" onclick="window._lsMetaTtSave()" ${st.ttSaving ? 'disabled' : ''}>${st.ttSaving ? 'Opslaan...' : 'Testtool opslaan'}</button></div>`;
+    const uitleg = '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px;line-height:1.5">Geldt <b>sitebreed</b> voor alle bezoekers: de website (cookiebanner, Meta-pixel, server-side CAPI) en de CRM-zenders (opstartsessie, webinar, The Lab, CRMCustomer). De echte cookiekeuze blijft op de lead staan. Resultaat per lead: zie <b>Recente leads naar Meta</b> hieronder (reden <i>testtool: nooit naar Meta</i> bij Nooit).</div>';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px"><div style="font-size:14px;font-weight:700;margin-bottom:4px">Testtool: toestemming &amp; cookiebanner</div>${uitleg}${stand}${modi}${banner}${testadr}${code}${opslaan}</div>`;
+  }
   // ── Meta-dekking per funnel (read-only overzicht uit /api/meta-dekking-per-funnel) ──
   async function fetchMetaDekking(force) {
     const st = (_live.metakoppeling = _live.metakoppeling || {});
@@ -4954,7 +5022,8 @@
       (st.form.testmode ? `<div style="margin-top:8px"><label style="font-size:12px;color:var(--text-3);display:block;margin-bottom:4px">Test-event-code (uit Meta Events Manager &rarr; Test Events)</label><input type="text" value="${esc(st.form.test_event_code)}" oninput="window._lsMetaSetCode(this)" placeholder="TESTxxxxx" style="width:220px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px"></div>` : ''),
       'Testmodus', '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Vervangt het handmatig zetten van META_CAPI_TEST_EVENT_CODE in Vercel. Uit = live.</div>'
     );
-    const blok3 = `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-start"><span style="font-size:18px;line-height:1">&#128274;</span><div><div style="font-size:13.5px;font-weight:700;margin-bottom:3px">Toestemming (vergrendeld)</div><div style="font-size:12px;color:var(--text-3);line-height:1.5">Leads zonder advertentie-toestemming worden <b>nooit</b> naar Meta verstuurd (AVG/cookiewet). De lead blijft gewoon in het CRM staan. Dit staat vast in de code en is bewust niet uit te zetten.</div></div></div>`;
+    // Testtool (2026-11-02) vervangt het vergrendelde toestemmingsblok.
+    const blok3 = _metaTesttoolKaart(st);
     const opslaan = `<div style="margin:4px 0 20px"><button class="btn btn-primary btn-sm" style="font-size:13px;padding:8px 16px" onclick="window._lsMetaSave()" ${st.saving ? 'disabled' : ''}>${st.saving ? 'Opslaan...' : 'Instellingen opslaan'}</button></div>`;
     const t = st.tellers || {};
     const teller = (n, l, kleur) => `<div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px"><div style="font-size:22px;font-weight:800;color:${kleur}">${n == null ? 0 : n}</div><div style="font-size:11.5px;color:var(--text-3)">${l}</div></div>`;

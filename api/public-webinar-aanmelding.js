@@ -32,6 +32,7 @@ import { sendMail } from './_lib/email.js';
 import { waitUntil } from '@vercel/functions';
 import { leesBestemming } from './_lib/trial-product.js';
 import { verwerkLeadMeta } from './_lib/crm-lead-meta.js';
+import { toestemmingUitBody } from './_lib/advertentie-toestemming.js';
 
 const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
@@ -159,7 +160,9 @@ export default async function handler(req, res) {
     waitUntil(verwerkLeadMeta(supabaseAdmin, {
       leadId, email: v.waarden.email, telefoonE164: v.waarden.telefoon,
       voornaam: v.waarden.voornaam, achternaam: null,
-      toestemming: v.waarden.toestemming,
+      // Advertentie-toestemming = de cookiekeuze (`cookie_toestemming`), NIET
+      // `toestemming` (dat is het verplichte berichtenvinkje, altijd true). Fix 2026-11-02.
+      toestemming: toestemmingUitBody(b),
       userAgent: typeof b.user_agent === 'string' ? b.user_agent : null,
       fbp: typeof b.fbp === 'string' ? b.fbp : null,
       fbc: typeof b.fbc === 'string' ? b.fbc : null,

@@ -23,6 +23,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { hashSha256, normalizeEmail, computeAppsecretProof, META_API_VERSION } from './meta-capi.js';
+import { effectieveToestemming, haalTesttool } from './meta-testtool.js';
 
 export const LAB_EVENTS = Object.freeze(['Lead', 'LabGestart', 'LabAfgewerkt', 'Schedule']);
 
@@ -135,10 +136,13 @@ export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, u
   const cfg = labMetaConfig();
   const basis = { aanmelding_id: aanmeldingId, event_name: eventName, event_id: eventId, match_keys: matchKeys(userData || {}) };
   if (!LAB_EVENTS.includes(eventName) || !eventId) return { ok: false, status: 'ongeldig' };
-  // Geen toestemming voor advertentiecookies → niets naar Meta (2026-10-25).
-  if (toestemming !== true) {
-    await log({ ...basis, status: 'skipped', skip_reason: 'geen_toestemming' });
-    return { ok: false, status: 'geen_toestemming' };
+  // Geen toestemming voor advertentiecookies → niets naar Meta (2026-10-25),
+  // na de override van de testtool (_lib/meta-testtool.js).
+  const tt = await haalTesttool();
+  if (effectieveToestemming(tt, toestemming) !== true) {
+    const nooit = tt.modus === 'nooit';
+    await log({ ...basis, status: 'skipped', skip_reason: nooit ? 'testtool: nooit naar Meta' : 'geen_toestemming' });
+    return { ok: false, status: nooit ? 'testtool_nooit' : 'geen_toestemming' };
   }
   if (!cfg.aan) {
     await log({ ...basis, status: 'skipped', skip_reason: 'META_PIXEL_ID/META_CAPI_TOKEN niet gezet' });
@@ -166,7 +170,8 @@ export async function stuurLabEvent({ eventName, eventId, aanmeldingId = null, u
   // testCode niet meegegeven (undefined) → env (cfg.testCode); wél meegegeven
   // (incl. null = live) → die waarde. Zo stuurt de Meta-koppeling-instelling ook
   // het Lab aan, terwijl andere callers ongewijzigd op de env blijven.
-  const effTestCode = testCode === undefined ? cfg.testCode : testCode;
+  // De test-code van de testtool gaat voor alles.
+  const effTestCode = tt.testEventCode || (testCode === undefined ? cfg.testCode : testCode);
   if (effTestCode) body.test_event_code = effTestCode;
 
   const { ok, resp } = await verstuurMetHerhaling(url.toString(), body);

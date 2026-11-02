@@ -11,6 +11,11 @@
 //      lead die via de website én via The Lab binnenkomt telt bij Meta één keer.
 // Zonder de kolom (migratie 2026-10-21-leads-meta-lead-op.sql in dfo-website nog
 // niet gedraaid): alleen het vaste event_id, Meta ontdubbelt binnen zijn venster.
+//
+// Testtool (2026-11-02, _lib/meta-testtool.js): de toestemmingscheck rekent met de
+// override (altijd/nooit) en met 'testadressen' aan vervalt de test-uitsluiting.
+
+import { effectieveToestemming, haalTesttool } from './meta-testtool.js';
 
 export function metaLeadEventId(leadId) {
   return `lead_${leadId}`;
@@ -39,10 +44,14 @@ export function isBotAgent(ua) {
  * Fail-soft: een claim-fout geeft GEEN Lead (liever één te weinig dan dubbel).
  */
 export async function beslisMetaLead(sb, { leadId, email, userAgent, isTest = false, vercelEnv = process.env.VERCEL_ENV, toestemming = false }) {
-  // Alleen met toestemming voor advertentiecookies (2026-10-25, _lib/advertentie-toestemming.js).
-  if (toestemming !== true) return { eventId: null, reden: 'geen_toestemming' };
+  // Alleen met toestemming voor advertentiecookies (2026-10-25, _lib/advertentie-toestemming.js),
+  // na de override van de testtool.
+  const tt = await haalTesttool(sb);
+  if (effectieveToestemming(tt, toestemming) !== true) {
+    return { eventId: null, reden: tt.modus === 'nooit' ? 'testtool_nooit' : 'geen_toestemming' };
+  }
   if (vercelEnv !== 'production') return { eventId: null, reden: 'geen_productie' };
-  if (isTest || isTestAdres(email)) return { eventId: null, reden: 'testadres' };
+  if (!tt.testadressen && (isTest || isTestAdres(email))) return { eventId: null, reden: 'testadres' };
   if (isBotAgent(userAgent)) return { eventId: null, reden: 'bot' };
   if (!leadId) return { eventId: null, reden: 'geen_lead' };
   try {
