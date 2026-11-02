@@ -11,6 +11,11 @@
 //     elke aanmelding — de laatste keuze telt).
 // FAIL-CLOSED: geen lead, NULL, kolom bestaat nog niet of een leesfout → geen
 // toestemming. Migratie: dfo-website docs/sql-migrations/2026-10-25-leads-advertentie-toestemming.sql.
+//
+// Testtool (2026-11-02, _lib/meta-testtool.js): modus 'altijd' → altijd ja,
+// 'nooit' → altijd nee, ongeacht wat er op de lead staat.
+
+import { haalTesttool } from './meta-testtool.js';
 
 /** Body van een aanmelding: alleen `cookie_toestemming === true` telt. PURE. */
 export function toestemmingUitBody(body) {
@@ -22,6 +27,9 @@ export function toestemmingUitBody(body) {
  * Gooit nooit; elke twijfel = false.
  */
 export async function leadHeeftToestemming(sb, { leadId = null, email = null } = {}) {
+  const tt = await haalTesttool();   // eigen lezing (standaardclient), los van de lead-query
+  if (tt.modus === 'altijd') return true;
+  if (tt.modus === 'nooit') return false;
   try {
     let q = sb.from('leads').select('advertentie_toestemming').is('verwijderd_op', null).limit(1);
     if (leadId) q = q.eq('id', leadId);

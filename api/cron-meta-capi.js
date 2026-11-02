@@ -31,6 +31,7 @@ import {
   DEFAULT_EVENT_NAME,
 } from './_lib/meta-capi.js';
 import { leadHeeftToestemming } from './_lib/advertentie-toestemming.js';
+import { haalTesttool } from './_lib/meta-testtool.js';
 
 const PER_RUN_LIMIT = 50;
 
@@ -102,6 +103,8 @@ export default async function handler(req, res) {
   summary.appsecret_proof = cfgStatus.appsecret_proof;
 
   const cfg = getMetaCapiConfig();
+  // Testtool (_lib/meta-testtool.js): een daar ingevulde test-code gaat voor de env.
+  const ttCode = (await haalTesttool()).testEventCode;
 
   // Fetch deals die nog geen CAPI-event hadden (LEFT JOIN via subquery-emulatie:
   // haal eerst verstuurde deal-ids op, filter dan met .not('id','in',(...))).
@@ -266,7 +269,7 @@ export default async function handler(req, res) {
       // POST naar Meta.
       let resp;
       try {
-        resp = await postCapiEvents({ event, testCode: cfg.testCode });
+        resp = await postCapiEvents({ event, testCode: ttCode || cfg.testCode });
       } catch (postErr) {
         summary.failed += 1;
         summary.errors.push({ phase: 'meta_post', deal_id: deal.id, error: postErr?.message || String(postErr) });

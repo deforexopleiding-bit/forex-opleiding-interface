@@ -25,6 +25,7 @@ import { leadHeeftToestemming, legToestemmingVast } from './advertentie-toestemm
 import { labUserData, labMetaConfig, verstuurMetHerhaling } from './lab-meta.js';
 import { computeAppsecretProof, META_API_VERSION } from './meta-capi.js';
 import { leesMetaLeadSettings, funnelAan, effectieveTestCode } from './meta-lead-settings.js';
+import { haalTesttool } from './meta-testtool.js';
 
 const LOG_TABEL = 'meta_lead_events';
 
@@ -93,7 +94,9 @@ async function stuurLeadEvent({ eventId, userData, bronUrl = null, customData = 
   if (cfg.appSecret) body.appsecret_proof = computeAppsecretProof(cfg.token, cfg.appSecret);
   // Testmode/code komt uit de Meta-koppeling-instelling (env als fallback);
   // zie api/_lib/meta-lead-settings.js (effectieveTestCode).
-  if (testCode) body.test_event_code = testCode;
+  // De test-code van de testtool (_lib/meta-testtool.js) gaat voor alles.
+  const ttCode = (await haalTesttool()).testEventCode;
+  if (ttCode || testCode) body.test_event_code = ttCode || testCode;
 
   const { ok, resp } = await verstuurMetHerhaling(url, body);
   if (al) {
@@ -157,6 +160,7 @@ export async function meldCrmLead(sb, p = {}) {
     if (!eventId) {
       // Consent- en dedup-skips (en de rest) expliciet loggen i.p.v. stil overslaan.
       const skip_reason = reden === 'geen_toestemming' ? 'geen advertentie-toestemming'
+        : reden === 'testtool_nooit' ? 'testtool: nooit naar Meta'
         : reden === 'al_gemeld' ? 'al geteld (dedup)'
           : `overgeslagen (${reden})`;
       await logUitkomst({ leadId, bron, status: 'skipped', skip_reason });
