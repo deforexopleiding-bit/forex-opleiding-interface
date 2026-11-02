@@ -109,7 +109,7 @@
       }
     } catch (e) { console.warn('[wanbetalers-v2] RBAC load fail:', e?.message || e); _rbac.canBrief = _rbac.canExecute = _rbac.canPropose = _rbac.canApprove = true; }
     _rbac.loaded = true;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   queueMicrotask(_ensureRbac);
 
@@ -363,7 +363,7 @@
     if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
     const seq = ++st._seq;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
     const j = await tryFetch('overzicht', '/api/wanbetalers-overzicht-list');
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
@@ -371,20 +371,20 @@
     else st.items = asArr(j.items || j.customers || j.rows);
     // Trigger arrangement-badge-fetch parallel.
     queueMicrotask(_fetchArrangements);
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchPipelineActs() {
     const st = _live.pipelineActs;
     if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
     const seq = ++st._seq;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
     const j = await tryFetch('pipeline-actions', '/api/dunning-pipeline-actions');
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon actie-dashboard niet laden';
     else st.data = j;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchPendingActs() {
     const st = _live.pendingActs;
@@ -396,7 +396,7 @@
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon open acties niet laden';
     else st.items = asArr(j.items || j.actions);
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   // Build 3: stale handmatige acties fetch. Read-only endpoint dat
   // MANUAL_* pending_actions ophaalt die langer dan de drempel open staan
@@ -418,7 +418,7 @@
       st.counts_by_type   = j.counts_by_type || {};
       st.counts_by_status = j.counts_by_status || {};
     }
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   // BROK 5 ACT-2: per-status cache voor Afgehandeld/Afgewezen tabs.
   _live.pendingActsByStatus = { EXECUTED: null, REJECTED: null };
@@ -436,7 +436,7 @@
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon paused-lijst niet laden';
     else st.items = asArr(j.items);
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchPendingActsByStatus(status) {
     const key = String(status).toUpperCase();
@@ -450,7 +450,7 @@
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon lijst niet laden';
     else st.items = asArr(j.items || j.actions);
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   // v=6 FIX 4: dedupe — _fetchArrangements consumeert nu de gedeelde
   // _arrLive.items en bouwt daaruit de byCust-map. Voorkomt de 6-vs-8-
@@ -479,20 +479,20 @@
       map[cid].push(a);
     }
     st.byCust = map;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchBriefs() {
     const st = _live.briefs;
     if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
     const seq = ++st._seq;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
     const j = await tryFetch('briefs', '/api/dunning-briefs-list-all?limit=500');
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon brieven niet laden';
     else st.items = asArr(j.items || j.briefs);
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchSettings() {
     const st = _live.settings;
@@ -504,7 +504,7 @@
     st.loading = false; st.fetched = true;
     if (!j || j.error) { st.error = (j && j.error) || 'Kon settings niet laden'; return; }
     st.data = j.settings || j;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
   async function _fetchCallLog(cid) {
     const st = _live.callLog;
@@ -622,7 +622,7 @@
   window.__wbxBrSetStatus = (val) => {
     if (!['new', 'downloaded', 'sent', 'all'].includes(val)) return;
     _ui.brStatusFilter = val;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   /* ── BROK 2 WRITE-HANDLERS ────────────────────────────────────────── */
@@ -648,12 +648,12 @@
       </div>`;
     const ok = await _askConfirm('Brief per e-mail versturen?', bodyHtml, { okLabel: 'Ja, verstuur', cancelLabel: 'Annuleren' });
     if (!ok) return;
-    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.briefBusy[brief_id] = true; _herteken();
     const r = await apiPost('/api/dunning-brief-email-send', { brief_id });
     _ui.briefBusy[brief_id] = false;
     if (!r.ok) {
       _toast('Verzenden faalde: ' + (r.error || 'onbekende fout'), 'error');
-      if (window.DFO?.render) window.DFO.render();
+      _herteken();
       return;
     }
     // Optimistic update: markeer als sent (server geeft sent_at terug).
@@ -665,7 +665,7 @@
       if (saved.sent_to_email) listRow.sent_to_email = saved.sent_to_email;
     }
     _toast('Brief verstuurd naar ' + (saved.sent_to_email || email || name), 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   // ── Brieven: markeer per post verstuurd ────────────────────────────
@@ -681,14 +681,14 @@
       { okLabel: 'Ja, markeer' }
     );
     if (!ok) return;
-    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.briefBusy[brief_id] = true; _herteken();
     const r = await apiPost('/api/dunning-brief-mark-post', { brief_id });
     _ui.briefBusy[brief_id] = false;
-    if (!r.ok) { _toast('Kon niet markeren: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Kon niet markeren: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     const listRow = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
     if (listRow) { listRow.sent_at = new Date().toISOString(); listRow.sent_via = 'post'; }
     _toast('Gemarkeerd als per post verstuurd.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   // ── Brieven: verwijderen (brief-row + PDF-storage) ─────────────────
@@ -704,24 +704,24 @@
       { okLabel: 'Ja, verwijder', cancelLabel: 'Annuleren', tone: 'danger' }
     );
     if (!ok) return;
-    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.briefBusy[brief_id] = true; _herteken();
     const r = await apiPost('/api/dunning-brief-delete', { brief_id });
     _ui.briefBusy[brief_id] = false;
-    if (!r.ok) { _toast('Verwijderen faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Verwijderen faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     // Optimistic: uit lijst verwijderen.
     _live.briefs.items = asArr(_live.briefs.items).filter((b) => String(b.id) !== String(brief_id));
     delete _ui.brSelected[brief_id];
     _toast('Brief verwijderd.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   // ── Brieven: bulk mark-verstuurd + bulk-print ──────────────────────
   window.__wbxBriefToggleSel = (brief_id) => {
     _ui.brSelected[brief_id] = !_ui.brSelected[brief_id];
     if (!_ui.brSelected[brief_id]) delete _ui.brSelected[brief_id];
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
-  window.__wbxBriefClearSel = () => { _ui.brSelected = {}; if (window.DFO?.render) window.DFO.render(); };
+  window.__wbxBriefClearSel = () => { _ui.brSelected = {}; _herteken(); };
   function _selBriefIds() { return Object.keys(_ui.brSelected).filter((k) => _ui.brSelected[k]); }
 
   window.__wbxBriefBulkMarkSent = async () => {
@@ -742,7 +742,7 @@
     }
     _ui.brSelected = {};
     _toast(`Gemarkeerd als verstuurd: ${ids.length} brief${ids.length === 1 ? '' : 'ven'}.`, 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   // v=6 FIX 8: PDF-preview fallback wanneer download_url mist.
   window.__wbxBriefPreview = async (brief_id) => {
@@ -966,7 +966,7 @@
     _ui.stageBusy[cid] = true;
     // BROK 8 minor: forceer render direct na busy-set zodat de dropdown
     // meteen z'n disabled-attribuut krijgt (voorheen 1 tick vertraging).
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     // BROK 9 FIX: server verwacht 'stage_slug' (api/dunning-pipeline-set-stage.js:28),
     // niet 'stage'. Voorheen kreeg elke fase-mutatie 400 "stage_slug vereist"
     // en werd de fase server-side niet gewijzigd (alleen UI-side optimistisch).
@@ -979,7 +979,7 @@
     delete _live.timeline.byCust[cid];
     if (_ui.gspSelectedId === cid) _fetchTimeline(cid);
     _toast(`Fase gezet: ${stageLabel}.`, 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   /* ── BROK 3 WRITE-HANDLERS — pending-actions ─────────────────────── */
@@ -1007,14 +1007,14 @@
       { okLabel: 'Ja, voer uit' }
     );
     if (!ok) return;
-    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.paBusy[action_id] = true; _herteken();
     const r = await apiPost('/api/pending-actions-approve', { id: action_id });
     _ui.paBusy[action_id] = false;
-    if (!r.ok) { _toast('Approve faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Approve faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     // Optimistic: verwijder uit pending-lijst.
     _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
     _toast('Actie goedgekeurd — motor voert uit.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   window.__wbxPaReject = async (action_id) => {
@@ -1029,13 +1029,13 @@
       { okLabel: 'Afwijzen' }
     );
     if (!reason) return;
-    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.paBusy[action_id] = true; _herteken();
     const r = await apiPost('/api/pending-actions-reject', { id: action_id, rejection_reason: reason });
     _ui.paBusy[action_id] = false;
-    if (!r.ok) { _toast('Reject faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Reject faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
     _toast('Actie afgewezen.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   window.__wbxPaMarkExecuted = async (action_id) => {
@@ -1056,13 +1056,13 @@
       { okLabel: 'Ja, markeer' }
     );
     if (!ok) return;
-    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.paBusy[action_id] = true; _herteken();
     const r = await apiPost('/api/pending-actions-mark-executed', { id: action_id });
     _ui.paBusy[action_id] = false;
-    if (!r.ok) { _toast('Markeren faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Markeren faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
     _toast('Actie gemarkeerd als uitgevoerd.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   window.__wbxPaMarkNotExecuted = async (action_id) => {
@@ -1145,7 +1145,7 @@
     if (!j) { _arrLive.error = 'Kon arrangementen niet laden'; }
     else if (j.error) { _arrLive.error = j.error; }
     else { _arrLive.items = asArr(j.items || j.arrangements); }
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   window.__wbxArrCancel = async (arrangement_id, arrLabel) => {
@@ -1161,10 +1161,10 @@
       { okLabel: 'Ja, annuleer', tone: 'danger' }
     );
     if (!ok) return;
-    _ui.arrBusy[arrangement_id] = true; if (window.DFO?.render) window.DFO.render();
+    _ui.arrBusy[arrangement_id] = true; _herteken();
     const r = await apiPost('/api/arrangements-cancel', { id: arrangement_id });
     _ui.arrBusy[arrangement_id] = false;
-    if (!r.ok) { _toast('Annuleren faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Annuleren faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     _arrLive.fetched = false; _fetchArrangementsList('ACTIEF');
     _live.pendingActs.fetched = false; _fetchPendingActs();
     _toast('Arrangement geannuleerd.', 'success');
@@ -1533,7 +1533,7 @@
     if (!j) { _bulkJobs.error = 'Kon bulk-jobs niet laden'; }
     else if (j.error) { _bulkJobs.error = j.error; }
     else { _bulkJobs.items = asArr(j.items || j.jobs); }
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   window.__wbxOvToggleSel = (cid) => {
@@ -1544,7 +1544,7 @@
   };
   window.__wbxOvClearSel = () => {
     _ui.ovSelected = {};
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   function _selOvCustIds() { return Object.keys(_ui.ovSelected).filter((k) => _ui.ovSelected[k]); }
   function _repaintOvSelBar() {
@@ -1602,17 +1602,17 @@
       </div>`;
     const ok = await _askTypedConfirm('Bulk dunning-workflow starten', bodyHtml, phrase, { okLabel: 'START' });
     if (!ok) return;
-    _ui.bulkBusy = true; if (window.DFO?.render) window.DFO.render();
+    _ui.bulkBusy = true; _herteken();
     const r = await apiPost('/api/wanbetalers-bulk-start-workflow', { invoice_ids: invoiceIds });
     _ui.bulkBusy = false;
-    if (!r.ok) { _toast('Bulk-start faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Bulk-start faalde: ' + (r.error || 'onbekend'), 'error'); _herteken(); return; }
     const added   = asArr(r.json?.added).length;
     const skipped = asArr(r.json?.skipped).length;
     const errors  = asArr(r.json?.errors).length;
     _toast(`Bulk-start: ${added} runs gestart · ${skipped} geskipt · ${errors} fout${errors === 1 ? '' : 'en'}.`, 'success');
     _ui.ovSelected = {};
     _bulkJobs.fetched = false; _fetchBulkJobs();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
 
   /* ══════════════════════════════════════════════════════════════════
@@ -1758,7 +1758,7 @@
         }
         state.result = r.json; state.step = 'result';
         _ui.ovSelected = {};
-        if (window.DFO?.render) window.DFO.render();
+        _herteken();
         render();
       },
     };
@@ -1949,7 +1949,7 @@
         // geïmplementeerd — geen centrale tab-API in dit bestand).
         if (_live.briefs) _live.briefs.fetched = false;
         _toast((r.json.totals.created || 0) + ' brie' + ((r.json.totals.created || 0) === 1 ? 'f' : 'ven') + ' aangemaakt — check de Brieven-tab.', 'success');
-        if (window.DFO?.render) window.DFO.render();
+        _herteken();
         render();
       },
     };
@@ -2785,14 +2785,14 @@
   window.__wbxActiesTab = (tab) => {
     if (!_ui.acties) _ui.acties = { tab: 'vandaag', searchQ: '', _timer: null };
     _ui.acties.tab = String(tab || 'vandaag');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   window.__wbxActiesSearch = (val) => {
     if (!_ui.acties) _ui.acties = { tab: 'vandaag', searchQ: '', _timer: null };
     _ui.acties.searchQ = String(val || '');
     if (_ui.acties._timer) clearTimeout(_ui.acties._timer);
     _ui.acties._timer = setTimeout(() => {
-      if (window.DFO?.render) window.DFO.render();
+      _herteken();
     }, 180);
   };
   window.__wbxActSnooze = async (id) => {
@@ -2825,10 +2825,10 @@
     if (!form) return;
     if (_ui.paBusy[id]) return;
     _ui.paBusy[id] = true;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
     const r = await apiPost('/api/pending-action-snooze', { id, scheduled_for: form.iso });
     _ui.paBusy[id] = false;
-    if (!r.ok) { _toast('Snooze mislukt: ' + r.error, 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    if (!r.ok) { _toast('Snooze mislukt: ' + r.error, 'error'); _herteken(); return; }
     _toast('Actie ingepland.', 'success');
     _live.pendingActs.fetched = false;
     _fetchPendingActs();
@@ -3094,9 +3094,9 @@
   window.__wbxBrSearchInput = (val) => {
     _ui.brSearchQ = String(val || '');
     if (_ui.brSearchTimer) clearTimeout(_ui.brSearchTimer);
-    _ui.brSearchTimer = setTimeout(() => { if (window.DFO?.render) window.DFO.render(); }, 200);
+    _ui.brSearchTimer = setTimeout(() => { _herteken(); }, 200);
   };
-  window.__wbxBrSearchClear = () => { _ui.brSearchQ = ''; if (window.DFO?.render) window.DFO.render(); };
+  window.__wbxBrSearchClear = () => { _ui.brSearchQ = ''; _herteken(); };
   window.__wbxBrToggleSelAll = () => {
     const items = asArr(_live.briefs.items);
     const categorize = (b) => (b.sent_at || b.status === 'sent' || b.sent_via) ? 'sent'
@@ -3116,7 +3116,7 @@
     } else {
       for (const b of filtered) _ui.brSelected[String(b.id)] = true;
     }
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   window.__wbxBriefBulkDelete = async () => {
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
@@ -3319,34 +3319,23 @@
     // list-scrollTop) én de thread-header (kan unread/brief-badge veranderen).
     // Alleen als er GEEN #wbxInboxList (view weg is) → dan is er niks te repainten;
     // bij een tab-switch of full-render vervolgens rendert de shell alles opnieuw.
-    if (document.getElementById('wbxInboxList')) {
-      _repaintInboxList();
-      _repaintInboxThreadHeader();
-    } else {
-      try { window.DFO?.render?.(); } catch (_) {}
-    }
+    // Sinds 29 okt: _herteken() — staat het gesprekkenscherm open, dan
+    // werkt dat ALLEEN de delen bij die echt veranderden (lijst per rij,
+    // filtertellers, kop); anders de volle render zoals voorheen.
+    _herteken();
   }
   // Repaint alleen de thread-header (boven de messages). Header toont
   // 24h-badge / brief-tag / totalUnread — deze data komt uit convs.items en
   // moet dus bijgewerkt worden bij elke conv-refetch. NIET de messages-scroll
   // aanraken (dat is _repaintInboxThread).
+  //
+  // Sinds 29 okt in een eigen houder (#wbxInboxThreadKop, display:contents,
+  // dus geen verschil in opmaak). Vroeger werd 'de eerste div van de kolom'
+  // vervangen; zonder gekozen gesprek bestond die kop niet en kon hij er dan
+  // ook niet meer bij komen zonder volle render. En: alleen schrijven als er
+  // iets veranderde — een open <select> of kebab-menu klapt anders dicht.
   function _repaintInboxThreadHeader() {
-    const el = document.getElementById('wbxInboxThreadScroll');
-    if (!el) return;
-    const parent = el.parentElement;
-    if (!parent) return;
-    const oldHeader = parent.querySelector(':scope > div:first-child');
-    // De header is de EERSTE div-child van de kolom (mag ook '' zijn als
-    // convId=null). Vervangende innerHTML van de wrapper garandeert dat we
-    // niet de scroll-container aanraken.
-    const convId = _ui.inbox.selectedConv;
-    const newHeaderHtml = _inboxThreadHeaderHtml(convId);
-    if (oldHeader && oldHeader.id !== 'wbxInboxThreadScroll') {
-      const tmp = document.createElement('template');
-      tmp.innerHTML = newHeaderHtml.trim();
-      const newNode = tmp.content.firstElementChild;
-      if (newNode) parent.replaceChild(newNode, oldHeader);
-    }
+    _wbxZetHtml(document.getElementById('wbxInboxThreadKop'), _inboxThreadHeaderHtml(_ui.inbox.selectedConv));
   }
   // SURFACE A: gedeelde filter+sort-helper. Server retourneert alle finance-convs;
   // wij tonen alleen wanbetaler-convs (is_debtor=true) + client-side searchQ +
@@ -3412,19 +3401,132 @@
     return null;
   }
 
-  // BP3 v30 (2026-09-04) — scroll-preserve helper. Elk DFO.render() vervangt
-  // de shell en dus #wbxInboxList → scrollTop=0 bij aanklikken van een gesprek.
-  // Wrap: capture scrollTop → render → restore in RAF (nieuwe DOM staat pas
-  // dan). Zelfde patroon als _lsInbSafeRender in leadsonderhoud-v2.
-  function _wbxSafeRender() {
-    const el = document.getElementById('wbxInboxList');
-    const savedTop = el ? el.scrollTop : 0;
+  /* ── GERICHT HERTEKENEN (29 okt) ──────────────────────────────────────────
+     Gemeten in de browser bij het openen van één gesprek: de hele lijst ging
+     eruit en erin (117 rijen, scrollTop 382 → 0) en daarna werd de VOLLEDIGE
+     shell nog twee keer vervangen (nav, kruimel, tabs, #content, topbar).
+     Oorzaak: elke statuswijziging in dit bestand riep DFO.render() aan, en die
+     vervangt alles — ook bij het openen van een gesprek, het ophalen van de
+     parkeerstand, elke tik van de ongedaan-teller en elke achtergrondfetch.
+
+     _herteken() is nu de enige weg. Staat het gesprekkenscherm open, dan
+     tekent hij ALLEEN de delen van dát scherm opnieuw, en elk deel alleen als
+     zijn HTML echt veranderde:
+       - lijst: per rij vergeleken (sleutel = gesprek-id); alleen gewijzigde
+         rijen worden vervangen, de rest blijft dezelfde node → scrollpositie
+         en hover blijven staan;
+       - draad: per bericht vergeleken (zelfde idee);
+       - schrijfbalk: focus, cursor en getypte tekst blijven bewaard;
+       - kop, filters, klantpaneel, kantooruren: enkel bij verschil.
+     Staat het scherm NIET open (ander tabblad), dan precies de volle render
+     van vroeger — daar verandert niets. */
+  function _wbxInboxGemonteerd() {
+    const S = window.DFO && window.DFO.S;
+    return !!(S && S.mod === 'wanbetalers' && S.tab === 'Gesprekken' && !S.dossier
+      && document.getElementById('wbxInboxList')
+      && document.getElementById('wbxInboxThreadScroll'));
+  }
+  function _herteken() {
+    if (_wbxInboxGemonteerd()) {
+      try { _hertekenInbox(); return; }
+      catch (e) { console.error('[wanbetalers-v2] gerichte hertekening faalde, volle render:', e); }
+    }
     try { window.DFO?.render?.(); } catch (_) {}
-    if (savedTop <= 0) return;
-    requestAnimationFrame(() => {
-      const el2 = document.getElementById('wbxInboxList');
-      if (el2) el2.scrollTop = savedTop;
+  }
+  function _hertekenInbox() {
+    _inboxBijRender();
+    // Het zoekveld zelf wordt nooit opnieuw geschreven (je typt erin). Alleen
+    // als de stand van buitenaf veranderde en je er niet in staat.
+    const zoek = document.getElementById('wbxInboxSearch');
+    if (zoek && document.activeElement !== zoek && zoek.value !== String(_ui.inbox.searchQ || '')) {
+      zoek.value = String(_ui.inbox.searchQ || '');
+    }
+    _wbxZetHtml(document.getElementById('wbxInboxFilters'), _inboxFiltersHtml());
+    _repaintInboxList();
+    _repaintInboxThreadHeader();
+    _repaintInboxThread(_ui.inbox.selectedConv);
+    _repaintInboxCompose();
+    _repaintInboxRightPane();
+    _wbxZetHtml(document.getElementById('wbxInboxKantooruren'), _officeHoursBanner());
+  }
+
+  /* Schrijf HTML alleen als hij anders is dan wat er de vorige keer in deze
+     node geschreven werd. De vergelijking hangt aan de node zelf: na een volle
+     render is het een nieuwe node zonder geheugen, en dan wordt er gewoon
+     geschreven. */
+  function _wbxZetHtml(el, html) {
+    if (!el) return false;
+    if (el.__wbxHtml === html) return false;
+    el.innerHTML = html;
+    el.__wbxHtml = html;
+    return true;
+  }
+
+  /* Vervang alleen de kinderen die veranderden.
+     Elk kind met een `data-wbx-sleutel` wordt vergeleken met het oude kind met
+     dezelfde sleutel; is de HTML gelijk, dan blijft de oude node staan (geen
+     mutatie, geen herlaadde afbeelding, geen verspringing). Kinderen zonder
+     sleutel (laadskelet, foutblok, lege tekst) worden gewoon vervangen. */
+  function _wbxMorph(parent, html) {
+    if (!parent) return;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    const oud = new Map();
+    Array.from(parent.children).forEach((k) => {
+      const s = k.getAttribute('data-wbx-sleutel');
+      if (s && !oud.has(s)) oud.set(s, k);
     });
+    const gebruikt = new Set();
+    const doel = Array.from(tpl.content.children).map((n) => {
+      const s = n.getAttribute('data-wbx-sleutel');
+      const b = s ? oud.get(s) : null;
+      if (b && !gebruikt.has(b) && b.outerHTML === n.outerHTML) { gebruikt.add(b); return b; }
+      return n;
+    });
+    // Losse tekstnodes (witruimte) horen er niet in; die kunnen alleen in de
+    // weg zitten bij het op volgorde zetten.
+    Array.from(parent.childNodes).forEach((k) => { if (k.nodeType !== 1) parent.removeChild(k); });
+    const blijft = new Set(doel);
+    Array.from(parent.children).forEach((k) => { if (!blijft.has(k)) parent.removeChild(k); });
+    doel.forEach((n, i) => {
+      const nu = parent.children[i] || null;
+      if (nu !== n) parent.insertBefore(n, nu);
+    });
+  }
+
+  /* Focus + cursor in een deel van het scherm vastleggen en na het schrijven
+     terugzetten. Op id als dat er is, anders op volgorde van de velden. */
+  function _wbxFocusVast(houder) {
+    const a = document.activeElement;
+    if (!houder || !a || !houder.contains(a)) return null;
+    const velden = Array.from(houder.querySelectorAll('input,textarea,select,button'));
+    const v = { id: a.id || null, i: velden.indexOf(a), start: null, eind: null, top: a.scrollTop || 0 };
+    try { v.start = a.selectionStart; v.eind = a.selectionEnd; } catch (_) { /* niet elk veld kent selectie */ }
+    return v;
+  }
+  function _wbxFocusTerug(houder, v) {
+    if (!houder || !v) return;
+    const velden = Array.from(houder.querySelectorAll('input,textarea,select,button'));
+    const el = (v.id && houder.querySelector('#' + v.id)) || (v.i >= 0 ? velden[v.i] : null);
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+      if (v.start != null && v.eind != null && typeof el.setSelectionRange === 'function') {
+        try { el.setSelectionRange(v.start, v.eind); } catch (_) { /* niet elk type */ }
+      }
+      if (v.top) el.scrollTop = v.top;
+    } catch (_) { /* noop */ }
+  }
+
+  /* Wat inboxView() bij elke render naast de opmaak deed: de eerste fetches
+     en het realtime-kanaal aanzetten. Gedeeld zodat de gerichte hertekening
+     daar niets in mist. */
+  function _inboxBijRender() {
+    if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading && !_live.inbox.convs.error) queueMicrotask(_fetchInboxConvs);
+    // Overzicht behouden voor legacy-fallback scoping (als backend geen is_debtor levert).
+    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
+    // SURFACE A: realtime subscribe + poll-fallback bij eerste render.
+    if (!_live.inboxRealtime.active) queueMicrotask(_startInboxRealtime);
   }
 
   /* Wat staat er geparkeerd, en wat ging er mis?
@@ -3445,7 +3547,10 @@
     if (!bag) return;
     bag.wacht = asArr(j.wacht);
     bag.aandacht = asArr(j.aandacht);
-    try { window.DFO?.render?.(); } catch (_) {}
+    // De aandachtsbalk hoort bij de schrijfbalk; meer hoeft er niet opnieuw.
+    // Vroeger stond hier de volle DFO.render(): dát was de tweede keer dat het
+    // hele scherm verdween, ~1,4 s na het aanklikken van een gesprek.
+    if (!_repaintInboxCompose()) _herteken();
   }
 
   // BROK 5-fix (v=11): stale-guard via _seq per __wbxInboxSelect.
@@ -3503,8 +3608,7 @@
       _repaintInboxThread(convId);
       _repaintInboxThreadHeader();
     } else {
-      // BP3 v30 — scroll-preserve tijdens fallback-render.
-      _wbxSafeRender();
+      _herteken();
     }
   }
   async function _fetchInboxCtx(convId, mySeq) {
@@ -3535,9 +3639,7 @@
   // BROK WB-FIX-2 #4: surgical repaint van het rechter klantgegevens-paneel.
   // Andere shell-render zou de thread-container vervangen → scrollTop=0.
   function _repaintInboxRightPane() {
-    const el = document.getElementById('wbxInboxRightPane');
-    if (!el) return;
-    el.innerHTML = _inboxKlantgegevensHtml(_ui.inbox.selectedConv);
+    _wbxZetHtml(document.getElementById('wbxInboxRightPane'), _inboxKlantgegevensHtml(_ui.inbox.selectedConv));
   }
 
   window.__wbxInboxSelect = (convId, opts) => {
@@ -3568,9 +3670,10 @@
     // /api/email-actions {action:'mark-read'} uit — dat schrijft alleen een
     // auditregel, dus elke badge kwam terug na herladen.
     if (!opts || opts.markeer !== false) _wbxMarkeerGelezen(convId, { stil: true });
-    // BP3 v30 — scroll-preserve op #wbxInboxList (voorheen: DFO.render zette
-    // scrollTop=0 bij aanklikken van een gesprek).
-    _wbxSafeRender();
+    // Openen tekent alleen bij wat verandert: twee lijstrijen (oude en nieuwe
+    // actieve), de kop, de draad, de schrijfbalk en het klantpaneel. De lijst
+    // zelf blijft staan, dus ook zijn scrollpositie. Vroeger: volle render.
+    _herteken();
   };
   // BROK 8 fix 5 (v=13): state-only oninput + surgical repaint van alleen de
   // conv-lijst. Voorheen: elke keystroke triggerde _fetchInboxConvs (server-side
@@ -3582,15 +3685,17 @@
   /* SURFACE A polish (v=24-fix): scroll-preservering — voorkomt dat de
      6s poll / Supabase-realtime tick de user naar de top spingt.
      Bewaart scrollTop van #wbxInboxList (links) over elke repaint. */
+  //
+  // Sinds 29 okt per rij (_wbxMorph): alleen rijen die echt veranderden
+  // (actief, ongelezen, nieuw bericht) worden vervangen. De scrollpositie
+  // wordt daarnaast nog steeds bewaard, voor het geval de lijst wél korter of
+  // langer werd (filter, nieuw gesprek).
   function _repaintInboxList() {
     const el = document.getElementById('wbxInboxList');
     if (!el) return;
     const prevTop = el.scrollTop;
-    el.innerHTML = _inboxConvsListHtml();
-    // Restore synchroon — de nieuwe DOM heeft dezelfde scroll-hoogte tenzij
-    // conv-count drastisch veranderd is. Voor die randgevallen accepteren we
-    // een kleine skip (nooit een terugsprong naar 0).
-    el.scrollTop = prevTop;
+    _wbxMorph(el, _inboxConvsListHtml());
+    if (el.scrollTop !== prevTop) el.scrollTop = prevTop;
   }
   // Per-conv scroll-state voor thread-scroll-preservation.
   _ui.inbox.threadScrollByConv = _ui.inbox.threadScrollByConv || {};
@@ -3622,6 +3727,9 @@
     attempts = attempts || 0;
     if (attempts > 250) return; // ~5s max (was 600ms)
     if (String(_ui.inbox.selectedConv) !== String(convId)) return;
+    // Al onderaan gezet (door _repaintInboxThread)? Dan stoppen. Anders trekt
+    // deze lus iemand die net omhoog begint te lezen terug naar beneden.
+    if (attempts > 0 && _ui.inbox.threadScrollBottomOnNext[String(convId)] === false) return;
     const fire = () => {
       const el = document.getElementById('wbxInboxThreadScroll');
       if (!el) return _wbxScrollThreadToBottomSoon(convId, attempts + 1);
@@ -3658,7 +3766,9 @@
     // scroll ECHT gelukt is (voorkomt dat een late DFO.render de force
     // verliest voordat we bodemen).
 
-    el.innerHTML = _inboxThreadHtml(convId);
+    // Per bericht vergeleken: berichten die er al stonden blijven dezelfde
+    // node (geen flikkering, geen herlaadde afbeeldingen).
+    _wbxMorph(el, _inboxThreadHtml(convId));
     _ui.inbox.threadItemCountByConv[convId] = itemsCount;
 
     // BROK WB-FIX-4 #3: SYNCHROON scroll als forceBottom of eerste render
@@ -3686,7 +3796,9 @@
   window.__wbxInboxSearch = (val) => {
     _ui.inbox.searchQ = String(val || '');
     if (_ui.inbox._searchTimer) clearTimeout(_ui.inbox._searchTimer);
-    _ui.inbox._searchTimer = setTimeout(_repaintInboxList, 200);
+    // _herteken en niet alleen de lijst: de tellers op de filterknoppen
+    // tellen de zoekterm mee. Het zoekveld zelf wordt niet aangeraakt.
+    _ui.inbox._searchTimer = setTimeout(_herteken, 200);
   };
   window.__wbxInboxStatus = (val) => {
     _ui.inbox.statusFilter = String(val || 'active');
@@ -3695,7 +3807,7 @@
     // active-state (chip.on) direct verhuist naar de aangeklikte pill.
     // Zonder deze render bleef de oranje box op de vorige waarde staan
     // totdat een andere event (bv. fetch-return) een render triggerde.
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     _fetchInboxConvs();
   };
   /* G5-deels. Nog een keer op dezelfde knop zet 'em weer uit — een filter
@@ -3709,13 +3821,13 @@
     _ui.inbox.focusFilter = (_ui.inbox.focusFilter === gewenst) ? 'geen' : gewenst;
     _ui.inbox.selectedConv = null;
     _ui.inbox.autoOpenedFirst = false;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   };
   window.__wbxInboxCat = (val) => {
     _ui.inbox.catFilter = String(val || 'alles');
     _ui.inbox.selectedConv = null;
     _ui.inbox.autoOpenedFirst = false;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   };
   /* H10 — van WhatsApp naar E-mail sprong de draad terug naar het oudste
      bericht (9 september). Oorzaak: deze knop riep de volle DFO.render() aan,
@@ -3738,11 +3850,37 @@
   };
 
   /* Chirurgische hertekening van alleen de schrijfbalk.
-     @returns {boolean} of het gelukt is */
+     @returns {boolean} of het gelukt is
+
+     Sinds 29 okt: niet opnieuw schrijven als er niets veranderde, en als het
+     wél moet, blijven focus en cursor waar ze stonden. De getypte tekst gaat
+     niet verloren: die staat via oninput al in _ui.inbox.compose en komt dus
+     mee in de nieuwe HTML.
+
+     De vergelijking negeert de inhoud van het tekstveld en het onderwerp — die
+     verandert bij elke toetsaanslag en staat dan al goed in het veld. Wijkt het
+     veld af van de stand (de code zette er iets in: snel antwoord, tekst
+     terug), dan wordt er alsnog geschreven. */
+  function _wbxComposeSleutel(html) {
+    return String(html)
+      .replace(/(<textarea id="wbxComposeTxt"[^>]*>)[\s\S]*?<\/textarea>/, '$1</textarea>')
+      .replace(/(<input id="wbxComposeSubject"[^>]*?) value="[^"]*"/, '$1');
+  }
   function _repaintInboxCompose() {
     const el = document.getElementById('wbxInboxCompose');
     if (!el) return false;
-    el.innerHTML = _inboxComposeHtml(_ui.inbox.selectedConv);
+    const html = _inboxComposeHtml(_ui.inbox.selectedConv);
+    const sleutel = _wbxComposeSleutel(html);
+    const c = _ui.inbox.compose || {};
+    const ta = el.querySelector('#wbxComposeTxt');
+    const su = el.querySelector('#wbxComposeSubject');
+    const veldenKloppen = (!ta || ta.value === String(c.text || ''))
+      && (!su || su.value === String(c.subject || ''));
+    if (el.__wbxSleutel === sleutel && veldenKloppen) return true;
+    const focus = _wbxFocusVast(el);
+    el.innerHTML = html;
+    el.__wbxSleutel = sleutel;
+    _wbxFocusTerug(el, focus);
     return true;
   }
   window.__wbxInboxComposeField = (field, val) => {
@@ -3820,17 +3958,33 @@
     u.tikker = setInterval(() => {
       if (_ui.inbox.uitstel !== u) return;
       if (!document.getElementById('wbxInboxList')) { _uitstelStop(); return; }
-      try { window.DFO?.render?.(); } catch (_) {}
+      // Alleen de teller en de balk. Vroeger elke seconde een volle render:
+      // het hele scherm verdween 30 keer, en een klik op "Toch niet" kon
+      // tussen twee renders in wegvallen omdat de knop een nieuwe node werd.
+      const sec = document.getElementById('wbxUitstelSec');
+      const balk = document.getElementById('wbxUitstelBalk');
+      if (sec && balk && gv) {
+        const rest = gv.uitstelRest(u.tot);
+        const tekst = 'Gaat weg over ' + rest.seconden + 's';
+        if (sec.textContent !== tekst) sec.textContent = tekst;
+        balk.style.width = Math.round(rest.deel * 100) + '%';
+        // De DOM loopt nu voor op wat er de laatste keer geschreven werd;
+        // de volgende hertekening van de schrijfbalk moet dus echt schrijven.
+        const comp = document.getElementById('wbxInboxCompose');
+        if (comp) comp.__wbxSleutel = null;
+      } else {
+        _herteken();
+      }
     }, 1000);
 
     u.timer = setTimeout(() => {
       if (_ui.inbox.uitstel !== u) return;
       _uitstelStop();
-      try { window.DFO?.render?.(); } catch (_) {}
+      _herteken();
       _uitstelVertrek(u);
     }, gv.UITSTEL_MS);
 
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   }
 
   /* Het startsein. Staat het bericht geparkeerd op de server, dan zeggen we
@@ -3857,7 +4011,7 @@
     _toast('Versturen mislukt: ' + (r.json?.message || r.error || 'onbekend'), 'error');
     try { u.herstel && u.herstel(); } catch (_) {}
     _fetchParkeerStand(u.convId, _ui.inbox._selectSeq);
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   }
 
   /* "Toch niet". Zet de tekst terug in de schrijfbalk, want negen van de tien
@@ -3885,7 +4039,7 @@
     _uitstelStop();
     try { herstel && herstel(); } catch (_) {}
     _toast('Teruggehaald. Er is niets verstuurd.', 'success');
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   };
 
   /* "Nu versturen" — voor wie niet wil wachten. */
@@ -3893,7 +4047,7 @@
     const u = _ui.inbox.uitstel;
     if (!u) return;
     _uitstelStop();
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     _uitstelVertrek(u);
   };
 
@@ -3924,7 +4078,7 @@
     _live.inbox.convs.fetched = false; _fetchInboxConvs();
     const composeTa = document.getElementById('wbxComposeTxt');
     if (composeTa) composeTa.value = '';
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     _toast('Bericht verstuurd.', 'success');
   }
 
@@ -3934,7 +4088,7 @@
   async function _wbxWaTekstVerstuur(convId, body) {
     const c = _ui.inbox.compose;
     c.sending = true; c.error = null;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     const r = await apiPost('/api/inbox-send', { conversation_id: convId, mode: 'text', body });
     c.sending = false;
     if (!r.ok) {
@@ -3950,7 +4104,7 @@
       // iemand die 'em opnieuw moet typen omdat het venster dichtviel, is
       // terecht boos.
       c.text = body;
-      try { window.DFO?.render?.(); } catch (_) {}
+      _herteken();
       return;
     }
     _wbxNaVerzending(convId);
@@ -3959,7 +4113,7 @@
   async function _wbxWaTemplateVerstuur(convId, tplLabel) {
     const c = _ui.inbox.compose;
     c.sending = true; c.error = null;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     const r = await apiPost('/api/inbox-send-template', {
       conversation_id: convId, template_name: tplLabel, language: 'nl', variables: {},
     });
@@ -3967,7 +4121,7 @@
     if (!r.ok) {
       c.error = r.error || 'Template-send faalde.';
       c.templateName = tplLabel;
-      try { window.DFO?.render?.(); } catch (_) {}
+      _herteken();
       return;
     }
     c.text = '';
@@ -4000,7 +4154,7 @@
       // WA text of template
       const useTemplate = c.waWindowExpired || !!c.templateName;
       if (useTemplate) {
-        if (!c.templateName) { c.error = 'Kies een template (24u-venster is verlopen).'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        if (!c.templateName) { c.error = 'Kies een template (24u-venster is verlopen).'; _herteken(); return; }
         const tplLabel = c.templateName;
         if (_gv2()) {
           const tplVoorHerstel = tplLabel;
@@ -4013,14 +4167,14 @@
         }
         const ok = await _askConfirm(`Template versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp (template)</div><div><b>Template:</b> <span style="font-family:'IBM Plex Mono',monospace">${esc(tplLabel)}</span></div>`, { okLabel: 'Ja, verstuur' });
         if (!ok) return;
-        c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+        c.sending = true; c.error = null; _herteken();
         const r = await apiPost('/api/inbox-send-template', { conversation_id: convId, template_name: tplLabel, language: 'nl', variables: {} });
         c.sending = false;
-        if (!r.ok) { c.error = r.error || 'Template-send faalde.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        if (!r.ok) { c.error = r.error || 'Template-send faalde.'; _herteken(); return; }
         c.templateName = ''; c.text = '';
       } else {
         const body = (c.text || '').trim();
-        if (!body) { c.error = 'Bericht is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        if (!body) { c.error = 'Bericht is leeg.'; _herteken(); return; }
         // G2 — met het ongedaan-venster vervalt de bevestiging vooraf. Een
         // "weet je het zeker?" vraagt iets op het moment dat je het antwoord
         // al hebt bedacht; na drie keer lees je 'em niet meer. De teller
@@ -4041,7 +4195,7 @@
         }
         const ok = await _askConfirm(`Bericht versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
         if (!ok) return;
-        c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+        c.sending = true; c.error = null; _herteken();
         const r = await apiPost('/api/inbox-send', { conversation_id: convId, mode: 'text', body });
         c.sending = false;
         if (!r.ok) {
@@ -4054,7 +4208,7 @@
           } else {
             c.error = r.error || 'WA-send faalde.';
           }
-          try { window.DFO?.render?.(); } catch (_) {}
+          _herteken();
           return;
         }
         c.text = '';
@@ -4062,7 +4216,7 @@
     } else if (c.channel === 'mail') {
       const body = (c.text || '').trim();
       const rawSubject = (c.subject || '').trim();
-      if (!body)    { c.error = 'Bericht is leeg.';   try { window.DFO?.render?.(); } catch (_) {} return; }
+      if (!body)    { c.error = 'Bericht is leeg.';   _herteken(); return; }
       const ctx = _live.inbox.ctx.byConv[convId];
       // BP3 v28→v30 THREADING — gedeelde helper _wbxFindLastInboundMail
       // (module-scope, ook gebruikt door _fetchInboxThread subject-prefill
@@ -4079,7 +4233,7 @@
            || (_lmeta.mailbox && _lmeta.imap_uid ? `${_lmeta.mailbox}:${_lmeta.imap_uid}` : null))
         : null;
       const replyTo = _lmeta.from_address || ctx?.customer?.email || null;
-      if (!replyTo) { c.error = 'Geen e-mailadres bij deze klant.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      if (!replyTo) { c.error = 'Geen e-mailadres bij deze klant.'; _herteken(); return; }
       // Onderwerp: als origineel al 'Re: '/'RE: '/'re:' start, niet dubbel prefixen.
       const reRe = /^\s*re\s*:\s*/i;
       let subject;
@@ -4088,7 +4242,7 @@
       } else if (_lmeta.subject) {
         subject = reRe.test(_lmeta.subject) ? _lmeta.subject : ('Re: ' + _lmeta.subject);
       } else {
-        c.error = 'Onderwerp is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return;
+        c.error = 'Onderwerp is leeg.'; _herteken(); return;
       }
       const isReply = !!replyEmailId;
       const ok = await _askConfirm(
@@ -4100,7 +4254,7 @@
         { okLabel: 'Ja, verstuur' }
       );
       if (!ok) return;
-      c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+      c.sending = true; c.error = null; _herteken();
       const payload = {
         from_mailbox: 'administratie',
         to: replyTo,
@@ -4110,7 +4264,7 @@
       if (replyEmailId) payload.email_id = replyEmailId;
       const r = await apiPost('/api/email-send-v2', payload);
       c.sending = false;
-      if (!r.ok) { c.error = r.error || 'Mail-send faalde.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      if (!r.ok) { c.error = r.error || 'Mail-send faalde.'; _herteken(); return; }
       c.text = ''; c.subject = '';
     }
 
@@ -4127,7 +4281,7 @@
     // beide en trigger een render.
     const composeTa = document.getElementById('wbxComposeTxt');
     if (composeTa) composeTa.value = '';
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     _toast('Bericht verstuurd.', 'success');
   };
   window.__wbxRetryInbox = () => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); };
@@ -4136,11 +4290,11 @@
   window.__wbxInboxSort = (mode) => {
     _ui.inbox.sortMode = (mode === 'latest' ? 'latest' : 'unread_first');
     _repaintInboxList();
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   };
   window.__wbxInboxKebab = () => {
     _ui.inbox.kebabOpen = !_ui.inbox.kebabOpen;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     // Klik-buiten sluit kebab.
     if (_ui.inbox.kebabOpen) {
       setTimeout(() => {
@@ -4148,7 +4302,7 @@
           if (!e.target.closest('#wbxInboxKebab')) {
             document.removeEventListener('click', closeOnce, true);
             _ui.inbox.kebabOpen = false;
-            try { window.DFO?.render?.(); } catch (_) {}
+            _herteken();
           }
         };
         document.addEventListener('click', closeOnce, true);
@@ -4358,14 +4512,14 @@
      Compose-menu / Bel-taak: submenu + POST /api/tasks-create-followup */
   window.__wbxInboxComposeMenu = () => {
     _ui.inbox.composeMenuOpen = !_ui.inbox.composeMenuOpen;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     if (_ui.inbox.composeMenuOpen) {
       setTimeout(() => {
         const closeOnce = (e) => {
           if (!e.target.closest('#wbxInboxComposeMenu')) {
             document.removeEventListener('click', closeOnce, true);
             _ui.inbox.composeMenuOpen = false;
-            try { window.DFO?.render?.(); } catch (_) {}
+            _herteken();
           }
         };
         document.addEventListener('click', closeOnce, true);
@@ -4475,7 +4629,7 @@
     if (!form) return;
     _ui.inbox.compose.text = form.text;
     _ui.inbox.compose.channel = 'wa';
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     _toast('Voorvertoning geladen — druk Verstuur.', 'success');
   };
 
@@ -4535,13 +4689,13 @@
     // mislukte verversing onzichtbaar zodra er al een lijst stond: je kijkt
     // naar iets van een minuut geleden en denkt dat het nu is.
     const verouderdBanner = (st.error && st.items.length)
-      ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
+      ? `<div data-wbx-sleutel="~verouderd" style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
           <b>Deze lijst is misschien niet actueel.</b> De laatste verversing mislukte (${esc(String(st.error))}).
         </div>`
       : '';
 
     const afgekaptBanner = (_gv2() && st.afgekapt)
-      ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
+      ? `<div data-wbx-sleutel="~afgekapt" style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
           <b>Je ziet niet alle gesprekken.</b> Er zijn er ${esc(String(st.totaal ?? '?'))}; hiervan passen er ${esc(String(asArr(st.items).length))} in één keer, de oudste vallen af.
         </div>`
       : '';
@@ -4599,7 +4753,7 @@
         ? 'var(--brand-soft,#E2F1F5)'
         : (unread > 0 ? 'var(--rose-soft, rgba(244,63,94,.06))' : 'transparent');
       const stripe = unread > 0 && !active ? 'border-left:3px solid var(--rose);padding-left:9px;' : '';
-      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background .08s;${stripe};display:flex;gap:9px;align-items:flex-start">
+      return `<div data-wbx-sleutel="${esc(cid)}" onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background .08s;${stripe};display:flex;gap:9px;align-items:flex-start">
         <div style="width:32px;height:32px;border-radius:50%;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;letter-spacing:.05em;text-transform:uppercase">${esc(initials)}</div>
         <div style="min-width:0;flex:1">
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
@@ -4658,7 +4812,7 @@
     if (!nr.paused && (!nr.next_reminder_at || !nr.next_reminder_kind)) return '';
     const kind = nr.next_reminder_kind ? String(nr.next_reminder_kind).toUpperCase() : '—';
     const when = nr.next_reminder_at ? _fmtDateTime(nr.next_reminder_at) : '';
-    return `<div style="padding:6px 12px;background:var(--amber-soft,#FFF4E5);border:1px solid var(--amber);border-radius:6px;font-size:11.5px;color:var(--amber);margin-bottom:10px">
+    return `<div data-wbx-sleutel="~noreply" style="padding:6px 12px;background:var(--amber-soft,#FFF4E5);border:1px solid var(--amber);border-radius:6px;font-size:11.5px;color:var(--amber);margin-bottom:10px">
       ⏸ No-reply cyclus: <b>${esc(kind)}</b> volgt ${esc(when || 'binnenkort')}${nr.reminder_count ? ' · ' + esc(String(nr.reminder_count)) + ' reminders verstuurd' : ''}
     </div>`;
   }
@@ -4757,10 +4911,10 @@
      aanwas BOVEN je staat. */
   function _repaintInboxThreadBehoudPositie(convId) {
     const el = document.getElementById('wbxInboxThreadScroll');
-    if (!el) { try { window.DFO?.render?.(); } catch (_) {} return; }
+    if (!el) { _herteken(); return; }
     const hoogteVoor = el.scrollHeight;
     const topVoor    = el.scrollTop;
-    el.innerHTML = _inboxThreadHtml(convId);
+    _wbxMorph(el, _inboxThreadHtml(convId));
     // Tel de telling bij, anders denkt de gewone repaint straks dat al deze
     // oude berichten zojuist zijn binnengekomen en springt hij alsnog omlaag.
     _ui.inbox.threadItemCountByConv[convId] = asArr(_live.inbox.thread.byConv[convId]?.items).length;
@@ -4775,7 +4929,7 @@
     const bag = _live.inbox.thread.byConv[convId];
     if (!bag || !bag.heeftMeer || bag.ouderEind) return '';
     const bezig = !!bag.ouderOp;
-    return `<div style="padding:10px 14px;text-align:center">
+    return `<div data-wbx-sleutel="~ouder" style="padding:10px 14px;text-align:center">
       <button type="button" ${bezig ? 'disabled' : ''}
         onclick="window.__wbxInboxOuder('${esc(convId)}')"
         style="font-size:12px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-2);cursor:${bezig ? 'default' : 'pointer'};opacity:${bezig ? '0.6' : '1'}">
@@ -4831,7 +4985,10 @@
       const standHtml = stand
         ? `<div style="font-size:10px;color:${standKleur};margin-top:4px;text-align:right;font-weight:${stand.code === 'failed' ? '600' : '500'}" title="${esc(stand.label)}">${stand.teken}${stand.code === 'failed' || stand.code === 'onbekend' ? ' ' + esc(stand.label) : ''}</div>`
         : '';
-      return `<div style="display:flex;justify-content:${align};margin-bottom:9px">
+      // Sleutel per bericht (kanaal + id, zoals draadSleutel): WhatsApp en mail
+      // komen uit verschillende tabellen, dus het id alleen is niet uniek.
+      const sleutel = (m && m.id != null) ? `${m.channel || '?'}:${m.id}` : '';
+      return `<div${sleutel ? ` data-wbx-sleutel="${esc(sleutel)}"` : ''} style="display:flex;justify-content:${align};margin-bottom:9px">
         <div style="max-width:78%;padding:8px 11px;background:${bg};border:1px solid var(--border);border-radius:var(--r-sm)">
           <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px">${chBadge}${esc(_fmtDateTime(m.at))}</div>
           ${subj}
@@ -4850,9 +5007,9 @@
     const breedte = Math.round(rest.deel * 100);
     return `<div style="padding:11px 14px;border-top:1px solid var(--border);background:var(--emerald-soft,var(--surface-2))">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span style="font-size:12.5px;color:var(--emerald);font-weight:600;white-space:nowrap">Gaat weg over ${rest.seconden}s</span>
+        <span id="wbxUitstelSec" style="font-size:12.5px;color:var(--emerald);font-weight:600;white-space:nowrap">Gaat weg over ${rest.seconden}s</span>
         <div style="flex:1;min-width:80px;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
-          <div style="height:100%;width:${breedte}%;background:var(--emerald);transition:width 1s linear"></div>
+          <div id="wbxUitstelBalk" style="height:100%;width:${breedte}%;background:var(--emerald);transition:width 1s linear"></div>
         </div>
         <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:5px 14px;font-weight:600"
           onclick="__wbxInboxUitstelTerug()">Toch niet</button>
@@ -4917,7 +5074,7 @@
     _ui.inbox.compose.channel = 'wa';
     _ui.inbox.compose.text = String(rij.body || '');
     _ui.inbox.compose.error = null;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
     try { document.getElementById('wbxComposeTxt')?.focus(); } catch (_) {}
   };
 
@@ -4969,7 +5126,7 @@
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(replyToLabel)}</span>
           </div>`
         : '';
-      composerHtml = `${replyIndicator}<input type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
+      composerHtml = `${replyIndicator}<input id="wbxComposeSubject" type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
         <textarea id="wbxComposeTxt" placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
     }
 
@@ -5073,7 +5230,7 @@
 
     _ui.inbox.spraakHerkenner = h;
     _ui.inbox.spraakBezig = true;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
 
     // De tussenstand meeschrijven, zodat je ziet dat er geluisterd wordt.
     // Een microfoon die pas na afloop iets toont, voelt als een microfoon die
@@ -5087,7 +5244,7 @@
       _ui.inbox.spraakBezig = false;
       schrijfInVeld(SP.voegSamen(beginTekst, alles));
       if (!String(alles || '').trim()) _toast('Er is niets verstaan.', 'warn');
-      try { window.DFO?.render?.(); } catch (_) {}
+      _herteken();
     });
 
     h.start();
@@ -5317,13 +5474,42 @@
   };
 
   function inboxView() {
-    if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading && !_live.inbox.convs.error) queueMicrotask(_fetchInboxConvs);
-    // Overzicht behouden voor legacy-fallback scoping (als backend geen is_debtor levert).
-    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
-    // SURFACE A: realtime subscribe + poll-fallback bij eerste render.
-    if (!_live.inboxRealtime.active) queueMicrotask(_startInboxRealtime);
+    _inboxBijRender();
     const convId = _ui.inbox.selectedConv;
     const qVal = String(_ui.inbox.searchQ || '');
+    return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
+      <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+        <div style="width:320px;min-width:260px;max-width:38%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border)">
+            <input id="wbxInboxSearch" type="text" value="${esc(qVal)}" oninput="__wbxInboxSearch(this.value)" placeholder="Zoek naam / nummer / e-mail…" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;box-sizing:border-box" autocomplete="off" spellcheck="false" />
+            <div id="wbxInboxFilters">${_inboxFiltersHtml()}</div>
+          </div>
+          <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div id="wbxInboxThreadKop" style="display:contents">${_inboxThreadHeaderHtml(convId)}</div>
+          <!-- min-height:0 op de draad (H6) en min-width:0 op de schrijfbalk (H11-
+               kandidaat): derde keer dezelfde val in dit bestand. In een
+               flexkolom is de standaard min-*:auto, en dan weigert een vak
+               kleiner te worden dan zijn inhoud. De schrijfbalk heeft bij een
+               dicht 24-uursvenster een <select> waarvan de breedte door de
+               langste optietekst bepaald wordt; zonder min-width:0 duwt die de
+               kolom op en loopt het rechterpaneel uit beeld. -->
+          <div id="wbxInboxThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
+          <div id="wbxInboxCompose" style="min-width:0">${_inboxComposeHtml(convId)}</div>
+        </div>
+        <div id="wbxInboxRightPane" style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+          ${_inboxKlantgegevensHtml(convId)}
+        </div>
+      </div>
+      <div id="wbxInboxKantooruren">${_officeHoursBanner()}</div>
+    </div>`;
+  }
+
+  /* De filterrijen onder het zoekveld: status, sortering, focus, categorie.
+     Eigen functie (29 okt) zodat de gerichte hertekening ze apart kan
+     bijwerken — het zoekveld erboven blijft dan staan terwijl je typt. */
+  function _inboxFiltersHtml() {
     // SURFACE A (v1-parity): filter-chips volgorde ACTIEF · AFGEHANDELD · ARCHIEF (icon-only) · ALLE.
     // v=48 (2026-08-30): oranje .chip.on-active-styling HERSTELD. De echte
     // bug was niet de styling maar dat __wbxInboxStatus geen re-render
@@ -5376,13 +5562,7 @@
         ${window.INBOX_CATEGORIE.chips(basisCat, _ui.inbox.catFilter, '__wbxInboxCat')}
       </div>`;
     }
-
-    return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
-      <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
-        <div style="width:320px;min-width:260px;max-width:38%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
-          <div style="padding:10px 12px;border-bottom:1px solid var(--border)">
-            <input id="wbxInboxSearch" type="text" value="${esc(qVal)}" oninput="__wbxInboxSearch(this.value)" placeholder="Zoek naam / nummer / e-mail…" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;box-sizing:border-box" autocomplete="off" spellcheck="false" />
-            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+    return `<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
               ${statusBtn('active', 'Actief')}
               ${statusBtn('afgehandeld', 'Afgehandeld')}
               ${statusBtn('archief', 'Archief', true)}
@@ -5394,28 +5574,7 @@
               ${sortBtn('latest', 'Laatste bericht')}
             </div>
             ${focusRij}
-            ${catRij}
-          </div>
-          <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
-        </div>
-        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-          ${_inboxThreadHeaderHtml(convId)}
-          <!-- min-height:0 op de draad (H6) en min-width:0 op de schrijfbalk (H11-
-               kandidaat): derde keer dezelfde val in dit bestand. In een
-               flexkolom is de standaard min-*:auto, en dan weigert een vak
-               kleiner te worden dan zijn inhoud. De schrijfbalk heeft bij een
-               dicht 24-uursvenster een <select> waarvan de breedte door de
-               langste optietekst bepaald wordt; zonder min-width:0 duwt die de
-               kolom op en loopt het rechterpaneel uit beeld. -->
-          <div id="wbxInboxThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
-          <div id="wbxInboxCompose" style="min-width:0">${_inboxComposeHtml(convId)}</div>
-        </div>
-        <div id="wbxInboxRightPane" style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
-          ${_inboxKlantgegevensHtml(convId)}
-        </div>
-      </div>
-      ${_officeHoursBanner()}
-    </div>`;
+            ${catRij}`;
   }
 
   /* SURFACE A — Thread-header: v1-faithful topbar boven de messages.
@@ -6359,7 +6518,7 @@
     delete _live.caseFaithful.pipeByCust[cid];
     _fetchCasePipeline(cid);
     _repaintCaseSheet();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   async function _caseActBewind(cid) {
@@ -6411,7 +6570,7 @@
     delete _live.caseFaithful.pipeByCust[cid];
     _fetchCasePipeline(cid);
     _repaintCaseSheet();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   /* Vraag Joost — genereert een nieuwe suggestie. BROK WB-FIX-3 #3: GEEN
@@ -6726,7 +6885,7 @@
     _live.overzicht.fetched = false;
     if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
     _repaintCaseSheet();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   async function _caseActDispute(cid) {
@@ -6742,7 +6901,7 @@
     _live.overzicht.fetched = false;
     if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
     _repaintCaseSheet();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   async function _caseActIncasso(cid) {
@@ -6770,7 +6929,7 @@
     _live.overzicht.fetched = false;
     if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
     _repaintCaseSheet();
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   async function _caseActPause(cid) {
@@ -7289,12 +7448,12 @@
     }
     _ui.pipeLastSelId = cid;
     _ui.pipeLastSelStage = stageSlug;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   window.__wbxPipeClearSel = () => {
     _ui.pipeSelected = {};
     _ui.pipeLastSelId = null;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   };
   window.__wbxPipeBulkMove = async () => {
     if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
@@ -7331,7 +7490,7 @@
     if (!ok) return;
     if (_ui.pipeBulkBusy) return;
     _ui.pipeBulkBusy = true;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
     let done = 0, failed = 0;
     for (const cid of toMove) {
       // Per-cid race-guard is stageBusy — set + clear.
@@ -7363,10 +7522,10 @@
     st.loading = true; st.error = null;
     const j = await tryFetch('stages', '/api/dunning-pipeline-stages', 8000);
     if (mySeq !== st._seq) return;
-    if (j && j.error) { st.error = j.error; st.loading = false; try { window.DFO?.render?.(); } catch (_) {} return; }
+    if (j && j.error) { st.error = j.error; st.loading = false; _herteken(); return; }
     st.items = asArr(j?.items);
     st.fetched = true; st.loading = false;
-    try { window.DFO?.render?.(); } catch (_) {}
+    _herteken();
   }
   window.__wbxRetryStages = () => { _live.stages.fetched = false; _fetchStages(); };
 
@@ -7854,7 +8013,7 @@
     if (!r.ok) { _toast('Verify-taak mislukt: ' + r.error, 'error'); return; }
     _toast('Verify-taak aangemaakt.', 'success');
     _live.pendingActs.fetched = false;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   // ── Escalatie-flow ────────────────────────────────────────────────
@@ -7896,7 +8055,7 @@
     if (!r.ok) { _toast('Escalatie mislukt: ' + r.error, 'error'); return; }
     _toast('Escalatie aangemaakt.', 'success');
     _live.pendingActs.fetched = false;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   // ── Vrije-taak-flow (MANUAL_FOLLOWUP) ─────────────────────────────
@@ -7934,7 +8093,7 @@
     if (!r.ok) { _toast('Taak-aanmaak mislukt: ' + r.error, 'error'); return; }
     _toast('Vrije taak aangemaakt.', 'success');
     _live.pendingActs.fetched = false;
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   // ── Toewijzen-aan-collega-flow (taken_items via /api/taken) ───────
@@ -8001,7 +8160,7 @@
     _ui.actieBusy['assign:' + cid] = false;
     if (!r.ok) { _toast('Toewijzen mislukt: ' + r.error, 'error'); return; }
     _toast('Taak toegewezen.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _herteken();
   }
 
   /* ── BROK 3 BRIEF-1: Nieuwe WIK-brief aanmaken vanuit klantgegevens ──
@@ -8068,7 +8227,7 @@
       // Herlaad brieven-lijst + case-briefs zodat nieuwe brief zichtbaar is.
       if (_live.brieven) _live.brieven.fetched = false;
       if (_live.caseSheet?.briefsByCust?.[cid]) delete _live.caseSheet.briefsByCust[cid];
-      if (window.DFO?.render) window.DFO.render();
+      _herteken();
     } catch (e) {
       _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
     } finally {

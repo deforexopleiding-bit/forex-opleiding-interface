@@ -474,8 +474,11 @@
     if (!knop) return;
     var teller = knop.querySelector('[data-kvsa-teller]');
     if (teller) {
-      teller.hidden = !staat.teller;
-      teller.textContent = staat.teller > 99 ? '99+' : String(staat.teller);
+      // Alleen bij verschil: dit draait elke vijf seconden, en textContent
+      // vervangt de tekstnode ook als het getal gelijk bleef.
+      var tekst = staat.teller > 99 ? '99+' : String(staat.teller);
+      if (teller.hidden !== !staat.teller) teller.hidden = !staat.teller;
+      if (teller.textContent !== tekst) teller.textContent = tekst;
     }
     knop.setAttribute('data-variant', staat.variant || '');
     knop.setAttribute('data-rinkelt', staat.onbevestigd ? '1' : '0');

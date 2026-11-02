@@ -438,6 +438,10 @@
     const el = document.getElementById('nav');
     if (!el) return;
     const badges = NS.badges || {};
+    // Zelfde HTML als de vorige keer → niets doen. setBadge() roept dit elke
+    // minuut per badgebron aan, en elke render ook; zonder deze vergelijking
+    // werd de hele navigatie (≈50 nodes) telkens vervangen terwijl er niets
+    // veranderde. De vergelijking hangt aan de node zelf.
     // BP3 v4 (2026-09-01) — active-highlight ondersteunt deeplink-MODs.
     // Als een zichtbaar deeplink-item wijst op de huidige (S.mod, S.tab), wint
     // dat item van zijn parent-MOD. Zo highlight "Gesprekken" (deeplink) i.p.v.
@@ -445,7 +449,7 @@
     // en idem voor "Instagram" (deeplink) i.p.v. "Instagram setter" (parent).
     const _deeplinkHit = mods.find(m => m.deeplink && m.deeplink.mod === S.mod && m.deeplink.tab === S.tab);
     const activeId = _deeplinkHit ? _deeplinkHit.id : S.mod;
-    el.innerHTML = groups.map(g => `
+    const html = groups.map(g => `
       <div class="nav-label">${g}</div>
       ${mods.filter(m => m.g === g).map(m => {
         // Pre-flip fix 3: ext-modules (bv. LMS) renderen als <a target=_blank>
@@ -464,6 +468,16 @@
         }
         return `<button class="nav-item ${activeCls}" onclick="DFO.goMod('${m.id}')" style="${activeStyle}">${inner}</button>`;
       }).join('')}`).join('');
+    if (el.__dfoHtml === html) return;
+    el.innerHTML = html;
+    el.__dfoHtml = html;
+  }
+
+  /* innerHTML alleen als de inhoud echt anders is (kruimel, tabbalk). */
+  function zetHtmlAlsAnders(el, html) {
+    if (!el || el.__dfoHtml === html) return;
+    el.innerHTML = html;
+    el.__dfoHtml = html;
   }
 
   function toggleNav(force) {
@@ -602,9 +616,9 @@
 
     const crumb = document.getElementById('crumb');
     if (crumb) {
-      crumb.innerHTML = S.dossier
+      zetHtmlAlsAnders(crumb, S.dossier
         ? `<span class="title-dot"></span><span style="cursor:pointer;color:var(--text-3);font-weight:500" onclick="DFO.S.dossier=null;DFO.render()">${m.naam}</span><span class="crumb-sep">/</span><span>${S.dossier}</span>`
-        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${tabLabel(S.tab)}</span>` : ''}`;
+        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${tabLabel(S.tab)}</span>` : ''}`);
     }
     const locked = modLocked(m.id);
     const tb = document.getElementById('tabs');
@@ -616,7 +630,7 @@
       // de rol/permissie niet mag zien (lege groep valt weg).
       const zichtbaar = new Set(tabs);
       const tabKnop = t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${tabLabel(t)}</button>`;
-      tb.innerHTML = (m.tabs || []).map(e => {
+      zetHtmlAlsAnders(tb, (m.tabs || []).map(e => {
         if (typeof e === 'string') return zichtbaar.has(e) ? tabKnop(e) : '';
         const items = (Array.isArray(e.items) ? e.items : []).filter(it => zichtbaar.has(it));
         if (!items.length) return '';
@@ -624,7 +638,10 @@
         const menu = items.map(it => `<button class="tab-drop-item ${S.tab === it ? 'active' : ''}" onclick="DFO.goTab('${it.replace(/'/g, "\\'")}')">${tabLabel(it)}</button>`).join('');
         const label = String(e.groep || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
         return `<div class="tab-group"><button class="tab tab-group-btn ${actief ? 'active' : ''}" aria-haspopup="true" aria-expanded="false" onclick="DFO.toggleTabGroup(this)">${label}<span class="tab-caret" aria-hidden="true">&#9662;</span></button><div class="tab-drop" role="menu">${menu}</div></div>`;
-      }).join('');
+      }).join(''));
+      // Bleef de balk staan, dan kan er nog een groep open staan; vroeger
+      // sloot de herbouw die vanzelf.
+      sluitTabGroepen();
     }
     const c = document.getElementById('content');
     if (c) {
