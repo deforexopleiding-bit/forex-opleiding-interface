@@ -44,7 +44,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { buildComponents, extractBodyVarIndices } from '../api/_lib/wa-template-components.js';
 import { getExampleForKey } from '../api/_lib/template-variables.js';
-import { WEBINAR_TEMPLATES } from '../api/_lib/webinar-templates.js';
+import { WEBINAR_TEMPLATES, OPVOLG_TEMPLATES_V2 } from '../api/_lib/webinar-templates.js';
+import { SCAN_WA_TEMPLATES } from '../api/_lib/afspraak-scan-templates.js';
 
 const D360 = 'https://waba-v2.360dialog.io';
 
@@ -61,6 +62,10 @@ export const VASTE_TEMPLATES = Object.freeze({
   intern: ['interne_nieuwe_afspraak_nl', 'nieuwe_lead'],
   // 2026-10-09: webinar fase 1 (api/_lib/webinar-templates.js).
   webinar: ['webinar_bevestiging', 'webinar_reminder_dag', 'webinar_reminder_uur', 'webinar_live'],
+  // 2026-11-02: strategie-scan (webinar/strategiescan) + opvolging zonder claims.
+  // NIEUWE namen: de oude v1/_1/_2 blijven bestaan en worden niet overschreven.
+  scan: Object.keys(SCAN_WA_TEMPLATES),
+  webinar_opvolging_v2: Object.keys(OPVOLG_TEMPLATES_V2),
 });
 
 // Klantnummer (onboarding + finance/dunning). De DB-bronnen vullen aan; deze
@@ -149,7 +154,7 @@ export function leesArgs(argv) {
 // Templates die in code gedefinieerd zijn (zelfde rij-vorm als whatsapp_meta_templates).
 // Gebruikt als er voor die naam (nog) geen DB-rij is — zodat nieuwe flows niet eerst
 // een handmatige rij nodig hebben. Een DB-rij gaat altijd voor.
-export const CODE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES });
+export const CODE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES, ...SCAN_WA_TEMPLATES, ...OPVOLG_TEMPLATES_V2 });
 /** DB-varianten, of anders de code-definitie (als 1 rij). PURE. */
 export function variantenVoor(naam, dbVarianten) {
   if (dbVarianten && dbVarianten.length) return { varianten: dbVarianten, uitCode: false };

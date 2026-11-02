@@ -304,10 +304,17 @@ async function waLijn(sb) {
 const wacht = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const isTijdelijk = (e) => /429|too many|rate|throughput|timeout|ETIMEDOUT|ECONNRESET|5\d\d/i.test(String(e?.message || e || ''));
 
-export async function verstuurWa(sb, { telefoon, templateNaam, ctx, wachtMs = 7000 }) {
+// `nieuwereNaam` (optioneel): een nieuwere versie die we sturen zodra 360dialog
+// hem APPROVED meldt; anders (en bij elke twijfel) gewoon `templateNaam`.
+export async function verstuurWa(sb, { telefoon, templateNaam, nieuwereNaam = null, ctx, wachtMs = 7000 }) {
   if (!telefoon) return { ok: false, overgeslagen: 'geen_telefoon' };
   const pnId = await waLijn(sb);
   if (!pnId) return { ok: false, overgeslagen: 'geen_wa_lijn' };
+  if (nieuwereNaam) {
+    let st = null;
+    try { st = await templateStatusOpLijn(pnId, nieuwereNaam); } catch (e) { console.warn('[webinar] status', nieuwereNaam, '(terugval):', e?.message || e); }
+    if (String(st || '').toUpperCase() === 'APPROVED') templateNaam = nieuwereNaam;
+  }
   const status = await templateStatusOpLijn(pnId, templateNaam);
   if (status !== 'APPROVED') return { ok: false, overgeslagen: 'template_' + String(status || 'onbekend').toLowerCase() };
   // De dag-template zegt vast "morgen": nooit versturen als dat niet klopt.

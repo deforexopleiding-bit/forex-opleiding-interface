@@ -109,7 +109,45 @@ export const OPVOLG_TEMPLATES = Object.freeze({
     vars: Object.freeze(['voornaam']),
   }),
 });
-const ALLE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES, ...OPVOLG_TEMPLATES });
+
+// 2026-11-02 (Maxim): NIEUWE versies van de opvolging, zonder resultaatbelofte
+// ("90 dagen") en zonder schaarste ("maar een paar plekken", "bijna vol",
+// "laatste kans"). De goedgekeurde _1/_2 hierboven blijven ongewijzigd bestaan
+// als terugval: de opvolging stuurt _v2 pas als 360dialog die APPROVED meldt
+// (verstuurWa met `nieuwereNaam`). Indienen: scripts/360-templates-upload.mjs.
+export const OPVOLG_TEMPLATES_V2 = Object.freeze({
+  webinar_opvolging_1_v2: Object.freeze({
+    name: 'webinar_opvolging_1_v2',
+    language: 'nl',
+    category: 'MARKETING',
+    header_type: 'NONE',
+    body_text:
+      'Hoi {{1}}! 👋\n\n'
+      + 'Je had je aangemeld voor onze webinar. De volgende stap is je gratis strategie-scan: 20 minuten via Zoom met ons team. Je gaat weg met een persoonlijk actieplan.\n\n'
+      + "Plan 'm hieronder in 👇",
+    body_examples: { 1: 'Jeffrey' },
+    footer_text: null,
+    buttons: Object.freeze([AGENDA_KNOP]),
+    vars: Object.freeze(['voornaam']),
+  }),
+  webinar_opvolging_2_v2: Object.freeze({
+    name: 'webinar_opvolging_2_v2',
+    language: 'nl',
+    category: 'MARKETING',
+    header_type: 'NONE',
+    body_text:
+      'Hoi {{1}}, je hebt je gratis strategie-scan nog niet ingepland.\n\n'
+      + "20 minuten via Zoom met ons team, en je gaat weg met een persoonlijk actieplan. Plan 'm hieronder in 👇",
+    body_examples: { 1: 'Jeffrey' },
+    footer_text: null,
+    buttons: Object.freeze([AGENDA_KNOP]),
+    vars: Object.freeze(['voornaam']),
+  }),
+});
+/** Huidige opvolg-template → nieuwe versie. */
+export const OPVOLG_V2_VOOR = Object.freeze({ webinar_opvolging_1: 'webinar_opvolging_1_v2', webinar_opvolging_2: 'webinar_opvolging_2_v2' });
+
+const ALLE_TEMPLATES = Object.freeze({ ...WEBINAR_TEMPLATES, ...OPVOLG_TEMPLATES, ...OPVOLG_TEMPLATES_V2 });
 
 /** Parameters in template-volgorde uit een context { voornaam, datum, tijd, zoom }. */
 export function templateVariabelen(naam, ctx) {

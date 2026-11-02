@@ -36,10 +36,11 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
-import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { sendTemplate, MetaNotConfiguredError, templateStatusOpLijn } from './_lib/meta-whatsapp.js';
+import { kiesWaTemplate } from './_lib/afspraak-scan-templates.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
-import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR, isLabAfspraak, varianteVoor } from './_lib/afspraak-berichten.js';
+import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR, isLabAfspraak, isScanAfspraak, varianteVoor } from './_lib/afspraak-berichten.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { logAfspraakFail } from './_lib/afspraak-faillog.js';
 import { classifySendError, MAX_ATTEMPTS, backoffMinNaPoging } from './_lib/send-error-classify.js';
@@ -106,20 +107,31 @@ async function haalBevestigingKandidaten(nowMs) {
   return data || [];
 }
 
+// Strategie-scan (webinar/strategiescan): de nieuwe afspraak_scan_*-template
+// zodra die APPROVED is op de lijn; anders (en bij elke twijfel) de v1.
+function waTemplateVoor(appt, moment, phoneId) {
+  return kiesWaTemplate({
+    v1: moment.waTemplate,
+    isScan: isScanAfspraak(appt),
+    statusVan: (naam) => templateStatusOpLijn(phoneId, naam),
+  });
+}
+
 // Eén WhatsApp-bevestiging versturen (+ succes-log). Returnt per-kanaal-uitkomst.
 async function stuurWaBevestiging(appt, moment, ctx, welkomPhoneId) {
   const variables = moment.waVars(appt, ctx).map((v) => String(v ?? ''));
+  const tpl = await waTemplateVoor(appt, moment, welkomPhoneId);
   try {
     const { wamid } = await sendTemplate({
-      to: appt.lead_phone, templateName: moment.waTemplate, languageCode: 'nl', variables, phoneNumberId: welkomPhoneId,
+      to: appt.lead_phone, templateName: tpl, languageCode: 'nl', variables, phoneNumberId: welkomPhoneId,
     });
     const varsMap = {}; variables.forEach((v, i) => { varsMap[String(i + 1)] = v; });
     await logOutboundWa(supabaseAdmin, {
       toPhone: appt.lead_phone, phoneNumberId: welkomPhoneId,
-      body: `WhatsApp-template '${moment.waTemplate}' — ${variables.join(' · ')}`,
-      wamid, templateName: moment.waTemplate, templateVariables: varsMap, source: 'afspraak-bevestiging-cron',
+      body: `WhatsApp-template '${tpl}' — ${variables.join(' · ')}`,
+      wamid, templateName: tpl, templateVariables: varsMap, source: 'afspraak-bevestiging-cron',
     });
-    return { ok: true, wamid, template: moment.waTemplate };
+    return { ok: true, wamid, template: tpl };
   } catch (e) {
     if (e instanceof MetaNotConfiguredError) return { ok: false, skipped: 'meta-niet-geconfigureerd' };
     return { ok: false, error: e?.message || String(e), http_status: e?.httpStatus ?? null };
@@ -388,7 +400,7 @@ async function verstuur(appt, moment, welkomPhoneId) {
   const uitkomst = { wa: null, mail: null };
   // The Lab / strategie-scan: eigen mailteksten. The Lab krijgt geen WhatsApp
   // waar de goedgekeurde template niet klopt (de 1u-herinnering — de template
-  // zegt "over 2 uur"). De scan gebruikt de gewone templates.
+  // zegt "over 2 uur"). De scan: afspraak_scan_* zodra APPROVED, anders v1.
   const variant = varianteVoor(moment.key, appt, ctx);
 
   // ── WhatsApp (welkom-lijn) ──
@@ -400,10 +412,11 @@ async function verstuur(appt, moment, welkomPhoneId) {
     uitkomst.wa = { ok: false, skipped: 'geen-telefoon' };
   } else {
     const variables = moment.waVars(appt, ctx).map((v) => String(v ?? ''));
+    const tpl = await waTemplateVoor(appt, moment, welkomPhoneId);
     try {
       const { wamid } = await sendTemplate({
         to: appt.lead_phone,
-        templateName: moment.waTemplate,
+        templateName: tpl,
         languageCode: 'nl',
         variables,
         phoneNumberId: welkomPhoneId,
@@ -413,19 +426,19 @@ async function verstuur(appt, moment, welkomPhoneId) {
       await logOutboundWa(supabaseAdmin, {
         toPhone: appt.lead_phone,
         phoneNumberId: welkomPhoneId,
-        body: `WhatsApp-template '${moment.waTemplate}' — ${variables.join(' · ')}`,
+        body: `WhatsApp-template '${tpl}' — ${variables.join(' · ')}`,
         wamid,
-        templateName: moment.waTemplate,
+        templateName: tpl,
         templateVariables: varsMap,
         source: 'afspraak-reminders-cron',
       });
-      uitkomst.wa = { ok: true, wamid, template: moment.waTemplate };
+      uitkomst.wa = { ok: true, wamid, template: tpl };
     } catch (e) {
       if (e instanceof MetaNotConfiguredError) uitkomst.wa = { ok: false, skipped: 'meta-niet-geconfigureerd' };
       else uitkomst.wa = { ok: false, error: e?.message || String(e), http_status: e?.httpStatus ?? null };
       // Faillog (alleen zichtbaarheid; verandert de reminder-logica niet).
       if (uitkomst.wa && uitkomst.wa.error) {
-        await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'whatsapp', templateName: moment.waTemplate, reason: uitkomst.wa.error, httpStatus: uitkomst.wa.http_status ?? null, toPhone: appt.lead_phone });
+        await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'whatsapp', templateName: tpl, reason: uitkomst.wa.error, httpStatus: uitkomst.wa.http_status ?? null, toPhone: appt.lead_phone });
       }
     }
   }

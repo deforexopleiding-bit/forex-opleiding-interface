@@ -177,7 +177,7 @@ test('ronde: alleen echt openstaande aanmelders krijgen nudge 1 (mail + WhatsApp
   assert.deepEqual(verzonden.mails.map((m) => m.to).sort(), ['ann@example.com', 'open@example.com']);
   assert.equal(verzonden.mails[0].subject, 'Jouw gratis strategie-scan staat klaar');
   assert.ok(verzonden.mails.every((m) => m.headers && /^<https:\/\/www\.deforexopleiding\.nl\/api\/voorkeuren\?token=/.test(m.headers['List-Unsubscribe'])), 'List-Unsubscribe');
-  assert.deepEqual(verzonden.wa.map((w) => [w.to, w.templateName, w.variables]), [['31611111111', 'webinar_opvolging_1', ['Open']]], 'WhatsApp alleen met telefoon');
+  assert.deepEqual(verzonden.wa.map((w) => [w.to, w.templateName, w.variables]), [['31611111111', 'webinar_opvolging_1_v2', ['Open']]], 'WhatsApp alleen met telefoon');
   const rij = (id) => db.tab.webinar_aanmeldingen.find((a) => a.id === id);
   assert.equal(rij('geboekt').berichten.opvolging_1.overgeslagen, 'geboekt');
   assert.equal(rij('romy').berichten.opvolging_1.overgeslagen, 'aankomende_afspraak');
@@ -208,7 +208,7 @@ test('ronde: nudge 2 de dag erna — overgeslagen voor wie tussendoor boekte; bu
   assert.equal(uit.opvolging_2, 1);
   assert.equal(uit.opvolging_overgeslagen, 1);
   assert.deepEqual(verzonden.mails.map((m) => [m.to, m.subject]), [['nog@example.com', 'Plan je gratis strategie-scan']]);
-  assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_opvolging_2']);
+  assert.deepEqual(verzonden.wa.map((w) => w.templateName), ['webinar_opvolging_2_v2'], 'de nep-360dialog meldt alles APPROVED → de nieuwe v2');
   assert.equal(a.berichten.opvolging_2.overgeslagen, 'geboekt');
 });
 
