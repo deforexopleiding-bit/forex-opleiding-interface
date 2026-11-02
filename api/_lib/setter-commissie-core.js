@@ -14,6 +14,17 @@
 //       3. deals.reservation_fee_invoice_id (uuid óf TL-id)   → 'reserveringsfee'
 //     Een factuur met een deal_id van een ANDERE deal is niet van ons
 //     (deal_id wint, net als in resolveDeal).
+//       4. TERUGVAL (2026-11-02) — factuur zonder deal_id én zonder
+//          tl_subscription_id (de TL-sync vult die vaak niet, gemeten: John
+//          Vliet 2026/2221): heeft de klant precies ÉÉN getekende, niet-
+//          gearchiveerde deal en is dat een setter-deal, dan hoort de factuur
+//          daarbij → 'enige_deal_klant' (zelfde regel als de mentorcommissie,
+//          commissie-toewijzing.js factuurVanSale stap 4). Getekend = status
+//          accepted/signed of een acceptatiedatum; ghost-deals (no_quotation)
+//          tellen niet. Een factuur van vóór de aanmaakdag van die deal hoort
+//          er niet bij. Twijfel = niet koppelen: meerdere getekende deals of
+//          een te oude factuur → `te_controleren` (in de cron-uitvoer), nooit
+//          gegokt. Conceptfacturen doen niet mee.
 //   - pct en scope uit setter_config: alleen is_active, en alleen facturen met
 //     paid_date >= effective_from.
 //
@@ -72,11 +83,25 @@ export function vandaagAmsterdam(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(now);
 }
 
+const GETEKEND = new Set(['accepted', 'signed']);
+/** Getekend: status accepted/signed of een acceptatiedatum (zoals isGetekendDeal in commissie-toewijzing.js). */
+export const isGetekend = (d) => !!d && (GETEKEND.has(String(d.tl_quotation_status || '').toLowerCase()) || !!d.tl_quotation_accepted_at);
+const actiefGetekend = (d) => isGetekend(d) && !d.archived_at && String(d.tl_quotation_status || '').toLowerCase() !== 'declined';
+const dag = (v) => (v ? String(v).slice(0, 10) : null);
+
 /**
- * Factuur → { deal, bron }. Zie de koppelregels bovenaan.
- * @returns {Map<string, { deal: object, bron: 'deal'|'abonnement'|'reserveringsfee' }>}
+ * Factuur → { deal, bron } plus de facturen die we bewust NIET koppelden.
+ * Zie de koppelregels bovenaan (1-3 + terugval 4).
+ * @param {object} p
+ * @param {Array} p.deals       setter-deals
+ * @param {Array} p.subs        abonnementen van die deals
+ * @param {Array} p.invoices    facturen
+ * @param {Array} [p.klantDeals] ALLE deals van de klanten van die setter-deals
+ *   (ook zonder setter) — nodig voor de terugval; zonder deze lijst geen terugval.
+ * @returns {{ koppeling: Map<string, { deal: object, bron: 'deal'|'abonnement'|'reserveringsfee'|'enige_deal_klant' }>,
+ *             teControleren: Array<{ invoice_id, factuurnummer, customer_id, reden, kandidaten: Array<{ deal_id, setter_user_id }> }> }}
  */
-export function koppelFacturenAanDeals({ deals = [], subs = [], invoices = [] }) {
+export function koppelFacturen({ deals = [], subs = [], invoices = [], klantDeals = [] }) {
   const dealById = new Map(deals.map((d) => [d.id, d]));
   const dealByTlSub = new Map();
   for (const s of subs) {
@@ -85,21 +110,59 @@ export function koppelFacturenAanDeals({ deals = [], subs = [], invoices = [] })
   const dealByFee = new Map();
   for (const d of deals) if (d.reservation_fee_invoice_id) dealByFee.set(String(d.reservation_fee_invoice_id), d);
 
-  const out = new Map();
+  // Terugval: getekende, niet-gearchiveerde deals per klant (met én zonder setter).
+  const getekendPerKlant = new Map();
+  if (klantDeals.length) {
+    const alle = new Map(klantDeals.concat(deals).map((d) => [d.id, d]));
+    for (const d of alle.values()) {
+      if (!d.customer_id || !actiefGetekend(d)) continue;
+      if (!getekendPerKlant.has(d.customer_id)) getekendPerKlant.set(d.customer_id, []);
+      getekendPerKlant.get(d.customer_id).push(d);
+    }
+  }
+
+  const koppeling = new Map();
+  const teControleren = [];
   for (const inv of invoices) {
     const feeDeal = dealByFee.get(String(inv.id)) || (inv.tl_invoice_id ? dealByFee.get(String(inv.tl_invoice_id)) : null);
     if (inv.deal_id) {
       const d = dealById.get(inv.deal_id);
-      if (d) out.set(inv.id, { deal: d, bron: feeDeal && feeDeal.id === d.id ? 'reserveringsfee' : 'deal' });
+      if (d) koppeling.set(inv.id, { deal: d, bron: feeDeal && feeDeal.id === d.id ? 'reserveringsfee' : 'deal' });
       continue; // deal_id van een andere deal → niet van deze setter
     }
-    if (inv.tl_subscription_id && dealByTlSub.has(inv.tl_subscription_id)) {
-      out.set(inv.id, { deal: dealByTlSub.get(inv.tl_subscription_id), bron: 'abonnement' });
-      continue;
+    if (inv.tl_subscription_id) {
+      if (dealByTlSub.has(inv.tl_subscription_id)) koppeling.set(inv.id, { deal: dealByTlSub.get(inv.tl_subscription_id), bron: 'abonnement' });
+      else if (feeDeal) koppeling.set(inv.id, { deal: feeDeal, bron: 'reserveringsfee' });
+      continue; // abonnement van een andere deal → geen terugval
     }
-    if (feeDeal) out.set(inv.id, { deal: feeDeal, bron: 'reserveringsfee' });
+    if (feeDeal) { koppeling.set(inv.id, { deal: feeDeal, bron: 'reserveringsfee' }); continue; }
+
+    // 4. Terugval: geen deal_id, geen abonnement.
+    if (String(inv.status || '').toLowerCase() === 'concept') continue;
+    const kandidaten = getekendPerKlant.get(inv.customer_id) || [];
+    if (!kandidaten.some((d) => dealById.has(d.id))) continue; // geen setter-deal bij deze klant
+    const melding = (reden) => teControleren.push({
+      invoice_id: inv.id, factuurnummer: inv.invoice_number || null, customer_id: inv.customer_id || null, reden,
+      factuurdatum: dag(inv.issue_date) || dag(inv.paid_date),
+      kandidaten: kandidaten.map((d) => ({ deal_id: d.id, setter_user_id: dealById.get(d.id)?.setter_user_id || null })),
+    });
+    if (kandidaten.length > 1) { melding('meerdere_getekende_deals'); continue; }
+    const deal = dealById.get(kandidaten[0].id);
+    const factuurdatum = dag(inv.issue_date) || dag(inv.paid_date);
+    const dealdatum = dag(deal.created_at) || dag(deal.tl_quotation_accepted_at);
+    if (!factuurdatum || !dealdatum) { melding('datum_onbekend'); continue; }
+    if (factuurdatum < dealdatum) { melding('factuur_ouder_dan_deal'); continue; }
+    koppeling.set(inv.id, { deal, bron: 'enige_deal_klant' });
   }
-  return out;
+  return { koppeling, teControleren };
+}
+
+/**
+ * Factuur → { deal, bron }. Zie de koppelregels bovenaan.
+ * @returns {Map<string, { deal: object, bron: 'deal'|'abonnement'|'reserveringsfee'|'enige_deal_klant' }>}
+ */
+export function koppelFacturenAanDeals(data) {
+  return koppelFacturen(data).koppeling;
 }
 
 /** Commissie op een basis-stap, telescopisch afgerond (Σ stappen = round2(totaal × pct)). */
@@ -244,7 +307,7 @@ const INV_COLS = 'id, invoice_number, customer_id, deal_id, tl_invoice_id, tl_su
  */
 export async function laadCommissieData(db, { setterIds = null } = {}) {
   let dq = db.from('deals')
-    .select('id, customer_id, setter_user_id, archived_at, tl_quotation_status, reservation_fee_invoice_id, quote_reference')
+    .select('id, customer_id, setter_user_id, archived_at, tl_quotation_status, tl_quotation_accepted_at, created_at, reservation_fee_invoice_id, quote_reference')
     .not('setter_user_id', 'is', null);
   if (setterIds) dq = dq.in('setter_user_id', setterIds);
   const deals = await alle(dq, 'deals');
@@ -262,8 +325,19 @@ export async function laadCommissieData(db, { setterIds = null } = {}) {
   const feeUuids = feeIds.filter((x) => UUID_RE.test(x));
   const feeTl = feeIds.filter((x) => !UUID_RE.test(x));
 
+  // Terugval (koppelregel 4): alle deals van deze klanten + hun facturen zonder
+  // deal_id en zonder abonnement (in JS gefilterd).
+  const custIds = [...new Set(deals.map((d) => d.customer_id).filter(Boolean))];
+  const klantDeals = custIds.length
+    ? await alle(db.from('deals').select('id, customer_id, setter_user_id, archived_at, tl_quotation_status, tl_quotation_accepted_at, created_at').in('customer_id', custIds), 'deals(klant)')
+    : [];
+
   const delen = await Promise.all([
     dealIds.length ? alle(db.from('invoices').select(INV_COLS).in('deal_id', dealIds), 'invoices(deal)') : [],
+    custIds.length
+      ? alle(db.from('invoices').select(INV_COLS).in('customer_id', custIds), 'invoices(klant)')
+        .then((rijen) => rijen.filter((i) => !i.deal_id && !i.tl_subscription_id))
+      : [],
     tlSubIds.length ? alle(db.from('invoices').select(INV_COLS).in('tl_subscription_id', tlSubIds), 'invoices(abonnement)') : [],
     feeUuids.length ? alle(db.from('invoices').select(INV_COLS).in('id', feeUuids), 'invoices(fee)') : [],
     feeTl.length ? alle(db.from('invoices').select(INV_COLS).in('tl_invoice_id', feeTl), 'invoices(fee-tl)') : [],
@@ -275,12 +349,12 @@ export async function laadCommissieData(db, { setterIds = null } = {}) {
       .select('id, setter_user_id, invoice_id, basis, amount, status, created_at')
       .in('setter_user_id', ids), 'setter_ledger_entries')
     : [];
-  return { setterIds: ids, deals, configs, subs, invoices, entries };
+  return { setterIds: ids, deals, configs, subs, invoices, entries, klantDeals };
 }
 
 /** Combineer data → plan per setter. Pure. */
 export function planCommissie(data, _opts = {}) {
-  const koppeling = koppelFacturenAanDeals(data);
+  const { koppeling, teControleren } = koppelFacturen(data);
   const perSetter = [];
   for (const sid of data.setterIds) {
     const cfg = data.configs.find((c) => c.user_id === sid) || null;
@@ -297,6 +371,9 @@ export function planCommissie(data, _opts = {}) {
       deals: data.deals.filter((d) => d.setter_user_id === sid).length,
       ...r,
       te_boeken: round2(r.mutaties.reduce((s, m) => s + m.amount, 0)),
+      // Terugval twijfelde (meerdere getekende deals / te oude factuur): niet
+      // gekoppeld, niets geboekt — Maxim beslist (zie koppelFacturen).
+      te_controleren: teControleren.filter((t) => t.kandidaten.some((k) => k.setter_user_id === sid)),
     });
   }
   return perSetter;

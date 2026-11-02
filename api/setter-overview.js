@@ -30,7 +30,7 @@ import { isUitgeslotenDeal, bouwSaleRegel, klantNaam, SETTER_DEAL_COLS } from '.
 import { laadCommissieData, koppelFacturenAanDeals } from './_lib/setter-commissie-core.js';
 import { annuleringVanDeal, isGetekendeDeal } from './_lib/setter-calls.js';
 
-const BRON_LABEL = { deal: 'factuur', abonnement: 'termijn (abonnement)', reserveringsfee: 'reserveringsfee' };
+const BRON_LABEL = { deal: 'factuur', abonnement: 'termijn (abonnement)', reserveringsfee: 'reserveringsfee', enige_deal_klant: 'factuur (enige deal van de klant)' };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
