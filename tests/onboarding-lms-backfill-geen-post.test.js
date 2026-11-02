@@ -163,7 +163,11 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // 24 → 25 (28 oktober 2026, Maxim): onboarding-portal-kolommen.js — de
   // spiegel leest portal_gestart_op/portal_geopend_op (oude wizard vs nieuwe
   // onboarding). Alleen lezen.
-  assert.ok(AFSLUITING.size <= 25,
+  // 25 → 26 (2 november 2026, Maxim): lms-student-ontkoppelen.js — een
+  //   onboarding die naar een BEWUST verwijderde LMS-student wijst (auditrij)
+  //   wordt losgemaakt in plaats van "in orde" te melden. Lezen uit het LMS,
+  //   één voorwaardelijke update in het CRM, niets dat verstuurt.
+  assert.ok(AFSLUITING.size <= 26,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });

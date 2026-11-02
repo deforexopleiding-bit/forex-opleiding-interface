@@ -28,6 +28,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
+import { ruimVerwijderdeKoppelingenOp } from './lms-student-ontkoppelen.js';
 import {
   spiegelOnboarding, SPIEGEL_TABEL,
   SPIEGEL_GESCHREVEN, SPIEGEL_VERWIJDERD, SPIEGEL_AFWEZIG,
@@ -83,6 +84,14 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
       result.error = 'DFO_LMS_SUPABASE_URL/KEY ontbreekt';
       console.error('[spiegel-sync/' + door + ']', result.error);
       return { status: 502, result };
+    }
+
+    // ── 0) Verwijzingen naar een BEWUST verwijderde LMS-student losmaken
+    //       (2 nov 2026, lms-student-ontkoppelen.js) — anders faalt elke
+    //       ronde op een FK-fout. Alleen met de auditrij als bewijs; een
+    //       droogloop telt alleen.
+    if (!dry) {
+      result.verwijderde_koppelingen = await ruimVerwijderdeKoppelingenOp({ lms });
     }
 
     // ── 1) De VERWACHTE verzameling, uit het CRM ────────────────────────

@@ -420,6 +420,20 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   of ≤30 d gestart via crm_onboarding_id én klant-e-mail; testaccounts uit `testaccounts()` / env
   CHECKIN_TESTACCOUNTS) en roept `hlms_checkin_run` (lock, idempotent). Rechten: role_permissions admin/manager
   (view) + admin (run); hoofdmentoren = wie `signals.hoofdmentor.receive` heeft (user_permissions, view).
+- Annuleren + account verwijderen = ÉÉN flow (2026-11-02) — drie knoppen (CRM-detailscherm, LMS Hoofdmentor ›
+  Onboarding, LMS-dossier) → één kern `api/_lib/onboarding-annuleren.js`. Eén annulering per STUDENT:
+  `eerdereAnnuleringenVanStudent` zoekt op steps.lms_student_id, steps.lms_toegang.student_id én de onboarding
+  (dfo_lms_student_id/bubble) — dossier na onboarding (of omgekeerd) = al geannuleerd, niets opnieuw (omgekeerd gaat
+  alleen de open onboarding mee dicht). Ook onboarding-records dragen nu steps.lms_student_id + niveau.
+  `lms_markering`: ontbrekende migratie / onbekende student = ok:false met reden, NOOIT ok/overgeslagen (bug 26 okt–2 nov).
+  "Account ook verwijderen" standaard aan, pas NA een geslaagde annulering, nooit bij incasso; al geannuleerd →
+  meteen verwijderen (`onboarding-cancel` `actie:'account_verwijderen'`). Het verwijderen doet ALTIJD het LMS
+  (`verwijderStudent`, machine-ingang /api/admin/studenten/<id>/verwijderen/, `api/_lib/lms-account-verwijderen.js`).
+  Daarna `api/_lib/lms-student-ontkoppelen.js`: onboardings die naar een BEWUST verwijderde student wijzen
+  (geen hlms_student-rij + auditrij hlms_student_verwijderd) → dfo_lms_student_id NULL + provision_error; ook in de
+  nachtelijke spiegel-sync en bij "Koppeling opnieuw controleren"; nooit op een mislukte lezing.
+  Machine-route `api/lms-geannuleerde-studenten.js` (GET lijst voor "Alle geannuleerden verwijderen" + backfill;
+  POST {actie:'verwijderd'} na een verwijdering in het LMS).
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:

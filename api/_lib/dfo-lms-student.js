@@ -26,6 +26,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient, isUniqueViolation } from './dfo-lms-db.js';
 import { berekenLmsVenster } from './onboarding-window.js';
+import { verdwenenStudenten, ontkoppelVerwijderdeStudent } from './lms-student-ontkoppelen.js';
 
 // Kolommen die we op onboardings lezen/schrijven voor deze koppeling.
 const CRM_KOLOMMEN =
@@ -411,11 +412,20 @@ export async function provisionDfoLmsStudent(onboardingId) {
   // hoeft niet opnieuw door de product_soort-controle, en die zou een
   // werkende overslaan-situatie in een fout kunnen veranderen.
   if (onboarding.dfo_lms_provisioned === true && onboarding.dfo_lms_student_id) {
-    return succesResultaat({
-      studentId: onboarding.dfo_lms_student_id,
-      email,
-      skipped: true,
-    });
+    const weg = await verdwenenStudenten([onboarding.dfo_lms_student_id], { lms }).catch(() => null);
+    if (!weg?.has(String(onboarding.dfo_lms_student_id))) {
+      return succesResultaat({ studentId: onboarding.dfo_lms_student_id, email, skipped: true });
+    }
+    // Sinds 29 okt kan het LMS een student verwijderen; dan was "in orde" hier
+    // een leugen (2 nov 2026). Alleen met de auditrij als bewijs (zie
+    // lms-student-ontkoppelen.js); bij twijfel blijft het zoals voorheen.
+    await ontkoppelVerwijderdeStudent(onboarding.dfo_lms_student_id, { verwijderdOp: weg.get(String(onboarding.dfo_lms_student_id)) });
+    return {
+      ok: false,
+      code: 'lms_student_verwijderd',
+      error: 'Het LMS-account van deze student is verwijderd: de koppeling is losgemaakt. '
+        + 'Wil je een nieuw account, klik dan op "Student aanmaken in LMS".',
+    };
   }
 
   // 4) Traject.

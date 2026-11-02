@@ -1,0 +1,4 @@
+{
+  "_bron": "information_schema.columns op dfo-lms (absicpdidnoblirngiia), gemeten 2 nov 2026: hlms_student_verwijderd (RUN_ME_29okt.sql, account verwijderen) — gelezen door lms-account-verwijderen.js en lms-student-ontkoppelen.js",
+  "hlms_student_verwijderd": "id,student_id,auth_id,naam,email,crm_onboarding_id,reden,verwijderd_door,verwijderd_door_auth,verwijderd_op,account_verwijderd_op,samenvatting"
+}

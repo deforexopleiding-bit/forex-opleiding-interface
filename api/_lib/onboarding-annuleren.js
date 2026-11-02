@@ -69,6 +69,7 @@ import { ensurePipelineCustomer, setStage } from './dunning-pipeline.js';
 import { crmMentorVoorLmsId } from './lms-mentor-brug.js';
 import { zoekKlantKandidaten, kiesKlant } from './factuurstand-spiegel.js';
 import { customerDisplayName } from './customer-name.js';
+import { accountStand } from './lms-account-verwijderen.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function tlCall(path, body, attempt = 0) {
@@ -303,17 +304,131 @@ export function bepaalKlant(kandidaten, gekozen = null) {
   return { status: 'onzeker', customer_id: null, via: null, alle };
 }
 
-/** De eerdere student-annuleringen (oudste eerst). */
-async function studentAnnuleringen(studentId) {
-  const { data, error } = await supabaseAdmin
-    .from('onboarding_cancellations')
-    .select('id, cancelled_at, created_at, customer_id, customer_name, steps')
-    .eq('steps->>lms_student_id', studentId)
-    .eq('steps->>niveau', 'student')
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true });
-  if (error) throw new Error('annuleringen lezen: ' + error.message);
-  return data || [];
+const ANNULERING_VELDEN = 'id, cancelled_at, created_at, onboarding_id, customer_id, customer_name, steps';
+
+/**
+ * Oudste eerst, zonder dubbels. PURE.
+ * @param {object[][]} lijsten
+ */
+export function voegAnnuleringenSamen(...lijsten) {
+  const perId = new Map();
+  for (const r of lijsten.flat()) if (r?.id && !perId.has(String(r.id))) perId.set(String(r.id), r);
+  return [...perId.values()].sort((a, b) =>
+    String(a.created_at || '').localeCompare(String(b.created_at || '')) || String(a.id).localeCompare(String(b.id)));
+}
+
+/**
+ * ELKE eerdere annulering van deze LMS-student, op welk niveau ook (oudste
+ * eerst). Vóór 2 nov 2026 zocht het studentniveau alleen naar records met
+ * `steps.niveau = 'student'`, waardoor een student die al via zijn onboarding
+ * geannuleerd was (Hoofdmentor › Onboarding of het CRM-detailscherm), in het
+ * dossier een tweede keer geannuleerd kon worden — gemeten: Blerim Racaj
+ * (19 okt via de onboarding, 29 okt via het dossier). Nu telt elk record dat
+ * via een van deze wegen bij de student hoort:
+ *   - `steps.lms_student_id` (studentniveau; sinds 2 nov ook onboardingniveau);
+ *   - `steps.lms_toegang.student_id` (elke annulering die de toegang sloot);
+ *   - de onboarding van het record wijst naar deze student
+ *     (`dfo_lms_student_id`, of het historische `bubble_user_id`).
+ * Testonboardings tellen niet mee.
+ */
+export async function eerdereAnnuleringenVanStudent(studentId, { bubbleUserId = null } = {}) {
+  if (!studentId) return [];
+  const lees = async (bouw, wat) => {
+    const { data, error } = await bouw(supabaseAdmin.from('onboarding_cancellations').select(ANNULERING_VELDEN));
+    if (error) throw new Error('annuleringen lezen (' + wat + '): ' + error.message);
+    return data || [];
+  };
+  const [opStudent, opToegang] = await Promise.all([
+    lees((q) => q.eq('steps->>lms_student_id', studentId), 'student'),
+    lees((q) => q.eq('steps->lms_toegang->>student_id', studentId), 'toegang'),
+  ]);
+  const filters = ['dfo_lms_student_id.eq.' + studentId];
+  if (bubbleUserId) filters.push('bubble_user_id.eq.' + bubbleUserId);
+  const { data: obs, error: obErr } = await supabaseAdmin.from('onboardings')
+    .select('id, is_test').or(filters.join(','));
+  if (obErr) throw new Error('onboardings van de student lezen: ' + obErr.message);
+  const obIds = (obs || []).filter((o) => o.is_test !== true).map((o) => o.id);
+  const opOnboarding = obIds.length ? await lees((q) => q.in('onboarding_id', obIds), 'onboarding') : [];
+  return voegAnnuleringenSamen(opStudent, opToegang, opOnboarding);
+}
+
+/** Het Bubble-id van een LMS-student (voor de historische koppeling); null bij twijfel. */
+async function bubbleIdVanStudent(studentId) {
+  const lms = getDfoLmsClient();
+  if (!lms || !studentId) return null;
+  const { data, error } = await lms.from('hlms_student').select('bubble_user_id').eq('id', studentId).maybeSingle();
+  if (error) return null;
+  return data?.bubble_user_id || null;
+}
+
+/**
+ * De LMS-student van een onboarding: dfo_lms_student_id, anders (historisch)
+ * via het Bubble-id — alleen bij precies één treffer. Leest alleen.
+ * @returns {Promise<{ id: string|null, bubble: string|null }>}
+ */
+async function lmsStudentVanOnboarding(ob) {
+  if (ob?.dfo_lms_student_id) return { id: ob.dfo_lms_student_id, bubble: ob.bubble_user_id || null };
+  if (!ob?.bubble_user_id) return { id: null, bubble: null };
+  const lms = getDfoLmsClient();
+  if (!lms) return { id: null, bubble: ob.bubble_user_id };
+  const { data } = await lms.from('hlms_student').select('id').eq('bubble_user_id', ob.bubble_user_id).limit(2);
+  return { id: (data || []).length === 1 ? data[0].id : null, bubble: ob.bubble_user_id };
+}
+
+/**
+ * De student is al geannuleerd (op een ander niveau) en nu komt zijn open
+ * onboarding nog binnen: alleen die onboarding mee dicht — status, lopende
+ * automaties, spiegel. Geen facturen, abonnementen of Teamleader: dat gebeurde
+ * bij de eerste annulering. Gooit nooit.
+ */
+async function sluitOnboardingMee(ob, doorUserId) {
+  const uit = { ok: true, onboarding_id: ob.id };
+  try {
+    const { error } = await supabaseAdmin.from('onboardings').update({ status: 'geannuleerd' }).eq('id', ob.id);
+    if (error) throw new Error(error.message);
+    const { data: gestopt, error: aErr } = await supabaseAdmin.from('onboarding_automation_runs')
+      .update({ status: 'cancelled', next_run_at: null, last_error: 'student al geannuleerd', updated_at: new Date().toISOString() })
+      .eq('onboarding_id', ob.id).eq('status', 'active').select('id');
+    if (aErr) throw new Error(aErr.message);
+    uit.automaties_gestopt = (gestopt || []).length;
+    const { error: nErr } = await supabaseAdmin.from('onboarding_mentor_updates').insert({
+      onboarding_id: ob.id, kind: 'note', status: null, created_by: doorUserId || null,
+      note: 'Op geannuleerd gezet: de student was al geannuleerd. Er is niets opnieuw gecrediteerd of stopgezet.',
+    });
+    if (nErr) console.warn('[onboarding-annuleren] tijdlijn: ' + nErr.message);
+  } catch (e) {
+    return { ok: false, onboarding_id: ob.id, error: e?.message || String(e) };
+  }
+  await spiegelNaActie(ob.id, 'onboarding-cancel');
+  return uit;
+}
+
+/**
+ * Voor "Account verwijderen" bij een al geannuleerde student (2 nov 2026):
+ * staat zijn onboarding nog open terwijl de student al geannuleerd is (via
+ * het dossier), dan gaat die onboarding mee dicht. Idempotent, geen
+ * Teamleader. Gooit nooit.
+ * @returns {Promise<{ ok: boolean, code: string, lms_student_id?: string|null, onboarding_gesloten?: object, error?: string }>}
+ */
+export async function sluitOnboardingVanGeannuleerdeStudent(onboardingId, doorUserId) {
+  try {
+    const c = await gatherContext(onboardingId);
+    if (!c.ob) return { ok: false, code: 'niet_gevonden', error: 'Onboarding niet gevonden.' };
+    const st = await lmsStudentVanOnboarding(c.ob);
+    if (String(c.ob.status || '').toLowerCase() === 'geannuleerd') return { ok: true, code: 'al_dicht', lms_student_id: st.id };
+    const eerder = st.id ? await studentAnnuleringen(st.id, st.bubble) : [];
+    if (eerder.length === 0) return { ok: false, code: 'niet_geannuleerd', error: 'Deze student is nog niet geannuleerd.' };
+    const gesloten = await sluitOnboardingMee(c.ob, doorUserId);
+    return { ok: gesloten.ok, code: gesloten.ok ? 'gesloten' : 'mislukt', lms_student_id: st.id, onboarding_gesloten: gesloten, ...(gesloten.ok ? {} : { error: gesloten.error }) };
+  } catch (e) {
+    return { ok: false, code: 'fout', error: e?.message || String(e) };
+  }
+}
+
+/** De eerdere annuleringen van deze student (oudste eerst) — alle niveaus. */
+async function studentAnnuleringen(studentId, bubbleUserId) {
+  const bubble = bubbleUserId === undefined ? await bubbleIdVanStudent(studentId) : bubbleUserId;
+  return eerdereAnnuleringenVanStudent(studentId, { bubbleUserId: bubble });
 }
 
 /**
@@ -376,11 +491,19 @@ async function gatherStudentContext({ studentId, customerId = null }) {
 export async function annuleringVoorbeeld(onboardingId) {
   const ctx = await gatherContext(onboardingId);
   if (!ctx.ob) return null;
+  const st = await lmsStudentVanOnboarding(ctx.ob);
+  const eerder = st.id ? await studentAnnuleringen(st.id, st.bubble) : [];
+  const zelf = String(ctx.ob.status || '').toLowerCase() === 'geannuleerd';
   return {
     preview:             true,
-    already_cancelled:   String(ctx.ob.status || '').toLowerCase() === 'geannuleerd',
+    // Al geannuleerd: deze onboarding, of de student op een ander niveau
+    // (dossier) — dan gebeurt er niets opnieuw (zie voerAnnuleringUit).
+    already_cancelled:   zelf || eerder.length > 0,
+    eerdere:             eerder[0] || null,
     customer_name:       ctx.ob.customer_name || null,
-    lms_student_id:      ctx.ob.dfo_lms_student_id || null,
+    lms_student_id:      st.id || null,
+    // Accountverwijdering: wat er nu in het LMS staat (zie accountStand).
+    account:             await accountStand(st.id),
     invoices: ctx.invoices.map((i) => ({
       id: i.id, invoice_number: i.invoice_number, amount_total: r2(i.amount_total),
       credited_amount: r2(i.credited_amount || 0), status: i.status, will_credit: true,
@@ -401,7 +524,10 @@ export async function annuleringVoorbeeld(onboardingId) {
 export async function studentAnnuleringVoorbeeld({ studentId, customerId = null }) {
   const eerder = await studentAnnuleringen(studentId);
   if (eerder.length > 0) {
-    return { status: 200, body: { preview: true, niveau: 'student', already_cancelled: true, eerdere: eerder[0] } };
+    // Al geannuleerd (op welk niveau ook): niets opnieuw — maar het venster
+    // biedt wel meteen "Account verwijderen" aan (2 nov 2026).
+    const account = await accountStand(studentId);
+    return { status: 200, body: { preview: true, niveau: 'student', already_cancelled: true, eerdere: eerder[0], account, naam_bevestiging: account?.naam || null } };
   }
   const ctx = await gatherStudentContext({ studentId, customerId });
   if (ctx.fout) return ctx.fout;
@@ -487,9 +613,18 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
       return { status: 200, body: { ok: true, already_cancelled: true } };
     }
     if (!reasonRaw) return { status: 400, body: { error: 'reason is verplicht bij execute.' } };
+    // DUBBEL ANNULEREN VOORKOMEN (2 nov 2026): de student van deze onboarding
+    // is al geannuleerd (bv. via het dossier) → niets opnieuw crediteren of
+    // stopzetten; alleen deze onboarding mee dicht, zodat hij uit de lijsten gaat.
+    const st = await lmsStudentVanOnboarding(c.ob);
+    const eerder = st.id ? await studentAnnuleringen(st.id, st.bubble) : [];
+    if (eerder.length > 0) {
+      const gesloten = await sluitOnboardingMee(c.ob, doorUserId);
+      return { status: 200, body: { ok: true, already_cancelled: true, eerdere: eerder[0], onboarding_gesloten: gesloten } };
+    }
     ctx = {
       ...c, niveau: 'onboarding', onboardings: [c.ob], customerId: c.ob.customer_id || null,
-      customerName: c.ob.customer_name || null, lmsStudentId: c.ob.dfo_lms_student_id || null,
+      customerName: c.ob.customer_name || null, lmsStudentId: st.id || null,
       mentorUserIdOnboarding: c.ob.mentor_user_id || null,
     };
   }
@@ -514,14 +649,17 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
       onboarding_status:      { ok: false },
       cancellation_record:    { ok: false },
       notify_mentor:          { ok: false },
+      lms_markering:          { ok: false },
     };
+    // Sinds 2 nov 2026 ook op onboarding-niveau: zo vindt elke latere
+    // annulering (dossier, onboarding) dit record terug — één annulering per student.
+    if (!opStudent) Object.assign(steps, { niveau: 'onboarding', lms_student_id: ctx.lmsStudentId || null });
     if (opStudent) {
       Object.assign(steps, {
         niveau: 'student', lms_student_id: ctx.lmsStudentId, status: 'bezig',
         klant: { customer_id: ctx.customerId, via: ctx.klant.via, status: ctx.klant.status },
         opties: keuze,
         incasso_pipeline: { ok: true, skipped: true, reason: 'niet-gekozen' },
-        lms_markering: { ok: false },
       });
     }
 
@@ -544,7 +682,7 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
       } catch (e) {
         return { status: 500, body: { error: 'De annulering kon niet vastgelegd worden; er is niets gewijzigd. ' + (e?.message || e), code: 'record_mislukt' } };
       }
-      const alle = await studentAnnuleringen(ctx.lmsStudentId).catch(() => []);
+      const alle = await studentAnnuleringen(ctx.lmsStudentId, ctx.student?.bubble_user_id || null).catch(() => []);
       if (alle.length > 0 && String(alle[0].id) !== String(cancellationId)) {
         const { error: delErr } = await supabaseAdmin.from('onboarding_cancellations').delete().eq('id', cancellationId);
         if (delErr) console.error('[onboarding-annuleren] dubbele claim opruimen: ' + delErr.message);
@@ -844,6 +982,9 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
       });
     } else if (opStudent) {
       steps.lms_markering = { ok: false, error: 'geen LMS-student' };
+    } else {
+      // Onboarding zonder LMS-account: er is in het LMS niets te markeren.
+      steps.lms_markering = { ok: true, skipped: true, reason: 'geen-lms-student' };
     }
 
     // g) Mentor- + management-melding (in de app), fail-soft maar AWAITED:
@@ -900,8 +1041,14 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
 
 /**
  * Stap l: de annulering in het LMS (functie hlms_student_annuleren, migratie
- * supabase/hlms_student_annulering.sql in dfo-lms-prototype). Faalzacht:
- * vóór die migratie staat deze stap op "overgeslagen", de rest gaat door.
+ * supabase/hlms_student_annulering.sql in dfo-lms-prototype). De rest van de
+ * annulering gaat altijd door, maar deze stap is ALTIJD eerlijk:
+ *
+ * BUGFIX 2 nov 2026 (Maxim): een ontbrekende migratie telde als
+ * `{ ok: true, skipped: true }` ("overgeslagen") — gemeten: 10 annuleringen
+ * sinds 26 okt kwamen zo nooit in het LMS, en het verslag zei groen. Nu is
+ * een ontbrekende migratie, een onbekende student of elke andere fout een
+ * ZICHTBARE fout (`ok: false` met de reden), nooit ok of overgeslagen.
  */
 async function markeerInLms({ studentId, cancellationId, door, reden, incasso, opties }) {
   try {
@@ -915,9 +1062,14 @@ async function markeerInLms({ studentId, cancellationId, door, reden, incasso, o
     if (error) {
       const code = String(error.code || '');
       if (code === 'PGRST202' || code === '42883') {
-        return incasso
-          ? { ok: false, error: 'migratie hlms_student_annulering.sql nog niet gedraaid in het LMS: geen incasso-merkteken' }
-          : { ok: true, skipped: true, reason: 'lms-migratie-ontbreekt' };
+        return {
+          ok: false, code: 'lms_migratie_ontbreekt',
+          error: 'migratie hlms_student_annulering.sql nog niet gedraaid in het LMS: de student staat daar NIET als geannuleerd'
+            + (incasso ? ' en heeft geen incasso-merkteken' : '') + '. Draai de migratie en daarna de inhaalslag.',
+        };
+      }
+      if (String(error.hint || '') === 'annulering_geen_student') {
+        return { ok: false, code: 'lms_student_niet_gevonden', error: 'de student bestaat niet (meer) in het LMS: niets gemarkeerd' };
       }
       throw new Error(error.message);
     }

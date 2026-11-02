@@ -19,10 +19,12 @@ function nepDb(tabellen) {
   const log = { updates: [], inserts: [] };
   return {
     log,
+    rpc: async () => ({ data: { annulering: 'nieuw' }, error: null }),
     from(tabel) {
       const st = { filters: [], patch: null, insert: null };
       const rijen = () => (tabellen[tabel] || []).filter((r) => st.filters.every(([op, k, v]) =>
-        op === 'eq' ? r[k] === v : op === 'in' ? v.includes(r[k]) : op === 'is' ? (r[k] ?? null) === v : op === 'neq' ? r[k] !== v : true));
+        op === 'eq' ? r[k] === v : op === 'in' ? v.includes(r[k]) : op === 'is' ? (r[k] ?? null) === v : op === 'neq' ? r[k] !== v
+          : op === 'or' ? v.split(',').some((d) => { const [kk, , vv] = d.split('.'); return String(r[kk] ?? '') === vv; }) : true));
       const uitkomst = () => {
         if (st.patch) { log.updates.push({ tabel, patch: st.patch, filters: st.filters }); return { data: rijen().map((r) => ({ id: r.id })), error: null }; }
         if (st.insert) { log.inserts.push({ tabel, rij: st.insert }); return { data: { id: tabel + '-nieuw' }, error: null }; }
@@ -34,6 +36,7 @@ function nepDb(tabellen) {
         neq(k, v) { st.filters.push(['neq', k, v]); return q; },
         in(k, v) { st.filters.push(['in', k, v]); return q; },
         is(k, v) { st.filters.push(['is', k, v]); return q; },
+        or(v) { st.filters.push(['or', null, v]); return q; },
         update(p) { st.patch = p; return q; },
         insert(r) { st.insert = r; return q; },
         maybeSingle: async () => ({ data: uitkomst().data?.[0] ?? null, error: null }),
