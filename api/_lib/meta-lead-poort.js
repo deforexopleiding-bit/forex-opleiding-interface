@@ -13,9 +13,10 @@
 // niet gedraaid): alleen het vaste event_id, Meta ontdubbelt binnen zijn venster.
 //
 // Testtool (2026-11-02, _lib/meta-testtool.js): de toestemmingscheck rekent met de
-// override (altijd/nooit) en met 'testadressen' aan vervalt de test-uitsluiting.
+// override (altijd/nooit; standaard alleen voor testadressen) en de test-uitsluiting
+// vervalt als testadressen door mogen (testadresToegestaan).
 
-import { effectieveToestemming, haalTesttool } from './meta-testtool.js';
+import { effectieveToestemming, haalTesttool, testadresToegestaan } from './meta-testtool.js';
 
 export function metaLeadEventId(leadId) {
   return `lead_${leadId}`;
@@ -47,11 +48,13 @@ export async function beslisMetaLead(sb, { leadId, email, userAgent, isTest = fa
   // Alleen met toestemming voor advertentiecookies (2026-10-25, _lib/advertentie-toestemming.js),
   // na de override van de testtool.
   const tt = await haalTesttool(sb);
-  if (effectieveToestemming(tt, toestemming) !== true) {
-    return { eventId: null, reden: tt.modus === 'nooit' ? 'testtool_nooit' : 'geen_toestemming' };
+  const test = isTest === true || isTestAdres(email);
+  if (effectieveToestemming(tt, toestemming, test) !== true) {
+    const nooit = tt.modus === 'nooit' && (!tt.alleenTestadressen || test);
+    return { eventId: null, reden: nooit ? 'testtool_nooit' : 'geen_toestemming' };
   }
   if (vercelEnv !== 'production') return { eventId: null, reden: 'geen_productie' };
-  if (!tt.testadressen && (isTest || isTestAdres(email))) return { eventId: null, reden: 'testadres' };
+  if (test && !testadresToegestaan(tt)) return { eventId: null, reden: 'testadres' };
   if (isBotAgent(userAgent)) return { eventId: null, reden: 'bot' };
   if (!leadId) return { eventId: null, reden: 'geen_lead' };
   try {

@@ -12,10 +12,12 @@
 // FAIL-CLOSED: geen lead, NULL, kolom bestaat nog niet of een leesfout → geen
 // toestemming. Migratie: dfo-website docs/sql-migrations/2026-10-25-leads-advertentie-toestemming.sql.
 //
-// Testtool (2026-11-02, _lib/meta-testtool.js): modus 'altijd' → altijd ja,
-// 'nooit' → altijd nee, ongeacht wat er op de lead staat.
+// Testtool (2026-11-02, _lib/meta-testtool.js): modus 'altijd' → ja, 'nooit' → nee,
+// ongeacht wat er op de lead staat — standaard alleen voor testadressen
+// (e-mail van de lead of het meegegeven adres), sitebreed voor iedereen.
 
-import { haalTesttool } from './meta-testtool.js';
+import { effectieveToestemming, haalTesttool } from './meta-testtool.js';
+import { isTestAdres } from './meta-lead-poort.js';
 
 /** Body van een aanmelding: alleen `cookie_toestemming === true` telt. PURE. */
 export function toestemmingUitBody(body) {
@@ -28,10 +30,9 @@ export function toestemmingUitBody(body) {
  */
 export async function leadHeeftToestemming(sb, { leadId = null, email = null } = {}) {
   const tt = await haalTesttool();   // eigen lezing (standaardclient), los van de lead-query
-  if (tt.modus === 'altijd') return true;
-  if (tt.modus === 'nooit') return false;
+  if (tt.modus !== 'normaal' && !tt.alleenTestadressen) return tt.modus === 'altijd';
   try {
-    let q = sb.from('leads').select('advertentie_toestemming').is('verwijderd_op', null).limit(1);
+    let q = sb.from('leads').select('advertentie_toestemming, email').is('verwijderd_op', null).limit(1);
     if (leadId) q = q.eq('id', leadId);
     else if (email) q = q.ilike('email', String(email).trim().toLowerCase());
     else return false;
@@ -42,7 +43,11 @@ export async function leadHeeftToestemming(sb, { leadId = null, email = null } =
       }
       return false;
     }
-    return data?.[0]?.advertentie_toestemming === true;
+    const echt = data?.[0]?.advertentie_toestemming === true;
+    if (tt.modus === 'normaal') return echt;
+    // Alleen testadressen: de override geldt als de lead (of het meegegeven adres) een testadres is.
+    const adres = data?.[0]?.email || email;
+    return effectieveToestemming(tt, echt, !!adres && isTestAdres(adres));
   } catch (e) {
     console.warn('[advertentie-toestemming] exception → geen toestemming', e?.message || e);
     return false;

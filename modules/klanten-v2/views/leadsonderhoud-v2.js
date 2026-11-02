@@ -4870,16 +4870,15 @@
     }
   };
   // ── Meta-toestemming-testtool (2026-11-02): app_settings.meta_toestemming_testtool ──
-  // Sitebreed: website (banner, pixel, CAPI) én CRM-zenders lezen hem (~15 s cache).
+  // Website (pixel, CAPI) én CRM-zenders lezen hem (~15 s cache). De cookiebanner verschijnt altijd.
   window._lsMetaTtModus = function (m) {
     const st = _live.metakoppeling; if (!st || !st.ttForm) return;
     st.ttForm.modus = m;
-    if (m === 'normaal') st.ttForm.cookiebanner = 'aan';   // banner uit kan alleen met altijd/nooit
     if (window.DFO?.render) window.DFO.render();
   };
-  window._lsMetaTtBanner = function () {
-    const st = _live.metakoppeling; if (!st || !st.ttForm || st.ttForm.modus === 'normaal') return;
-    st.ttForm.cookiebanner = st.ttForm.cookiebanner === 'uit' ? 'aan' : 'uit';
+  window._lsMetaTtAlleenTest = function () {
+    const st = _live.metakoppeling; if (!st || !st.ttForm) return;
+    st.ttForm.alleen_testadressen = st.ttForm.alleen_testadressen === false;   // ontbreekt = aan → uit
     if (window.DFO?.render) window.DFO.render();
   };
   window._lsMetaTtTestadressen = function () {
@@ -4908,7 +4907,7 @@
   const _TT_MODI = [
     ['normaal', 'Normaal', 'Alleen naar Meta als de bezoeker advertentiecookies accepteerde.'],
     ['altijd', 'Altijd naar Meta', 'Ook als de bezoeker cookies weigerde of nog niet koos.'],
-    ['nooit', 'Nooit naar Meta', 'Ook niet als de bezoeker alles accepteerde (geen pixel, geen CAPI).'],
+    ['nooit', 'Nooit naar Meta', 'Ook niet als de bezoeker alles accepteerde.'],
   ];
   function _metaTesttoolKaart(st) {
     if (!st.ttForm) return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px;font-size:12.5px;color:var(--text-3)">Testtool kon niet geladen worden (/api/meta-testtool).</div>';
@@ -4918,20 +4917,21 @@
       return `<button onclick="window._lsMetaTtModus('${k}')" style="flex:1;min-width:180px;text-align:left;padding:10px 12px;border-radius:var(--r-sm);border:1.5px solid ${aan ? '#16a34a' : 'var(--border)'};background:${aan ? '#e7f6ee' : 'var(--surface)'};cursor:pointer"><div style="font-size:13px;font-weight:700;color:${aan ? '#16a34a' : 'var(--text)'}">${aan ? '&#9679; ' : ''}${lbl}</div><div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.4">${sub}</div></button>`;
     };
     const modi = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px">${_TT_MODI.map(modusKnop).join('')}</div>`;
-    const bannerSub = f.modus === 'normaal'
-      ? 'Kies eerst &quot;Altijd&quot; of &quot;Nooit&quot; naar Meta.'
-      : (f.modus === 'altijd' ? 'Geen banner; iedereen telt als &quot;Alles accepteren&quot; (pixel + statistieken laden).' : 'Geen banner; iedereen telt als &quot;Alleen noodzakelijk&quot;.');
-    const banner = `<div style="${f.modus === 'normaal' ? 'opacity:.5;pointer-events:none' : ''}">${_metaSwitch(f.cookiebanner === 'uit', 'window._lsMetaTtBanner()', 'Cookiebanner uitschakelen', bannerSub)}</div>`;
-    const testadr = _metaSwitch(f.testadressen, 'window._lsMetaTtTestadressen()', 'Testadressen ook versturen', 'Adressen met +test, testdomeinen en testaccounts gaan normaal nooit naar Meta.');
+    const alleen = f.alleen_testadressen !== false;
+    const alleenSub = alleen
+      ? 'Altijd/Nooit geldt alleen voor testadressen (+test, testdomeinen, testaccounts). Echte leads volgen gewoon hun cookiekeuze.'
+      : '<b style="color:var(--rose)">UIT: Altijd/Nooit geldt voor ALLE bezoekers, ook echte leads.</b>';
+    const alleenTest = _metaSwitch(alleen, 'window._lsMetaTtAlleenTest()', 'Alleen voor testadressen', alleenSub);
+    const testadr = _metaSwitch(f.testadressen, 'window._lsMetaTtTestadressen()', 'Testadressen ook versturen (bij Normaal)', 'Adressen met +test, testdomeinen en testaccounts gaan normaal nooit naar Meta. Bij Altijd/Nooit met &quot;Alleen voor testadressen&quot; gaan ze sowieso mee.');
     const code = `<div style="margin-top:6px"><label style="font-size:12px;color:var(--text-3);display:block;margin-bottom:4px">Test-event-code (optioneel, voor website én CRM; leeg = zoals Testmodus/env)</label><input type="text" value="${esc(f.test_event_code || '')}" oninput="window._lsMetaTtCode(this)" placeholder="TESTxxxxx" style="width:220px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px"></div>`;
     const s = st.tt && st.tt.stand;
     const modusTekst = (m) => (_TT_MODI.find((x) => x[0] === m) || _TT_MODI[0])[1];
-    const nu = s ? `${modusTekst(s.modus)} · cookiebanner ${s.cookiebanner === 'uit' ? 'UIT' : 'aan'} · testadressen ${s.testadressen ? 'mee' : 'niet'}${s.test_event_code ? ' · test-code ' + esc(s.test_event_code) : ''}` : 'onbekend';
+    const nu = s ? `${modusTekst(s.modus)}${s.modus !== 'normaal' ? (s.alleen_testadressen === false ? ' · <b style="color:var(--rose)">voor ALLE bezoekers</b>' : ' · alleen testadressen') : ''} · testadressen bij Normaal ${s.testadressen ? 'mee' : 'niet'}${s.test_event_code ? ' · test-code ' + esc(s.test_event_code) : ''}` : 'onbekend';
     const door = st.tt && st.tt.gezet_op ? ` <span style="color:var(--text-3)">(gezet ${esc(new Date(st.tt.gezet_op).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}${st.tt.gezet_door ? ' door ' + esc(st.tt.gezet_door) : ''})</span>` : '';
     const stand = `<div style="font-size:12px;margin-bottom:8px"><b>Nu actief:</b> ${nu}${door}</div>`;
     const opslaan = `<div style="margin-top:12px"><button class="btn btn-primary btn-sm" style="font-size:13px;padding:8px 16px" onclick="window._lsMetaTtSave()" ${st.ttSaving ? 'disabled' : ''}>${st.ttSaving ? 'Opslaan...' : 'Testtool opslaan'}</button></div>`;
-    const uitleg = '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px;line-height:1.5">Geldt <b>sitebreed</b> voor alle bezoekers: de website (cookiebanner, Meta-pixel, server-side CAPI) en de CRM-zenders (opstartsessie, webinar, The Lab, CRMCustomer). De echte cookiekeuze blijft op de lead staan. Resultaat per lead: zie <b>Recente leads naar Meta</b> hieronder (reden <i>testtool: nooit naar Meta</i> bij Nooit).</div>';
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px"><div style="font-size:14px;font-weight:700;margin-bottom:4px">Testtool: toestemming &amp; cookiebanner</div>${uitleg}${stand}${modi}${banner}${testadr}${code}${opslaan}</div>`;
+    const uitleg = '<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px;line-height:1.5">Stuurt wat er naar Meta gaat: de website (Meta-pixel, server-side CAPI) en de CRM-zenders (opstartsessie, webinar, The Lab, CRMCustomer). De <b>cookiebanner verschijnt altijd</b>. Standaard geldt Altijd/Nooit alleen voor testadressen. De echte cookiekeuze blijft op de lead staan. Resultaat per lead: zie <b>Recente leads naar Meta</b> hieronder (reden <i>testtool: nooit naar Meta</i> bij Nooit).</div>';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px"><div style="font-size:14px;font-weight:700;margin-bottom:4px">Testtool: toestemming naar Meta</div>${uitleg}${stand}${modi}${alleenTest}${testadr}${code}${opslaan}</div>`;
   }
   // ── Meta-dekking per funnel (read-only overzicht uit /api/meta-dekking-per-funnel) ──
   async function fetchMetaDekking(force) {

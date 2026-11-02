@@ -64,12 +64,13 @@ test('stuurLabEvent: zonder toestemming → skipped (geen_toestemming), geen Met
 
 test('bedrading: poort, Lab-aanmelding/-sessie/-cron en CRMCustomer volgen de toestemming', () => {
   const poort = lees('api/_lib/meta-lead-poort.js');
-  assert.match(poort, /toestemming = false \}\) \{\n\s+\/\/[^\n]*\n\s+if \(toestemming !== true\) return \{ eventId: null, reden: 'geen_toestemming' \};/);
+  // Sinds de testtool (2026-11-02): de check rekent met de toestemming NA de override.
+  assert.match(poort, /if \(effectieveToestemming\(tt, toestemming, test\) !== true\) \{[\s\S]{0,200}reden: nooit \? 'testtool_nooit' : 'geen_toestemming' \};/);
   const aan = lees('api/lab-aanmelding.js');
   assert.match(aan, /const advToestemming = toestemmingUitBody\(req\.body\);/);
   assert.match(aan, /await legToestemmingVast\(supabaseAdmin, leadId, advToestemming, 'lab-aanmelding'\);/);
   assert.match(aan, /isTest: d\.is_test, toestemming: advToestemming \}\);/);
-  assert.match(aan, /bronUrl: d\.landingspagina,\s+toestemming: advToestemming,/);
+  assert.match(aan, /bronUrl: d\.landingspagina,[\s\S]{0,200}toestemming: true,/);   // poort keurde goed (testtool, 2026-11-02)
   assert.match(lees('api/lab-sessie.js'), /toestemming: await leadHeeftToestemming\(supabaseAdmin, \{ leadId: lead\.id, email: lab\.email \}\),/);
   const cron = lees('api/cron-lab-opvolging.js');
   assert.match(cron, /await leadHeeftToestemming\(supabaseAdmin, \{ leadId: p\.eerste\.lead_id, email: em \}\)/);

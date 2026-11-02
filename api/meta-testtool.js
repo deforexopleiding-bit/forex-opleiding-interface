@@ -5,10 +5,10 @@
 // Website (dfo-website lib/meta-testtool.ts) en CRM-zenders lezen hem runtime
 // (~15 s cache per serverinstantie).
 //
-//   GET  → 200 { stand: { modus, cookiebanner, testadressen, test_event_code }, actief, gezet_door, gezet_op }
+//   GET  → 200 { stand: { modus, alleen_testadressen, testadressen, test_event_code }, actief, gezet_door, gezet_op }
 //          Permission: leads.view.
-//   POST { modus, cookiebanner, testadressen, test_event_code }
-//        → 200 { ok:true, stand, actief }   ·  400 { error } bij een ongeldige combinatie
+//   POST { modus, alleen_testadressen, testadressen, test_event_code }
+//        → 200 { ok:true, stand, actief }   ·  400 { error } bij ongeldige invoer
 //          Permission: leads.update.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -16,7 +16,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { TESTTOOL_SLEUTEL, isActief, leesTesttool, valideerTesttool, wisTesttoolCache } from './_lib/meta-testtool.js';
 
 function naarUit(stand) {
-  return { modus: stand.modus, cookiebanner: stand.cookiebanner, testadressen: stand.testadressen, test_event_code: stand.testEventCode || '' };
+  return { modus: stand.modus, alleen_testadressen: stand.alleenTestadressen, testadressen: stand.testadressen, test_event_code: stand.testEventCode || '' };
 }
 
 export default async function handler(req, res) {
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
     if (error) throw error;
     wisTesttoolCache();
     const stand = leesTesttool(value);
-    console.log('[meta-testtool] bewaard', { modus: stand.modus, cookiebanner: stand.cookiebanner, testadressen: stand.testadressen, door: value.gezet_door });
+    console.log('[meta-testtool] bewaard', { modus: stand.modus, alleenTestadressen: stand.alleenTestadressen, testadressen: stand.testadressen, door: value.gezet_door });
     return res.status(200).json({ ok: true, stand: naarUit(stand), actief: isActief(stand) });
   } catch (e) {
     console.error('[meta-testtool] bewaren', e?.message || e);
