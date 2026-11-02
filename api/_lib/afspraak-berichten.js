@@ -13,6 +13,17 @@
 //
 // Quick-reply-knoppen ("Ik ben erbij") zitten in de goedgekeurde template zelf
 // en hebben geen runtime-parameters — sendTemplate hoeft ze niet mee te geven.
+//
+// LET OP: alle vijf goedgekeurde templates zeggen letterlijk
+// "kennismakingsgesprek". Ook de strategie-scan (webinar/strategiescan) en The
+// Lab gebruiken ze voorlopig; alleen de MAILS hebben een eigen variant.
+//
+// Varianten per booking_source (één keuze: `varianteVoor`):
+//   · 'the-lab'                 → labVariant  (strategiesessie, 30 min)
+//   · 'webinar' / 'strategiescan' → scanVariant (strategie-scan, 20 min, ons team)
+//   · al de rest                → de standaardtekst in MOMENTEN (kennismakingsgesprek)
+// Elke bevestigingsmail draagt een .ics (de Google-uitnodiging vanuit GHL staat
+// sinds 2 nov 2026 uit op de afsprakenkalender, dus dit is het agenda-item).
 
 import { supabaseAdmin } from '../supabase.js';
 import { renderAfspraakMail, platteTekstAfspraak } from './mail-shell-afspraak.js';
@@ -163,6 +174,133 @@ export function labVariant(key, a, c) {
   return { mail, whatsapp: key !== 'r2' };
 }
 
+// ── STRATEGIE-SCAN (webinar + strategiescan) ──────────────────────────────
+// Wie via het webinar (QR → /agenda/webinar) of de scan-landingspagina boekt,
+// boekt een STRATEGIE-SCAN: 20 minuten via Zoom met ons team (bewust geen naam:
+// de scan gebeurt met het team, niet per se met Dave). Zelfde momenten en
+// timing als de standaard; WhatsApp blijft de goedgekeurde templates gebruiken.
+export const SCAN_BRONNEN = ['webinar', 'strategiescan'];
+export const SCAN_DUUR = 20;
+export function isScanAfspraak(a) {
+  return SCAN_BRONNEN.includes(String(a?.booking_source || '').trim().toLowerCase());
+}
+
+export const SCAN_BEKIJKEN = [
+  ['Je tradet al', 'dan doen we een audit van je tradeplan, je journal en je strategie.'],
+  ['Je tradet nog niet', 'dan bekijken we of trading in je dagelijks leven past.'],
+];
+const SCAN_ACTIEPLAN = 'Je gaat weg met een concreet actieplan.';
+
+function scanBekijkenHtml() {
+  return '<br><br><b>Wat we bekijken:</b><br>'
+    + SCAN_BEKIJKEN.map(([wie, wat]) => `• <b>${wie}?</b> ${wat}`).join('<br>')
+    + `<br><br>${SCAN_ACTIEPLAN}`;
+}
+
+const SCAN_MAIL = {
+  bevestiging: (a, c) => ({
+    subject: 'Je strategie-scan staat gepland',
+    titel: 'Je strategie-scan staat gepland ✅',
+    inleiding: `Hoi ${c.voornaam}, gelukt! Je gratis strategie-scan staat gepland: 20 minuten via Zoom met ons team. De uitnodiging voor je agenda zit in de bijlage.${scanBekijkenHtml()}`,
+    details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Duur', waarde: '20 minuten' }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r24: (a, c) => ({
+    subject: 'Herinnering: morgen je strategie-scan',
+    titel: 'Tot morgen! 🙌',
+    inleiding: `Hoi ${c.voornaam}, nog even een vriendelijke herinnering: morgen staat je strategie-scan met ons team gepland. 20 minuten via Zoom. Tradet je al? Houd dan je tradeplan en je journal bij de hand.`,
+    details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r2: (a, c) => ({
+    subject: 'Over 2 uur: je strategie-scan',
+    titel: 'Over 2 uur is het zover 🎯',
+    inleiding: `Hoi ${c.voornaam}, over 2 uur (om ${c.tijdNL}) start je strategie-scan met ons team. Zit je er een paar minuten vroeger klaar voor? Een rustige plek en je laptop of gsm volstaan.`,
+    details: [{ label: 'Wanneer', waarde: `Vandaag om ${c.tijdNL}` }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  r30: (a, c) => ({
+    subject: 'Over 30 minuten begint je strategie-scan',
+    titel: 'Over 30 minuten begint je scan',
+    inleiding: `Hoi ${c.voornaam}, over 30 minuten (${c.tijdNL}) begint je strategie-scan en we houden je plek graag vrij. Laat je ons even weten of het je lukt?`,
+    details: [{ label: 'Waar', waarde: zoomDetail(c.zoom) }],
+    cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+  }),
+  zoom5: (a, c) => ({
+    subject: 'We beginnen zo — join je strategie-scan',
+    titel: 'We beginnen zo! ⏱️',
+    inleiding: `Hoi ${c.voornaam}, over ongeveer 5 minuten start je strategie-scan. Klik hieronder om direct te joinen.`,
+    cta: c.zoom ? { label: 'Nu deelnemen', url: c.zoom } : null,
+    voetnoot: 'Lukt het inloggen niet meteen? Stuur ons even een berichtje, dan helpen we je er zo doorheen.',
+  }),
+};
+
+/** De .ics bij de bevestiging van een strategie-scan. PURE. */
+export function scanIcsBijlage(a, c) {
+  return afspraakIcsBijlage(a, c, {
+    filename: 'strategie-scan.ics',
+    titel: 'Strategie-scan — De Forex Opleiding',
+    duurMin: SCAN_DUUR,
+    regels: [
+      '20 minuten via Zoom met ons team van De Forex Opleiding.',
+      'Wat we bekijken:', ...SCAN_BEKIJKEN.map(([wie, wat]) => `- ${wie}? ${wat}`),
+      SCAN_ACTIEPLAN,
+    ],
+  });
+}
+
+/** De scan-variant van een moment (mail + of er WhatsApp mag). PURE. */
+export function scanVariant(key, a, c) {
+  const bouw = SCAN_MAIL[key];
+  if (!bouw) return null;
+  const args = bouw(a, c);
+  if (key !== 'zoom5' && key !== 'r30') args.voetnoot = selfServiceVoetnoot(a, c);
+  const mail = bouwMail(args);
+  if (key === 'bevestiging') mail.attachments = [scanIcsBijlage(a, c)];
+  // WhatsApp: de goedgekeurde algemene templates (zeggen "kennismakingsgesprek").
+  return { mail, whatsapp: true };
+}
+
+/**
+ * De variant voor deze afspraak, of null voor de standaardtekst. Eén plek
+ * voor de keuze, zodat cron en testsend hetzelfde kiezen. PURE.
+ */
+export function varianteVoor(key, a, c) {
+  if (isLabAfspraak(a)) return labVariant(key, a, c);
+  if (isScanAfspraak(a)) return scanVariant(key, a, c);
+  return null;
+}
+
+// ── .ics voor elke bevestiging ─────────────────────────────────────────────
+// Naam = De Forex Opleiding (in de titel). Bewust GEEN ORGANIZER: een
+// persoonlijk adres hoort er niet in, en met een organizer behandelen sommige
+// agenda's de bijlage als uitnodiging waarop je moet antwoorden.
+export const STANDAARD_DUUR = 20; // "ongeveer 20 minuten" in de standaardtekst
+
+/** Generieke .ics-bijlage. PURE. */
+export function afspraakIcsBijlage(a, c, { filename, titel, duurMin, regels = [] }) {
+  const beschrijving = [
+    ...regels,
+    c.zoom ? `Deelnemen: ${c.zoom}` : 'De Zoom-link staat in je bevestigingsmail.',
+    `Verzetten of annuleren: ${c.selfUrl}`,
+  ].join('\n');
+  return {
+    filename,
+    contentType: 'text/calendar; charset=utf-8; method=PUBLISH',
+    content: maakIcs({ uid: a.id || a.afspraak_token || a.scheduled_at, start: a.scheduled_at, duurMin, titel, beschrijving, locatie: c.zoom || 'Zoom', url: c.zoom || c.selfUrl }),
+  };
+}
+
+/** De .ics bij de standaardbevestiging (kennismakingsgesprek). PURE. */
+export function standaardIcsBijlage(a, c) {
+  return afspraakIcsBijlage(a, c, {
+    filename: 'kennismakingsgesprek.ics',
+    titel: 'Kennismakingsgesprek — De Forex Opleiding',
+    duurMin: STANDAARD_DUUR,
+    regels: ['Kennismakingsgesprek via Zoom met De Forex Opleiding.'],
+  });
+}
+
 function zoomDetail(zoom) {
   return zoom
     ? `<a href="${zoom}" style="color:#10284A">Deelnemen via Zoom</a>`
@@ -203,13 +341,17 @@ export const MOMENTEN = [
     match: (a, nowMs) => !a.bevestiging_sent_at && !!a.zoom_join_url && new Date(a.scheduled_at).getTime() > nowMs,
     waTemplate: 'afspraak_bevestiging_v1',
     waVars: (a, c) => [c.voornaam, c.momentNL, c.zoom, c.selfUrl],
-    mail: (a, c) => bouwMail({
-      subject: 'Je kennismakingsgesprek staat gepland',
-      titel: 'Je kennismakingsgesprek staat gepland ✅',
-      inleiding: `Hoi ${c.voornaam}, gelukt! Je kennismakingsgesprek met De Forex Opleiding staat gepland. In ongeveer 20 minuten kijken we samen naar jouw situatie en je doelen, en maken we een persoonlijk plan. Geen verplichtingen.`,
-      details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
-      cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
-      voetnoot: selfServiceVoetnoot(a, c),
+    mail: (a, c) => ({
+      ...bouwMail({
+        subject: 'Je kennismakingsgesprek staat gepland',
+        titel: 'Je kennismakingsgesprek staat gepland ✅',
+        inleiding: `Hoi ${c.voornaam}, gelukt! Je kennismakingsgesprek met De Forex Opleiding staat gepland. In ongeveer 20 minuten kijken we samen naar jouw situatie en je doelen, en maken we een persoonlijk plan. Geen verplichtingen.`,
+        details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
+        cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+        voetnoot: selfServiceVoetnoot(a, c),
+      }),
+      // Agenda-item: de Google-uitnodiging uit GHL staat uit.
+      attachments: [standaardIcsBijlage(a, c)],
     }),
   },
   {

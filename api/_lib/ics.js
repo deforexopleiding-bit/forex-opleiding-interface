@@ -1,7 +1,7 @@
 // api/_lib/ics.js
 //
 // Eén afspraak als agenda-uitnodiging (.ics, RFC 5545) — voor de bevestiging
-// van de strategiesessie na The Lab. Geen afhankelijkheid: een handvol regels.
+// van elke afspraak (The Lab, strategie-scan, kennismakingsgesprek). Geen afhankelijkheid: een handvol regels.
 //
 // Tijden in UTC (Z), zodat elke agenda ze in de eigen tijdzone toont. UID is
 // stabiel per afspraak: wie de bijlage twee keer opent, krijgt één item.
@@ -50,7 +50,7 @@ export function maakIcs({ uid, start, duurMin = 30, titel, beschrijving = '', lo
   const regels = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//De Forex Opleiding//The Lab//NL',
+    'PRODID:-//De Forex Opleiding//Afspraken//NL',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',

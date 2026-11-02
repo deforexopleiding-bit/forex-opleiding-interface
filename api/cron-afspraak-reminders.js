@@ -39,7 +39,7 @@ import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
-import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR, isLabAfspraak, labVariant } from './_lib/afspraak-berichten.js';
+import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR, isLabAfspraak, varianteVoor } from './_lib/afspraak-berichten.js';
 import { leesLabGastheer } from './_lib/lab-gastheer.js';
 import { logAfspraakFail } from './_lib/afspraak-faillog.js';
 import { classifySendError, MAX_ATTEMPTS, backoffMinNaPoging } from './_lib/send-error-classify.js';
@@ -154,8 +154,8 @@ async function logAfspraakMailInThread({ toEmail, subject, text }) {
 // Eén bevestigings-mail versturen. Returnt per-kanaal-uitkomst.
 async function stuurMailBevestiging(appt, moment, ctx) {
   try {
-    const lab = isLabAfspraak(appt) ? labVariant(moment.key, appt, ctx) : null;
-    const { subject, text, html, attachments = null } = lab ? lab.mail : moment.mail(appt, ctx);
+    const variant = varianteVoor(moment.key, appt, ctx); // Lab / strategie-scan / null
+    const { subject, text, html, attachments = null } = variant ? variant.mail : moment.mail(appt, ctx);
     const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html, attachments });
     if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
     return r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
@@ -386,12 +386,13 @@ async function unclaimRow(id, kolom) {
 async function verstuur(appt, moment, welkomPhoneId) {
   const ctx = bouwContext(appt);
   const uitkomst = { wa: null, mail: null };
-  // The Lab: eigen teksten, en geen WhatsApp waar de goedgekeurde template
-  // niet klopt (de 1u-herinnering — de template zegt "over 2 uur").
-  const lab = isLabAfspraak(appt) ? labVariant(moment.key, appt, ctx) : null;
+  // The Lab / strategie-scan: eigen mailteksten. The Lab krijgt geen WhatsApp
+  // waar de goedgekeurde template niet klopt (de 1u-herinnering — de template
+  // zegt "over 2 uur"). De scan gebruikt de gewone templates.
+  const variant = varianteVoor(moment.key, appt, ctx);
 
   // ── WhatsApp (welkom-lijn) ──
-  if (lab && !lab.whatsapp) {
+  if (variant && !variant.whatsapp) {
     uitkomst.wa = { ok: false, skipped: 'lab-geen-passende-template' };
   } else if (!welkomPhoneId) {
     uitkomst.wa = { ok: false, skipped: 'welkom-phone-ontbreekt' };
@@ -437,7 +438,7 @@ async function verstuur(appt, moment, welkomPhoneId) {
     uitkomst.mail = { ok: false, skipped: 'email-onbezorgbaar' };
   } else {
     try {
-      const { subject, text, html, attachments = null } = lab ? lab.mail : moment.mail(appt, ctx);
+      const { subject, text, html, attachments = null } = variant ? variant.mail : moment.mail(appt, ctx);
       const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html, attachments });
       if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
       uitkomst.mail = r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };

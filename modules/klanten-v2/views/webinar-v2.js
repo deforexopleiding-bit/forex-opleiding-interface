@@ -233,7 +233,7 @@
       <div class="card-body" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">
         ${beeld}
         <div style="flex:1;min-width:220px;font-size:12.5px;line-height:1.55">
-          <div>Laat deze QR tijdens het webinar zien. Deelnemers plannen er een gratis strategie-scan (t.w.v. €99) mee bij Dave.</div>
+          <div>Laat deze QR tijdens het webinar zien. Deelnemers plannen er een gratis strategie-scan (t.w.v. €99) met ons team mee.</div>
           <div style="margin:6px 0"><a href="${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}" target="_blank" rel="noopener" class="mono">${esc(q ? q.url : 'https://deforexopleiding.nl/agenda/webinar')}</a></div>
           <div style="color:var(--text-3);font-size:11.5px">Boekingen via deze link krijgen bron "webinar" en de setter van die link (Leadsonderhoud → Bronnen) — die ontvangt de commissie.</div>
           <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
