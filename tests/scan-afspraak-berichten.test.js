@@ -71,6 +71,15 @@ test('SCAN: geen enkel moment zegt kennismakingsgesprek, Dave of Heylen', () => 
   }
 });
 
+test('SCHRIJFWIJZE: "Je tradet al" / "Je tradet nog niet", bij omkering "Trade je al" (nooit "Tradet je")', () => {
+  const c = B.bouwContext(WEBINAR);
+  const alles = KEYS.map((k) => { const m = B.varianteVoor(k, WEBINAR, c).mail; return m.html + m.text + (m.attachments?.[0]?.content || ''); }).join('\n');
+  assert.match(alles, /Je tradet al/);
+  assert.match(alles, /Je tradet nog niet/);
+  assert.match(alles, /Trade je al\?/);
+  assert.doesNotMatch(alles, /Tradet je|Je trade al|Je trade nog/);
+});
+
 test('SCAN: WhatsApp blijft aan met de goedgekeurde templates (geen nieuwe namen)', () => {
   const c = B.bouwContext(WEBINAR);
   for (const k of KEYS) assert.equal(B.varianteVoor(k, WEBINAR, c).whatsapp, true, k);

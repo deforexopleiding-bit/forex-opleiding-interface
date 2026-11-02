@@ -39,7 +39,11 @@ import { OPVOLG_V2_VOOR } from './webinar-templates.js';
 export const AGENDA_URL = 'https://deforexopleiding.nl/agenda/webinar';
 /** Canonieke scan-omschrijving — kopie van SCAN_OMSCHRIJVING in dfo-website lib/agenda-bron-tekst.ts. */
 export const SCAN_OMSCHRIJVING = 'Gratis strategie-scan (t.w.v. €99). In 15-20 minuten ontdek je samen met ons precies waar je staat, welke stappen je kunt zetten en wat jouw mogelijkheden zijn. Je ontvangt daarna een persoonlijk, uitgebreid rapport én een certificaat van De Forex Opleiding.';
-export const URGENTIE = 'Er zijn maar 3 gratis scan-plekken per webinar.';
+// 2 nov 2026 (beslissing Maxim): geen schaarste meer in de mail. De "3 gratis
+// scan-plekken per webinar" werd nergens afgedwongen (boek-API kent alleen de
+// algemene daglimiet). De feitelijke boodschap staat in SCAN_FEITEN.
+/** Feitelijke boodschap over de scan (zelfde als de afspraakmails en /agenda/webinar). */
+export const SCAN_FEITEN = '20 minuten via Zoom met ons team. Je gaat weg met een persoonlijk actieplan.';
 export const MIGRATIE = '2026-10-12-webinar-opvolging.sql';
 
 export const OPVOLGINGEN = Object.freeze([
@@ -112,24 +116,22 @@ export function opvolgBesluit(aanmelding, data, nu = new Date()) {
 // ── Mail (PURE) ──────────────────────────────────────────────────────────────
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const scanZin = SCAN_OMSCHRIJVING.replace(/^Gratis strategie-scan \(t\.w\.v\. €99\)\. /, '');
-
 export function bouwOpvolgMail(key, { voornaam, voorkeurenLink = null } = {}) {
   const naam = esc(String(voornaam || '').trim() || 'daar');
   const cta = { label: 'Plan je gratis scan', url: AGENDA_URL };
   const afmeld = voorkeurenLink
-    ? `<br><br>Liever minder of geen mails? <a href="${esc(voorkeurenLink)}" style="color:#7a8798">Voorkeuren aanpassen of afmelden</a>.`
-    : '';
+    ? `Liever minder of geen mails? <a href="${esc(voorkeurenLink)}" style="color:#7a8798">Voorkeuren aanpassen of afmelden</a>.`
+    : null;
   const v = key === 'opvolging_1' ? {
     subject: 'Jouw gratis strategie-scan staat klaar',
     titel: 'Jouw gratis strategie-scan staat klaar',
-    inleiding: `Hoi ${naam}, bedankt voor je aanmelding voor onze webinar. De volgende stap is je gratis strategie-scan (t.w.v. €99). ${esc(scanZin)}<br><br>Er zijn maar 3 gratis scan-plekken per webinar — plan 'm nu in.`,
+    inleiding: `Hoi ${naam}, bedankt voor je aanmelding voor onze webinar. De volgende stap is je gratis strategie-scan (t.w.v. €99): ${esc(SCAN_FEITEN)}<br><br>Plan 'm hieronder in.`,
   } : {
-    subject: 'Laatste kans: je gratis scan-plek',
-    titel: 'Laatste kans op je gratis scan-plek ⏳',
-    inleiding: `Hoi ${naam}, de gratis scan-plekken van deze week zijn bijna vol. Wil je jouw gratis strategie-scan (t.w.v. €99)? ${esc(scanZin)}<br><br>Plan dan vandaag nog je gratis strategie-scan in.`,
+    subject: 'Plan je gratis strategie-scan',
+    titel: 'Plan je gratis strategie-scan',
+    inleiding: `Hoi ${naam}, je hebt je gratis strategie-scan (t.w.v. €99) nog niet ingepland: ${esc(SCAN_FEITEN)}<br><br>Plan 'm hieronder in.`,
   };
-  const args = { subject: v.subject, titel: v.titel, inleiding: v.inleiding, details: [], cta, voetnoot: URGENTIE + afmeld };
+  const args = { subject: v.subject, titel: v.titel, inleiding: v.inleiding, details: [], cta, ...(afmeld ? { voetnoot: afmeld } : {}) };
   return { subject: v.subject, html: renderAfspraakMail(args), text: platteTekstAfspraak(args) + (voorkeurenLink ? `\nVoorkeuren aanpassen of afmelden: ${voorkeurenLink}` : '') };
 }
 

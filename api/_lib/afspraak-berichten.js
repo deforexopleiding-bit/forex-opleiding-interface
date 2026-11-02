@@ -208,7 +208,7 @@ const SCAN_MAIL = {
   r24: (a, c) => ({
     subject: 'Herinnering: morgen je strategie-scan',
     titel: 'Tot morgen! 🙌',
-    inleiding: `Hoi ${c.voornaam}, nog even een vriendelijke herinnering: morgen staat je strategie-scan met ons team gepland. 20 minuten via Zoom. Tradet je al? Houd dan je tradeplan en je journal bij de hand.`,
+    inleiding: `Hoi ${c.voornaam}, nog even een vriendelijke herinnering: morgen staat je strategie-scan met ons team gepland. 20 minuten via Zoom. Trade je al? Houd dan je tradeplan en je journal bij de hand.`,
     details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
     cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
   }),
