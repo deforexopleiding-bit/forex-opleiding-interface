@@ -1,5 +1,5 @@
 // api/mentor-cash-traject-save.js
-// POST { id?, event_id, customer_id?, client_label,
+// POST { id?, event_id, customer_id, deal_id, client_label,
 //        total_amount, term_count, start_month, note? }
 // → { ok:true, traject }
 // Permission: mentor.ledger.write (zelfde als mentor-ledger-set-status).
@@ -12,11 +12,18 @@
 //
 // pct + bonus_total worden gesnapshot bij aanmaak (BONUS_PCT=3);
 // wijziging van de constante raakt lopende trajects niet retroactief.
-// GEEN ledger-entries hier — die maakt de cron per maand aan.
+// SINDS 3 NOV 2026: een nieuw traject vraagt een klant (customer_id) en een
+// sale (deal_id) en wordt meteen omgezet naar de factuurmotor
+// (api/_lib/cash-traject-omzetten.js): per aanwezige event-mentor één parent
+// met de commissie; vrijgave ENKEL op betaalde facturen. Zonder klant + sale
+// geen traject (er is dan geen factuurcheck mogelijk). Bedragen van een
+// omgezet traject liggen vast in het grootboek en zijn hier niet meer te
+// wijzigen.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { BONUS_PCT } from './_lib/events-complete-core.js';
+import { omzetTraject } from './_lib/cash-traject-omzetten.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -46,7 +53,7 @@ export default async function handler(req, res) {
   const b = req.body || {};
   const {
     id, event_id,
-    customer_id = null, client_label,
+    customer_id = null, deal_id = null, client_label,
     total_amount, term_count, start_month, note = null,
     release_day,
   } = b;
@@ -57,6 +64,8 @@ export default async function handler(req, res) {
   const isUpdate = !!id;
   if (!isUpdate) {
     if (!UUID_RE.test(String(event_id || ''))) return res.status(400).json({ error: 'event_id vereist' });
+    if (!UUID_RE.test(String(customer_id || ''))) return res.status(400).json({ error: 'customer_id vereist: zonder klant geen factuurcheck' });
+    if (!UUID_RE.test(String(deal_id || ''))) return res.status(400).json({ error: 'deal_id vereist: de sale waarop de facturen staan' });
   }
   if (customer_id != null && customer_id !== '' && !UUID_RE.test(String(customer_id))) {
     return res.status(400).json({ error: 'customer_id ongeldig' });
@@ -108,18 +117,34 @@ export default async function handler(req, res) {
         bonus_total:  bonusTotal,
         start_month:  startMonthNorm,
         release_day:  releaseDayNum || 1,   // default 1
-        status:       'active',
+        status:       'paused',          // tot het omzetten hieronder lukt
         created_by:   user.id,
         note:         note ? String(note).slice(0, 2000) : null,
       };
       const { data: inserted, error: insErr } = await supabaseAdmin
         .from('mentor_cash_trajects').insert(row).select('*').maybeSingle();
       if (insErr) throw new Error('insert: ' + insErr.message);
-      return res.status(200).json({ ok: true, traject: inserted });
+      let plan;
+      try {
+        plan = await omzetTraject({ trajectId: inserted.id, customerId: customer_id, dealId: deal_id, dryRun: false });
+      } catch (e) {
+        plan = { ok: false, reden: e.message };
+      }
+      if (!plan.ok) {
+        await supabaseAdmin.from('mentor_cash_trajects').delete().eq('id', inserted.id);
+        return res.status(422).json({ error: 'Traject niet aangemaakt: ' + plan.reden });
+      }
+      return res.status(200).json({ ok: true, traject: { ...inserted, status: 'omgezet' }, plan });
     }
 
     // UPDATE: alleen aangeleverde velden aanraken. pct blijft gesnapshot;
     // bonus_total wordt bijgetrokken op de nieuwe total_amount (× oude pct).
+    const { data: huidig } = await supabaseAdmin
+      .from('mentor_cash_trajects').select('id, status').eq('id', id).maybeSingle();
+    if (!huidig) return res.status(404).json({ error: 'traject niet gevonden' });
+    if (huidig.status === 'omgezet' && (total_amount !== undefined || term_count !== undefined || customer_id !== undefined || start_month !== undefined)) {
+      return res.status(409).json({ error: 'Omgezet traject: bedrag, klant en termijnen liggen vast in het grootboek (factuurmotor).' });
+    }
     const patch = {};
     if (customer_id !== undefined) patch.customer_id = customer_id || null;
     if (client_label !== undefined) patch.client_label = String(client_label).trim();

@@ -43,6 +43,7 @@ import {
   computeCoachingEarnings, coachingRegelLabel, intakeRegelLabel, OUDE_BRON_EINDE,
 } from './coaching-earnings.js';
 import { computeBonusOverview } from '../mentor-bonus-overview.js';
+import { isTrajectTermKey } from './cash-traject-omzetten.js';
 
 export const BTW_RATE = 1.21;
 
@@ -181,14 +182,20 @@ export async function computeAndUpsertConcept({ mentorUserId, monthStart, actorI
   const lowerBound = _prevMonthStartOfCore(period.start); // 1e van M-1
   const { data: ledgerRows, error: ledErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, amount, released_at')
+    .select('id, amount, released_at, idempotency_key, parent_entry_id')
     .eq('mentor_user_id', mentorUserId)
     .eq('status', 'vrijgegeven')
     .is('payout_id', null)
     .gte('released_at', lowerBound)
     .lt('released_at', period.start);
   if (ledErr) throw new Error(`ledger fetch (${mentorUserId}): ${ledErr.message}`);
-  const bonusEntryIds = (ledgerRows || []).map((r) => r.id);
+  // Oude termijnregels van een OMGEZET traject (cashtraject:<id>:term:<n> met
+  // parent) die nog in geen rapport zitten, horen niet bij dit rapport: ze
+  // werden zonder factuurcheck vrijgegeven en het overzicht neemt ze niet
+  // mee in de bonus (api/_lib/cash-traject-omzetten.js). Niet koppelen.
+  const bonusEntryIds = (ledgerRows || [])
+    .filter((r) => !(r.parent_entry_id && isTrajectTermKey(r.idempotency_key)))
+    .map((r) => r.id);
 
   // 5) TRAVEL — alleen als config.travel_enabled.
   const { data: cfg, error: cfgErr } = await supabaseAdmin

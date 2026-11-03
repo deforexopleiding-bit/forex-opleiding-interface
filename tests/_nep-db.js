@@ -77,6 +77,11 @@ export function maakNepDb() {
       lt(c, v) { st.filters.push((r) => r[c] < v); return k; },
       lte(c, v) { st.filters.push((r) => r[c] <= v); return k; },
       ilike() { return k; },
+      like(c, pat) {
+        const re = new RegExp('^' + String(pat).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.') + '$');
+        st.filters.push((r) => re.test(String(r[c] ?? '')));
+        return k;
+      },
       or() { return k; },
       order(col, opts = {}) { st.orders.push({ col, asc: opts.ascending !== false, nullsFirst: !!opts.nullsFirst }); return k; },
       limit(n) { st.limit = n; return k; },
