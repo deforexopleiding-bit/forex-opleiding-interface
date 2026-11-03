@@ -12,7 +12,7 @@
 // zo is, rekenen dry-run en controlescherm een rapport in status
 // 'goedgekeurd' met period_month <= de grens als werkelijk uitbetaald en tonen
 // ze het verschil met de status apart. Status zelf wordt hier NIET gewijzigd
-// (voorstel: docs/sql-migrations/2026-11-03-VOORSTEL-rapporten-juni-september-uitbetaald.sql).
+// (definitief SQL, beslissing Maxim 3 nov: docs/sql-migrations/2026-11-03-rapporten-juni-september-uitbetaald.sql).
 //
 // Grens: app_settings 'mentor_rapporten_werkelijk_uitbetaald_tot'
 // ({ "period_month": "YYYY-MM-01" }), standaard 2026-09-01 (Maxims melding).
