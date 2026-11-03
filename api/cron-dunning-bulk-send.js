@@ -29,6 +29,7 @@
 // Auth: Bearer $CRON_SECRET (checkCronAuth).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { laadIncassoUitsluiting, filterIncassoTermijnfacturen } from './_lib/incasso-termijnfacturen.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
 import { buildSendComponents } from './_lib/meta-template-components-builder.js';
 import { buildMetaVariablesFromMapping } from './_lib/template-variables.js';
@@ -149,6 +150,13 @@ export default async function handler(req, res) {
     const templateCache = new Map(); // name → row of null
     const emailTplCache = new Map(); // id → {subject, body}
 
+    // PR 4 mentorcommissie: incasso-termijnfacturen (klant bij incasso / met
+    // incasso-regeling, of factuur van een incasso_regeling-abonnement)
+    // krijgen geen aanmaning. Eén keer per run laden; fail-soft.
+    const incassoUitsl = await laadIncassoUitsluiting(supabaseAdmin, {
+      customerIds: [...new Set(pendingRecips.map((r) => r.customer_id).filter(Boolean))],
+    });
+
     for (const rec of pendingRecips) {
       summary.processed++;
 
@@ -188,10 +196,12 @@ export default async function handler(req, res) {
         if (rec.customer_id) {
           const { data: invs } = await supabaseAdmin
             .from('invoices')
-            .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
+            .select('id, customer_id, tl_subscription_id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
             .eq('customer_id', rec.customer_id)
             .in('status', OPEN_STATUSES);
-          openInvoices = (invs || []).filter((inv) => openAmount(inv) > 0);
+          const allesOpen = (invs || []).filter((inv) => openAmount(inv) > 0);
+          openInvoices = filterIncassoTermijnfacturen(allesOpen, incassoUitsl).over;
+          if (allesOpen.length && !openInvoices.length) rec._incassoSkip = true;
         }
       } catch (_) { /* fail-soft */ }
 
@@ -204,7 +214,11 @@ export default async function handler(req, res) {
       if (openInvoices.length === 0) {
         const { error: skipErr } = await supabaseAdmin
           .from('dunning_bulk_recipients')
-          .update({
+          .update(rec._incassoSkip ? {
+            status      : 'skipped',
+            skip_reason : 'incasso_termijnfactuur',
+            error       : 'send-time skip: enkel incasso-termijnfacturen open (bij incasso / regeling) — geen aanmaning',
+          } : {
             status      : 'skipped',
             skip_reason : 'no_open_amount',
             error       : 'send-time skip: klant heeft 0 open bedrag op verzendmoment',

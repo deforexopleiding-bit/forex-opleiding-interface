@@ -26,6 +26,7 @@ import {
   executeResumeDunningStep,
 } from './dunning-step-executors.js';
 import { markOverdue } from './mentor-ledger-engine.js';
+import { laadIncassoUitsluiting, filterIncassoTermijnfacturen } from './incasso-termijnfacturen.js';
 import { resetJoostCountersForCustomer } from './dunning-arrangement-hooks.js';
 import {
   evaluateStepFailure,
@@ -92,6 +93,27 @@ const PAGE_HARD_CAP = 100 * PAGE_SIZE; // 100k rijen — vangnet tegen runaway.
  *                                terugkeeft (zonder .range()/limit).
  * @returns {Promise<Array<object>>}  Alle rijen achter elkaar geplakt.
  */
+/**
+ * Auto-instroom in de wanbetalers-pipeline (auto:overdue) — puur.
+ * overdueRows / openRows zijn al ZONDER incasso-termijnfacturen
+ * (filterIncassoTermijnfacturen, PR 4). Regel: precies één open factuur,
+ * vervallen, en geen niet-terminaal incassodossier.
+ */
+export function kiesAutoInstroom({ overdueRows = [], openRows = [], inIncasso = new Set() } = {}) {
+  const openCount = new Map();
+  for (const r of openRows) if (r?.customer_id) openCount.set(r.customer_id, (openCount.get(r.customer_id) || 0) + 1);
+  const toevoegen = [];
+  let skippedMulti = 0, skippedIncasso = 0;
+  for (const cid of new Set(overdueRows.map((r) => r?.customer_id).filter(Boolean))) {
+    const cnt = openCount.get(cid) || 0;
+    if (cnt === 0) continue;
+    if (cnt >= 2) { skippedMulti++; continue; }
+    if (inIncasso.has(cid)) { skippedIncasso++; continue; }
+    toevoegen.push(cid);
+  }
+  return { toevoegen, skippedMulti, skippedIncasso };
+}
+
 export async function fetchAllRows(buildQuery) {
   const out = [];
   for (let from = 0; from < PAGE_HARD_CAP; from += PAGE_SIZE) {
@@ -313,7 +335,7 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
     let q = supabaseAdmin
       .from('invoices')
       .select(
-        'id, customer_id, amount_total, amount_paid, credited_amount, due_date, issue_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
+        'id, customer_id, tl_subscription_id, amount_total, amount_paid, credited_amount, due_date, issue_date, status, invoice_number, is_test, customers!inner(id, first_name, last_name, company_name, is_company, email, archived_at, anonymized_at, is_test)'
       )
       .in('status', OPEN_STATUSES);
     if (customerId) q = q.eq('customer_id', customerId);
@@ -326,17 +348,24 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
   });
   if (rows.length === 0) return rows;
 
+  // PR 4 mentorcommissie: incasso-termijnfacturen (klant bij incasso / met
+  // incasso-regeling, of factuur van een incasso_regeling-abonnement) krijgen
+  // GEEN aanmaning — ze gaan niet naar de klant en niet naar het bureau.
+  // Zie api/_lib/incasso-termijnfacturen.js. Fail-soft (lege uitsluiting).
+  const uitsl = await laadIncassoUitsluiting(supabaseAdmin, { customerIds: customerId ? [customerId] : null });
+  const zonderIncasso = filterIncassoTermijnfacturen(rows, uitsl).over;
+
   // D5 — auto-pause: bouw set van invoice_ids die in een ACTIEF arrangement
   // zitten (UPPERCASE + legacy lowercase). Filter die invoices weg.
   try {
     const activeInvoiceIds = await fetchActiveArrangementInvoiceIds(customerId);
-    if (activeInvoiceIds.size === 0) return rows;
-    return rows.filter((inv) => !activeInvoiceIds.has(inv.id));
+    if (activeInvoiceIds.size === 0) return zonderIncasso;
+    return zonderIncasso.filter((inv) => !activeInvoiceIds.has(inv.id));
   } catch (e) {
     // Fail-soft: bij DB-issue logt + valt terug op ongefilterde set (oude
     // gedrag). Beter doorgaan met onnodige reminder dan een complete cron-stop.
     console.error('[dunning-engine] arrangement-pause lookup failed, continuing without filter', e?.message);
-    return rows;
+    return zonderIncasso;
   }
 }
 
@@ -695,16 +724,21 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       // Gepagineerd via fetchAllRows — bij >1000 overdue-rijen mistten we
       // customer_ids die verderop nooit door de count-query zouden komen,
       // dus die klanten stroomden nooit in.
-      const overdueRows = await fetchAllRows(() => {
+      const overdueAlle = await fetchAllRows(() => {
         let q = supabaseAdmin
           .from('invoices')
-          .select('customer_id')
+          .select('customer_id, tl_subscription_id')
           .in('status', OPEN_STATUSES)
           .lt('due_date', today);
         if      (scope === 'production') q = q.eq('is_test', false);
         else if (scope === 'test')       q = q.eq('is_test', true);
         return q;
       });
+      // PR 4: incasso-termijnfacturen (en klanten bij incasso / met regeling)
+      // stromen NIET in de pipeline — geen auto:overdue meer voor deze facturen.
+      const incassoUitsl = await laadIncassoUitsluiting(supabaseAdmin);
+      const { over: overdueRows, uitgesloten: skippedIncassoTermijn } = filterIncassoTermijnfacturen(overdueAlle, incassoUitsl);
+      if (skippedIncassoTermijn) console.log(`[dunning-engine] auto-instroom: ${skippedIncassoTermijn} vervallen incasso-termijnfactu(u)r(en) overgeslagen`);
       const uniqueCustIds = Array.from(new Set(
         (overdueRows || []).map((r) => r.customer_id).filter(Boolean)
       ));
@@ -717,21 +751,17 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
         // factuurrijen wereldwijd knipte PostgREST er af → klant met 4
         // open telde er nog maar 1 → verkeerde workflow-instroom.
         // Zelfde is_test-scope als de overdue-query hierboven.
-        const openInvRows = await fetchAllRows(() => {
+        const openInvAlle = await fetchAllRows(() => {
           let q = supabaseAdmin
             .from('invoices')
-            .select('customer_id')
+            .select('customer_id, tl_subscription_id')
             .in('customer_id', uniqueCustIds)
             .in('status', OPEN_STATUSES);
           if      (scope === 'production') q = q.eq('is_test', false);
           else if (scope === 'test')       q = q.eq('is_test', true);
           return q;
         });
-        const openCountByCust = new Map();
-        for (const r of openInvRows || []) {
-          if (!r?.customer_id) continue;
-          openCountByCust.set(r.customer_id, (openCountByCust.get(r.customer_id) || 0) + 1);
-        }
+        const openInvRows = filterIncassoTermijnfacturen(openInvAlle, incassoUitsl).over;
 
         // Klanten met een niet-terminaal incasso-dossier → skippen. Fail-
         // soft: tabel bestaat pas vanaf migratie 037; oudere DB's raken
@@ -749,12 +779,11 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
           console.warn('[dunning-engine] incasso-lookup soft-fail:', e?.message || e);
         }
 
-        for (const cid of uniqueCustIds) {
+        const keuze = kiesAutoInstroom({ overdueRows, openRows: openInvRows, inIncasso });
+        skippedMulti = keuze.skippedMulti;
+        skippedIncasso = keuze.skippedIncasso;
+        for (const cid of keuze.toevoegen) {
           if (elapsed(startedAt) > abortMs) break;
-          const cnt = openCountByCust.get(cid) || 0;
-          if (cnt === 0)      continue;                             // shouldn't happen, defensief
-          if (cnt >= 2)     { skippedMulti++;   continue; }
-          if (inIncasso.has(cid)) { skippedIncasso++; continue; }
           await ensurePipelineCustomer(cid);
           addedCount++;
         }
@@ -1359,6 +1388,27 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // Betaal-hercheck vóór ELKE stap. Cruciaal voor multi-stap-rondes:
         // als de klant tussen email en whatsapp betaalt, stopt de lus hier
         // en wordt de whatsapp NIET verstuurd.
+        // PR 4 mentorcommissie: klant bij incasso of met een incasso-regeling →
+        // geen aanmaning meer. Een lopende run stopt met reden 'incasso_status'
+        // (NIET 'paid': de klant heeft niet betaald; zijn facturen lopen via het
+        // bureau of de maandlijst incasso-abonnementen).
+        {
+          const uitsl = await laadIncassoUitsluiting(supabaseAdmin, { customerIds: [run.customer_id] });
+          if (uitsl.klanten.has(run.customer_id)) {
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ status: 'cancelled', completed_at: nowIso(), completion_reason: 'incasso_status', updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStepId,
+              event_type: 'cancelled',
+              payload: { reason: 'incasso_status' },
+            });
+            runAdvanced = true;
+            break;
+          }
+        }
         const customerRows = await fetchOpenInvoices(run.customer_id);
         const aggMap = aggregatePerCustomer(customerRows);
         const agg = aggMap.get(run.customer_id);

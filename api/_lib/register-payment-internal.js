@@ -12,7 +12,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
-import { releaseProportionalForPayment } from './mentor-ledger-engine.js';
+import { releaseProportionalForPaidAmount } from './mentor-ledger-engine.js';
 import { createNotification } from './notify.js';
 import { spiegelFactuurstandNaWijziging } from './factuurstand-spiegel.js';
 
@@ -200,24 +200,19 @@ export async function registerPaymentInternal(opts) {
   // deze aanroep gooit nooit en houdt de betaalregistratie nooit tegen.
   await spiegelFactuurstandNaWijziging(inv.customer_id, 'register-payment-internal');
 
-  // 5b. F5.2 mentor-hook: bij ELKE betaling (partial of full) wordt het
-  // evenredige deel van de openstaande bonus-obligaties vrijgegeven via
-  // child-entries. Forward-only / no clawback. Non-blocking; engine is
-  // idempotent op (parent_id, payment_id).
-  // Bij fullyPaid spawnt 'ie ook een settle-child voor evt. afrondings-restjes
-  // zodat de gehele obligatie volledig vrijgegeven is na de eindbetaling.
+  // 5b. Mentor-hook (PR 4 mentorcommissie, 3 nov 2026): na elke betaling
+  // draait de FACTUURMOTOR voor de klant (releaseProportionalForPaidAmount):
+  // doel = commissie × betaald op de facturen van de sale / basis, min wat al
+  // vrijgegeven is. Eén motor voor cron, sync en betaling: enkel betaalde
+  // facturen, verrekening van te veel vrijgegeven, incassostatus, nooit
+  // dubbel (idempotent op het betaalde totaal). Vervangt het oude
+  // per-betaling-pad (releaseProportionalForPayment), dat de sale-regel en de
+  // verrekening niet kende. Non-blocking; forward-only.
   if (inv.customer_id && payRow?.id) {
     try {
-      await releaseProportionalForPayment({
-        customerId      : inv.customer_id,
-        sourceInvoiceId : inv.id,
-        paymentId       : payRow.id,
-        paymentAmount   : r2(amtNum),
-        invoiceTotal    : Number(inv.amount_total) || 0,
-        fullyPaid       : newStatus === 'paid',
-      });
+      await releaseProportionalForPaidAmount({ customerId: inv.customer_id });
     } catch (e) {
-      console.error('[register-payment-internal] mentor-hook releaseProportionalForPayment:', e.message);
+      console.error('[register-payment-internal] mentor-hook factuurmotor:', e.message);
     }
   }
 

@@ -9,6 +9,7 @@
 //   niets.
 
 import { supabaseAdmin } from '../supabase.js';
+import { laadIncassoUitsluiting, filterIncassoTermijnfacturen } from './incasso-termijnfacturen.js';
 import { customerDisplayName } from './customer-name.js';
 import { createDossierCore } from './incasso-dossier.js';
 import {
@@ -100,12 +101,16 @@ export async function evaluateIncassoCandidates(opts = {}) {
   // 1) Open facturen aggregeren per klant.
   const { data: invRows, error: iErr } = await supabaseAdmin
     .from('invoices')
-    .select('id, customer_id, amount_total, amount_paid, credited_amount, due_date, status, is_test')
+    .select('id, customer_id, tl_subscription_id, amount_total, amount_paid, credited_amount, due_date, status, is_test')
     .in('status', OPEN_INV_STATUSES).eq('is_test', false);
   if (iErr) throw new Error('invoices: ' + iErr.message);
 
+  // PR 4 mentorcommissie: incasso-termijnfacturen (klant bij incasso / met
+  // incasso-regeling, factuur van een incasso_regeling-abonnement) gaan NIET
+  // naar het bureau — ze tellen hier niet als open schuld. Fail-soft.
+  const incassoUitsl = await laadIncassoUitsluiting(supabaseAdmin);
   const perCustomer = new Map();
-  for (const inv of invRows || []) {
+  for (const inv of filterIncassoTermijnfacturen(invRows || [], incassoUitsl).over) {
     if (!inv.customer_id) continue;
     const openEur = openAmountEur(inv);
     if (openEur <= 0) continue;

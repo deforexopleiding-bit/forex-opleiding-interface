@@ -660,6 +660,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   STAAT STIL vanaf sinds; regeling/betaald: echte betalingen tellen weer (ook tijdens de stilstand); oninbaar: niets vanaf
   incasso_sinds. `incassoVoor` geeft enkel stoppende rijen. Signalen (dossier/pipeline/onboarding) = voorstellen. Klanten-v2:
   tab Incassostatus + filter/badge in de lijst (`/api/customers?incasso=`); mentor ziet `status_label` (geen vrije tekst).
+  INCASSO-TERMIJNFACTUREN (PR 4): klant bij_incasso/incasso_regeling of factuur van een `soort='incasso_regeling'`-abonnement
+  → `api/_lib/incasso-termijnfacturen.js` sluit ze uit van dunning-engine (auto-instroom `kiesAutoInstroom` + aanmaanruns
+  `fetchOpenInvoices`), cron-dunning-bulk-send (skip_reason incasso_termijnfactuur), incasso-auto (geen bureaudossier) en
+  TL-autosend (sales-subscription-create: `invoice_generation: book`). Maandlijst: Wanbetalers › Incasso-abonnementen
+  (`views/incasso-maandlijst-v2.js`, `GET /api/incasso-maandlijst`, rekenkern `api/_lib/incasso-maandlijst.js`); "Betaling
+  ontvangen" = /api/finance-invoice-register-payment. Betaalhook in register-payment-internal = de factuurmotor
+  (releaseProportionalForPaidAmount), niet meer releaseProportionalForPayment.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

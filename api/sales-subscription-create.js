@@ -665,7 +665,10 @@ export default async function handler(req, res) {
           title: row.description || 'Abonnement',
           billing_cycle,
           payment_term: { type: 'after_invoice_date', days: 14 },
-          invoice_generation,
+          // Incasso-regeling (PR 4 mentorcommissie): termijnfacturen gaan NIET
+          // naar de klant (en niet naar het bureau) — TL boekt enkel. De
+          // betaling wordt geregistreerd via de maandlijst incasso-abonnementen.
+          invoice_generation: subsNorm[i]._soort?.soort === 'incasso_regeling' ? { action: 'book' } : invoice_generation,
           grouped_lines: [{ line_items: tlLineItems }],
         };
         // ends_on uit frontend (start + (term-1) mnd + 2 dagen buffer); ook voor
