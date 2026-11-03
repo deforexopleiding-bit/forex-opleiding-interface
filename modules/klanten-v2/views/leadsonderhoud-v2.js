@@ -4525,6 +4525,9 @@
     { bron: 'kennismakingscursus-v10', naam: 'Mini-cursus (v10 · B)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v10', status: 'actief' },
     { bron: 'webinar-v1',            naam: 'Webinar (v1 · A)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v1',             status: 'actief' },
     { bron: 'webinar-v2',            naam: 'Webinar (v2 · B)', product: 'webinar',   route: 'https://deforexopleiding.nl/webinar-v2',             status: 'actief' },
+    // 2026-11-03: A/B via /go/webinar-3-4 (Funnels koppelen), zelfde formulier als v1/v2.
+    { bron: 'webinar-3',             naam: 'Webinar · webinar-3 (donker)', product: 'webinar', route: 'https://deforexopleiding.nl/webinar-3', status: 'actief' },
+    { bron: 'webinar-4',             naam: 'Webinar · webinar-4 (blauw)',  product: 'webinar', route: 'https://deforexopleiding.nl/webinar-4', status: 'actief' },
     // 2026-10-19: The Lab (trial + strategiesessie) en de Strategie-scan — eigen flow, apart gehouden.
     { bron: 'the-lab-v1',            naam: 'The Lab (v1 · A)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v1',             status: 'actief' },
     { bron: 'the-lab-v2',            naam: 'The Lab (v2 · B)', product: 'the-lab',   route: 'https://deforexopleiding.nl/the-lab-v2',             status: 'actief' },

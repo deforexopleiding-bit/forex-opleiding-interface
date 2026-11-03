@@ -5,7 +5,7 @@
 // server: x-internal-token == OPSTARTSESSIE_SECRET (zelfde geheim als
 // public-event-vervolg-invite).
 //
-// Body: { voornaam, email, telefoon (E.164), bron: 'webinar-v1'|'webinar-v2',
+// Body: { voornaam, email, telefoon (E.164), bron: 'webinar-v1'|'webinar-v2'|'webinar-3'|'webinar-4',
 //         lead_id (uuid|null), toestemming (bool), sessie_id (uuid|null) }
 //   sessie_id (2026-10-13, datumkeuze): de gekozen sessie. Moet één van de op dit
 //   moment aangeboden sessies zijn (eerstvolgende 3 doorgaande); anders 409
@@ -36,7 +36,8 @@ import { toestemmingUitBody } from './_lib/advertentie-toestemming.js';
 
 const ALARM_NAAR = process.env.PROVISIONING_ALARM_EMAIL || 'biemoldjeffrey@gmail.com';
 
-export const BRONNEN = Object.freeze(['webinar-v1', 'webinar-v2']);
+// 2026-11-03: + webinar-3 (donker) / webinar-4 (blauw), A/B via /go/webinar-3-4 (dfo-website).
+export const BRONNEN = Object.freeze(['webinar-v1', 'webinar-v2', 'webinar-3', 'webinar-4']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

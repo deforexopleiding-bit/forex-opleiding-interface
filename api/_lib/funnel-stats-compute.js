@@ -53,6 +53,9 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   // 2026-10-09: gratis webinar (elke maandag 19:00) — A = formulier in beeld, B = belofte + knop.
   'webinar-v1',
   'webinar-v2',
+  // 2026-11-03: nieuwe webinar-funnels via /go/webinar-3-4 (donker vs blauw).
+  'webinar-3',
+  'webinar-4',
   // 2026-10-19: The Lab (gratis tradingsimulator, 7 dagen) en de Strategie-scan —
   // twee aparte funnels met hun eigen flow (geen quiz, geen A/B/C-boekflow).
   'the-lab-v1',
@@ -95,6 +98,8 @@ export const VARIANT_INFO = Object.freeze({
   '7-daagse-v6':            { label: '7-daagse v6 (trade)', groep: '7-daagse' },
   'webinar-v1':             { label: 'Webinar (v1 · A)', groep: 'webinar' },
   'webinar-v2':             { label: 'Webinar (v2 · B)', groep: 'webinar' },
+  'webinar-3':              { label: 'Webinar · webinar-3 (donker)', groep: 'webinar' },
+  'webinar-4':              { label: 'Webinar · webinar-4 (blauw)', groep: 'webinar' },
   'the-lab-v1':             { label: 'The Lab (v1 · A)', groep: 'the-lab' },
   'the-lab-v2':             { label: 'The Lab (v2 · B)', groep: 'the-lab' },
   'strategiescan-v1':       { label: 'Strategie-scan (v1)', groep: 'strategiescan' },

@@ -209,7 +209,7 @@
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary btn-sm" ${st.bezig ? 'disabled' : ''} onclick="__wbOpslaan()">Opslaan</button>
-          <span style="font-size:11.5px;color:var(--text-3)">Elke maandag. Aanmeldpagina's: /webinar-v1 en /webinar-v2 op de website.</span>
+          <span style="font-size:11.5px;color:var(--text-3)">Elke maandag. Aanmeldpagina's: /webinar-3 en /webinar-4 (A/B via /go/webinar-3-4); /webinar-v1 en /webinar-v2 blijven bereikbaar.</span>
         </div>
       </div></div>`;
   }
@@ -224,7 +224,7 @@
     if (!d) {
       return `<div class="card" style="margin-bottom:14px">${kop}<div class="card-body" style="font-size:12.5px;color:${st.dash.fout ? 'var(--rose)' : 'var(--text-3)'}">${esc(st.dash.fout || 'Resultaten laden…')}</div></div>`;
     }
-    const naam = { 'webinar-v1': 'Funnel A (webinar-v1)', 'webinar-v2': 'Funnel B (webinar-v2)', overig: 'Overig' };
+    const naam = { 'webinar-v1': 'Funnel A (webinar-v1)', 'webinar-v2': 'Funnel B (webinar-v2)', 'webinar-3': 'Funnel webinar-3 (donker)', 'webinar-4': 'Funnel webinar-4 (blauw)', overig: 'Overig' };
     const rij = (label, r, sterk) => `<tr${sterk ? ' style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
       <td>${esc(label)}</td>
       <td class="r">${r.aanmeldingen}${r.personen !== r.aanmeldingen ? ` <span style="color:var(--text-3);font-weight:400" title="Unieke personen (e-mail)">(${r.personen} pers.)</span>` : ''}</td>
