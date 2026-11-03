@@ -82,6 +82,8 @@
     incasso: null,      // venster: { customer_id, deal_id, klant, sinds, reden, scope, bron, bezig, fout }
     opheffen: null,     // venster: { id, klant, reden, bezig, fout }
     koppelKeuze: {},    // invoice_id → gekozen deal_id ('' = geen sale)
+    // Controle (PR 5, alleen lezen): GET /api/commissie-controle.
+    controle: { data: null, loading: false, error: null, alleenAfwijkingen: true, code: '', bron: '', zoek: '', open: null },
   };
   const STATUS = {
     wacht:         { c: 'neutral', l: 'Wacht op betaling' },
@@ -894,6 +896,66 @@
   }
 
   /* ── Hoofdview ───────────────────────────────────────────────────────── */
+  /* ── Controle (PR 5 — alleen lezen, geen correcties) ─────────────────── */
+  async function laadControle() {
+    const c = _st.controle;
+    if (c.loading) return;
+    c.loading = true; c.error = null; render();
+    const j = await api('/api/commissie-controle', undefined, 55000);
+    c.loading = false;
+    if (j.__error) c.error = j.__error; else c.data = j;
+    render();
+  }
+  window.__commCtrl = (k, v) => { _st.controle[k] = v; render(); };
+  window.__commCtrlVernieuw = () => { _st.controle.data = null; laadControle(); };
+  window.__commCtrlOpen = (k) => { _st.controle.open = _st.controle.open === k ? null : k; render(); };
+  function controleView() {
+    const c = _st.controle;
+    if (!c.data && !c.loading && !c.error) queueMicrotask(laadControle);
+    if (c.error) return errBlk(c.error);
+    if (!c.data) return skel();
+    const L = c.data.labels || {};
+    const t = c.data.totalen || {};
+    const zoek = String(c.zoek || '').toLowerCase();
+    const rijen = asArr(c.data.rijen).filter((r) => (!c.alleenAfwijkingen || r.afwijkingen.length)
+      && (!c.code || r.afwijkingen.includes(c.code)) && (!c.bron || r.bron === c.bron)
+      && (!zoek || `${r.klant} ${r.event || ''} ${(r.mentoren || []).join(' ')}`.toLowerCase().includes(zoek)));
+    const n = (v) => (v == null ? '—' : eur(v));
+    const pills = (r) => r.afwijkingen.map((a) => H.pill(['te_veel_vrijgegeven', 'rapport_te_veel', 'geen_commissie', 'traject_niet_omgezet'].includes(a) ? 'danger' : 'warn', L[a] || a)).join(' ');
+    const balk = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <label style="font-size:12.5px;display:flex;gap:6px;align-items:center"><input type="checkbox" ${c.alleenAfwijkingen ? 'checked' : ''} onchange="window.__commCtrl('alleenAfwijkingen', this.checked)"> Alleen afwijkingen</label>
+      <select style="${selectStijl}" onchange="window.__commCtrl('code', this.value)"><option value="">Alle soorten afwijking</option>${Object.entries(L).map(([k, l]) => `<option value="${k}" ${c.code === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <select style="${selectStijl}" onchange="window.__commCtrl('bron', this.value)"><option value="">Events, toewijzingen en trajecten</option>${[['event', 'Events'], ['toewijzing', 'Toewijzingen'], ['traject', 'Trajecten']].map(([v, l]) => `<option value="${v}" ${c.bron === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <input style="${selectStijl}" placeholder="Zoek klant, event of mentor" value="${esc(c.zoek || '')}" onchange="window.__commCtrl('zoek', this.value)">
+      <button class="btn btn-ghost btn-sm" onclick="window.__commCtrlVernieuw()">↻ Vernieuwen</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">${t.sales || 0} sales · ${t.met_afwijking || 0} met afwijking · zou moeten zijn ${eur(t.zou_moeten_zijn)} · rapport ${eur(t.rapport_vrijgegeven)} (definitief ${eur(t.in_definitief_rapport)}) · grootboek ${eur(t.vrijgegeven)} (te veel ${eur(t.te_veel_vrijgegeven)}, achter ${eur(t.achter)}) · werkelijk uitbetaald ${eur(t.werkelijk_uitbetaald)}, waarvan status nog niet uitbetaald ${eur(t.verschil_status_werkelijkheid)} (rapporten t/m ${esc(String(c.data.uitbetaald_tot || '').slice(0, 7))}) · vrijgegeven in geen rapport ${eur(t.vrijgegeven_niet_in_rapport)}. Alleen lezen — er wordt niets aangepast.</div>`;
+    const tabel = `<div style="overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">
+      <thead><tr><th>Klant</th><th>Event / bron</th><th>Mentoren</th><th>Klantstatus</th><th class="r">Betaald</th><th class="r">Zou moeten zijn</th><th class="r" title="Wat het mentorrapport voor deze sale uitkeert of zal uitkeren; daaronder het deel in een definitief rapport">Rapport</th><th class="r">Werkelijk uitbetaald</th><th class="r" title="Vrijgegeven in het grootboek (audit)">Grootboek</th><th class="r" title="Grootboek − zou moeten zijn">Verschil</th><th>Afwijkingen</th></tr></thead>
+      <tbody>${rijen.map((r) => {
+        const open = c.open === r.sleutel;
+        const detail = open ? `<tr><td colspan="11" style="background:var(--surface-2);font-size:12px">
+          ${r.uitleg ? `<div style="margin-bottom:6px">${esc(r.uitleg)}</div>` : ''}
+          ${asArr(r.per_mentor).length ? `<div><b>Per mentor:</b> ${asArr(r.per_mentor).map((m) => `${esc(m.mentor_user_id)} — commissie ${eur(m.commissie)}, zou ${eur(m.doel)}, vrij ${eur(m.vrijgegeven)}, uitbetaald ${eur(m.werkelijk_uitbetaald)}`).join(' · ')}</div>` : ''}
+          ${asArr(r.facturen).length ? `<div style="margin-top:4px"><b>Facturen van de sale:</b> ${asArr(r.facturen).map((f) => `${esc(f.nummer || '—')} ${eur(f.bedrag)} (betaald ${eur(f.betaald)}, ${esc(f.status)})`).join(' · ')}</div>` : '<div style="margin-top:4px">Geen facturen bij deze sale.</div>'}
+          ${r.incasso_stop ? `<div style="margin-top:4px">Incasso: betalingen vanaf ${esc(r.incasso_stop)} tellen niet (stilstand).</div>` : ''}
+        </td></tr>` : '';
+        return `<tr style="cursor:pointer" onclick="window.__commCtrlOpen('${esc(r.sleutel)}')">
+          <td><b>${esc(r.klant)}</b>${r.geannuleerd ? ' <span style="font-size:11px;color:var(--text-3)">geannuleerd</span>' : ''}</td>
+          <td>${esc(r.event || '—')}<div style="font-size:11px;color:var(--text-3)">${esc(r.bron)}</div></td>
+          <td>${esc((r.mentoren || []).join(', ') || '—')}</td>
+          <td>${esc(r.klantstatus?.label || '—')}</td>
+          <td class="r mono">${n(r.betaald)}</td>
+          <td class="r mono">${n(r.zou_moeten_zijn)}</td>
+          <td class="r mono">${n(r.rapport_vrijgegeven)}<div style="font-size:10.5px;color:var(--text-3)">definitief ${n(r.in_definitief_rapport)}</div></td>
+          <td class="r mono">${n(r.werkelijk_uitbetaald)}${r.verschil_status_werkelijkheid > 0.005 ? `<div style="font-size:10.5px;color:var(--amber)">status: ${eur(r.rapport_status_uitbetaald ?? r.status_uitbetaald)}</div>` : ''}</td>
+          <td class="r mono">${n(r.vrijgegeven)}</td>
+          <td class="r mono" style="${(r.verschil || 0) > 0.005 ? 'color:var(--rose);font-weight:700' : ((r.verschil || 0) < -0.005 ? 'color:var(--amber)' : '')}">${r.verschil == null ? '—' : eur(r.verschil)}</td>
+          <td>${pills(r)}</td></tr>${detail}`;
+      }).join('') || '<tr><td colspan="11" style="padding:16px;color:var(--text-3)">Geen sales met deze filter.</td></tr>'}</tbody></table></div>`;
+    return balk + tabel;
+  }
+
   function commissiesView() {
     if (!isAdmin()) {
       return `<div class="empty" style="padding:72px 20px"><div class="empty-ico">${svg(I.grad)}</div><div class="empty-t">Geen toegang</div>
@@ -926,11 +988,12 @@
       { c: 'rose', icon: I.alert, label: 'Risico', val: eur(k.risico), sub: `${k.risico_aantal || 0} sale${k.risico_aantal === 1 ? '' : 's'} · vervallen / wanbetaler / geannuleerd`, hi: (k.risico || 0) > 0 },
       ...((k.vervallen_incasso || 0) > 0 ? [{ c: 'rose', icon: I.alert, label: 'Vervallen door incasso', val: eur(k.vervallen_incasso), sub: `${k.vervallen_incasso_aantal || 0} sale${k.vervallen_incasso_aantal === 1 ? '' : 's'} · niet meer voor de mentor` }] : []),
     ]);
-    const seg = [['mentor', 'Per mentor'], ['event', 'Per event'], ['sale', 'Per sale']].map(([v, l]) =>
+    const seg = [['mentor', 'Per mentor'], ['event', 'Per event'], ['sale', 'Per sale'], ['controle', 'Controle']].map(([v, l]) =>
       `<button class="chip ${_st.weergave === v ? 'on' : ''}" onclick="window.__commWeergave('${v}')">${l}</button>`).join('');
     const inhoud = _st.weergave === 'mentor' ? perMentorView()
       : _st.weergave === 'event' ? filterBalk() + perEventView()
-        : filterBalk() + salesTabel(gefilterdeSales());
+        : _st.weergave === 'controle' ? controleView()
+          : filterBalk() + salesTabel(gefilterdeSales());
     // 6 tegels: iets smaller dan de standaard (200px) zodat ze op één rij passen.
     const kpiStijl = '<style>.comm-kpis .kpi-grid{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}</style>';
     return `${kop}${migratie}${fouten}${kpiStijl}<div class="comm-kpis">${kpiStrip}</div>

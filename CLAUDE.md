@@ -667,6 +667,11 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   (`views/incasso-maandlijst-v2.js`, `GET /api/incasso-maandlijst`, rekenkern `api/_lib/incasso-maandlijst.js`); "Betaling
   ontvangen" = /api/finance-invoice-register-payment. Betaalhook in register-payment-internal = de factuurmotor
   (releaseProportionalForPaidAmount), niet meer releaseProportionalForPayment.
+  CONTROLESCHERM (PR 5): Mentoren › Commissies › weergave "Controle" (`GET /api/commissie-controle`, mentor.admin.view,
+  rekenkern `api/_lib/commissie-controle.js`, ALLEEN LEZEN). Per sale: betaald, zou moeten zijn (= factuurmotor),
+  rapportkant (computeBonusOverview: rapport / in definitief rapport / werkelijk uitbetaald), grootboek, verschil +
+  afwijkingen (te veel, achter, geen commissie, soort ontbreekt, niet gekoppeld, factuur te veel betaald, traject niet
+  omgezet, status loopt achter, vrijgegeven in geen rapport). Lijst 3 nov: docs/commissie/2026-11-03-afwijkingen.md.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
