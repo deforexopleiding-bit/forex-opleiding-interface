@@ -117,6 +117,8 @@
     'kennismakingscursus-v6':  'Mini v6 (B)',
     'webinar-v1':              'Webinar v1 (A)',
     'webinar-v2':              'Webinar v2 (B)',
+    'webinar-3':               'Webinar · webinar-3',
+    'webinar-4':               'Webinar · webinar-4',
     'kennismakingscursus-v7':  'Mini v7',
     'kennismakingscursus-v8':  'Mini v8',
     'the-lab':                 'The Lab (LMS)',
@@ -823,6 +825,8 @@
           <option value="kennismakingscursus-v6"  ${fBron === 'kennismakingscursus-v6' ? 'selected' : ''}>kennismakingscursus-v6</option>
           <option value="webinar-v1"              ${fBron === 'webinar-v1' ? 'selected' : ''}>webinar-v1</option>
           <option value="webinar-v2"              ${fBron === 'webinar-v2' ? 'selected' : ''}>webinar-v2</option>
+          <option value="webinar-3"               ${fBron === 'webinar-3' ? 'selected' : ''}>webinar-3</option>
+          <option value="webinar-4"               ${fBron === 'webinar-4' ? 'selected' : ''}>webinar-4</option>
           <option value="the-lab" ${fBron === 'the-lab' ? 'selected' : ''}>the-lab</option>
           <option value="the-lab-v1" ${fBron === 'the-lab-v1' ? 'selected' : ''}>the-lab-v1</option>
           <option value="the-lab-v2" ${fBron === 'the-lab-v2' ? 'selected' : ''}>the-lab-v2</option>

@@ -23,7 +23,7 @@ import { webinarBoekingVan, zelfdePersoon, normEmail, tel9 } from './webinar-opv
 import { laadCommissieData, planCommissie, isSetterCommissieDryRun } from './setter-commissie-core.js';
 import { isUitgeslotenDeal, round2 } from './setter-sale-plan.js';
 
-export const FUNNELS = Object.freeze(['webinar-v1', 'webinar-v2']);
+export const FUNNELS = Object.freeze(['webinar-v1', 'webinar-v2', 'webinar-3', 'webinar-4']);
 const AFGEVALLEN = new Set(['cancelled', 'verwijderd']);
 
 const leeg = () => ({ aanmeldingen: 0, personen: 0, calls: 0, sales: 0, commissie_geboekt: 0, commissie_te_boeken: 0, commissie: 0 });
