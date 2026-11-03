@@ -10,7 +10,9 @@
 // een TL-storing of een download-fout → return null. De caller mag hier NOOIT
 // op breken; de brief gaat dan zonder die ene bijlage de deur uit.
 
-import fetch from 'node-fetch';
+// Globale fetch (zelfde runtime-fetch als tlFetch / finance-invoice-pdf.js).
+// NIET 'node-fetch' importeren: dat staat niet in package.json en wordt alleen
+// transitief geresolved (fragiel). Vercel Node (18+) heeft fetch globaal.
 import { tlFetch } from './teamleader-token.js';
 
 /**
@@ -42,8 +44,9 @@ export async function fetchInvoicePdfBuffer(tlInvoiceId) {
       return null;
     }
 
-    // 2) De (kortlevende) signed URL downloaden → Buffer.
-    const pdfRes = await fetch(url);
+    // 2) De (kortlevende) signed URL downloaden → Buffer. redirect:'follow'
+    //    expliciet: TL serveert de PDF vaak via een redirect naar een CDN-URL.
+    const pdfRes = await fetch(url, { redirect: 'follow' });
     if (!pdfRes.ok) {
       console.warn('[teamleader-invoice-pdf] PDF-download HTTP', pdfRes.status, 'voor', id);
       return null;

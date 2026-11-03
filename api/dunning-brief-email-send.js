@@ -131,29 +131,40 @@ export default async function handler(req, res) {
     //     PDF, dan verstuurt de brief + overige bijlagen gewoon en loggen we de
     //     miss in dunning_log. Een ontbrekende factuur-PDF breekt NOOIT de send.
     const attachments = [{ filename, content: pdfBuffer, contentType: 'application/pdf' }];
+    // Klein log-helpertje: dunning_log mag de send NOOIT breken.
+    const logBijlageGemist = async (payloadExtra) => {
+      try {
+        await supabaseAdmin.from('dunning_log').insert({
+          run_id: null, step_id: null,
+          event_type: 'incasso_brief_factuur_pdf_gemist',
+          payload: { customer_id: brief.customer_id, brief_id: briefId, ...payloadExtra },
+        });
+      } catch (_) {}
+    };
     try {
       const { openInvoices } = await fetchOpenInvoicesForCustomer(brief.customer_id);
-      const gemist = [];
-      for (const iv of (openInvoices || [])) {
-        const buf = iv.tl_invoice_id ? await fetchInvoicePdfBuffer(iv.tl_invoice_id) : null;
-        if (buf) {
-          const nr = String(iv.invoice_number || iv.id).replace(/[^\w.-]+/g, '_');
-          attachments.push({ filename: `factuur_${nr}.pdf`, content: buf, contentType: 'application/pdf' });
-        } else {
-          gemist.push({ invoice_id: iv.id, invoice_number: iv.invoice_number || null, reden: iv.tl_invoice_id ? 'download_mislukt' : 'geen_tl_invoice_id' });
+      if (!openInvoices || openInvoices.length === 0) {
+        // Geen stille lege uitkomst meer: expliciet loggen dat er geen open
+        // facturen waren om bij te voegen (bv. alles betaald/concept/is_test,
+        // of status buiten open/partially_paid/overdue).
+        await logBijlageGemist({ reden: 'geen_open_facturen' });
+      } else {
+        const gemist = [];
+        for (const iv of openInvoices) {
+          const buf = iv.tl_invoice_id ? await fetchInvoicePdfBuffer(iv.tl_invoice_id) : null;
+          if (buf) {
+            const nr = String(iv.invoice_number || iv.id).replace(/[^\w.-]+/g, '_');
+            attachments.push({ filename: `factuur_${nr}.pdf`, content: buf, contentType: 'application/pdf' });
+          } else {
+            gemist.push({ invoice_id: iv.id, invoice_number: iv.invoice_number || null, reden: iv.tl_invoice_id ? 'download_mislukt' : 'geen_tl_invoice_id' });
+          }
         }
-      }
-      if (gemist.length) {
-        try {
-          await supabaseAdmin.from('dunning_log').insert({
-            run_id: null, step_id: null,
-            event_type: 'incasso_brief_factuur_pdf_gemist',
-            payload: { customer_id: brief.customer_id, brief_id: briefId, gemist },
-          });
-        } catch (_) {}
+        if (gemist.length) await logBijlageGemist({ gemist });
       }
     } catch (e) {
+      // Ook een gevangen exception niet langer stil: zichtbaar in dunning_log.
       console.warn('[dunning-brief-email-send] factuur-bijlagen overgeslagen (fail-soft):', e?.message || e);
+      await logBijlageGemist({ reden: 'attachment_exception', message: String(e?.message || e).slice(0, 500) });
     }
 
     // 5) SEND via bestaande Strato-mailer (fase 4G-patroon). Fail-loud op de send zelf.
