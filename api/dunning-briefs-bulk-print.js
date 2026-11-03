@@ -6,6 +6,12 @@
 // gebruiker vinkt N brieven aan, klikt "Print/Download selectie", krijgt 1 PDF
 // die 'ie in 1 printjob kan printen (Cmd+P → 1x klik → alle brieven).
 //
+// Per brief worden DIRECT daarachter de openstaande factuur-PDF's van die klant
+// mee-gemerged (Teamleader), zodat de post-bundel compleet is: brief + facturen,
+// per klant, achter elkaar. Fail-soft per factuur (zie mergeFacturen hieronder):
+// een gemiste factuur breekt de print niet en wordt gelogd in dunning_log
+// (event 'incasso_brief_factuur_pdf_gemist').
+//
 // KRITIEK: we mergen de BEWAARDE PDFs uit Supabase Storage (niet hergenereren).
 // Reden: bewaarde PDF = juridisch bewijs. Wat je print MOET exact zijn wat er
 // in dunning_briefs staat + later verstuurd wordt. Hergenereren zou het bewijs
@@ -33,6 +39,8 @@
 import { PDFDocument } from 'pdf-lib';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { fetchOpenInvoicesForCustomer } from './_lib/incasso-pre-brief-core.js';
+import { fetchInvoicePdfBuffer } from './_lib/teamleader-invoice-pdf.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'dunning-briefs';
@@ -98,7 +106,51 @@ export default async function handler(req, res) {
     const merged = await PDFDocument.create();
     let mergedCount = 0;
     let skippedCount = 0;
+    let facturenBijgevoegd = 0;
     const skippedIds = [];
+
+    // Log-helpertje voor gemiste factuur-PDF's: mag de print NOOIT breken.
+    const logBijlageGemist = async (customerId, briefId, payloadExtra) => {
+      try {
+        await supabaseAdmin.from('dunning_log').insert({
+          run_id: null, step_id: null,
+          event_type: 'incasso_brief_factuur_pdf_gemist',
+          payload: { customer_id: customerId, brief_id: briefId, bron: 'bulk_print', ...payloadExtra },
+        });
+      } catch (_) {}
+    };
+
+    // Merge alle openstaande factuur-PDF's van 1 klant achter de brief-pagina's.
+    // Fail-soft per factuur (zelfde categorieen als het e-mailpad): een gemiste
+    // factuur breekt de print niet, maar wordt wel gelogd in dunning_log.
+    const mergeFacturen = async (customerId, briefId) => {
+      try {
+        const { openInvoices } = await fetchOpenInvoicesForCustomer(customerId);
+        if (!openInvoices || openInvoices.length === 0) {
+          await logBijlageGemist(customerId, briefId, { reden: 'geen_open_facturen' });
+          return;
+        }
+        const gemist = [];
+        for (const iv of openInvoices) {
+          const buf = iv.tl_invoice_id ? await fetchInvoicePdfBuffer(iv.tl_invoice_id) : null;
+          if (!buf) {
+            gemist.push({ invoice_id: iv.id, invoice_number: iv.invoice_number || null, reden: iv.tl_invoice_id ? 'download_mislukt' : 'geen_tl_invoice_id' });
+            continue;
+          }
+          try {
+            const invPdf = await PDFDocument.load(buf, { ignoreEncryption: true });
+            const pages = await merged.copyPages(invPdf, invPdf.getPageIndices());
+            for (const p of pages) merged.addPage(p);
+            facturenBijgevoegd++;
+          } catch (_) {
+            gemist.push({ invoice_id: iv.id, invoice_number: iv.invoice_number || null, reden: 'download_mislukt' });
+          }
+        }
+        if (gemist.length) await logBijlageGemist(customerId, briefId, { gemist });
+      } catch (e) {
+        await logBijlageGemist(customerId, briefId, { reden: 'attachment_exception', message: String(e?.message || e).slice(0, 500) });
+      }
+    };
 
     for (const row of ordered) {
       try {
@@ -120,6 +172,8 @@ export default async function handler(req, res) {
         const pages = await merged.copyPages(srcPdf, srcPdf.getPageIndices());
         for (const p of pages) merged.addPage(p);
         mergedCount++;
+        // Direct achter deze brief: de openstaande factuur-PDF's van de klant.
+        await mergeFacturen(row.customer_id, row.id);
       } catch (e) {
         console.warn('[dunning-briefs-bulk-print] merge failed for brief', row.id, e?.message || e);
         skippedCount++; skippedIds.push(row.id);
@@ -170,6 +224,7 @@ export default async function handler(req, res) {
           skipped_ids: skippedIds,
           merged_count: mergedCount,
           skipped_count: skippedCount,
+          facturen_bijgevoegd: facturenBijgevoegd,
         },
       });
     } catch (_) {}
@@ -183,6 +238,7 @@ export default async function handler(req, res) {
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     res.setHeader('X-Briefs-Merged', String(mergedCount));
     res.setHeader('X-Briefs-Skipped', String(skippedCount));
+    res.setHeader('X-Facturen-Bijgevoegd', String(facturenBijgevoegd));
     return res.status(200).send(buffer);
   } catch (e) {
     console.error('[dunning-briefs-bulk-print]', e?.message || e);
