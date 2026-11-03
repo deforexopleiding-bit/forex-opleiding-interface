@@ -114,7 +114,59 @@
     });
   }
 
-  var api = { kies: kies };
+  /** Aantal ongelezen (WA + mail) van een rij uit de lijst. */
+  function ongelezenAantal(c) {
+    var n = Number(c && (c.total_unread != null ? c.total_unread : c.unread_count));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /**
+   * Welk gesprek opent er vanzelf na het laden? (3 nov 2026)
+   *
+   * Het eerste ZICHTBARE gesprek zonder ongelezen berichten, en anders geen.
+   * Automatisch openen markeert niets (geen klik), dus een ongelezen gesprek
+   * openen betekende: het staat open, je leest het, en het blijft ongelezen.
+   * Met sortering ongelezen-eerst was dat net altijd zo. Nu betekent "open"
+   * altijd ook "gelezen", en blijft een gesprek dat iemand manueel op
+   * ongelezen zette ongelezen na herladen.
+   *
+   * @param {Array} zichtbaar  de lijst zoals ze getoond wordt (na kies())
+   * @returns de rij, of null
+   */
+  function kiesAutoOpen(zichtbaar) {
+    var lijst = alsLijst(zichtbaar);
+    for (var i = 0; i < lijst.length; i++) {
+      if (lijst[i] && lijst[i].id && ongelezenAantal(lijst[i]) === 0) return lijst[i];
+    }
+    return null;
+  }
+
+  /**
+   * Moet het gesprek dat open staat nu op gelezen? (3 nov 2026)
+   *
+   * Komt er een nieuw bericht binnen in het open gesprek, dan staat het op het
+   * scherm en hoort het niet als ongelezen te blijven hangen. Behalve:
+   *   • het tabblad is niet zichtbaar (niemand kijkt),
+   *   • iemand zette dit gesprek zelf op ongelezen (dat blijft zo tot een klik),
+   *   • de draad is nog aan het laden (dan staat het bericht nog niet op het
+   *     scherm; de volgende ronde probeert opnieuw),
+   *   • er loopt al een markering.
+   */
+  function moetOpenGesprekGelezen(o) {
+    o = o || {};
+    if (!o.rij || !o.rij.id) return false;
+    if (o.zichtbaar !== 'visible') return false;
+    if (o.handOngelezen) return false;
+    if (o.draadLaadt || o.bezig) return false;
+    return ongelezenAantal(o.rij) > 0;
+  }
+
+  var api = {
+    kies: kies,
+    ongelezenAantal: ongelezenAantal,
+    kiesAutoOpen: kiesAutoOpen,
+    moetOpenGesprekGelezen: moetOpenGesprekGelezen,
+  };
   if (typeof window !== 'undefined') window.INBOX_WANBETALER_SELECTIE = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();
