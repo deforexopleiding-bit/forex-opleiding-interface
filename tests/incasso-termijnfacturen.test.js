@@ -125,3 +125,46 @@ test('betaling ontvangen op een termijnfactuur → de factuurmotor geeft de comm
   assert.equal(r.total_released, 4.5, '108 × 300 / 7200 — op wat effectief binnenkwam');
   mock.reset();
 });
+
+// ── Beslissing Maxim (3 nov): bureaufacturen zoals Shaliwal 2026/2136 blijven
+// open; bij een regeling crediteert Maxim ze zelf. Een klant op bij_incasso
+// krijgt daarvoor GEEN aanmaning en zo'n factuur geeft GEEN commissie.
+const SHAL = '2404a8e2-9a9b-412c-ba59-ff3ec3c503fd';
+const bureau = { id: 'b2136', customer_id: SHAL, deal_id: null, tl_subscription_id: null, invoice_number: '2026 / 2136',
+  amount_total: 6760, amount_paid: 0, credited_amount: 0, status: 'open', issue_date: '2026-10-19', due_date: '2026-10-26', created_at: '2026-10-19T00:00:00Z' };
+
+test('bij_incasso: de open bureaufactuur krijgt geen aanmaning (auto-instroom, runs, bulk, bureau-auto)', async () => {
+  const db = maakNepDb();
+  db.reset({ mentor_commissie_incasso: [{ id: 'm', customer_id: SHAL, deal_id: null, sinds: '2026-10-19', status: 'bij_incasso', opgeheven_op: null }], subscriptions: [] });
+  const u = await laadIncassoUitsluiting(db.client);
+  assert.equal(isIncassoTermijnfactuur(bureau, u), true);
+  const rijen = [{ customer_id: SHAL, tl_subscription_id: null }];
+  assert.deepEqual(kiesAutoInstroom({ overdueRows: filterIncassoTermijnfacturen(rijen, u).over, openRows: filterIncassoTermijnfacturen(rijen, u).over }).toevoegen, []);
+  // Een al lopende aanmaanrun stopt met reden incasso_status — niet 'paid'.
+  assert.match(lees('api/_lib/dunning-engine.js'), /uitsl\.klanten\.has\(run\.customer_id\)[\s\S]{0,400}completion_reason: 'incasso_status'/);
+});
+
+test('bij_incasso: ook als de bureaufactuur later op betaald komt, geeft ze geen commissie', async () => {
+  const db = maakNepDb();
+  mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client } });
+  const engine = await import(url('api/_lib/mentor-ledger-engine.js') + '?b=' + Date.now());
+  const D = 'ced18cac-6d96-4805-8bbe-55a3df9de30d';
+  db.reset({
+    deals: [{ id: D, customer_id: SHAL, tl_quotation_status: 'accepted', tl_quotation_accepted_at: '2026-04-08T17:34:37Z' }],
+    subscriptions: [],
+    invoices: [{ ...bureau, amount_paid: 6760, status: 'paid', paid_date: '2026-11-20' }],
+    payments: [], mentor_sale_attributions: [], dunning_credited_debt: [], commissie_factuur_koppeling: [],
+    mentor_commissie_incasso: [{ id: 'm', customer_id: SHAL, deal_id: null, sinds: '2026-10-19', status: 'bij_incasso', opgeheven_op: null }],
+    mentor_ledger_entries: [{ id: 'p', mentor_user_id: 'u', event_id: 'ev', entry_type: 'bonus', customer_id: SHAL, basis: 7200, amount: 108,
+      original_amount: 108, status: 'pending', parent_entry_id: null, source_quote_id: D, idempotency_key: 'ev:bonus:s:u', created_at: '2026-07-06T00:00:00Z' }],
+  });
+  const r = await engine.releaseProportionalForPaidAmount({ customerId: SHAL });
+  assert.equal(r.total_released, 0, 'betaling vanaf de incassodatum telt niet (stilstand)');
+  // Met een regeling crediteert Maxim de bureaufactuur zelf → telt als 0 betaald.
+  db.tables.mentor_commissie_incasso[0].opgeheven_op = '2026-12-01T00:00:00Z';
+  db.tables.mentor_commissie_incasso.push({ id: 'm2', customer_id: SHAL, deal_id: null, sinds: '2026-12-01', incasso_sinds: '2026-10-19', status: 'incasso_regeling', opgeheven_op: null });
+  db.tables.invoices[0] = { ...bureau, amount_paid: 0, credited_amount: 6760, status: 'credited' };
+  const r2 = await engine.releaseProportionalForPaidAmount({ customerId: SHAL });
+  assert.equal(r2.total_released, 0, 'gecrediteerde bureaufactuur geeft niets');
+  mock.reset();
+});
