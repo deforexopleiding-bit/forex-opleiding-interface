@@ -23,8 +23,6 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendMail } from './mailer.js';
-import { fetchOpenInvoicesForCustomer } from './_lib/incasso-pre-brief-core.js';
-import { fetchInvoicePdfBuffer } from './_lib/teamleader-invoice-pdf.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'dunning-briefs';
@@ -105,7 +103,7 @@ export default async function handler(req, res) {
     let subject, intro, filename;
     if (isTussen) {
       subject = 'Een vriendelijke herinnering aan je openstaande betaling';
-      intro = 'In de bijlage vind je onze vriendelijke herinnering en de bijbehorende factuur/facturen, zodat je alles meteen bij de hand hebt.';
+      intro = 'In de bijlage vind je onze vriendelijke herinnering met een overzicht van de openstaande factu(u)r(en).';
       filename = `herinnering_${brief.customer_id.slice(0, 8)}.pdf`;
     } else if (brief.country === 'BE') {
       subject = 'Eerste (kosteloze) herinnering (De Forex Opleiding)';
@@ -126,46 +124,9 @@ export default async function handler(req, res) {
       'administratie@deforexopleiding.nl',
     ].join('\n');
 
-    // 4b) Bijlagen: altijd de brief-PDF; daarnaast de factuur-PDF('s) van de
-    //     openstaande facturen (Teamleader). FAIL-SOFT per factuur: mislukt een
-    //     PDF, dan verstuurt de brief + overige bijlagen gewoon en loggen we de
-    //     miss in dunning_log. Een ontbrekende factuur-PDF breekt NOOIT de send.
+    // 4b) Bijlage: alleen de bewaarde brief-PDF. (De factuur-PDF-bijlage is
+    //     teruggedraaid; het e-mailpad stuurt uitsluitend de brief mee.)
     const attachments = [{ filename, content: pdfBuffer, contentType: 'application/pdf' }];
-    // Klein log-helpertje: dunning_log mag de send NOOIT breken.
-    const logBijlageGemist = async (payloadExtra) => {
-      try {
-        await supabaseAdmin.from('dunning_log').insert({
-          run_id: null, step_id: null,
-          event_type: 'incasso_brief_factuur_pdf_gemist',
-          payload: { customer_id: brief.customer_id, brief_id: briefId, ...payloadExtra },
-        });
-      } catch (_) {}
-    };
-    try {
-      const { openInvoices } = await fetchOpenInvoicesForCustomer(brief.customer_id);
-      if (!openInvoices || openInvoices.length === 0) {
-        // Geen stille lege uitkomst meer: expliciet loggen dat er geen open
-        // facturen waren om bij te voegen (bv. alles betaald/concept/is_test,
-        // of status buiten open/partially_paid/overdue).
-        await logBijlageGemist({ reden: 'geen_open_facturen' });
-      } else {
-        const gemist = [];
-        for (const iv of openInvoices) {
-          const buf = iv.tl_invoice_id ? await fetchInvoicePdfBuffer(iv.tl_invoice_id) : null;
-          if (buf) {
-            const nr = String(iv.invoice_number || iv.id).replace(/[^\w.-]+/g, '_');
-            attachments.push({ filename: `factuur_${nr}.pdf`, content: buf, contentType: 'application/pdf' });
-          } else {
-            gemist.push({ invoice_id: iv.id, invoice_number: iv.invoice_number || null, reden: iv.tl_invoice_id ? 'download_mislukt' : 'geen_tl_invoice_id' });
-          }
-        }
-        if (gemist.length) await logBijlageGemist({ gemist });
-      }
-    } catch (e) {
-      // Ook een gevangen exception niet langer stil: zichtbaar in dunning_log.
-      console.warn('[dunning-brief-email-send] factuur-bijlagen overgeslagen (fail-soft):', e?.message || e);
-      await logBijlageGemist({ reden: 'attachment_exception', message: String(e?.message || e).slice(0, 500) });
-    }
 
     // 5) SEND via bestaande Strato-mailer (fase 4G-patroon). Fail-loud op de send zelf.
     const sendRes = await sendMail({
