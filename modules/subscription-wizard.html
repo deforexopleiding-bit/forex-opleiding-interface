@@ -99,6 +99,8 @@
         <select id="saleTypeSel"><option value="domestic">Normaal NL/BE</option><option value="intracommunautair">Zakelijk België - Intracommunautair</option></select>
       </div>
     </div>
+    <!-- Soort abonnement (mentorcommissie, verplicht — api/_lib/subscription-soort.js) -->
+    <div class="card" id="soortCard"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <strong style="font-size:14px">Abonnementen</strong>
       <button class="btn btn-success btn-sm" id="addSub">+ Abonnement toevoegen</button>
@@ -681,6 +683,7 @@ function descSelect(s,i){
     + (isCustom?`<input data-desccustom="${i}" placeholder="Eigen omschrijving" value="${esc(s.description)}" style="margin-top:6px" />`:'');
 }
 function renderSubs(){
+  try{ renderSoort(); }catch(e){ console.warn('[subw] soort render', e); }
   const root=document.getElementById('subList');
   const zero=isZeroVat();
   const warn = zero ? `<div class="bonus" style="background:rgba(245,158,11,.14);color:#b45309;margin-bottom:10px;padding:10px;border-radius:8px;font-size:12.5px">⚠️ ${esc(saleType()==='intracommunautair'?'Intracommunautair':'Buiten EU')}: alle regels worden met <strong>0% BTW</strong> gefactureerd. Het BTW-tarief blijft zichtbaar voor de administratie, maar Teamleader rekent 0%.</div>` : '';
@@ -823,7 +826,47 @@ function renderSubTotal(){
 }
 document.getElementById('addSub').addEventListener('click',()=>{state.subs.push(newEmptySub());renderSubs();});
 
+// ── Soort abonnement (mentorcommissie) ─────────────────────────────────────
+// Bepaalt bij welke sale de betalingen voor de mentorcommissie tellen.
+state.soort = { soort: MODE === 'deal' ? 'origineel' : null, aanpassing_type: null, sale_deal_id: null };
+state.soortSales = []; state.soortSalesFor = null;
+const SOORT_OPT = [
+  ['origineel','Origineel','Het abonnement van de sale zelf.'],
+  ['aanpassing','Aanpassing','Uitstel, lager bedrag of regeling van een bestaande sale.'],
+  ['incasso_regeling','Incasso-regeling','Termijnen van een regeling na incasso; blijft bij dezelfde sale.'],
+  ['nieuwe_offerte','Nieuwe offerte','Een nieuwe sale; telt nooit mee voor een oude event-bonus.'],
+];
+function soortKlantId(){ return (state.customer && state.customer.id) || (state.deal && state.deal.customer_id) || state.matched_customer_id || null; }
+async function laadSoortSales(){
+  const cid = soortKlantId();
+  if(!cid || state.soortSalesFor === cid) return;
+  state.soortSalesFor = cid;
+  try{ const j = await apiFetch('/api/subscription-soort?customer_id='+encodeURIComponent(cid)).then(r=>r.json()); state.soortSales = Array.isArray(j?.sales) ? j.sales : []; }catch(_){ state.soortSales = []; }
+  renderSoort();
+}
+function renderSoort(){
+  const box = document.getElementById('soortCard'); if(!box) return;
+  const so = state.soort;
+  const saleNodig = so.soort==='aanpassing' || so.soort==='incasso_regeling';
+  box.innerHTML = `<div style="font-weight:600;font-size:13px;margin-bottom:6px">Soort abonnement <span style="color:var(--red,#dc2626)">*</span> <span style="font-weight:400;font-size:11.5px;opacity:.7">— bepaalt bij welke sale de betalingen voor de mentorcommissie tellen</span></div>
+    ${SOORT_OPT.map(([v,l,d])=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;cursor:pointer"><input type="radio" name="soort" value="${v}" ${so.soort===v?'checked':''} data-soort><span><b style="font-size:12.5px">${esc(l)}</b> <span style="font-size:11.5px;opacity:.7">${esc(d)}</span></span></label>`).join('')}
+    ${so.soort==='aanpassing' ? `<div class="field" style="margin-top:6px"><label>Soort aanpassing</label><select id="soortType"><option value="">— kies —</option>${[['uitstel','Uitstel'],['lager_bedrag','Lager bedrag'],['regeling','Regeling']].map(([v,l])=>`<option value="${v}" ${so.aanpassing_type===v?'selected':''}>${l}</option>`).join('')}</select></div>` : ''}
+    ${saleNodig ? `<div class="field" style="margin-top:6px"><label>Hoort bij sale</label><select id="soortSale"><option value="">— kies de oorspronkelijke sale —</option>${state.soortSales.map(x=>`<option value="${esc(x.id)}" ${so.sale_deal_id===x.id?'selected':''}>${esc((x.referentie||'Offerte')+' · '+(x.getekend_op?String(x.getekend_op).slice(0,10):'niet getekend')+(x.gearchiveerd?' · gearchiveerd':''))}</option>`).join('')}</select></div>` : ''}`;
+  box.querySelectorAll('[data-soort]').forEach(r=>r.addEventListener('change',e=>{ so.soort=e.target.value; if(so.soort!=='aanpassing') so.aanpassing_type=null; renderSoort(); }));
+  const t=document.getElementById('soortType'); if(t) t.addEventListener('change',e=>{ so.aanpassing_type=e.target.value||null; });
+  const sl=document.getElementById('soortSale'); if(sl) sl.addEventListener('change',e=>{ so.sale_deal_id=e.target.value||null; });
+  laadSoortSales();
+}
+function soortFout(){
+  const so = state.soort;
+  if(!so.soort) return 'Kies de soort abonnement (mentorcommissie).';
+  if(so.soort==='aanpassing' && !so.aanpassing_type) return 'Kies het soort aanpassing (uitstel, lager bedrag of regeling).';
+  if((so.soort==='aanpassing'||so.soort==='incasso_regeling') && !so.sale_deal_id) return 'Kies bij welke sale dit abonnement hoort.';
+  return null;
+}
+
 function validateSubs(){
+  const sf = soortFout(); if(sf) return sf;
   if(!state.subs.length) return 'Minimaal 1 abonnement vereist';
   // Sub-datum-regels (alleen in deal-modus; standalone → geen cursus-start):
   // - Aanbetaling-sub: ≥3d vóór cursus-start.
@@ -980,6 +1023,7 @@ async function submit(syncToTl){
       first_call_at:null,
       sync_to_tl:!!syncToTl,
       subscriptions:subsPayload,
+      commissie_soort:{ ...state.soort },
     };
     if(bp.bypass === true){
       payload.bypass_reservation_fee = true;

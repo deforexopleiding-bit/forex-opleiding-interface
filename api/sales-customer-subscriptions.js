@@ -4,6 +4,7 @@
 // Permission: sales.customer.view.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { laadSubsMetSoort } from './_lib/subscription-soort.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
@@ -32,9 +33,10 @@ export default async function handler(req, res) {
     let subscriptions = [];
     const dealsWithSubs = new Set();
     if (dealIds.length) {
-      const { data: subs } = await supabaseAdmin.from('subscriptions')
-        .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, postponed_months, original_start_date')
-        .in('deal_id', dealIds).order('start_date', { ascending: true });
+      // Soort abonnement (mentorcommissie) mee, fail-soft zonder migratie.
+      const subs = await laadSubsMetSoort(supabaseAdmin, dealIds,
+        'id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, postponed_months, original_start_date',
+        { order: { col: 'start_date', opts: { ascending: true } } });
       subscriptions = subs || [];
       for (const s of subscriptions) dealsWithSubs.add(s.deal_id);
 

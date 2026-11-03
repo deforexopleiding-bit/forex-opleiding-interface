@@ -15,6 +15,7 @@
 // api/_lib/commissie-toewijzing.js voor de scope op de eigen deal).
 
 import { supabaseAdmin } from '../supabase.js';
+import { laadSubsMetSoort } from './subscription-soort.js';
 import { computeDealTotals } from './deal-total.js';
 import { betaaldBedrag, telAlsBetaald, isVolledigGecrediteerd } from './factuur-betaald.js';
 import { customerDisplayName } from './customer-name.js';
@@ -27,7 +28,7 @@ import {
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn } from './commissie-maand.js';
 import {
   REDENEN, REDEN_LABEL, DEFAULT_PCT, aandeelPerMentor, attrIdempotencyKey, attributionIdOf,
-  isSchemaOntbreekt, loadAttributions, maakSaleScope, factuurVanSale,
+  isSchemaOntbreekt, loadAttributions, maakSaleScope, factuurVanSale, commissieSalesVan,
 } from './commissie-toewijzing.js';
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -94,23 +95,25 @@ async function dealContext(deals) {
   const alleDeals = new Map(klantDeals.map((d) => [d.id, d]));
   for (const d of deals) if (!alleDeals.has(d.id)) alleDeals.set(d.id, d);
   const alleDealIds = [...alleDeals.keys()];
-  const subs = alleDealIds.length
-    ? await alle(supabaseAdmin.from('subscriptions').select('id, deal_id, amount, vat_percentage, line_items, term_count, billing_cycle, start_date, status, teamleader_subscription_id').in('deal_id', alleDealIds), 'subscriptions')
+  const subs = await laadSubsMetSoort(supabaseAdmin, alleDealIds,
+    'id, deal_id, amount, vat_percentage, line_items, term_count, billing_cycle, start_date, status, teamleader_subscription_id');
+  // Commissie-sales per klant (event-parents + actieve toewijzingen).
+  const klantParents = custIds.length
+    ? await alle(supabaseAdmin.from('mentor_ledger_entries')
+      .select('customer_id, source_quote_id, status')
+      .eq('entry_type', 'bonus').is('parent_entry_id', null).in('customer_id', custIds), 'ledger (klant)')
     : [];
-  const saleScope = maakSaleScope({ deals: [...alleDeals.values()], subs });
+  // De bekeken deals (zoeken / preview "Sale toewijzen") tellen mee als
+  // commissie-sale: zo toont de preview wat er na toewijzen gebeurt.
+  const salesPerKlant = commissieSalesVan(klantParents, [
+    ...(attrs.list || []),
+    ...deals.map((d) => ({ customer_id: d.customer_id, deal_id: d.id, status: 'actief' })),
+  ]);
+  const saleScope = maakSaleScope({ deals: [...alleDeals.values()], subs, commissieSales: salesPerKlant });
 
   // Regeling na creditering: aan welke sale hangt een regelingsfactuur?
   const facturen = invoices.filter((i) => !isConcept(i)); // concept telt nooit
   if (regCtx.krediet.size || regCtx.handmatig.size) {
-    const parents = await alle(supabaseAdmin.from('mentor_ledger_entries')
-      .select('customer_id, source_quote_id, status')
-      .eq('entry_type', 'bonus').is('parent_entry_id', null).in('customer_id', custIds), 'ledger (klant)');
-    const salesPerKlant = new Map();
-    for (const e of parents) {
-      if (e.status === 'geannuleerd' || !e.source_quote_id || !e.customer_id) continue;
-      if (!salesPerKlant.has(e.customer_id)) salesPerKlant.set(e.customer_id, new Set());
-      salesPerKlant.get(e.customer_id).add(e.source_quote_id);
-    }
     for (const inv of facturen) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
   }
 

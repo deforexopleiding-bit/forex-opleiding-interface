@@ -1,5 +1,6 @@
 // api/admin/tl-import-subscriptions.js
 // POST → bulk-import van actieve TL-subscriptions + bijbehorende klanten.
+import { stelSoortVoor, soortKolomOntbreekt } from '../_lib/subscription-soort.js';
 // SUPER_ADMIN ONLY. Idempotent (skip op teamleader_subscription_id). Dry-run support.
 //
 // Body: { dry_run=true, department_id?, limit=100, skip_existing=true }
@@ -341,13 +342,26 @@ export default async function handler(req, res) {
             status: 'active', start_date: starts || new Date().toISOString().slice(0, 10), total_amount: totalExcl,
           }).select('id').single();
           if (gdErr) throw new Error('ghost-deal insert: ' + gdErr.message);
-          const { error: subErr } = await supabaseAdmin.from('subscriptions').insert({
+          const subRij = {
             deal_id: gd.id, teamleader_subscription_id: sub.id, description: full.title || sub.title || 'Geïmporteerd uit TL',
             status: localStat, start_date: starts || null, end_date: full.ends_on || sub.ends_on || null,
             term_count: termCount, amount: totalExcl, vat_percentage: liRows[0]?.vat_percentage ?? 21,
             billing_cycle: billing, line_items: liRows, tl_department_id: dept,
             imported_from_tl_at: new Date().toISOString(),
-          });
+          };
+          // Soort abonnement (mentorcommissie): alleen als het voorstel ZEKER is
+          // (één getekende sale, start ≤ 92 d). Anders leeg → "soort ontbreekt"
+          // in het controlescherm; nooit gokken.
+          let soortRij = {};
+          try {
+            const { data: klantDeals } = await supabaseAdmin.from('deals')
+              .select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at').eq('customer_id', customerId);
+            const v = stelSoortVoor({ deal_id: gd.id, start_date: starts || null }, { deals: klantDeals || [] });
+            if (v.zeker) soortRij = { soort: v.soort, aanpassing_type: v.aanpassing_type, sale_deal_id: v.sale_deal_id, soort_bron: 'import', soort_gezet_op: new Date().toISOString() };
+            detail.soort_voorstel = { soort: v.soort, zeker: v.zeker, reden: v.reden };
+          } catch (e) { console.warn('[tl-import] soort-voorstel:', e.message); }
+          let { error: subErr } = await supabaseAdmin.from('subscriptions').insert({ ...subRij, ...soortRij });
+          if (subErr && soortKolomOntbreekt(subErr)) ({ error: subErr } = await supabaseAdmin.from('subscriptions').insert(subRij));
           if (subErr) throw new Error('subscription insert: ' + subErr.message);
         }
         totals.subs_imported++; detail.action = 'imported';

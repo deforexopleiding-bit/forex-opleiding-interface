@@ -648,6 +648,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   werkelijkheid: `api/_lib/commissie-uitbetaald.js` (goedgekeurd t/m app_settings
   `mentor_rapporten_werkelijk_uitbetaald_tot`, standaard 2026-09-01 = werkelijk uitbetaald).
   `mark_payout_paid` faalt met bonus_drift op elk rapport (telt de rapportmaand, rapport koppelt M-1).
+  SOORT ABONNEMENT (PR 2): `subscriptions.soort` (origineel/aanpassing[+aanpassing_type uitstel|lager_bedrag|regeling]/
+  incasso_regeling/nieuwe_offerte) + `sale_deal_id`, `api/_lib/subscription-soort.js`. Verplicht in
+  sales-subscription-create (400 SOORT_VERPLICHT), wijzigen via `api/subscription-soort.js` (ook met facturen).
+  Sale-regel (`maakSaleScope`/`factuurVanSale`) telt NOOIT meer klantbreed: alleen facturen van de eigen sale;
+  losse facturen (geen deal/abonnement) enkel bij de ENIGE commissie-sale (`commissieSalesVan`) zonder nieuwe
+  offerte. Zonder soort: oude regel, anders enige commissie-sale (overgang). Migratie 2026-11-03-subscriptions-soort.sql.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

@@ -22,6 +22,7 @@ import { createTlInvoice } from './_lib/invoice-create-core.js';
 import { assertDateNotInPast } from './_lib/onboarding-start-date.js';
 import { validateBypassRequest } from './_lib/reservation-fee-bypass.js';
 import { nlDateString } from './_lib/nl-period.js';
+import { SOORTEN, soortInvoerVan, valideerSoortenVoorKlant, soortKolomOntbreekt } from './_lib/subscription-soort.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -119,6 +120,15 @@ export default async function handler(req, res) {
     const subsNorm = subscriptions.map(s => ({ ...s, _lines: normalizeLineItems(s) }));
     for (const s of subsNorm) {
       if (!s._lines.length) return res.status(400).json({ error: `Abonnement "${s.description || ''}" heeft geen regel met bedrag > 0` });
+    }
+    // Soort abonnement is VERPLICHT (mentorcommissie, beslissing Maxim 3 nov
+    // 2026): origineel / aanpassing / incasso_regeling / nieuwe_offerte.
+    // De koppeling aan de sale wordt per klant gecontroleerd zodra die bekend is.
+    for (const s of subsNorm) {
+      s._soortInvoer = soortInvoerVan(s, req.body);
+      if (!SOORTEN.includes(s._soortInvoer.soort)) {
+        return res.status(400).json({ error: 'Kies de soort abonnement (origineel, aanpassing, incasso-regeling of nieuwe offerte).', code: 'SOORT_VERPLICHT' });
+      }
     }
 
     // Ondergrens-gate voor subscription.start_date: "niet in het verleden".
@@ -244,6 +254,9 @@ export default async function handler(req, res) {
         if (!d) return res.status(404).json({ error: 'Deal niet gevonden' });
         deal = d; dealId = d.id;
       }
+      const sv = await valideerSoortenVoorKlant(supabaseAdmin, { customerId: deal.customer_id, eigenDealId: dealId, invoer: subsNorm.map((s) => s._soortInvoer) });
+      if (!sv.ok) return res.status(400).json({ error: sv.fout, code: 'SOORT_ONGELDIG' });
+      sv.waarden.forEach((w, i) => { subsNorm[i]._soort = w; });
     } else {
       // Bedrijfsentiteit valideren.
       if (tl_department_id) {
@@ -297,6 +310,10 @@ export default async function handler(req, res) {
           customerId = cust.id;
         }
       }
+      // Soort + sale controleren vóór er een deal wordt aangemaakt (geen halve staat).
+      const sv = await valideerSoortenVoorKlant(supabaseAdmin, { customerId, eigenDealId: null, invoer: subsNorm.map((s) => s._soortInvoer) });
+      if (!sv.ok) return res.status(400).json({ error: sv.fout, code: 'SOORT_ONGELDIG' });
+      sv.waarden.forEach((w, i) => { subsNorm[i]._soort = w; });
       // Ghost-deal (geen offerte): subs hangen altijd onder een deal.
       const totalExcl = subsNorm.reduce((sum, s) => sum + s._lines.reduce((a, li) => a + (Number(li.amount) || 0) * (Number(s.term_count) || 1), 0), 0);
       const earliestStart = subsNorm.map(s => s.start_date).filter(Boolean).sort()[0] || new Date().toISOString().slice(0, 10);
@@ -437,7 +454,7 @@ export default async function handler(req, res) {
     const subRows = [];
     for (const s of subsNorm) {
       const totalExcl = s._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0);
-      const { data: row } = await supabaseAdmin.from('subscriptions').insert({
+      const basisRij = {
         deal_id:           dealId,
         description:        s.description || null,
         amount:            Math.round(totalExcl * 100) / 100,
@@ -448,7 +465,23 @@ export default async function handler(req, res) {
         tl_department_id:  departmentId,
         line_items:        s._lines.map(li => ({ description: li.description, amount: li.amount, vat_percentage: li.vat_percentage, product_id: li.product_id || null })),
         status:            'active',
-      }).select('*').single();
+      };
+      const soortRij = s._soort ? {
+        soort:            s._soort.soort,
+        aanpassing_type:  s._soort.aanpassing_type,
+        sale_deal_id:     s._soort.sale_deal_id || dealId,
+        soort_bron:       'aanmaak',
+        soort_gezet_door: user.id,
+        soort_gezet_op:   new Date().toISOString(),
+      } : {};
+      let { data: row, error: insErr } = await supabaseAdmin.from('subscriptions').insert({ ...basisRij, ...soortRij }).select('*').single();
+      // Fail-soft zolang docs/sql-migrations/2026-11-03-subscriptions-soort.sql
+      // niet gedraaid is: zonder de soort-kolommen opslaan (luid gelogd).
+      if (insErr && soortKolomOntbreekt(insErr)) {
+        console.warn('[sub-create] soort-kolommen ontbreken (migratie niet gedraaid) — abonnement zonder soort opgeslagen');
+        ({ data: row, error: insErr } = await supabaseAdmin.from('subscriptions').insert(basisRij).select('*').single());
+      }
+      if (insErr) console.error('[sub-create] subscription insert:', insErr.message);
       if (row) subRows.push(row);
     }
 

@@ -98,6 +98,13 @@
     sale_type: 'domestic',   // 'domestic' | 'intracommunautair' — standalone-only
     sync_to_tl: true,
 
+    // Soort abonnement (mentorcommissie, verplicht) — geldt voor alle subs in
+    // deze wizard. { soort, aanpassing_type, sale_deal_id }. Zie
+    // api/_lib/subscription-soort.js.
+    soort: { soort: null, aanpassing_type: null, sale_deal_id: null },
+    soortSales: [],
+    soortSalesFor: null,
+
     // Subs (1 of meer)
     subscriptions: [/* { description, term_count, start_date, end_date, line_items:[{description, amount, amount_incl, vat_percentage, _lead}] } */],
 
@@ -145,6 +152,9 @@
     _sub.custSearching = false;
     _sub.bypassFee = false;
     _sub.bypassReason = '';
+    _sub.soort = { soort: null, aanpassing_type: null, sale_deal_id: null };
+    _sub.soortSales = [];
+    _sub.soortSalesFor = null;
 
     _rerender();
     _loadRefData();      // entities + products + trajecten (parallel)
@@ -483,6 +493,12 @@
     if (step === 2) {
       if (!_sub.tl_department_id) { _sub.globalError = 'Kies een entiteit.'; _rerender(); return false; }
       if (!_sub.subscriptions.length) { _sub.globalError = 'Voeg minstens één abonnement toe.'; _rerender(); return false; }
+      {
+        const so = _sub.soort || {};
+        if (!so.soort) { _sub.globalError = 'Kies de soort abonnement (mentorcommissie).'; _rerender(); return false; }
+        if (so.soort === 'aanpassing' && !so.aanpassing_type) { _sub.globalError = 'Kies het soort aanpassing (uitstel, lager bedrag of regeling).'; _rerender(); return false; }
+        if ((so.soort === 'aanpassing' || so.soort === 'incasso_regeling') && !so.sale_deal_id) { _sub.globalError = 'Kies bij welke sale dit abonnement hoort.'; _rerender(); return false; }
+      }
       for (const s of _sub.subscriptions) {
         if (!s.description || !s.description.trim()) { _sub.globalError = 'Elk abonnement heeft een omschrijving nodig.'; _rerender(); return false; }
         if (!s.start_date) { _sub.globalError = 'Elk abonnement heeft een startdatum nodig.'; _rerender(); return false; }
@@ -655,6 +671,7 @@
         })),
       })),
     };
+    payload.commissie_soort = { ..._sub.soort };
     if (_sub.mode === 'deal' && _sub.dealId) payload.deal_id = _sub.dealId;
     else {
       payload.mode = 'standalone';
@@ -812,13 +829,58 @@
       </div>`;
   }
 
+  // ── Soort abonnement (mentorcommissie) ──────────────────────────────────
+  const SOORT_OPT = [
+    ['origineel', 'Origineel', 'Het abonnement van de sale zelf.'],
+    ['aanpassing', 'Aanpassing', 'Uitstel, lager bedrag of regeling van een bestaande sale.'],
+    ['incasso_regeling', 'Incasso-regeling', 'Termijnen van een regeling na incasso; blijft bij dezelfde sale.'],
+    ['nieuwe_offerte', 'Nieuwe offerte', 'Een nieuwe sale; telt nooit mee voor een oude event-bonus.'],
+  ];
+  function _soortKlantId() { return _sub.customer?.id || _sub.deal?.customer_id || null; }
+  async function _laadSoortSales(cid) {
+    if (!cid || _sub.soortSalesFor === cid) return;
+    _sub.soortSalesFor = cid;
+    const j = await tryFetch('soort', '/api/subscription-soort?customer_id=' + encodeURIComponent(cid));
+    _sub.soortSales = asArr(j?.sales);
+    _rerender();
+  }
+  window.__subwSoort = (k, v) => {
+    _sub.soort[k] = v || null;
+    if (k === 'soort' && v !== 'aanpassing') _sub.soort.aanpassing_type = null;
+    _rerender();
+  };
+  function _renderSoortBlok() {
+    const cid = _soortKlantId();
+    if (cid && _sub.soortSalesFor !== cid) queueMicrotask(() => _laadSoortSales(cid));
+    if (_sub.mode === 'deal' && !_sub.soort.soort) _sub.soort.soort = 'origineel';
+    const so = _sub.soort;
+    const saleNodig = so.soort === 'aanpassing' || so.soort === 'incasso_regeling';
+    return `<div class="sw-card" style="margin:12px 0;padding:12px 14px;border:1px solid var(--border);border-radius:8px">
+      <div style="font-weight:600;font-size:13px;margin-bottom:6px">Soort abonnement <span style="color:var(--rose)">*</span>
+        <span style="font-weight:400;font-size:11.5px;color:var(--text-3)"> — bepaalt bij welke sale de betalingen voor de mentorcommissie tellen</span></div>
+      ${SOORT_OPT.map(([v, l, d]) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;cursor:pointer">
+        <input type="radio" name="subw-soort" value="${v}" ${so.soort === v ? 'checked' : ''} onchange="__subwSoort('soort', this.value)">
+        <span><b style="font-size:12.5px">${esc(l)}</b> <span style="font-size:11.5px;color:var(--text-3)">${esc(d)}</span></span></label>`).join('')}
+      ${so.soort === 'aanpassing' ? `<label class="sw-field" style="margin-top:6px"><span>Soort aanpassing</span>
+        <select class="ib-input" onchange="__subwSoort('aanpassing_type', this.value)">
+          <option value="">— kies —</option>
+          ${[['uitstel', 'Uitstel'], ['lager_bedrag', 'Lager bedrag'], ['regeling', 'Regeling']].map(([v, l]) => `<option value="${v}" ${so.aanpassing_type === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></label>` : ''}
+      ${saleNodig ? `<label class="sw-field" style="margin-top:6px"><span>Hoort bij sale</span>
+        <select class="ib-input" onchange="__subwSoort('sale_deal_id', this.value)">
+          <option value="">— kies de oorspronkelijke sale —</option>
+          ${_sub.soortSales.map((x) => `<option value="${esc(x.id)}" ${so.sale_deal_id === x.id ? 'selected' : ''}>${esc((x.referentie || 'Offerte') + ' · ' + (x.getekend_op ? String(x.getekend_op).slice(0, 10) : 'niet getekend') + (x.bedrag != null ? ' · ' + eur(x.bedrag) : '') + (x.gearchiveerd ? ' · gearchiveerd' : ''))}</option>`).join('')}
+        </select></label>` : ''}
+    </div>`;
+  }
+
   function _renderStep2() {
     const entOpts = _sub.entities.map((e) => `<option value="${esc(e.tl_department_id)}" ${_sub.tl_department_id === e.tl_department_id ? 'selected' : ''}>${esc(e.label)}</option>`).join('');
     const total = _sub.subscriptions.reduce((sum, s) => sum + _subInclPerTerm(s) * (Number(s.term_count) || 1), 0);
     return `<div class="sw-step">
       <h2 class="sw-step-title">Abonnementen</h2>
       <p class="sw-step-sub">Termijnbedragen zijn <b>excl. BTW</b> in de payload; de <b>incl.-kolom</b> is de leidraad voor klant-communicatie. Wijzig één van beide en de andere volgt.</p>
-
+      ${_renderSoortBlok()}
       <div class="sw-header-row">
         <label class="sw-field"><span>Entiteit</span>
           <select class="ib-input" onchange="__subwSetField('tl_department_id', this.value)">${entOpts}</select>

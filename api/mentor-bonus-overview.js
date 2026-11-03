@@ -47,13 +47,14 @@ import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 import { isTrajectTermKey, maakVerrekenaar } from './_lib/cash-traject-omzetten.js';
+import { laadSubsMetSoort } from './_lib/subscription-soort.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
   loadRegelingContext, koppelDeal, incassoVoor, isConcept, heeftKrediet, regelingTermijnen,
 } from './_lib/commissie-regeling.js';
 import {
-  loadAttributions, attributionIdOf, uitTeSluitenDeals, REDEN_LABEL,
-  maakSaleScope, factuurVanSale, factuurVanSales,
+  loadAttributions, attributionIdOf, REDEN_LABEL,
+  maakSaleScope, factuurVanSale, commissieSalesVan,
 } from './_lib/commissie-toewijzing.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -249,11 +250,9 @@ export async function computeBonusOverview(effectiveUserId) {
       }
       const dealIds = (deals || []).map((d) => d.id);
       if (dealIds.length) {
-        const { data: subs } = await supabaseAdmin
-          .from('subscriptions')
-          .select('id, deal_id, amount, vat_percentage, term_count, start_date, billing_cycle, line_items, status, teamleader_subscription_id')
-          .in('deal_id', dealIds)
-          .order('start_date', { ascending: false });
+        const subs = await laadSubsMetSoort(supabaseAdmin, dealIds,
+          'id, deal_id, amount, vat_percentage, term_count, start_date, billing_cycle, line_items, status, teamleader_subscription_id',
+          { order: { col: 'start_date', opts: { ascending: false } } });
         // Latest sub per deal wint.
         for (const s of subs || []) {
           allSubs.push(s);
@@ -450,42 +449,34 @@ export async function computeBonusOverview(effectiveUserId) {
     // Regelingsfacturen (geen deal/abonnement) krijgen hun sale via de
     // koppelregel (_k); incasso-markeringen stoppen de commissie vanaf `sinds`.
     const regCtx = await loadRegelingContext(supabaseAdmin, customerIds);
-    const salesPerKlant = new Map();
-    if (regCtx.krediet.size || regCtx.handmatig.size) {
+    // Commissie-sales per klant (alle mentoren): voor de koppelregel en voor
+    // facturen zonder deal/abonnement (sale-regel 4, commissie-toewijzing.js).
+    let salesPerKlant = new Map();
+    if (customerIds.length) {
       const { data: alleParents } = await supabaseAdmin
         .from('mentor_ledger_entries')
         .select('customer_id, source_quote_id, status')
         .eq('entry_type', 'bonus')
         .is('parent_entry_id', null)
         .in('customer_id', customerIds);
-      for (const e of alleParents || []) {
-        if (e.status === 'geannuleerd' || !e.source_quote_id || !e.customer_id) continue;
-        if (!salesPerKlant.has(e.customer_id)) salesPerKlant.set(e.customer_id, new Set());
-        salesPerKlant.get(e.customer_id).add(e.source_quote_id);
-      }
+      salesPerKlant = commissieSalesVan(alleParents || [], attrs.list || []);
+    }
+    if (regCtx.krediet.size || regCtx.handmatig.size) {
       for (const arr of invoicesByCust.values()) for (const inv of arr) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
     }
-    // Hoort deze factuur bij een ANDERE sale (of bewust bij geen)? Dan telt ze
-    // niet klantbreed mee voor deze sale — anders telt een betaling dubbel.
-    const elders = (inv, eigenDeal) => !!(inv._k && !inv._k.onbekend && inv._k.deal !== (eigenDeal || null));
     const addMonthsIso = (iso, n) => addMonths(new Date(String(iso).slice(0, 10) + 'T00:00:00Z'), n).toISOString().slice(0, 10);
 
-    // Klant-route afgebakend op een toewijzing: een toegewezen sale ziet alleen
-    // de facturen van zijn eigen deal; een event-sale ziet de facturen van
-    // (andere) toegewezen deals niet. Zelfde regel als de vrijgave-engine.
-    // Returnt null = geen afbakening (oude klantbrede maps gebruiken).
-    const saleScope = maakSaleScope({ deals: allDeals, subs: allSubs });
+    // Elke sale (event of toewijzing) ziet alleen de facturen van zijn eigen
+    // sale — nooit klantbreed (PR 2, 3 nov 2026). Zelfde regel als de
+    // vrijgave-engine (factuurVanSale).
+    const saleScope = maakSaleScope({ deals: allDeals, subs: allSubs, commissieSales: salesPerKlant });
     const scopedCustCache = new Map();
-    function scopedCust(customerId, { dealId = null, excl = null, eigenDeal = null } = {}) {
+    function scopedCust(customerId, { dealId = null } = {}) {
       if (!customerId) return null;
       const alle = invoicesByCust.get(customerId) || [];
-      const metElders = !dealId && alle.some((inv) => elders(inv, eigenDeal));
-      if (!dealId && !(excl && excl.size) && !metElders) return null;
-      const key = customerId + '|' + (dealId ? 'd:' + dealId : 'x:' + [...(excl || [])].sort().join(',') + '|e:' + (metElders ? eigenDeal : ''));
+      const key = customerId + '|d:' + (dealId || '-');
       if (scopedCustCache.has(key)) return scopedCustCache.get(key);
-      const list = alle.filter((inv) => (dealId
-        ? factuurVanSale(inv, dealId, saleScope, customerId)
-        : (!factuurVanSales(inv, excl || new Set(), saleScope, customerId) && !elders(inv, eigenDeal))));
+      const list = dealId ? alle.filter((inv) => factuurVanSale(inv, dealId, saleScope, customerId)) : [];
       const acc = { paid_total: 0, last_paid_date: null, list, overdue: { count: 0, amount: 0 } };
       for (const inv of list) {
         acc.paid_total += betaaldBedrag(inv);
@@ -771,25 +762,19 @@ export async function computeBonusOverview(effectiveUserId) {
       const attrId   = attributionIdOf(r);
       const attr     = attrId ? (attrs.byId.get(attrId) || null) : null;
       const eigenDeal = r.source_quote_id || null;
-      const excl     = attrId ? null : uitTeSluitenDeals(attrs.activeDealIdsByCust.get(r.customer_id), eigenDeal);
-      const scope    = attrId ? scopedCust(r.customer_id, { dealId: eigenDeal || '00000000-0000-0000-0000-000000000000' })
-        : scopedCust(r.customer_id, { excl, eigenDeal });
-      // Abonnementen van de sale: bij een toewijzing die van de eigen deal plus
-      // de TL-abonnementen op een ghost-deal die bij deze sale horen
-      // (maakSaleScope); bij een event-sale zonder die van toegewezen sales.
-      let customerDeals = dealsByCust.get(r.customer_id) || [];
-      if (attrId) {
-        const ghosts = saleScope.ghostVan(eigenDeal);
-        customerDeals = customerDeals.filter((d) => d.id === eigenDeal || ghosts.has(d.id));
-      } else if (excl.size) {
-        const exclGhosts = new Set([...excl].flatMap((d) => [...saleScope.ghostVan(d)]));
-        customerDeals = customerDeals.filter((d) => !excl.has(d.id) && !exclGhosts.has(d.id));
+      // Facturen en abonnementen van DEZE sale (factuurVanSale / subsVan):
+      // eigen deal, abonnementen volgens hun soort (origineel, aanpassing,
+      // incasso-regeling → deze sale; nieuwe offerte → nooit), en losse
+      // facturen enkel bij de enige commissie-sale. Nooit klantbreed.
+      const scope    = scopedCust(r.customer_id, { dealId: eigenDeal || '00000000-0000-0000-0000-000000000000' });
+      // Per deal het laatst gestarte abonnement dat bij deze sale hoort (zelfde
+      // keuze als vroeger subByDeal, maar enkel binnen de sale).
+      const perDeal = new Map();
+      for (const s of (eigenDeal ? saleScope.subsVan(eigenDeal) : [])) {
+        const cur = perDeal.get(s.deal_id);
+        if (!cur || String(s.start_date || '') > String(cur.start_date || '')) perDeal.set(s.deal_id, s);
       }
-      const allCustSubs = [];
-      for (const d of customerDeals) {
-        const s = subByDeal.get(d.id);
-        if (s) allCustSubs.push(s);
-      }
+      const allCustSubs = [...perDeal.values()];
       allCustSubs.sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
 
       // #625-regressie-fix: filter cancelled subs eruit vóór de combinatie
@@ -894,17 +879,10 @@ export async function computeBonusOverview(effectiveUserId) {
       let paidTotalFromInvs = 0;
       let lastPaidFromInvs  = null;
       {
-        const subKey  = sub?.teamleader_subscription_id || null;
-        const subAcc  = subKey ? subPaidMap.get(subKey) : null;
-        const custAcc = scope || (r.customer_id ? custPaidMap.get(r.customer_id) : null);
-        const subPaid  = (subAcc  && subAcc.paid_total  > 0) ? subAcc.paid_total  : 0;
-        const custPaid = (custAcc && custAcc.paid_total > 0) ? custAcc.paid_total : 0;
-        paidTotalFromInvs = Math.max(subPaid, custPaid);
-        // last_paid_date: kies de datum uit de route met het hoogste bedrag
-        // (typisch = de recentste betaling). Fallback op de andere route.
-        lastPaidFromInvs  =
-          (custPaid >= subPaid ? custAcc?.last_paid_date : subAcc?.last_paid_date)
-          || subAcc?.last_paid_date || custAcc?.last_paid_date || null;
+        // PR 2: enkel de facturen van deze sale (scope), geen MAX met een
+        // klantbrede of losse abonnementsroute meer.
+        paidTotalFromInvs = scope && scope.paid_total > 0 ? scope.paid_total : 0;
+        lastPaidFromInvs  = scope?.last_paid_date || null;
       }
 
       // Bepaal factuur-lijst (invList) vóór nbPaid, want nbPaid telt nu het
@@ -926,10 +904,13 @@ export async function computeBonusOverview(effectiveUserId) {
       // consequent aan de sub gekoppeld zijn (wizard-flow).
       const subKeyForTerm = sub?.teamleader_subscription_id || null;
       const invListSub    = subKeyForTerm ? (invoicesBySub.get(subKeyForTerm) || null) : null;
-      const invListCust   = scope ? scope.list : (r.customer_id ? (invoicesByCust.get(r.customer_id) || null) : null);
+      // PR 2: de facturen van deze sale (scope) zijn de bron; de lijst van het
+      // leidende abonnement is er een deel van.
+      const invListCust   = scope ? scope.list : null;
       const subLen        = invListSub  ? invListSub.length  : 0;
       const custLen       = invListCust ? invListCust.length : 0;
-      const invList       = (custLen > subLen) ? invListCust : (invListSub || invListCust);
+      const invList       = invListCust || invListSub;
+      void subLen; void custLen;
 
       // Regeling na creditering: termijnen = de ECHTE facturen (gecrediteerd →
       // vervangen; regelingsfacturen met hun eigen bedrag en vervaldag) + de
