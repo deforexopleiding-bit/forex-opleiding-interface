@@ -75,7 +75,7 @@ async function laadTab({ updateGooit = false } = {}) {
     },
     location: { href: '' },
   };
-  const modalUrl = url('modules/klanten-v2/views/modals/subscription-actions.js') + '?v=1';
+  const modalUrl = url('modules/klanten-v2/views/modals/subscription-actions.js') + '?v=2';
   mock.module(modalUrl, {
     namedExports: {
       openSubscriptionUpdateModal: ({ sub }) => {
@@ -87,6 +87,8 @@ async function laadTab({ updateGooit = false } = {}) {
       openSubscriptionPostponeModal: ({ sub }) => geopend.push(['postpone', sub.id]),
       openSubscriptionPostponeAllModal: () => geopend.push(['postpone-all']),
       openSubscriptionDeleteModal: ({ sub }) => geopend.push(['delete', sub.id]),
+      openSubscriptionSoortModal: ({ sub }) => geopend.push(['soort', sub.id]),
+      soortLabel: (sub) => (sub?.soort ? String(sub.soort) : null),
     },
   });
   const origErr = console.error;
