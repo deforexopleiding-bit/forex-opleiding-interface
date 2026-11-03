@@ -201,22 +201,49 @@ test('overzicht: conceptfactuur verschijnt nergens (geen termijn, geen achtersta
   assert.ok(!sale.termijnen.some((t) => t.due_date === '2026-09-17'));
 });
 
-test('overzicht: incasso → termijnen na de datum vervallen, uit projectie en KPI', async () => {
-  zet({ facturen: [
-      fact(R1, { amount_total: 1000, amount_paid: 1000, status: 'paid', paid_date: '2026-10-05', due_date: '2026-10-01' }),
-      fact(R2, { amount_total: 2000, due_date: '2027-02-01' }),
-    ],
-    incasso: [{ id: 'm1', customer_id: K, deal_id: null, sinds: '2026-11-01', reden: 'bureau', opgeheven_op: null }] });
+// PR 3 (3 nov 2026, Maxim): bij incasso STAAT de commissie STIL (niet weg);
+// een regeling laat echte betalingen weer tellen; oninbaar = weggevallen.
+const twee = () => [
+  fact(R1, { amount_total: 1000, amount_paid: 1000, status: 'paid', paid_date: '2026-10-05', due_date: '2026-10-01' }),
+  fact(R2, { amount_total: 2000, due_date: '2027-02-01' }),
+];
+test('overzicht: bij incasso → termijnen na de datum staan stil, uit projectie, label voor de mentor', async () => {
+  zet({ facturen: twee(), incasso: [{ id: 'm1', customer_id: K, deal_id: null, sinds: '2026-11-01', reden: 'GEHEIME-NOTITIE', opgeheven_op: null, status: 'bij_incasso' }] });
   const out = await computeBonusOverview(A);
   const sale = out.per_event[0].sales[0];
   assert.equal(sale.status, 'incasso');
-  assert.deepEqual(sale.incasso, { sinds: '2026-11-01', vervallen: 60 });
+  assert.deepEqual(sale.incasso, { sinds: '2026-11-01', vervallen: 60, stilstand: true });
   assert.equal(sale.termijnen.find((t) => t.due_date === '2027-02-01').status, 'incasso');
   assert.equal(sale.termijnen.find((t) => t.due_date === '2026-10-01').status, 'betaald');
   const feb = out.projection_12m.find((m) => m.month === '2027-02');
   if (feb) assert.equal(feb.expected, 0);
-  assert.equal(out.totals.earned_total, 30, '90 − 60 vervallen');
-  assert.equal(out.totals.cf_expected, 0, 'openstaand deel komt niet meer');
+  assert.equal(out.totals.earned_total, 90, 'stilstand is niet weg: verdiend blijft 90');
+  assert.equal(out.totals.cf_expected, 0, 'zolang het stilstaat wordt het niet verwacht');
+  assert.equal(sale.status_label.code, 'bij_incasso');
+  assert.match(sale.status_label.verwachting, /staat stil/);
+  assert.ok(!JSON.stringify(sale.status_label).includes('GEHEIME-NOTITIE'), 'de vrije reden van Maxim gaat niet naar de mentor');
+});
+
+test('overzicht: afgesloten als oninbaar → weggevallen, telt niet als verdiend', async () => {
+  zet({ facturen: twee(), incasso: [{ id: 'm1', customer_id: K, deal_id: null, sinds: '2026-12-01', incasso_sinds: '2026-11-01', reden: 'x', opgeheven_op: null, status: 'afgesloten', afgesloten_als: 'oninbaar' }] });
+  const out = await computeBonusOverview(A);
+  const sale = out.per_event[0].sales[0];
+  assert.equal(sale.incasso.sinds, '2026-11-01', 'vanaf het begin van de incasso');
+  assert.equal(out.totals.earned_total, 30, '90 − 60 weggevallen');
+  assert.equal(sale.status_label.code, 'weggevallen');
+});
+
+test('engine: incasso-regeling → betalingen tellen weer, ook wat tijdens de stilstand binnenkwam', async () => {
+  const betaaldTijdensIncasso = fact(R1, { amount_total: 1000, amount_paid: 1000, status: 'paid', paid_date: '2026-11-15', due_date: '2026-11-15' });
+  zet({ facturen: [betaaldTijdensIncasso], incasso: [{ id: 'm1', customer_id: K, deal_id: null, sinds: '2026-11-01', reden: 'x', opgeheven_op: null, status: 'bij_incasso' }] });
+  await engine.releaseProportionalForPaidAmount({ customerId: K });
+  assert.equal(kids('p-ev').length, 0, 'bij incasso: staat stil');
+  db.tables.mentor_commissie_incasso[0].opgeheven_op = '2026-12-01T00:00:00Z';
+  db.tables.mentor_commissie_incasso.push({ id: 'm2', customer_id: K, deal_id: null, sinds: '2026-12-01', incasso_sinds: '2026-11-01', reden: 'regeling', opgeheven_op: null, status: 'incasso_regeling' });
+  await engine.releaseProportionalForPaidAmount({ customerId: K });
+  assert.equal(som(kids('p-ev')), 30, 'regeling: 1000/3000 × 90');
+  const out = await computeBonusOverview(A);
+  assert.equal(out.per_event[0].sales[0].status_label.code, 'regeling');
 });
 
 /* ── Cockpit-acties ───────────────────────────────────────────────────── */

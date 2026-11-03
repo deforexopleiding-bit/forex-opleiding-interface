@@ -26,16 +26,18 @@
 // niet als betaald, niet als verwacht, niet als achterstallig, niet in de
 // koppelregel.
 //
-// ── 3. INCASSO ───────────────────────────────────────────────────────────
-// mentor_commissie_incasso: vanaf `sinds` is de klant (of één sale) niet meer
-// voor de mentor. Betalingen met datum >= sinds tellen niet, ook niet als
-// het bureau later geld binnenhaalt. Wat al vrijgegeven/uitbetaald is blijft
-// (forward-only). Het grootboek wordt NIET aangeraakt: elke lezer laat de
-// betalingen vanaf `sinds` gewoon weg. Opheffen = de markering eindigt; de
-// volgende vrijgave-run haalt in wat sinds betaald is.
+// ── 3. INCASSO (status per klant, PR 3 — api/_lib/klant-incassostatus.js) ─
+// bij_incasso: de commissie STAAT STIL — betalingen met datum >= sinds tellen
+// (nog) niet. incasso_regeling of afgesloten-betaald: echte betalingen tellen
+// weer (ook wat tijdens de stilstand binnenkwam); de bureaufactuur is concept
+// en telt nooit, dus telt enkel wat effectief bij ons binnenkomt.
+// afgesloten-oninbaar: niets vanaf het begin van de incasso. Dit vervangt de
+// oude regel "alles na incasso telt nooit meer". Wat al vrijgegeven/
+// uitbetaald is blijft (forward-only); het grootboek wordt niet aangeraakt.
 
 import { betaaldBedrag, isVolledigGecrediteerd } from './factuur-betaald.js';
 import { isSchemaOntbreekt } from './commissie-toewijzing.js';
+import { laadIncassoRijen, commissieStop } from './klant-incassostatus.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -90,12 +92,13 @@ export async function loadRegelingContext(db, customerIds = []) {
   } catch (e) { console.warn('[commissie-regeling] koppeling:', e?.message || e); }
 
   try {
-    const { data, error } = await db.from('mentor_commissie_incasso')
-      .select('id, customer_id, deal_id, sinds, reden, bron, gezet_op, opgeheven_op').in('customer_id', ids);
-    if (error) { if (!ontbreekt(error)) console.warn('[commissie-regeling] incasso:', error.message); }
-    else {
+    // Incassostatus (api/_lib/klant-incassostatus.js): status-kolommen
+    // fail-soft — zonder 2026-11-03-klant-incassostatus.sql is elke actieve
+    // rij 'bij_incasso' (het oude gedrag).
+    const r = await laadIncassoRijen(db, ids, { alleenActief: true });
+    if (r.ok) {
       ctx.incassoOk = true;
-      ctx.incasso = (data || []).filter((r) => !r.opgeheven_op);
+      ctx.incasso = r.rijen.filter((m) => !m.opgeheven_op);
     }
   } catch (e) { console.warn('[commissie-regeling] incasso:', e?.message || e); }
 
@@ -135,13 +138,26 @@ export function koppelDeal(inv, ctx, salesPerKlant) {
   return { onbekend: true };
 }
 
-/** Actieve incassomarkering voor (klant, sale): specifiek voor de sale gaat voor klantbreed. */
-export function incassoVoor(markeringen, customerId, dealId) {
+/** Actieve incassostatus-rij voor (klant, sale): specifiek voor de sale gaat voor klantbreed. Elke status. */
+export function incassoStatusVoor(markeringen, customerId, dealId) {
   if (!customerId || !markeringen?.length) return null;
   const actief = markeringen.filter((m) => m.customer_id === customerId && !m.opgeheven_op);
   return actief.find((m) => dealId && m.deal_id === dealId)
     || actief.find((m) => !m.deal_id)
     || null;
+}
+
+/**
+ * Staat de commissie stil voor (klant, sale)? Geeft de rij terug met
+ * `sinds` = de datum vanaf wanneer betalingen niet tellen, of null.
+ * PR 3 (3 nov 2026): bij_incasso → stilstand vanaf sinds; incasso_regeling en
+ * afgesloten-betaald → echte betalingen tellen weer (null); afgesloten-
+ * oninbaar → niets vanaf het begin van de incasso.
+ */
+export function incassoVoor(markeringen, customerId, dealId) {
+  const m = incassoStatusVoor(markeringen, customerId, dealId);
+  const stop = commissieStop(m);
+  return stop ? { ...m, sinds: stop } : null;
 }
 
 /**

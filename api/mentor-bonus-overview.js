@@ -48,9 +48,10 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 import { isTrajectTermKey, maakVerrekenaar } from './_lib/cash-traject-omzetten.js';
 import { laadSubsMetSoort } from './_lib/subscription-soort.js';
+import { mentorLabel, statusVan } from './_lib/klant-incassostatus.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
-  loadRegelingContext, koppelDeal, incassoVoor, isConcept, heeftKrediet, regelingTermijnen,
+  loadRegelingContext, koppelDeal, incassoVoor, incassoStatusVoor, isConcept, heeftKrediet, regelingTermijnen,
 } from './_lib/commissie-regeling.js';
 import {
   loadAttributions, attributionIdOf, REDEN_LABEL,
@@ -1162,8 +1163,11 @@ export async function computeBonusOverview(effectiveUserId) {
       // een (vervangende) factuur loopt, ook al werd het abonnement stopgezet.
       const regelingLoopt = !!(regeling && regeling.termijnen.some((t) => t.inv && !t.gecrediteerd));
       const subCancelled = activeSubs.length === 0 && allCustSubs.length > 0 && !regelingLoopt;
-      // Incasso: wat vervalt telt niet als verdiend.
-      if (vervallen > 0 && !schemaUnknown) earned_total = round2(earned_total - vervallen);
+      // Incasso (PR 3): bij_incasso = stilstand (niet weg, wel niet verwacht);
+      // enkel afgesloten-oninbaar is echt weggevallen en telt niet als verdiend.
+      const statusRij = incassoStatusVoor(regCtx.incasso, r.customer_id, eigenDeal);
+      const weggevallen = !!(statusRij && statusVan(statusRij) === 'afgesloten' && statusRij.afgesloten_als === 'oninbaar');
+      if (vervallen > 0 && !schemaUnknown && weggevallen) earned_total = round2(earned_total - vervallen);
       if (schemaUnknown)          saleStatus = 'geen_abonnement';
       else if (subCancelled)      saleStatus = 'geannuleerd';
       else if (nbPaid >= termCount && termCount > 0) saleStatus = 'voltooid';
@@ -1175,6 +1179,9 @@ export async function computeBonusOverview(effectiveUserId) {
       // telt nergens mee (mentorAmount was al 0).
       if (isCancelled) saleStatus = 'geannuleerd';
       else if (sindsI)  saleStatus = 'incasso';
+      // Label voor de mentor: bij incasso / regeling / geannuleerd / weggevallen,
+      // met reden en verwachting (geen dossierdetails, geen vrije tekst).
+      const statusLabel = mentorLabel({ marking: statusRij, saleGeannuleerd: saleStatus === 'geannuleerd' });
 
       // Extra afgeleide velden voor de UI. last_payment_date valt eerst
       // terug op de source_invoice_id.paid_date; als die er niet is,
@@ -1249,7 +1256,8 @@ export async function computeBonusOverview(effectiveUserId) {
           created_at         : attr?.created_at || r.created_at || null,
           mentor_count       : Math.max(1, mentorsPerSale.get(deelSleutel(r))?.size || 1),
           // Incasso: alleen datum + wat vervalt (geen dossierdetails voor de mentor).
-          incasso            : sindsI ? { sinds: sindsI, vervallen: round2(vervallen) } : null,
+          incasso            : sindsI ? { sinds: sindsI, vervallen: round2(vervallen), stilstand: !weggevallen } : null,
+          status_label       : statusLabel,
           // Regeling na creditering: deel van de commissie dat door geen
           // (vervangende) factuur of abonnementstermijn gedekt is.
           regeling           : regeling ? { niet_gedekt: regeling.niet_gedekt } : null,

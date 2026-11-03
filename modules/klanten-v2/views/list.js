@@ -82,6 +82,7 @@ export async function renderListView(rootEl, { profile } = {}) {
       search: '',
       created_from: '',
       created_to: '',
+      incasso: '',             // '' | bij_incasso | incasso_regeling | afgesloten | actief
     },
     sort: 'created_at:desc',
     page: 1,
@@ -147,6 +148,7 @@ async function loadList() {
     params.set('status', state.filter.status);
     if (state.filter.created_from) params.set('created_from', state.filter.created_from);
     if (state.filter.created_to)   params.set('created_to', state.filter.created_to);
+    if (state.filter.incasso)      params.set('incasso', state.filter.incasso);
     params.set('sort_by', sortBy);
     params.set('sort_dir', sortDir || 'desc');
     params.set('page', String(state.page));
@@ -301,10 +303,18 @@ function renderToolbar() {
     ${(state.filter.created_from || state.filter.created_to) ? `<button type="button" class="ds-chip" data-act="date-clear" title="Wis datum-filter">✕ datum</button>` : ''}
   `;
 
+  // Incassostatus (PR 3 mentorcommissie): eenduidige status per klant.
+  const incassoSelect = `
+    <select class="ds-filter-sel" data-act="incasso" title="Incassostatus">
+      ${[['', 'Incasso: alle'], ['bij_incasso', 'Bij incasso'], ['incasso_regeling', 'Incasso-regeling'], ['afgesloten', 'Incasso afgesloten'], ['actief', 'Geen incasso']]
+        .map(([v, l]) => `<option value="${v}" ${state.filter.incasso === v ? 'selected' : ''}>${K().esc(l)}</option>`).join('')}
+    </select>`;
+
   el.innerHTML = `
     ${statusChips}
     <div style="width:1px; height:22px; background:var(--border); margin:0 4px;"></div>
     ${tagsSelector}
+    ${incassoSelect}
     ${dateRange}
     <div class="ds-tb-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -315,6 +325,12 @@ function renderToolbar() {
       <span style="font-size:11.5px; color:var(--text-3); font-family:'IBM Plex Mono',monospace;">${K().esc(state.total)} klanten</span>
     </div>
   `;
+
+  el.querySelector('[data-act="incasso"]')?.addEventListener('change', (e) => {
+    state.filter.incasso = e.target.value || '';
+    state.page = 1;
+    loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
+  });
 
   // Status-chips — sync teller + pager mét tabel-render, ná fetch (bug-fix
   // 2026-08-16: renderToolbar() draaide vóór loadList() klaar was → teller
@@ -472,6 +488,13 @@ function tableFrame(bodyHtml) {
     </div>`;
 }
 
+function incassoPillFor(c) {
+  const i = c.incasso_status;
+  if (!i) return '';
+  const kleur = i.status === 'bij_incasso' ? 'var(--rose)' : i.status === 'incasso_regeling' ? 'var(--amber)' : 'var(--text-3)';
+  return ` <span class="ds-pill ds-pill-neutral nodot" title="Incassostatus${i.sinds ? ' sinds ' + K().esc(i.sinds) : ''}" style="color:${kleur};border-color:${kleur};margin-left:4px">${K().esc(i.label || i.status)}</span>`;
+}
+
 function renderRows() {
   return state.rows.map((c) => rowHtml(c)).join('');
 }
@@ -508,7 +531,7 @@ function rowHtml(c) {
       </td>
       <td><div class="ds-cell-main">${K().esc(emailPhone || '—')}</div></td>
       <td class="ds-optional"><div style="display:flex; gap:4px; flex-wrap:wrap;">${tagsHtml}${extraTags || ''}${!(c.tags || []).length ? '<span style="color:var(--text-3); font-size:12px;">—</span>' : ''}</div></td>
-      <td class="ds-optional">${statusPill}</td>
+      <td class="ds-optional">${statusPill}${incassoPillFor(c)}</td>
       <td class="ds-optional"><span class="num" style="font-size:12.5px; color:var(--text-2);">${K().esc(created)}</span></td>
       <td class="ds-optional"><span class="num" style="font-size:12.5px; color:var(--text-2);">${K().esc(formatDate(c.last_contact_at) || '—')}</span></td>
       <td>
