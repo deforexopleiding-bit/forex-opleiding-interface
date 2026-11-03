@@ -3207,6 +3207,12 @@
     // refreshes heen tot de server hetzelfde zegt — een lijst-fetch die vóór
     // de schrijfactie vertrok, laat de badge dan niet terugspringen.
     leesStand:     {},
+    // Gesprekken die de gebruiker zelf op ongelezen zette (per conv-id). Die
+    // blijven ongelezen tot een klik, ook als ze open staan en er iets nieuws
+    // binnenkomt (3 nov 2026). Leeft zo lang het tabblad leeft.
+    handOngelezen: {},
+    openMarkeerBezig: null,            // conv-id waarvoor het open gesprek nu gemarkeerd wordt
+    openMarkeerPauze: null,            // { id, tot } na een mislukte automatische markering
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
     compose: {
@@ -3278,6 +3284,7 @@
     //
     // _fetchOverzicht hiernaast deed het al goed (`if (!j || j.error)`). Dit is
     // dus geen keuze geweest maar een inconsistentie binnen één bestand.
+    let lijstGelukt = false;
     if (!j || j.error) {
       st.error = (j && j.error) || 'Kon de gesprekken niet laden';
       // De vorige lijst blijft staan. Een lijst die leegvalt bij een hik is
@@ -3285,6 +3292,7 @@
       // er wel is, en concludeert dat hij niets gestuurd heeft.
       st.fetched = true;
     } else {
+      lijstGelukt = true;
       st.items = asArr(j?.items); st.fetched = true;
       _wbxPasLeesStandToe(st.items);
       st.error = null;
@@ -3303,16 +3311,22 @@
     // SURFACE A: auto-open eerste gesprek na eerste fetch. Filtert de wanbetaler-
     // set client-side (zelfde criteria als _inboxConvsListHtml zodat auto-open
     // niet naar een niet-zichtbare conv wijst).
-    if (!_ui.inbox.autoOpenedFirst && !_ui.inbox.selectedConv) {
-      const debtorItems = _selectVisibleInboxItems(asArr(st.items));
-      const first = debtorItems[0];
-      if (first?.id) {
+    //
+    // 3 nov 2026: het eerste zichtbare gesprek ZONDER ongelezen berichten, en
+    // is er geen, dan opent er niets. Automatisch openen is geen klik en
+    // markeert dus niets; met ongelezen-eerst opende hier net een ongelezen
+    // gesprek, dat je dan las zonder dat het ooit gelezen werd. Zo betekent
+    // "open" altijd ook "gelezen", en blijft een manueel ongelezen gezet
+    // gesprek ongelezen na herladen (de reden voor markeer:false).
+    // Eén poging, op de eerste geslaagde lijst die iets toont: daarna springt
+    // er niet plots een gesprek open omdat er ergens eentje gelezen werd.
+    if (lijstGelukt && !_ui.inbox.autoOpenedFirst && !_ui.inbox.selectedConv) {
+      const zichtbaar = _selectVisibleInboxItems(asArr(st.items));
+      if (zichtbaar.length) {
         _ui.inbox.autoOpenedFirst = true;
+        const gelezen = window.INBOX_WANBETALER_SELECTIE?.kiesAutoOpen?.(zichtbaar) || null;
         // queueMicrotask zodat de render eerst een lijst rendert vóór de select-race.
-        // Automatisch openen is geen klik: het gesprek blijft ongelezen tot
-        // de gebruiker het zelf aanklikt (anders zou een ongelezen gezet
-        // gesprek bij elke herlaadbeurt meteen weer gelezen worden).
-        queueMicrotask(() => window.__wbxInboxSelect(String(first.id), { markeer: false }));
+        if (gelezen?.id) queueMicrotask(() => window.__wbxInboxSelect(String(gelezen.id), { markeer: false }));
       }
     }
     // SURFACE A polish (v=24-fix): surgical repaint van alleen de list (behoudt
@@ -3325,6 +3339,8 @@
     } else {
       try { window.DFO?.render?.(); } catch (_) {}
     }
+    // Nieuw bericht in het gesprek dat open staat? Dan op het scherm en gelezen.
+    if (lijstGelukt) _wbxHoudOpenGesprekGelezen();
   }
   // Repaint alleen de thread-header (boven de messages). Header toont
   // 24h-badge / brief-tag / totalUnread — deze data komt uit convs.items en
@@ -3568,6 +3584,7 @@
     // /api/email-actions {action:'mark-read'} uit — dat schrijft alleen een
     // auditregel, dus elke badge kwam terug na herladen.
     if (!opts || opts.markeer !== false) _wbxMarkeerGelezen(convId, { stil: true });
+    // (_wbxMarkeerGelezen haalt ook een manuele 'ongelezen' weg: een klik wint.)
     // BP3 v30 — scroll-preserve op #wbxInboxList (voorheen: DFO.render zette
     // scrollTop=0 bij aanklikken van een gesprek).
     _wbxSafeRender();
@@ -4227,6 +4244,7 @@
     if (!id) return false;
     const k = { stand: 'gelezen', sinds: Date.now() };
     _ui.inbox.leesStand[id] = k;
+    delete _ui.inbox.handOngelezen[id];
     _wbxOptimisticSetUnread(id, 0);
     const r = await apiPost('/api/inbox-mark-read', { conversation_id: id, module: 'finance' });
     if (!r.ok) {
@@ -4253,16 +4271,57 @@
     const id = String(convId);
     const k = { stand: 'ongelezen', sinds: Date.now() };
     _ui.inbox.leesStand[id] = k;
+    _ui.inbox.handOngelezen[id] = true;
     _wbxOptimisticSetUnread(id, 1);
     const r = await apiPost('/api/inbox-mark-unread', { conversation_id: id, module: 'finance' });
     if (!r.ok) {
       if (_ui.inbox.leesStand[id] === k) delete _ui.inbox.leesStand[id];
+      delete _ui.inbox.handOngelezen[id];
       _toast('Markeren mislukt: ' + r.error, 'error');
       _live.inbox.convs.fetched = false; _fetchInboxConvs();
       return;
     }
     _toast('Gemarkeerd als ongelezen.', 'success');
   };
+  // Het gesprek dat open staat blijft gelezen (3 nov 2026). Na elke geslaagde
+  // lijst-fetch en bij terugkeren naar het tabblad: staat er in het open
+  // gesprek iets ongelezen (nieuw WA-bericht of nieuwe mail), dan eerst de
+  // draad opnieuw halen — het bericht moet op het scherm staan vóór het
+  // "gelezen" heet; de lijst-poll ververst de draad niet — en dan markeren
+  // via de bestaande /api/inbox-mark-read. Enkel als het tabblad zichtbaar is
+  // en de gebruiker het niet zelf op ongelezen zette. Mislukt de markering,
+  // dan een minuut niet opnieuw (anders: fout → lijst opnieuw → opnieuw fout).
+  const WBX_OPEN_MARKEER_PAUZE_MS = 60 * 1000;
+  async function _wbxHoudOpenGesprekGelezen() {
+    const SEL = window.INBOX_WANBETALER_SELECTIE;
+    const id = _ui.inbox.selectedConv ? String(_ui.inbox.selectedConv) : '';
+    if (!id || typeof SEL?.moetOpenGesprekGelezen !== 'function') return;
+    const pz = _ui.inbox.openMarkeerPauze;
+    if (pz && pz.id === id && Date.now() < pz.tot) return;
+    const rij = (_live.inbox.convs.items || []).find((x) => String(x.id) === id);
+    const zichtbaarNu = () => document.visibilityState;
+    if (!SEL.moetOpenGesprekGelezen({
+      rij,
+      zichtbaar: zichtbaarNu(),
+      handOngelezen: !!_ui.inbox.handOngelezen[id],
+      draadLaadt: !!_live.inbox.thread.loading[id],
+      bezig: _ui.inbox.openMarkeerBezig === id,
+    })) return;
+    _ui.inbox.openMarkeerBezig = id;
+    try {
+      await _fetchInboxThread(id, _ui.inbox._selectSeq);
+      // Ondertussen weggeklikt, tabblad weg, manueel ongelezen of draad mislukt: niets.
+      if (String(_ui.inbox.selectedConv || '') !== id) return;
+      if (zichtbaarNu() !== 'visible' || _ui.inbox.handOngelezen[id]) return;
+      // Een draad zonder berichten (timeout geeft een lege bag) toont niets.
+      if (_live.inbox.thread.error[id] || !(_live.inbox.thread.byConv[id]?.items?.length)) return;
+      const ok = await _wbxMarkeerGelezen(id, { stil: true });
+      if (!ok) _ui.inbox.openMarkeerPauze = { id, tot: Date.now() + WBX_OPEN_MARKEER_PAUZE_MS };
+    } finally {
+      if (_ui.inbox.openMarkeerBezig === id) _ui.inbox.openMarkeerBezig = null;
+    }
+  }
+
   window.__wbxInboxPauseFlow = async (cid) => {
     if (!cid) return;
     const reason = await _askReason('Aanmaan-flow pauzeren', 'Waarom? (bv. "Wacht op klant-terugkoppeling")', { okLabel: 'Pauzeer' });
@@ -4311,6 +4370,9 @@
       const haak = () => {
         if (document.hidden) return;
         if (!document.getElementById('wbxInboxList')) return;
+        // Terug naar het tabblad: wat er ondertussen in het open gesprek
+        // binnenkwam, staat nu op het scherm (3 nov 2026, los van de vlag).
+        _wbxHoudOpenGesprekGelezen();
         if (!_gv2()) return;                       // vlag uit: niets veranderen
         _live.inbox.convs.fetched = false;
         _fetchInboxConvs();
