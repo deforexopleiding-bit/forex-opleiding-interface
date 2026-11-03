@@ -42,6 +42,8 @@ export const KOLOMMEN = new Set([
   'email', 'phone',
   'address_street', 'address_number', 'address_postal', 'address_city', 'address_country',
   'vat_number', 'kvk_number', 'birth_date',
+  // date_of_birth: gemeten op productie 3 nov 2026 (information_schema) — het incasso-overzicht weert minderjarigen.
+  'date_of_birth',
   'tl_company_id', 'tl_contact_id', 'ghl_contact_id',
   'status', 'is_test',
   'onboarding_status', 'onboarding_token', 'onboarding_token_expires_at',
