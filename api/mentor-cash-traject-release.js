@@ -1,6 +1,8 @@
 // api/mentor-cash-traject-release.js
-// POST { id? } → draait de vrijval-motor voor alle actieve trajecten (of één
-// specifiek traject wanneer id meegegeven). Permission: mentor.ledger.write.
+// POST { id?, dry_run? } → draait de FACTUURMOTOR voor de klanten van de
+// omgezette trajecten (of één traject). Geen datumvrijval meer: zonder
+// betaalde factuur komt er niets vrij. dry_run=true schrijft niets en geeft
+// per klant de simulatie terug. Permission: mentor.ledger.write.
 //
 // Voor de admin-testknop op /modules/mentor-cash-trajects-admin.html — geen
 // CRON_SECRET vereist, zelfde vrijval-logica als de dagelijkse cron.
@@ -29,7 +31,7 @@ export default async function handler(req, res) {
   if (id && !UUID_RE.test(String(id))) return res.status(400).json({ error: 'id ongeldig' });
 
   try {
-    const summary = await releaseCashTrajectTerms({ trajectId: id || null });
+    const summary = await releaseCashTrajectTerms({ trajectId: id || null, dryRun: req.body?.dry_run === true });
     return res.status(200).json({ ok: true, ...summary });
   } catch (e) {
     console.error('[mentor-cash-traject-release]', e.message);

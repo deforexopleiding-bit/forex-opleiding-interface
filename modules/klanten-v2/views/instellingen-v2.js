@@ -6553,7 +6553,7 @@
     }, action === 'delete' ? 'warn' : undefined);
   };
   window.__setMntCashRelease = () => {
-    openConfirm(`Vrijval-motor draaien voor ALLE actieve cash-trajecten? Dit voert de release-berekeningen uit voor elke termijn die vandaag vrijkomt, per event-mentor. Draait normaal via cron; handmatig alleen voor bijzondere gevallen.`, async () => {
+    openConfirm(`Factuurmotor draaien voor de klanten van de omgezette trajecten? Er komt enkel commissie vrij op betaalde facturen; wat te veel vrijgegeven is wordt eerst verrekend. Niet omgezette trajecten krijgen niets. Draait normaal dagelijks via cron.`, async () => {
       _mnc.releasing = true; if (render) render();
       try {
         const j = await tryFetch('mnc-release', '/api/mentor-cash-traject-release', {
@@ -6562,8 +6562,8 @@
         if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
         const parts = [];
         if (typeof j?.processed === 'number')  parts.push(`${j.processed} verwerkt`);
-        if (typeof j?.released === 'number')   parts.push(`${j.released} uitgekeerd`);
-        if (typeof j?.skipped === 'number')    parts.push(`${j.skipped} overgeslagen`);
+        if (typeof j?.mentor_entries_count === 'number') parts.push(`${j.mentor_entries_count} vrijgave(s) op betaalde facturen`);
+        if (typeof j?.skipped_zonder_factuurcheck === 'number' && j.skipped_zonder_factuurcheck) parts.push(`${j.skipped_zonder_factuurcheck} zonder factuurcheck overgeslagen`);
         _mnc.lastRelease = { at: new Date().toISOString(), summary: parts.join(' · ') || 'OK', raw: j };
         showToast('Vrijval-motor uitgevoerd', 'ok');
         _mnc.fetched = false; fetchMntCash();
@@ -6579,6 +6579,7 @@
         active:    '<span style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">actief</span>',
         paused:    '<span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:11px;font-weight:600">gepauzeerd</span>',
         completed: '<span style="padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3);font-size:11px;font-weight:600">voltooid</span>',
+        omgezet:   '<span title="Geeft enkel vrij op betaalde facturen (factuurmotor)" style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">factuurmotor</span>',
       })[t.status] || `<span style="padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3);font-size:11px">${esc(t.status || '—')}</span>`;
       const evTitle = t.event?.title || (t.event_id ? String(t.event_id).slice(0,8)+'…' : '—');
       const startM = t.start_month ? String(t.start_month).slice(0,7) : '—';
@@ -6592,8 +6593,7 @@
         <td style="padding:8px 12px">${pill}</td>
         <td style="padding:6px 12px;text-align:right;white-space:nowrap">
           ${t.status === 'active'    ? `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMntCashStatus('${esc(t.id)}','pause')" style="font-size:11px">Pauzeer</button>` : ''}
-          ${t.status === 'paused'    ? `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMntCashStatus('${esc(t.id)}','resume')" style="font-size:11px;color:var(--emerald)">Hervat</button>` : ''}
-          ${t.status !== 'completed' ? `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMntCashStatus('${esc(t.id)}','delete')" style="font-size:11px;color:var(--rose)">Verwijder</button>` : ''}
+          ${t.status !== 'completed' && t.status !== 'omgezet' ? `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMntCashStatus('${esc(t.id)}','delete')" style="font-size:11px;color:var(--rose)">Verwijder</button>` : ''}
         </td>
       </tr>`;
     }).join('');
@@ -6606,7 +6606,7 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="window.__setMntCashRefresh()" style="font-size:11px">↻ Vernieuwen</button>
-          <button class="btn btn-primary btn-sm" ${_mnc.releasing?'disabled':''} onclick="window.__setMntCashRelease()" style="font-size:11px;background:var(--amber);border-color:var(--amber)">${_mnc.releasing?'Bezig…':'💸 Vrijval-motor draaien'}</button>
+          <button class="btn btn-primary btn-sm" ${_mnc.releasing?'disabled':''} onclick="window.__setMntCashRelease()" style="font-size:11px;background:var(--amber);border-color:var(--amber)">${_mnc.releasing?'Bezig…':'Factuurmotor draaien'}</button>
         </div>
       </div>
       ${_mnc.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:8px">⚠ ${esc(_mnc.error)}</div>` : ''}
@@ -6626,7 +6626,7 @@
           <tbody>${rows || `<tr><td colspan="8" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_mnc.loading?'Laden…':'Geen cash-trajecten'}</td></tr>`}</tbody>
         </table>
       </div>
-      <div style="margin-top:10px;padding:10px 14px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55">Aanmaken van nieuwe cash-trajecten vraagt event-context (event_id + termijnen + bedrag); die flow leeft in de Mentoren-module. Deze sectie beheert bestaande trajecten (pauzeer/hervat/verwijder) + de globale vrijval-motor.</div>
+      <div style="margin-top:10px;padding:10px 14px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55">Aanmaken van nieuwe cash-trajecten vraagt event-context (event_id + termijnen + bedrag); die flow leeft in de Mentoren-module. Sinds 3 nov 2026 geeft een traject NOOIT meer op datum vrij: enkel betaalde facturen geven commissie (factuurmotor). Een nieuw traject vraagt daarom een klant en een sale; oude trajecten worden omgezet (docs/sql-migrations/2026-11-03-cashtraject-naar-factuurmotor.sql).</div>
     </div>`;
   }
 

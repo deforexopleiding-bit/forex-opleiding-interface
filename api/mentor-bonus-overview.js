@@ -46,6 +46,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from './_lib/factuur-betaald.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
+import { isTrajectTermKey, maakVerrekenaar } from './_lib/cash-traject-omzetten.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
   loadRegelingContext, koppelDeal, incassoVoor, isConcept, heeftKrediet, regelingTermijnen,
@@ -142,11 +143,21 @@ export async function computeBonusOverview(effectiveUserId) {
     // Children-som per parent (voor `released_share` op de sale-cell).
     // Alleen vrijgegeven + uitbetaalde children tellen als "reeds vrijgevallen".
     const releasedByParent = new Map(); // parent_id -> sum(child.amount)
+    // Omgezet traject (api/_lib/cash-traject-omzetten.js): de oude termijn-
+    // regels (cashtraject:<id>:term:<n>) hangen als children aan de parent.
+    //  - regels die al in een rapport zitten (payout_id of status uitbetaald)
+    //    blijven in de maand van hun vrijgave staan (zoals dat rapport ze zag)
+    //    en tellen als al vergoed: betaalde termijnen tellen pas weer voor het
+    //    deel BOVEN dat bedrag (verrekening, nooit dubbel);
+    //  - regels die zonder factuurcheck vrijgegeven werden maar in GEEN rapport
+    //    zitten, gaan NIET alsnog naar een rapport (enkel een betaalde factuur
+    //    geeft commissie): apart getoond, beslissing Maxim.
+    const trajectRegelsByParent = new Map(); // parent_id -> { totaal, niet_in_rapport, perMaand: Map<ym, bedrag> }
     if (rows.length > 0) {
       const parentIds = rows.map((r) => r.id);
       const { data: kids, error: kidsErr } = await supabaseAdmin
         .from('mentor_ledger_entries')
-        .select('parent_entry_id, amount, status')
+        .select('parent_entry_id, amount, status, idempotency_key, released_at, payout_id')
         .in('parent_entry_id', parentIds)
         .in('status', ['vrijgegeven', 'uitbetaald']);
       if (kidsErr) throw new Error('children fetch: ' + kidsErr.message);
@@ -154,6 +165,19 @@ export async function computeBonusOverview(effectiveUserId) {
         if (!c.parent_entry_id) continue;
         const cur = releasedByParent.get(c.parent_entry_id) || 0;
         releasedByParent.set(c.parent_entry_id, cur + (Number(c.amount) || 0));
+        if (isTrajectTermKey(c.idempotency_key)) {
+          const t = trajectRegelsByParent.get(c.parent_entry_id) || { totaal: 0, niet_in_rapport: 0, perMaand: new Map() };
+          const amt = Number(c.amount) || 0;
+          if (c.status !== 'uitbetaald' && !c.payout_id) {
+            t.niet_in_rapport = round2(t.niet_in_rapport + amt);
+            trajectRegelsByParent.set(c.parent_entry_id, t);
+            continue;
+          }
+          t.totaal = round2(t.totaal + amt);
+          const ym = c.released_at ? String(c.released_at).slice(0, 7) : null;
+          if (ym) t.perMaand.set(ym, round2((t.perMaand.get(ym) || 0) + amt));
+          trajectRegelsByParent.set(c.parent_entry_id, t);
+        }
       }
     }
 
@@ -982,6 +1006,21 @@ export async function computeBonusOverview(effectiveUserId) {
       const incasso = incassoVoor(regCtx.incasso, r.customer_id, eigenDeal);
       const sindsI = incasso ? String(incasso.sinds).slice(0, 10) : null;
       let vervallen = 0;
+      // Omgezet traject: al vrijgegeven termijnregels in hun eigen maand
+      // (zoals het rapport ze al zag) + verrekening op de betaalde termijnen.
+      const trajectRegels = isCancelled ? null : (trajectRegelsByParent.get(r.id) || null);
+      const verrekenaar = maakVerrekenaar(trajectRegels ? trajectRegels.totaal : 0);
+      let verrekendTotaal = 0;
+      if (trajectRegels) {
+        const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
+        for (const [k, amt] of trajectRegels.perMaand.entries()) {
+          if (!monthAmount.has(k) || amt <= 0) continue;
+          monthPaid.set(k, round2((monthPaid.get(k) || 0) + amt));
+          monthAmount.set(k, round2((monthAmount.get(k) || 0) + amt));
+          if (!monthBreakdown.has(k)) monthBreakdown.set(k, []);
+          monthBreakdown.get(k).push({ label: customerLabel(custObj) + ' (traject)', amount: round2(amt), status: 'betaald' });
+        }
+      }
       // Vrijgegeven zoals het payout-rapport het ziet: betaalde termijnen die
       // in een maand tellen (projection paid) + inhaal (via correctie).
       let vrijRapport = 0;
@@ -1027,8 +1066,23 @@ export async function computeBonusOverview(effectiveUserId) {
           plaats.inhaal = false;
           vervallen = round2(vervallen + tAmount);
         }
+        // Verrekening (omgezet traject): het deel van deze betaalde termijn dat
+        // al via de oude termijnregels vrijgegeven is, telt niet opnieuw.
+        let telBedrag = tAmount;
+        let verrekendHier = 0;
+        if (trajectRegels && isPaidTerm && tStatus !== 'incasso' && tStatus !== 'gecrediteerd') {
+          verrekendHier = verrekenaar.neem(tAmount);
+          telBedrag = round2(tAmount - verrekendHier);
+          verrekendTotaal = round2(verrekendTotaal + verrekendHier);
+          if (telBedrag <= 0 && verrekendHier > 0) {
+            tStatus = 'verrekend';
+            plaats.telt = false;
+            plaats.verschoven = false;
+            plaats.inhaal = false;
+          }
+        }
         if (!schemaUnknown && isPaidTerm && tStatus !== 'incasso' && (plaats.telt || plaats.inhaal)) {
-          vrijRapport = round2(vrijRapport + tAmount);
+          vrijRapport = round2(vrijRapport + telBedrag);
         }
         const inhaalToken = invForTerm?.id || `${r.id}:${i + 1}`;
         const voorgesteld = plaats.inhaal ? (inhaalVoorgesteld.get(inhaalToken) || null) : null;
@@ -1038,6 +1092,7 @@ export async function computeBonusOverview(effectiveUserId) {
           due_date: effectiveYmd,
           amount  : tAmount,
           status  : tStatus,
+          ...(verrekendHier > 0 ? { verrekend: verrekendHier } : {}),
           betaald_op         : plaats.betaaldatum,
           maand              : plaats.maand,
           uitbetaald_in      : plaats.uitbetaald_in,
@@ -1046,7 +1101,7 @@ export async function computeBonusOverview(effectiveUserId) {
           ...(row.vervangen ? { vervangen: true } : {}),
           ...(row.gepland ? { gepland: true } : {}),
         });
-        if (!schemaUnknown && tAmount > 0 && !isCancelled && tStatus !== 'incasso' && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
+        if (!schemaUnknown && telBedrag > 0 && !isCancelled && tStatus !== 'incasso' && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
           const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
           const rapport = afsluiting.rapportVoor(plaats.maand);
           verschoven.push({
@@ -1069,7 +1124,7 @@ export async function computeBonusOverview(effectiveUserId) {
             inhaal_voorstel_periode: plaats.inhaal ? volgendRapport : null,
             inhaal_voorgesteld: voorgesteld,
             achterstallig_sinds: plaats.achterstallig_sinds,
-            amount: tAmount,
+            amount: telBedrag,
           });
         }
         // Cashflow-projectie: vul zowel monthPaid (betaalde termijnen, historie)
@@ -1081,7 +1136,7 @@ export async function computeBonusOverview(effectiveUserId) {
         if (!schemaUnknown && plaats.telt) {
           const k = plaats.maand;
           if (isPaidTerm) {
-            if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + tAmount));
+            if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + telBedrag));
           } else {
             open_total += tAmount;
             if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + tAmount));
@@ -1089,14 +1144,14 @@ export async function computeBonusOverview(effectiveUserId) {
               monthAchterstallig.set(k, round2((monthAchterstallig.get(k) || 0) + tAmount));
             }
           }
-          if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + tAmount));
-          if (tAmount > 0 && monthAmount.has(k)) {
+          if (monthAmount.has(k)) monthAmount.set(k, round2((monthAmount.get(k) || 0) + telBedrag));
+          if (telBedrag > 0 && monthAmount.has(k)) {
             const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
             if (!monthBreakdown.has(k)) monthBreakdown.set(k, []);
             monthBreakdown.get(k).push({
               label : customerLabel(custObj),
               term  : i + 1,
-              amount: round2(tAmount),
+              amount: round2(telBedrag),
               status: isPaidTerm ? 'betaald' : (tStatus === 'achterstallig' ? 'achterstallig' : 'verwacht'),
               ...(tStatus === 'achterstallig' ? { achterstallig_sinds: plaats.achterstallig_sinds } : {}),
               ...(plaats.verschoven && isPaidTerm ? { vervaldag: effectiveYmd } : {}),
@@ -1187,7 +1242,10 @@ export async function computeBonusOverview(effectiveUserId) {
           // Eén getal "vrijgegeven" = wat in het rapport komt (zie vrijRapport).
           // released_share blijft het grootboek (audit).
           // Zonder schema rekent het rapport niets; dan het grootboek.
-          vrijgegeven_rapport: round2(schemaUnknown ? entryReleased : vrijRapport),
+          vrijgegeven_rapport: round2(schemaUnknown ? entryReleased : (vrijRapport + (trajectRegels ? trajectRegels.totaal : 0))),
+          // Omgezet traject: al vrijgegeven via de oude termijnregels en het
+          // deel daarvan dat nog niet door betalingen ingehaald is.
+          verrekening        : trajectRegels ? { reeds_in_rapport: trajectRegels.totaal, ingehaald: verrekendTotaal, nog_te_verrekenen: verrekenaar.rest(), vrijgegeven_niet_in_rapport: trajectRegels.niet_in_rapport } : null,
           term_count         : termCount,
           per_term_amount    : round2(perTermMentor),
           schema_unknown     : schemaUnknown,
@@ -1222,7 +1280,7 @@ export async function computeBonusOverview(effectiveUserId) {
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
         cell.released_share     = round2((cell.released_share || 0) + entryReleased);
-        cell.vrijgegeven_rapport = round2((cell.vrijgegeven_rapport || 0) + (schemaUnknown ? entryReleased : vrijRapport));
+        cell.vrijgegeven_rapport = round2((cell.vrijgegeven_rapport || 0) + (schemaUnknown ? entryReleased : (vrijRapport + (trajectRegels ? trajectRegels.totaal : 0))));
         if (sindsI) {
           cell.incasso = { sinds: sindsI, vervallen: round2((cell.incasso?.vervallen || 0) + vervallen) };
         }

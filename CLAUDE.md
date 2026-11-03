@@ -638,6 +638,16 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `2026-10-22-mentor-sale-attributions.sql`. Forward-only: annuleren laat
   vrijgegeven/uitbetaald staan; al uitbetaald → melding
   `finance.mentor_commissie_clawback`.
+  REGELS MAXIM (3 nov 2026): enkel een BETAALDE factuur geeft commissie vrij, zonder uitzondering; te veel
+  vrijgegeven wordt verrekend (niets meer vrij tot de betalingen het inhalen, niemand betaalt terug).
+  TRAJECTEN (`mentor_cash_trajects`): GEEN datumvrijval meer. `releaseCashTrajectTerms` schrijft zelf niets en
+  draait enkel de factuurmotor voor omgezette trajecten (status 'omgezet', `api/_lib/cash-traject-omzetten.js`:
+  parent `cashtraject:<id>:sale:<uid>` per aanwezige mentor, oude termijnregels = children). Overzicht/rapport:
+  oude termijnregels IN een rapport tellen als al vergoed (verrekening via `maakVerrekenaar`), regels in GEEN
+  rapport gaan niet alsnog naar een rapport en worden niet aan een payout gekoppeld. Rapportstand vs
+  werkelijkheid: `api/_lib/commissie-uitbetaald.js` (goedgekeurd t/m app_settings
+  `mentor_rapporten_werkelijk_uitbetaald_tot`, standaard 2026-09-01 = werkelijk uitbetaald).
+  `mark_payout_paid` faalt met bonus_drift op elk rapport (telt de rapportmaand, rapport koppelt M-1).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

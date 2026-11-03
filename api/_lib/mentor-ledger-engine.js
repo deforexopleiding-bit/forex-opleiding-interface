@@ -808,10 +808,17 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   if (parentIds.length) {
     const { data: kids } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('parent_entry_id, amount, idempotency_key')
+      .select('parent_entry_id, amount, idempotency_key, status')
       .in('parent_entry_id', parentIds);
     for (const k of (kids || [])) {
       if (!k.parent_entry_id) continue;
+      // Reeds vrijgegeven = vrijgegeven + uitbetaald. Een geannuleerde child
+      // telt niet (de idempotency-key blijft wel bestaan → nooit opnieuw).
+      if (k.status && !['vrijgegeven', 'uitbetaald'].includes(k.status)) {
+        if (!kidsByParent.has(k.parent_entry_id)) kidsByParent.set(k.parent_entry_id, []);
+        kidsByParent.get(k.parent_entry_id).push({ ...k, amount: 0 });
+        continue;
+      }
       if (!kidsByParent.has(k.parent_entry_id)) kidsByParent.set(k.parent_entry_id, []);
       kidsByParent.get(k.parent_entry_id).push(k);
     }

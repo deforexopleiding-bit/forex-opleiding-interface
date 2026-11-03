@@ -1,22 +1,26 @@
 // api/mentor-cash-traject-status.js
-// POST { id, action: 'pause' | 'resume' | 'delete' }
-// → { ok:true, traject? }
+// POST { id, action: 'pause' | 'resume' | 'delete' | 'omzetten', customer_id?, deal_id?, dry_run? }
+// → { ok:true, traject? } of (omzetten) het omzetplan
 // Permission: mentor.ledger.write.
 //
-// pause  → status='paused', paused_at=now(). Cron slaat 'paused' trajects
-//          over → resterende termijnen schuiven vanzelf.
-// resume → status='active', paused_at=null. Cron pakt de eerstvolgende
-//          termijn op basis van (# reeds aangemaakt ledger-entries), dus
-//          pauze-maanden schuiven de resterende vrijvalperiode naar achteren
-//          zonder complexe datumrekening.
-// delete → verwijder de traject-rij. Al aangemaakte ledger-entries BLIJVEN
-//          staan (die zijn al verdiend); alleen toekomstige vrijval stopt.
+// pause    → status='paused', paused_at=now().
+// resume   → GEWEIGERD (409) sinds 3 nov 2026: een traject geeft nooit meer
+//            op datum vrij. Zet het om naar de factuurmotor ('omzetten').
+// omzetten → zet het traject om naar de factuurmotor (api/_lib/cash-traject-
+//            omzetten.js): parents per aanwezige mentor met de oorspronkelijke
+//            commissie; bestaande vrijgegeven termijnen tellen als reeds
+//            vrijgegeven. dry_run (standaard true) toont het plan zonder te
+//            schrijven; dry_run:false voert het uit.
+// delete   → verwijder de traject-rij. Al aangemaakte ledger-entries BLIJVEN
+//            staan. Een omgezet traject kan niet verwijderd worden (de
+//            commissie hangt dan aan de factuurmotor).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { omzetTraject } from './_lib/cash-traject-omzetten.js';
 
 const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIONS   = new Set(['pause', 'resume', 'delete']);
+const ACTIONS   = new Set(['pause', 'resume', 'delete', 'omzetten']);
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -32,13 +36,27 @@ export default async function handler(req, res) {
 
   const { id, action } = req.body || {};
   if (!UUID_RE.test(String(id || ''))) return res.status(400).json({ error: 'id vereist' });
-  if (!ACTIONS.has(String(action || ''))) return res.status(400).json({ error: 'action moet pause/resume/delete zijn' });
+  if (!ACTIONS.has(String(action || ''))) return res.status(400).json({ error: 'action moet pause/resume/delete/omzetten zijn' });
 
   try {
     const { data: cur } = await supabaseAdmin
       .from('mentor_cash_trajects').select('id, status').eq('id', id).maybeSingle();
     if (!cur) return res.status(404).json({ error: 'traject niet gevonden' });
 
+    if (action === 'resume') {
+      return res.status(409).json({ error: 'Een traject geeft niet meer op datum vrij. Zet het om naar de factuurmotor (enkel betaalde facturen geven commissie vrij).', code: 'DATUMVRIJVAL_UIT' });
+    }
+    if (action === 'omzetten') {
+      const { customer_id = null, deal_id = null } = req.body || {};
+      if (customer_id && !UUID_RE.test(String(customer_id))) return res.status(400).json({ error: 'customer_id ongeldig' });
+      if (deal_id && !UUID_RE.test(String(deal_id))) return res.status(400).json({ error: 'deal_id ongeldig' });
+      const plan = await omzetTraject({ trajectId: id, customerId: customer_id, dealId: deal_id, dryRun: req.body?.dry_run !== false });
+      if (!plan.ok) return res.status(422).json({ error: plan.reden, plan });
+      return res.status(200).json({ ok: true, plan });
+    }
+    if (action === 'delete' && cur.status === 'omgezet') {
+      return res.status(409).json({ error: 'Een omgezet traject kan niet verwijderd worden: de commissie loopt via de factuurmotor.' });
+    }
     if (action === 'delete') {
       const { error: delErr } = await supabaseAdmin.from('mentor_cash_trajects').delete().eq('id', id);
       if (delErr) throw new Error('delete: ' + delErr.message);
