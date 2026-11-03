@@ -788,6 +788,27 @@
     } catch (e) { _toast('Bulk-print netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
   };
 
+  // Gecombineerde post-download van EEN brief: brief-PDF + alle openstaande
+  // factuur-PDF's in 1 PDF. POST naar de nieuwe route; blob openen in nieuwe tab.
+  // De kale "Bewijs"-download (signed URL) en het e-mailpad blijven ongewijzigd.
+  window.__wbxBriefDownloadPost = async (brief_id) => {
+    if (!brief_id) return;
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/dunning-brief-print-combined', { method: 'POST', headers, body: JSON.stringify({ brief_id }) });
+      if (!resp.ok) { _toast('Download faalde: HTTP ' + resp.status, 'error'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const n = resp.headers.get('X-Facturen-Bijgevoegd');
+      _toast(n != null ? `PDF gedownload (${n} factuur${n === '1' ? '' : 'en'} bijgevoegd).` : 'PDF gedownload.', 'success');
+    } catch (e) { _toast('Download netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
+  };
+
   // ── Gesprekken: belpoging loggen ───────────────────────────────────
   function _callFormState(cid) {
     if (!_ui.callForm[cid]) _ui.callForm[cid] = { outcome: '', note: '', callback_at: '', saving: false, error: null };
@@ -3034,6 +3055,7 @@
       const pdfBtn = pdfUrl
         ? `<a class="btn btn-ghost btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener" style="font-size:11px;text-decoration:none" title="Signed URL, 5 min geldig">PDF →</a>`
         : `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefPreview('${esc(bid)}')" title="Genereer preview via wanbetalers-brief-pdf?preview=1">👁 Preview</button>`;
+      const postBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefDownloadPost('${esc(bid)}')" title="Brief + alle openstaande factuur-PDF's in 1 PDF, voor verzending per post">↓ Post</button>`;
       const emailBtn  = cat === 'sent'
         ? '<span style="font-size:11px;color:var(--text-3)">—</span>'
         : `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--brand,#0A7490);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefEmail('${esc(bid)}')" title="Mail de bewaarde PDF naar de klant (echt bericht)">${busy ? 'Bezig…' : '📧 Mail'}</button>`;
@@ -3048,7 +3070,7 @@
         <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3)">${esc(tpl)}</div>
         <div class="mono" style="text-align:right;color:var(--text-3)">${esc(created)}</div>
         <div>${statusPill}${b.sent_at ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(_fmtDate(b.sent_at))}</div>` : ''}</div>
-        <div style="display:flex;gap:4px;justify-content:flex-end;align-items:center;flex-wrap:wrap">${pdfBtn}${emailBtn}${markBtn}${delBtn}</div>
+        <div style="display:flex;gap:4px;justify-content:flex-end;align-items:center;flex-wrap:wrap">${pdfBtn}${postBtn}${emailBtn}${markBtn}${delBtn}</div>
       </div>`;
     }).join('') : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen brieven in dit filter.</div>`;
 
@@ -6276,12 +6298,15 @@
     }
     const downloadBtn = latest?.download_url
       ? `<a class="btn btn-ghost btn-sm" style="font-size:11.5px;text-decoration:none" href="${esc(latest.download_url)}" target="_blank" rel="noopener">↓ Bewijs</a>` : '';
+    const postDownloadBtn = latest
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxBriefDownloadPost('${esc(latest.id)}')" title="Brief + alle openstaande factuur-PDF's in 1 PDF, voor verzending per post">↓ Download voor post (met facturen)</button>` : '';
     return `<div class="wbx-drawer-card">
       <div class="wbx-drawer-card-h">WIK-brief — bewijs</div>
       <div class="wbx-drawer-card-b">
         ${statusLine}
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
           ${downloadBtn}
+          ${postDownloadBtn}
           ${sendActions}
           <span style="font-size:10.5px;color:var(--text-3);width:100%">Tussenbrief (vriendelijk, aanbevolen als eerste):</span>
           <button class="btn btn-primary btn-sm" style="font-size:11.5px;color:#fff" onclick="__wbxWikGen('${esc(cid)}','NL','tussen')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>✉ Tussenbrief NL</button>
