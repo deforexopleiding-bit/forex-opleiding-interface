@@ -47,11 +47,19 @@
 //     next_cursor: int | null
 //   }
 //
-// Failure (200 met warning): partial batches processed + warning-veld.
+// Leesstand (3 nov 2026): een ONGELEZEN mail ouder dan
+// LATE_KOPPELING_GELEZEN_NA_DAGEN gaat in dezelfde update op is_read=true
+// (koppelPatch), zodat een oude mail een gelezen gesprek niet terug ongelezen
+// maakt. Jongere mails blijven ongelezen. Telling: would_mark_read_count /
+// marked_read_count.
+//
+// Failure (200 met warning): partial batches processed + warning-veld. Een
+// mislukte update stopt de run (ok:false + warning) — niet meer overslaan.
 // 403: geen super_admin. 405: geen POST.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { resolveCustomerIdsForEmails } from './_lib/email-customer-match.js';
+import { koppelPatch, LATE_KOPPELING_GELEZEN_NA_DAGEN } from './_lib/gesprek-leesstand.js';
 
 const DEFAULT_BATCH_SIZE = 500;
 const MAX_BATCH_SIZE     = 1000;
@@ -83,7 +91,7 @@ async function isSuperAdmin(req) {
 async function fetchNullBatch(mailbox, offset, size) {
   let q = supabaseAdmin
     .from('email_messages')
-    .select('id, from_address', { count: 'exact' })
+    .select('id, from_address, is_read, date_received', { count: 'exact' })
     .is('customer_id', null)
     .order('id', { ascending: true })
     .range(offset, offset + size - 1);
@@ -94,18 +102,18 @@ async function fetchNullBatch(mailbox, offset, size) {
 }
 
 // Voer één batch door de matcher, groepeer per resolved customer_id.
-async function processBatch(rows) {
+async function processBatch(rows, nu = Date.now()) {
   const addrs = rows.map((r) => r.from_address).filter(Boolean);
   const idByAddr = await resolveCustomerIdsForEmails(supabaseAdmin, addrs);
   // Voor elke rij: bepaal target customer_id (of null).
-  const updates = []; // [{ id, customer_id }]
+  const updates = []; // [{ id, customer_id, is_read? }] — de patch uit koppelPatch
   const perCustomer = new Map(); // customer_id -> { count, email_hint }
   const unresolved = new Map();  // from_address -> count
   for (const r of rows) {
     const key = String(r.from_address || '').trim().toLowerCase();
     const cid = key ? idByAddr.get(key) : null;
     if (cid) {
-      updates.push({ id: r.id, customer_id: cid });
+      updates.push({ id: r.id, ...koppelPatch(r, cid, nu) });
       const cur = perCustomer.get(cid) || { count: 0, email_hint: key };
       cur.count += 1;
       perCustomer.set(cid, cur);
@@ -117,34 +125,41 @@ async function processBatch(rows) {
 }
 
 // Batch-update via kleine PATCH-chunks (max 100 rijen per call om URL-limits
-// te respecteren). Retour: aantal succesvolle updates.
-async function persistUpdates(updates) {
-  if (updates.length === 0) return 0;
+// te respecteren). Retour: { updated, markedRead }.
+// Een fout gooit: de run stopt en meldt het (ok:false + warning). Eerder werd
+// een mislukte chunk met een console.warn overgeslagen.
+export async function persistUpdates(updates, sb = supabaseAdmin) {
+  const res = { updated: 0, markedRead: 0 };
+  if (updates.length === 0) return res;
   const CHUNK = 100;
-  let ok = 0;
   for (let i = 0; i < updates.length; i += CHUNK) {
     const chunk = updates.slice(i, i + CHUNK);
-    // Groepeer per customer_id → 1 UPDATE per unique target (efficiënter dan
-    // per rij een UPDATE, en atomisch op DB-laag).
-    const byCid = new Map();
+    // Groepeer per (customer_id, gelezen?) → 1 UPDATE per unieke patch
+    // (efficiënter dan per rij een UPDATE, en atomisch op DB-laag).
+    const perPatch = new Map();
     for (const u of chunk) {
-      if (!byCid.has(u.customer_id)) byCid.set(u.customer_id, []);
-      byCid.get(u.customer_id).push(u.id);
+      const leesbaar = u.is_read === true;
+      const sleutel = u.customer_id + (leesbaar ? '|gelezen' : '');
+      if (!perPatch.has(sleutel)) {
+        perPatch.set(sleutel, { patch: leesbaar ? { customer_id: u.customer_id, is_read: true } : { customer_id: u.customer_id }, ids: [] });
+      }
+      perPatch.get(sleutel).ids.push(u.id);
     }
-    for (const [cid, ids] of byCid) {
-      const { error, count } = await supabaseAdmin
+    for (const { patch, ids } of perPatch.values()) {
+      const { error, count } = await sb
         .from('email_messages')
-        .update({ customer_id: cid }, { count: 'exact' })
+        .update(patch, { count: 'exact' })
         .in('id', ids)
         .is('customer_id', null); // safety: alleen NULL overschrijven
       if (error) {
-        console.warn('[backfill-email-customer-id] update chunk fail:', error.message);
-        continue;
+        console.error('[backfill-email-customer-id] update chunk fail:', error.message);
+        throw new Error('update chunk fail: ' + error.message);
       }
-      ok += count || 0;
+      res.updated += count || 0;
+      if (patch.is_read === true) res.markedRead += count || 0;
     }
   }
-  return ok;
+  return res;
 }
 
 export default async function handler(req, res) {
@@ -174,6 +189,8 @@ export default async function handler(req, res) {
   let mailsScanned  = 0;
   let updatedCount  = 0;
   let wouldUpdateCount = 0;
+  let markedReadCount = 0;
+  let wouldMarkReadCount = 0;
   let batchesScanned = 0;
   let cursor = startCursor;
   let lastTotalNull = null;
@@ -201,12 +218,14 @@ export default async function handler(req, res) {
 
       if (dryRun) {
         wouldUpdateCount += updates.length;
+        wouldMarkReadCount += updates.filter((u) => u.is_read === true).length;
         // Bij dry-run advanceren we de cursor met batchSize (want we hebben
         // NIETS gemuteerd, dus NULL-rijen blijven staan en offset moet mee).
         cursor += rows.length;
       } else {
         const persisted = await persistUpdates(updates);
-        updatedCount += persisted;
+        updatedCount += persisted.updated;
+        markedReadCount += persisted.markedRead;
         // Bij live-run schuiven NULL-rijen naar links (updates zijn er niet
         // meer). Cursor NIET advanceren want de "restant NULL"-set is nu
         // kleiner — de volgende range(0, batchSize) pakt de volgende N.
@@ -247,6 +266,8 @@ export default async function handler(req, res) {
     batches_scanned: batchesScanned,
     mails_scanned:   mailsScanned,
     ...(dryRun ? { would_update_count: wouldUpdateCount } : { updated_count: updatedCount }),
+    ...(dryRun ? { would_mark_read_count: wouldMarkReadCount } : { marked_read_count: markedReadCount }),
+    gelezen_na_dagen: LATE_KOPPELING_GELEZEN_NA_DAGEN,
     still_null_count: stillNull,
     by_customer: byCustomerTop,
     unresolved_top_addresses: unresolvedTop,

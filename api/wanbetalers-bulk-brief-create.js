@@ -70,6 +70,8 @@ export default async function handler(req, res) {
   const customerIds = Array.isArray(body.customer_ids) ? body.customer_ids : [];
   const dryRun      = body.dry_run !== false;
   const clientBulkJobId = String(body.bulk_job_id || '').trim();
+  // Brieftype: 'tussen' = vriendelijke tussenbrief, anders WIK/eerste-herinnering.
+  const briefType   = (body.brief_type === 'tussen') ? 'tussen' : 'wik';
 
   if (customerIds.length === 0) return res.status(400).json({ error: 'customer_ids leeg' });
   if (!customerIds.every(id => UUID_RE.test(id))) return res.status(400).json({ error: 'customer_ids moet uuids zijn' });
@@ -202,6 +204,7 @@ export default async function handler(req, res) {
           const gen = await generatePreBriefForCustomer({
             customerId: r.customer_id,
             country: null,               // laat generator zelf via bepaalLand detecteren (single source)
+            briefType,                   // 'tussen' | 'wik' (default), per bulk-run gekozen
             generatedByUserId: user.id,
             runId: null, stepId: null,   // geen dunning-koppeling
             db: supabaseAdmin,
