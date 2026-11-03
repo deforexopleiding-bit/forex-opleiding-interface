@@ -18,16 +18,16 @@ toont **Mentoren › Commissies › Controle** dit live, inclusief de rapportkan
 | **Totaal** | **259,60** | **141,80** | **117,80** | **73,20** | **186,40** |
 
 Oplossing: PR 1 (omzetten + verrekening). Details in `2026-11-03-dryrun-trajecten.md`.
+Beslissing Maxim (3 nov): de 117,80 in geen rapport wordt **geannuleerd** —
+`docs/sql-migrations/2026-11-03-trajecten-annuleren-niet-in-rapport.sql` (na de omzetting).
 
-## 2. Sale zonder commissie — de ene event-sale
+## 2. Sale zonder commissie
 
-**Jimco Schepens**, Forex Masterclass Gent op 23-09-2026: deal e596e858, getekend
-op 23-09 (12 000), aanwezige mentoren Danny Anyere en Seppe Hellin. De
-deelnemer staat op **"aangemeld"** in plaats van "aanwezig". Daardoor maakte
-event-afronding geen commissie aan. Er is nog niets betaald: de enige factuur,
-2026/5020 van 99,99, is gecrediteerd. Bij 3 % op 12 000 en 2 mentoren is de
-commissie 180,00 per mentor. **Niet zelf toegewezen**: beslissing Maxim (deelnemer op
-aanwezig zetten en het event opnieuw afronden, of via "Sale toewijzen").
+Geen. De eerder gemelde Jimco Schepens (Forex Masterclass Gent 23-09) is een
+**annulatie** (beslissing Maxim 3 nov): offerte gearchiveerd op 29-10, abonnement
+en onboarding geannuleerd, factuur 2026/5020 gecrediteerd. Geen commissie en geen
+nakijkpunt; zijn gegevens zijn niet aangeraakt. Het controlescherm toont een
+gearchiveerde offerte nooit als "sale zonder commissie" (getest).
 
 ## 3. Grootboek loopt achter (doel > vrijgegeven in het grootboek)
 
@@ -59,16 +59,17 @@ klopt exact (7,40). Bij 9 sales is nog niets betaald, dus doel 0 = grootboek 0.
 
 23 rapporten staan op **goedgekeurd** terwijl ze volgens Maxim betaald zijn. Hun
 grootboekregels staan op vrijgegeven. De knop "Markeer uitbetaald" kan ze niet
-afsluiten: hij faalt op elk van die rapporten met `bonus_drift`. Voorstel:
-`docs/sql-migrations/2026-11-03-VOORSTEL-rapporten-juni-september-uitbetaald.sql`
-(niet gedraaid). Daarnaast staat Seppe april 2026 nog op goedgekeurd (bonus 0,00); dat
+afsluiten: hij faalt op elk van die rapporten met `bonus_drift`. Beslissing Maxim (3 nov): op uitbetaald —
+`docs/sql-migrations/2026-11-03-rapporten-juni-september-uitbetaald.sql`
+(definitief, niet door mij gedraaid). Daarnaast staat Seppe april 2026 nog op goedgekeurd (bonus 0,00); dat
 rapport noemde Maxim niet.
 
 ## 5. Facturen en klanten om te controleren
 
 - **Shaliwal 2026/835**: 440 betaald op 400 (40 te veel). De motor telt 440.
-- **Shaliwal 2026/2136** (6 760, open sinds 26-10, zonder deal of abonnement): regeling of bureaufactuur?
-  Een bureaufactuur moet in concept staan.
+- **Shaliwal 2026/2136** (6 760, zonder deal of abonnement) is de **bureaufactuur** en blijft open
+  (beslissing Maxim 3 nov); bij een regeling crediteert Maxim ze zelf. Met de klant op *bij incasso*
+  krijgt ze geen aanmaning en geeft ze geen commissie (getest in PR 4).
 - **Paul Plantfeber**: betalingen in GoHighLevel staan niet in het CRM. Er zijn twee getekende deals.
 - **Dany Brice Iradukunda**: de sale is geannuleerd (commissie 0, correct), maar factuur 2026/1320
   van 1 185 is **betaald** op 12-07. Terugbetaling of een andere sale?
