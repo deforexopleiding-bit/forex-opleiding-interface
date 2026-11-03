@@ -42,9 +42,10 @@ Status in de database: 0,00 uitbetaald. Werkelijkheid: 141,80 uitbetaald
 * Rapport/overzicht: termijnregels die al in een rapport zitten (141,80) staan in
   hun eigen maand en tellen als al vergoed; betaalde termijnen tellen pas voor
   het deel daarboven. De 117,80 die **in geen rapport** zit gaat niet alsnog naar
-  een rapport (geen betaalde factuur). Beslissing Maxim: annuleren (voorstel B in
-  `docs/sql-migrations/2026-11-03-VOORSTEL-rapporten-juni-september-uitbetaald.sql`)
-  of laten staan.
+  een rapport (geen betaalde factuur). **Beslissing Maxim (3 nov): annuleren** —
+  `docs/sql-migrations/2026-11-03-trajecten-annuleren-niet-in-rapport.sql` (na de
+  omzetting). Daarna verrekent de motor op 141,80: Paul krijgt 2,20 vrij (doel 48,00),
+  Shaliwal en Noorulhaq blijven op 0.
 * Paul: het overzicht rekent per betaalde termijn (12,44 op basis van het
   abonnement van 414,68 incl. btw; de facturen zijn 400). Bij 4 betaalde
   termijnen is dat 49,76 tegenover 45,80 in rapporten, dus 3,96 in het rapport
