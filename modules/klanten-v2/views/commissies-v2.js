@@ -307,7 +307,7 @@
 
   /* ── Incasso / regeling ─────────────────────────────────────────────── */
   const incassoPill = (inc) => inc
-    ? `<span title="Wat vanaf deze datum betaald wordt, telt niet meer voor de mentor">${H.pill('danger', `Incasso — geen commissie meer sinds ${esc(fmtDate(inc.sinds))}`)}</span>` : '';
+    ? `<span title="${inc.stilstand === false ? 'Oninbaar afgesloten: er komt niets meer' : 'Commissie staat stil; met een regeling tellen echte betalingen weer'}">${H.pill('danger', inc.stilstand === false ? `Weggevallen sinds ${esc(fmtDate(inc.sinds))}` : `Incasso — staat stil sinds ${esc(fmtDate(inc.sinds))}`)}</span>` : '';
   // Actieve markering voor deze sale (specifiek) of de hele klant.
   const markeringVoor = (customerId, dealId) => {
     const lijst = asArr(_st.data?.incasso_markeringen).filter((m) => m.customer_id === customerId);
@@ -347,7 +347,7 @@
 
   function saleDetail(s) {
     const termijnen = asArr(s.termijnen);
-    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'], incasso: ['danger', 'Incasso — vervalt'] };
+    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'], incasso: ['danger', 'Incasso — staat stil'] };
     const tabel = termijnen.length ? `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vervaldatum</th><th>Status</th><th class="num">Commissie (alle mentoren)</th></tr></thead><tbody>
       ${termijnen.map((t) => { const m = TS[t.status] || TS.open; return `<tr><td class="mono">${t.index}</td><td>${esc(fmtDate(t.due_date))}</td><td>${H.pill(m[0], m[1])}${t.vervangen ? ' <span style="font-size:11px;color:var(--text-3)">→ vervangen door regeling</span>' : ''}</td><td class="num mono">${eur(t.aandeel)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div style="font-size:12.5px;color:var(--text-3)">Geen termijnschema bekend.</div>';
@@ -367,7 +367,7 @@
         ${Math.abs((Number(s.vrijgegeven_grootboek) || 0) - (Number(s.vrijgegeven) || 0)) > 0.01 ? `<div style="font-size:11.5px;color:var(--text-3)" title="Vrij = betaalde termijnen, zoals in het rapport. Het grootboek is alleen nog audit.">Grootboek (audit): <span class="mono">${eur(s.vrijgegeven_grootboek)}</span></div>` : ''}
         ${s.achterstallig ? `<div style="color:var(--rose)">Achterstand klant: <span class="mono">${eur(s.achterstand_bedrag)}</span></div>` : ''}
         ${s.risico_redenen.length ? `<div style="color:var(--rose)">Risico: ${esc(s.risico_redenen.join(', '))}</div>` : ''}
-        ${s.incasso ? `<div style="color:var(--rose)">Incasso sinds ${esc(fmtDate(s.incasso.sinds))} · vervalt <span class="mono">${eur(s.incasso.vervallen)}</span>${mark ? ` · ${esc(mark.reden)}` : ''}</div>` : ''}
+        ${s.incasso ? `<div style="color:var(--rose)">${s.status_label ? esc(s.status_label.tekst) : 'Incasso sinds ' + esc(fmtDate(s.incasso.sinds))} · ${s.incasso.stilstand === false ? 'weggevallen' : 'staat stil'} <span class="mono">${eur(s.incasso.vervallen)}</span>${mark ? ` · ${esc(mark.reden)}` : ''}</div>` : ''}
         ${s.niet_gedekt > 0 ? `<div style="color:var(--text-3)">Regeling dekt <span class="mono">${eur(s.niet_gedekt)}</span> niet (gecrediteerd zonder vervangende factuur)</div>` : ''}
         <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${annuleer}${incassoKnop}</div>
       </div></div>`;

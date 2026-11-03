@@ -34,6 +34,7 @@
 // en houdt counts/pagination simpel op de hoofdquery).
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { klantenMetStatus, laadIncassoRijen, huidigeStatus } from './_lib/klant-incassostatus.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const SORT_WHITELIST = new Set(['first_name', 'last_name', 'created_at', 'last_contact_at']);
@@ -112,8 +113,30 @@ async function respondList(req, res) {
     }
   }
 
+  // Incassostatus-filter (PR 3): ?incasso=bij_incasso,incasso_regeling,afgesloten
+  // of ?incasso=actief (= geen actieve incassostatus). Fail-soft.
+  const incassoWant = parseCsv(q.incasso).filter((x) => ['actief', 'bij_incasso', 'incasso_regeling', 'afgesloten'].includes(x));
+  let incassoIds = null;
+  let incassoUitsluiten = null;
+  if (incassoWant.length) {
+    const met = await klantenMetStatus(supabaseAdmin, incassoWant.filter((x) => x !== 'actief')) || [];
+    if (incassoWant.includes('actief')) {
+      const alle = await klantenMetStatus(supabaseAdmin, ['bij_incasso', 'incasso_regeling', 'afgesloten']) || [];
+      // 'actief' (eventueel met andere statussen): sluit klanten uit met een
+      // incassostatus die niet gekozen is.
+      incassoUitsluiten = alle.filter((id) => !met.includes(id));
+    } else {
+      incassoIds = met;
+      if (!incassoIds.length) {
+        return res.status(200).json({ customers: [], total: 0, page, page_size: pageSize, total_pages: 0 });
+      }
+    }
+  }
+
   // Hoofdquery
   let query = supabaseAdmin.from('customers').select('*', { count: 'exact' });
+  if (incassoIds) query = query.in('id', incassoIds);
+  if (incassoUitsluiten && incassoUitsluiten.length) query = query.not('id', 'in', `(${incassoUitsluiten.join(',')})`);
 
   // Status (active default = archived_at NULL AND anonymized_at NULL)
   const statusOr = [];
@@ -186,6 +209,18 @@ async function respondList(req, res) {
     }
   }
 
+  // Incassostatus per zichtbare klant (fail-soft).
+  const incassoPerKlant = new Map();
+  if (ids.length) {
+    try {
+      const r = await laadIncassoRijen(supabaseAdmin, ids, { alleenActief: true });
+      for (const id of ids) {
+        const h = huidigeStatus(r.rijen, id);
+        if (h.status !== 'actief') incassoPerKlant.set(id, { status: h.status, label: h.label, sinds: h.sinds });
+      }
+    } catch (e) { console.warn('[customers] incassostatus:', e.message); }
+  }
+
   const total = count || 0;
   return res.status(200).json({
     customers: (customers || []).map((c) => ({
@@ -201,6 +236,7 @@ async function respondList(req, res) {
       created_at: c.created_at,
       tags: tagsByCustomer[c.id] || [],
       status: deriveStatus(c),
+      incasso_status: incassoPerKlant.get(c.id) || null,
       deal_count_active: 0,    // placeholder — Sales-module (Fase 2B+)
       last_contact_at: null,   // placeholder — Sales-module / WhatsApp-laag
     })),

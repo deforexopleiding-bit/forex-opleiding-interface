@@ -654,6 +654,12 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Sale-regel (`maakSaleScope`/`factuurVanSale`) telt NOOIT meer klantbreed: alleen facturen van de eigen sale;
   losse facturen (geen deal/abonnement) enkel bij de ENIGE commissie-sale (`commissieSalesVan`) zonder nieuwe
   offerte. Zonder soort: oude regel, anders enige commissie-sale (overgang). Migratie 2026-11-03-subscriptions-soort.sql.
+  INCASSOSTATUS (PR 3): één status per klant — actief / bij_incasso / incasso_regeling / afgesloten (betaald|oninbaar)
+  in `mentor_commissie_incasso` (actieve rij deal_id NULL = huidig, gesloten rijen = historiek), `api/_lib/klant-incassostatus.js`
+  + `api/klant-incassostatus.js` (lezen finance.dunning.view, wijzigen finance.incasso.manage). bij_incasso: commissie
+  STAAT STIL vanaf sinds; regeling/betaald: echte betalingen tellen weer (ook tijdens de stilstand); oninbaar: niets vanaf
+  incasso_sinds. `incassoVoor` geeft enkel stoppende rijen. Signalen (dossier/pipeline/onboarding) = voorstellen. Klanten-v2:
+  tab Incassostatus + filter/badge in de lijst (`/api/customers?incasso=`); mentor ziet `status_label` (geen vrije tekst).
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

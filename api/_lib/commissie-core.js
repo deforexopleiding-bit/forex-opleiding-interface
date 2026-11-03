@@ -16,6 +16,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { laadSubsMetSoort } from './subscription-soort.js';
+import { statusVan, STATUS_LABEL } from './klant-incassostatus.js';
 import { computeDealTotals } from './deal-total.js';
 import { betaaldBedrag, telAlsBetaald, isVolledigGecrediteerd } from './factuur-betaald.js';
 import { customerDisplayName } from './customer-name.js';
@@ -701,7 +702,8 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
         cel.vrijgegeven = round2(cel.vrijgegeven + rel);
         cel.vrijgegeven_grootboek = round2(cel.vrijgegeven_grootboek + relGb);
         const verv = round2(s.incasso?.vervallen || 0);
-        if (s.incasso) cel.incasso = { sinds: s.incasso.sinds, vervallen: round2((cel.incasso?.vervallen || 0) + verv) };
+        if (s.incasso) cel.incasso = { sinds: s.incasso.sinds, vervallen: round2((cel.incasso?.vervallen || 0) + verv), stilstand: s.incasso.stilstand !== false };
+        if (s.status_label && !cel.status_label) cel.status_label = s.status_label;
         cel.vervallen = round2(cel.vervallen + verv);
         cel.niet_gedekt = round2(cel.niet_gedekt + (Number(s.regeling?.niet_gedekt) || 0));
         cel.mentoren.push({ user_id: m.user_id, naam: m.naam, aandeel: share, vrijgegeven: rel, vervallen: verv, geannuleerd: mentorGeannuleerd });
@@ -912,6 +914,7 @@ export async function wanbetalingLijsten({ regels, sales = [] }) {
 
   const incasso_markeringen = ctx.incasso.map((m) => ({
     id: m.id, customer_id: m.customer_id, klant: naam.get(m.customer_id) || '(klant)',
+    status: statusVan(m), status_label: STATUS_LABEL[statusVan(m)] + (m.afgesloten_als ? ` (${m.afgesloten_als})` : ''),
     deal_id: m.deal_id || null, sale: m.deal_id ? (saleLabel.get(m.deal_id) || 'Sale') : 'Alle sales van de klant',
     sinds: String(m.sinds).slice(0, 10), reden: m.reden, bron: m.bron, gezet_op: m.gezet_op,
   }));

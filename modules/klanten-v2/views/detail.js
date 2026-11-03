@@ -18,6 +18,7 @@ import { renderAbonnementenTab } from './tabs/abonnementen.js?v=10';
 import { renderFacturenTab }     from './tabs/facturen.js';
 import { renderCreditnotasTab }  from './tabs/creditnotas.js?v=2';
 import { renderWanbetalersTab }  from './tabs/wanbetalers.js';
+import { renderIncassoTab }      from './tabs/incasso.js?v=1';
 import { renderAuditTab }        from './tabs/audit.js';
 
 const K = () => window.KV;
@@ -39,6 +40,8 @@ const TABS = [
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 12h8"/></svg>' },
   { key: 'wanbetalers',  label: 'Wanbetalers',  renderer: renderWanbetalersTab,
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 22h20L12 2z"/><path d="M12 9v5M12 18h.01"/></svg>' },
+  { key: 'incasso',      label: 'Incassostatus', renderer: renderIncassoTab,
+    ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>' },
   { key: 'audit',        label: 'Audit',        renderer: renderAuditTab,
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/></svg>' },
 ];

@@ -753,7 +753,7 @@
     if (status === 'betaald')       return H.pill('ok',     'Betaald');
     if (status === 'gecrediteerd')  return H.pill('neutral', 'Gecrediteerd');
     if (status === 'achterstallig') return H.pill('danger', 'Achterstallig');
-    if (status === 'incasso')       return H.pill('danger', 'Incasso — vervalt');
+    if (status === 'incasso')       return H.pill('danger', 'Incasso — staat stil');
     return H.pill('warn', 'Open');
   }
   window.__verdBonusSetTab = (t) => {
@@ -872,9 +872,11 @@
       const summaryRow = `<tr onclick="window.__verdBonusToggle('${esc(s._key)}')" style="cursor:pointer;${isOpen ? 'background:var(--surface-2)' : ''}">
         <td><strong>${esc(s.customer_label || '—')}</strong></td>
         <td>${_bronCel(s)}</td>
-        <td>${s.incasso
-          ? `${H.pill('danger', 'Incasso — geen commissie meer sinds ' + fmtDate(s.incasso.sinds))}<div style="font-size:11px;color:var(--rose);margin-top:3px">vervalt: ${eur(s.incasso.vervallen)}</div>`
-          : _bonusStatusPill(s.status, s.start_date) + overdueBadge}</td>
+        <td>${s.status_label
+          ? `${H.pill(s.status_label.code === 'regeling' ? 'warn' : (s.status_label.code === 'bij_incasso' ? 'danger' : 'neutral'), s.status_label.tekst)}<div style="font-size:11px;color:var(--text-3);margin-top:3px;max-width:260px" title="${esc(s.status_label.reden || '')}">${esc(s.status_label.verwachting || '')}</div>`
+          : (s.incasso
+            ? `${H.pill('danger', 'Incasso sinds ' + fmtDate(s.incasso.sinds))}`
+            : _bonusStatusPill(s.status, s.start_date) + overdueBadge)}</td>
         <td>
           <div style="font-size:12px">${paidCount}/${termCount}</div>
           <div class="progress" style="height:5px;margin-top:3px;max-width:100px"><i style="width:${pct.toFixed(1)}%;background:var(--emerald)"></i></div>
