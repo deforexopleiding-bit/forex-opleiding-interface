@@ -67,7 +67,7 @@
 
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS, permKey: 'customer.module.access', tabs: ['Overzicht'] },
     { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor', 'super_admin', 'admin', 'manager'], tabs: [] },
-    { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
+    { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Incasso-abonnementen', 'Brieven', 'Motor'] },
     // Iris — VRIJGEGEVEN op 16 oktober 2026 (was slapend sinds 21 september).
     // `roles: SAMS` zet 'em in de zijbalk voor super_admin, manager en sales;
     // die laatste is waarom het nu gebeurt: Dave moet haar zien. Daarmee is
