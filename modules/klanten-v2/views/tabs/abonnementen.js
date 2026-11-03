@@ -18,10 +18,12 @@
 
 import {
   openSubscriptionPostponeModal,
+  openSubscriptionSoortModal,
+  soortLabel,
   openSubscriptionPostponeAllModal,
   openSubscriptionUpdateModal,
   openSubscriptionDeleteModal,
-} from '../modals/subscription-actions.js?v=1';
+} from '../modals/subscription-actions.js?v=2';
 
 const K = () => window.KV;
 
@@ -261,6 +263,9 @@ function renderSubRow(sub) {
       <td>
         <div class="cell-main-wrap"><span class="cell-main">${K().esc(desc)}</span></div>
         ${isPostponed ? `<div style="font-size:11px;color:var(--amber);margin-top:2px">Uitgesteld · ${K().esc(String(sub.postponed_months))} mnd</div>` : ''}
+        ${soortLabel(sub)
+          ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px" title="Soort abonnement (mentorcommissie)">${K().esc(soortLabel(sub))}</div>`
+          : `<div style="font-size:11px;color:var(--amber);margin-top:2px" title="Bepaalt bij welke sale de betalingen voor de mentorcommissie tellen">Soort ontbreekt</div>`}
       </td>
       <td class="r kv-fac-amount"><span class="mono">${K().esc(fmtEur(inclPerTerm(sub)))}</span></td>
       <td>${K().esc(fmtDate(sub.start_date) || '—')}</td>
@@ -271,6 +276,7 @@ function renderSubRow(sub) {
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}"
           ${hasInv ? 'aria-disabled="true" data-kv-abo-locked style="opacity:.45;cursor:not-allowed" title="Al gefactureerd — aanpassen niet mogelijk. Gebruik crediteren + nieuw abonnement."' : 'title="Aanpassen"'}>✎</button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone="${K().esc(sub.id)}" title="Uitstellen">⏱</button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-soort="${K().esc(sub.id)}" title="Soort abonnement (mentorcommissie)">◇</button>
         ${ended ? '' : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">⊘</button>`}
       </td>
     </tr>`;
@@ -540,6 +546,7 @@ function wire(rootEl) {
   bindRij('data-kv-abo-update', openSubscriptionUpdateModal, 'Aanpassen');
   bindRij('data-kv-abo-postpone', openSubscriptionPostponeModal, 'Uitstellen');
   bindRij('data-kv-abo-delete', openSubscriptionDeleteModal, 'Deactiveren');
+  bindRij('data-kv-abo-soort', ({ sub, onSuccess }) => openSubscriptionSoortModal({ sub, customerId: state.customerId, onSuccess }), 'Soort');
   rootEl.querySelector('[data-kv-abo-postpone-all]')?.addEventListener('click', () => {
     const activeCount = state.subs.filter((s) => {
       const k = String(s.status || '').toLowerCase();

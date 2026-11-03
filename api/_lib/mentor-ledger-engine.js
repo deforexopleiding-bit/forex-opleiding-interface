@@ -16,8 +16,9 @@ import { supabaseAdmin } from '../supabase.js';
 import { betaaldBedrag, telAlsBetaald } from './factuur-betaald.js';
 import {
   loadAttributions, attributionIdOf, uitTeSluitenDeals,
-  isSchemaOntbreekt, maakSaleScope, factuurVanSale, factuurVanSales,
+  isSchemaOntbreekt, maakSaleScope, factuurVanSale, commissieSalesVan,
 } from './commissie-toewijzing.js';
+import { laadSubsMetSoort } from './subscription-soort.js';
 import {
   loadRegelingContext, koppelDeal, incassoVoor, betaaldVoor, isConcept, heeftKrediet,
 } from './commissie-regeling.js';
@@ -696,15 +697,8 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
   const { data: dealsForCust } = await supabaseAdmin
     .from('deals').select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at').eq('customer_id', customerId);
   const dealIds = (dealsForCust || []).map((d) => d.id);
-  let subsForCust = [];
-  if (dealIds.length) {
-    const { data: subs } = await supabaseAdmin
-      .from('subscriptions')
-      .select('id, deal_id, teamleader_subscription_id, start_date')
-      .in('deal_id', dealIds)
-      .order('start_date', { ascending: false, nullsFirst: false });
-    subsForCust = subs || [];
-  }
+  const subsForCust = await laadSubsMetSoort(supabaseAdmin, dealIds, 'id, deal_id, teamleader_subscription_id, start_date, status',
+    { order: { col: 'start_date', opts: { ascending: false, nullsFirst: false } } });
 
   // ── 2) Facturen van de klant — paid_total per tl_sub_id + customer-breed ─
   //    Conceptfacturen tellen nooit (o.a. de incassofactuur voor het bureau).
@@ -721,43 +715,25 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
       custLastPaidDate = inv.paid_date;
     }
   }
-  const paidBySub = new Map(); // tl_sub_id -> { paid, lastPaidDate }
-  for (const inv of (allInvs || [])) {
-    if (!inv.tl_subscription_id) continue;
-    if (!paidBySub.has(inv.tl_subscription_id)) {
-      paidBySub.set(inv.tl_subscription_id, { paid: 0, lastPaidDate: null });
-    }
-    const acc = paidBySub.get(inv.tl_subscription_id);
-    const paid = betaaldBedrag(inv);
-    acc.paid += paid;
-    if (paid > 0 && inv.paid_date && (!acc.lastPaidDate || inv.paid_date > acc.lastPaidDate)) {
-      acc.lastPaidDate = inv.paid_date;
-    }
-  }
-
   // ── 2b) Handmatige toewijzingen (verlenging/upsell) — fail-soft ─────────
-  //   Toegewezen deal → zijn parents tellen ALLEEN de facturen van die deal.
-  //   Event-parent → facturen van (andere) toegewezen deals tellen niet mee in
-  //   de klantbrede som. Zonder toewijzingen: exact het oude gedrag.
+  //   Elke sale (event of toewijzing) telt alleen de facturen van zijn eigen
+  //   deal; een toegewezen deal is een eigen commissie-sale.
   const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
-  const activeAttrDeals = attrs.activeDealIdsByCust.get(customerId) || new Set();
 
   // ── 2c) Regeling na creditering + incasso (api/_lib/commissie-regeling.js)
   //   Regelingsfacturen (geen deal, geen abonnement) krijgen hun sale via de
   //   koppelregel. Incasso: betalingen vanaf `sinds` tellen niet. Zonder
   //   kredieten, koppelingen of markeringen: exact het oude gedrag.
   const regCtx = await loadRegelingContext(supabaseAdmin, [customerId]);
-  const salesPerKlant = new Map();
-  if (heeftKrediet(regCtx, customerId) || regCtx.handmatig.size) {
-    const { data: alleParents } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .select('source_quote_id, status')
-      .eq('entry_type', 'bonus')
-      .eq('customer_id', customerId)
-      .is('parent_entry_id', null);
-    salesPerKlant.set(customerId, new Set((alleParents || [])
-      .filter((e) => e.status !== 'geannuleerd' && e.source_quote_id).map((e) => e.source_quote_id)));
-  }
+  // Commissie-sales van de klant (event-parents + actieve toewijzingen): voor
+  // de koppelregel én voor facturen zonder deal/abonnement (sale-regel 4).
+  const { data: alleParents } = await supabaseAdmin
+    .from('mentor_ledger_entries')
+    .select('customer_id, source_quote_id, status')
+    .eq('entry_type', 'bonus')
+    .eq('customer_id', customerId)
+    .is('parent_entry_id', null);
+  const salesPerKlant = commissieSalesVan(alleParents || [], attrs.list || []);
   for (const inv of allInvs) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
   const betalingenPerFactuur = new Map();
   if (regCtx.incasso.length && allInvs.length) {
@@ -770,7 +746,7 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     }
   }
 
-  const saleScope = maakSaleScope({ deals: dealsForCust || [], subs: subsForCust });
+  const saleScope = maakSaleScope({ deals: dealsForCust || [], subs: subsForCust, commissieSales: salesPerKlant });
 
   // ── 3) Parents ───────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
@@ -831,58 +807,17 @@ export async function releaseProportionalForPaidAmount({ customerId, dryRun = fa
     const attrId = attributionIdOf(parent);
     const incasso = incassoVoor(regCtx.incasso, customerId, parent.source_quote_id);
     const sinds = incasso ? String(incasso.sinds).slice(0, 10) : null;
-    let saleTotaalBetaald;
-    let saleLastPaidDate;
-    if (attrId) {
-      // Toegewezen sale: alleen de facturen van de eigen deal (incl. de
-      // regelingsfacturen die aan die deal gekoppeld zijn), nooit klantbreed.
-      const dealId = parent.source_quote_id || null;
-      const acc    = dealId
-        ? somBetaald(allInvs.filter((inv) => factuurVanSale(inv, dealId, saleScope, customerId)), sinds)
-        : { paid: 0, lastPaidDate: null };
-      saleTotaalBetaald = acc.paid;
-      saleLastPaidDate  = acc.lastPaidDate;
-    } else {
-      const excl = uitTeSluitenDeals(activeAttrDeals, parent.source_quote_id);
-      // Bepaal sub voor deze parent → tl_sub_id → totaalBetaald voor deze sale.
-      let sub = null;
-      if (parent.source_quote_id) {
-        sub = subsForCust.find((s) => s.deal_id === parent.source_quote_id) || null;
-      }
-      if (!sub) sub = subsForCust.find((s) => !excl.has(s.deal_id) && !excl.has(saleScope.dealVanSub(s))) || null;
-      const tlSubId = sub?.teamleader_subscription_id || null;
-
-      // Sale-scope totaalBetaald: MAX van sub-route en customer-route.
-      // Waarom max en niet else-if: bij klanten met deels ongekoppelde
-      // facturen (tl_subscription_id=NULL op sommige betalingen) is de
-      // sub-route incompleet. Customer-route bevat álle klant-facturen (incl.
-      // de gekoppelde) en is dus altijd >= sub-route.
-      // Randgeval multi-sale klant: bij >1 sale per customer kan custPaidTotal
-      // facturen van andere sales bevatten — bekende beperking (idem in
-      // mentor-bonus-overview). De cap op (origAmount - reedsReleased) verderop
-      // voorkomt dat er ooit meer dan de volledige bonus vrijkomt. Exactheid
-      // verbetert zodra facturen consequent aan de sub gekoppeld zijn.
-      // Toegewezen deals (verlenging) tellen niet mee voor een event-bonus,
-      // en ook geen regelingsfacturen die aan een ANDERE sale (of bewust aan
-      // geen sale) gekoppeld zijn — anders telt dezelfde betaling dubbel.
-      const elders = (inv) => !!(inv._k && !inv._k.onbekend && inv._k.deal !== (parent.source_quote_id || null));
-      const filteren = excl.size || sinds || allInvs.some(elders);
-      const custAcc = filteren
-        ? somBetaald(allInvs.filter((inv) => !factuurVanSales(inv, excl, saleScope, customerId) && !elders(inv)), sinds)
-        : { paid: custPaidTotal, lastPaidDate: custLastPaidDate };
-      const subAcc  = sinds
-        ? (tlSubId ? somBetaald(allInvs.filter((inv) => inv.tl_subscription_id === tlSubId), sinds) : null)
-        : ((tlSubId && paidBySub.has(tlSubId)) ? paidBySub.get(tlSubId) : null);
-      const subPaid  = subAcc ? _r2(subAcc.paid) : 0;
-      const custPaid = _r2(custAcc.paid);
-      saleTotaalBetaald = Math.max(subPaid, custPaid);
-      // last paid_date volgt de route met het hoogste bedrag (typisch = recentste
-      // betaling); fallback op de andere route zodat we nooit null returnen als
-      // er wél betaald is.
-      saleLastPaidDate =
-        (custPaid >= subPaid ? custAcc.lastPaidDate : (subAcc?.lastPaidDate || null))
-        || custAcc.lastPaidDate || subAcc?.lastPaidDate || null;
-    }
+    // Eén regel voor event-bonus én toewijzing (PR 2, 3 nov 2026): alleen de
+    // facturen van de EIGEN sale tellen (commissie-toewijzing.js
+    // factuurVanSale: deal, abonnementen volgens hun soort, en losse facturen
+    // enkel bij de enige commissie-sale). Nooit meer klantbreed; een nieuwe
+    // offerte telt nooit mee voor een oude event-bonus.
+    const dealId = parent.source_quote_id || null;
+    const acc = dealId
+      ? somBetaald(allInvs.filter((inv) => factuurVanSale(inv, dealId, saleScope, customerId)), sinds)
+      : { paid: 0, lastPaidDate: null };
+    const saleTotaalBetaald = acc.paid;
+    const saleLastPaidDate  = acc.lastPaidDate;
 
     const parentBasis = Number(parent.basis) || 0;
     const kids        = kidsByParent.get(parent.id) || [];

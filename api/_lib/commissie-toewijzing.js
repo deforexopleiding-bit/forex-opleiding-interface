@@ -17,6 +17,8 @@
 // niet gedraaid is, bestaan tabel en kolom niet. loadAttributions geeft dan
 // een lege set terug en alle oude paden gedragen zich exact zoals voorheen.
 
+import { saleVanSoort } from './subscription-soort.js';
+
 export const ATTR_KEY_PREFIX = 'attr:';
 export const REDENEN = ['verlenging', 'upsell', 'handmatig'];
 export const REDEN_LABEL = { verlenging: 'Verlenging', upsell: 'Upsell', handmatig: 'Handmatig' };
@@ -142,29 +144,40 @@ export function uitTeSluitenDeals(activeDealIds, eigenDealId) {
 }
 
 // ── Welke facturen horen bij een SALE (getekende deal)? ─────────────────────
-// Eén regel voor de vrijgave-engine (toegewezen sale), het bonus-overzicht en
-// de zoek/preview van "Sale toewijzen" (gemeten 22 okt: facturen uit de
-// TL-sync hebben vaak geen deal_id én geen tl_subscription_id, en
-// TL-geïmporteerde abonnementen hangen aan een 'ghost'-deal zonder offerte):
-//   0. de koppelregel van de regeling na creditering (inv._k, PR6) wint;
+// Eén regel voor de vrijgave-engine, het bonus-overzicht (en dus het rapport),
+// de cockpit en het controlescherm. Sinds 3 nov 2026 (PR 2, beslissing Maxim)
+// telt een sale NOOIT meer klantbreed: alleen de facturen van de sale zelf.
+//   0. de koppelregel van de regeling na creditering (inv._k) wint;
 //   1. invoices.deal_id = de deal;
-//   2. tl_subscription_id van een abonnement van de deal — inclusief
-//      abonnementen op een ghost-deal (tl_quotation_status 'no_quotation',
-//      TL-import zonder offerte) die bij deze sale horen: de laatst getekende
-//      deal van de klant die vóór de startdatum (+31 dagen speling) getekend
-//      werd, en hooguit 92 dagen vóór die startdatum. Een abonnement dat later
-//      start is een verlenging en hoort bij geen enkele getekende sale;
-//   3. invoices.deal_id = zo'n ghost-deal;
+//   2. tl_subscription_id van een abonnement dat bij de sale hoort. Welk
+//      abonnement bij welke sale hoort, zegt subscriptions.soort +
+//      sale_deal_id (api/_lib/subscription-soort.js): origineel, aanpassing
+//      (uitstel / lager bedrag / regeling) en incasso_regeling → de
+//      oorspronkelijke sale; nieuwe_offerte → haar eigen sale (telt nooit
+//      mee voor een oude event-bonus, tenzij die sale toegewezen werd).
+//      OVERGANG (soort nog niet ingevuld): de oude regel — eigen deal, of bij
+//      een ghost-deal (TL-import zonder offerte) de laatst getekende deal vóór
+//      de start (+31 d) en hooguit 92 d vóór de start; vindt die niets, dan de
+//      enige commissie-sale van de klant (zoals het klantbrede optellen dat
+//      deed). Zulke abonnementen staan als "soort ontbreekt" in het
+//      controlescherm;
+//   3. invoices.deal_id = een (ghost-)deal van zo'n abonnement;
 //   4. een factuur zonder deal en zonder abonnement (en zonder koppeling)
-//      telt alleen als de klant precies één getekende deal heeft.
+//      hoort bij de ENIGE commissie-sale van de klant — als de klant geen
+//      nieuwe offerte heeft. Twee commissie-sales of een nieuwe offerte →
+//      onbekend (niet meetellen; koppelen in de cockpit). Zonder
+//      commissieSales (oude callers): als de klant precies één getekende deal
+//      heeft.
 const GETEKEND = new Set(['accepted', 'signed']);
 export const isGetekendDeal = (d) => !!d && (GETEKEND.has(String(d.tl_quotation_status || '').toLowerCase()) || !!d.tl_quotation_accepted_at);
 
 /**
- * @param {{ deals: Array, subs: Array }} p  alle deals en subs van de klant(en)
- * @returns {{ subsVan(dealId): Array, dealVanSub(sub): string|null, getekendPerKlant: Map<string, Array>, ghostVan(dealId): Set<string> }}
+ * @param {{ deals: Array, subs: Array, commissieSales?: Map<string, Set<string>> }} p
+ *   deals/subs: alles van de klant(en); subs mogen soort/sale_deal_id dragen.
+ *   commissieSales: customer_id → deals met een (niet geannuleerde) commissie
+ *   (event-parent of actieve toewijzing).
  */
-export function maakSaleScope({ deals = [], subs = [] } = {}) {
+export function maakSaleScope({ deals = [], subs = [], commissieSales = null } = {}) {
   const dealById = new Map(deals.map((d) => [d.id, d]));
   const getekendPerKlant = new Map();
   for (const d of deals) {
@@ -181,7 +194,21 @@ export function maakSaleScope({ deals = [], subs = [] } = {}) {
     return d.toISOString().slice(0, 10);
   };
   const isGhost = (d) => String(d?.tl_quotation_status || '').toLowerCase() === 'no_quotation';
-  const dealVanSub = (s) => {
+  const klantVan = (s) => dealById.get(s.deal_id)?.customer_id || null;
+  // Klanten met een nieuwe offerte die zelf geen commissie heeft: hun losse
+  // facturen kunnen we niet aan een sale toewijzen.
+  const nieuweOfferte = new Set();
+  for (const s of subs) {
+    if (s?.soort !== 'nieuwe_offerte') continue;
+    const c = klantVan(s);
+    const sale = saleVanSoort(s);
+    if (c && !(commissieSales?.get(c)?.has(sale))) nieuweOfferte.add(c);
+  }
+  const enigeCommissieSale = (c) => {
+    const cs = c ? commissieSales?.get(c) : null;
+    return cs && cs.size === 1 && !nieuweOfferte.has(c) ? [...cs][0] : null;
+  };
+  const oudeRegel = (s) => {
     const eigen = dealById.get(s.deal_id);
     if (!eigen || !isGhost(eigen)) return s.deal_id || null;
     const kandidaten = getekendPerKlant.get(eigen.customer_id) || [];
@@ -196,11 +223,20 @@ export function maakSaleScope({ deals = [], subs = [] } = {}) {
     const getekend = String(gekozen.tl_quotation_accepted_at || gekozen.created_at || '').slice(0, 10);
     return start <= plusDagen(getekend, 92) ? gekozen.id : null;
   };
+  const zonderSoort = new Set(); // sub-id's die via de overgangsregel gekoppeld zijn
+  const dealVanSub = (s) => {
+    const viaSoort = saleVanSoort(s);
+    if (viaSoort !== undefined) return viaSoort;
+    const oud = oudeRegel(s);
+    if (oud) return oud;
+    return enigeCommissieSale(klantVan(s));
+  };
   const subsPerSale = new Map();
   const ghostPerSale = new Map();
   for (const s of subs) {
     const sale = dealVanSub(s);
     if (!sale) continue;
+    if (!s.soort) zonderSoort.add(s.id);
     if (!subsPerSale.has(sale)) subsPerSale.set(sale, []);
     subsPerSale.get(sale).push(s);
     if (s.deal_id && s.deal_id !== sale) {
@@ -210,7 +246,11 @@ export function maakSaleScope({ deals = [], subs = [] } = {}) {
   }
   return {
     getekendPerKlant,
+    commissieSales,
     dealVanSub,
+    enigeCommissieSale,
+    heeftNieuweOfferte: (c) => nieuweOfferte.has(c),
+    zonderSoort: (dealId) => (subsPerSale.get(dealId) || []).filter((s) => zonderSoort.has(s.id)),
     subsVan: (dealId) => subsPerSale.get(dealId) || [],
     ghostVan: (dealId) => ghostPerSale.get(dealId) || new Set(),
   };
@@ -225,10 +265,28 @@ export function factuurVanSale(inv, dealId, scope, customerId) {
   if (inv.tl_subscription_id && scope.subsVan(dealId).some((s) => s.teamleader_subscription_id === inv.tl_subscription_id)) return true;
   if (inv.deal_id && scope.ghostVan(dealId).has(inv.deal_id)) return true;
   if (!inv.deal_id && !inv.tl_subscription_id) {
-    const getekend = scope.getekendPerKlant.get(customerId || inv.customer_id) || [];
+    const c = customerId || inv.customer_id;
+    if (scope.commissieSales) return scope.enigeCommissieSale(c) === dealId;
+    const getekend = scope.getekendPerKlant.get(c) || [];
     return getekend.length === 1 && getekend[0].id === dealId;
   }
   return false;
+}
+
+/**
+ * customer_id → deals met commissie: niet geannuleerde bonus-parents
+ * (source_quote_id) + actieve toewijzingen. Voor maakSaleScope.
+ */
+export function commissieSalesVan(parents = [], attributions = []) {
+  const m = new Map();
+  const add = (c, d) => {
+    if (!c || !d) return;
+    if (!m.has(c)) m.set(c, new Set());
+    m.get(c).add(d);
+  };
+  for (const e of parents) if (e && e.status !== 'geannuleerd') add(e.customer_id, e.source_quote_id);
+  for (const a of attributions) if (a && a.status === 'actief') add(a.customer_id, a.deal_id);
+  return m;
 }
 
 /** Hoort deze factuur bij één van deze sales? (uitsluiten bij een event-bonus) */

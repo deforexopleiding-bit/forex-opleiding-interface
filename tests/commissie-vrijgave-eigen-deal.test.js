@@ -107,30 +107,34 @@ test('idempotent: tweede run geeft niets extra vrij', async () => {
   assert.equal(som(kids('p-event')), 90);
 });
 
-test('forward-only: toewijzing achteraf draait al vrijgegeven event-bonus niet terug', async () => {
-  // Eerst zonder toewijzing: oude gedrag telt de verlengingsfactuur klantbreed.
+// Sinds PR 2 (3 nov 2026, beslissing Maxim): een sale telt NOOIT klantbreed.
+// Een factuur van een andere deal (nieuwe offerte) telt nooit mee voor een oude
+// event-bonus, ook niet zonder toewijzing; met toewijzing telt ze voor die.
+test('forward-only: al vrijgegeven blijft staan, ook als de regel strenger wordt', async () => {
   basis({ facturen: [fOud(3000), fNieuw(3000)], toewijzing: false });
-  await engine.releaseProportionalForPaidAmount({ customerId: K });
-  assert.equal(som(kids('p-event')), 180);
-  // Nu wordt D2 toegewezen: event-som zakt naar 3000, maar niets wordt teruggedraaid.
-  db.tables.mentor_sale_attributions = [{ id: X, deal_id: D2, customer_id: K, reden: 'verlenging', status: 'actief' }];
-  await engine.releaseProportionalForPaidAmount({ customerId: K });
+  // Een eerdere (klantbrede) run gaf 180 vrij; die child blijft staan.
+  db.tables.mentor_ledger_entries.push({ id: 'oud-kind', mentor_user_id: A, event_id: EV, entry_type: 'bonus', customer_id: K,
+    amount: 180, status: 'vrijgegeven', parent_entry_id: 'p-event', idempotency_key: 'p-event:paidamount:600000' });
+  db.tables.mentor_ledger_entries.find((e) => e.id === 'p-event').amount = 0;
+  db.tables.mentor_ledger_entries.find((e) => e.id === 'p-event').original_amount = 180;
+  const r = await engine.releaseProportionalForPaidAmount({ customerId: K });
+  assert.equal(r.total_released, 0, 'niets extra, maar ook niets teruggedraaid');
   assert.equal(som(kids('p-event')), 180);
 });
 
-test('zonder migratie (tabel ontbreekt): exact het oude klantbrede gedrag', async () => {
+test('nieuwe offerte zonder toewijzing (en zonder migratie): telt niet voor de oude event-bonus', async () => {
   basis({ facturen: [fOud(3000), fNieuw(1000)], toewijzing: false, missing: ['mentor_sale_attributions'] });
   const r = await engine.releaseProportionalForPaidAmount({ customerId: K });
-  assert.equal(som(kids('p-event')), 120, 'MAX(sub 3000, klant 4000)/6000 × 180');
-  assert.equal(r.paid_total, 4000);
+  assert.equal(som(kids('p-event')), 90, 'alleen 3000/6000 × 180 — de factuur van D2 telt niet');
+  assert.equal(r.paid_total, 4000, 'rapportveld paid_total blijft klantbreed (informatief)');
 });
 
-test('geannuleerde toewijzing sluit de deal niet meer uit (oude gedrag terug)', async () => {
+test('geannuleerde toewijzing: de factuur van die deal telt nog altijd niet voor de event-bonus', async () => {
   basis({ facturen: [fOud(3000), fNieuw(1000)] });
   db.tables.mentor_sale_attributions[0].status = 'geannuleerd';
   db.tables.mentor_ledger_entries = db.tables.mentor_ledger_entries.filter((e) => e.id !== 'p-attr');
   await engine.releaseProportionalForPaidAmount({ customerId: K });
-  assert.equal(som(kids('p-event')), 120);
+  assert.equal(som(kids('p-event')), 90);
 });
 
 test('termijn-modus: event-parent zonder eigen sub valt niet terug op de verlengings-sub', async () => {

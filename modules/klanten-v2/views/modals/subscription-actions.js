@@ -519,3 +519,139 @@ export function openSubscriptionDeleteModal({ sub, onSuccess } = {}) {
   _dl = { sub, saving: false, globalError: null, tlFailed: false, onSuccess: onSuccess || null };
   _dlRerender();
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// SOORT ABONNEMENT (mentorcommissie — PR 2, 3 nov 2026)
+// origineel / aanpassing (uitstel, lager bedrag, regeling) / incasso_regeling
+// blijven bij de oorspronkelijke sale; nieuwe_offerte is een eigen sale en
+// telt nooit mee voor een oude event-bonus. Server: /api/subscription-soort.
+// ══════════════════════════════════════════════════════════════════════════
+export const SOORT_OPTIES = [
+  { v: 'origineel', l: 'Origineel', d: 'Het abonnement van de sale zelf.' },
+  { v: 'aanpassing', l: 'Aanpassing', d: 'Uitstel, lager bedrag of regeling van dezelfde sale.' },
+  { v: 'incasso_regeling', l: 'Incasso-regeling', d: 'Termijnen van een regeling na incasso; blijft bij dezelfde sale.' },
+  { v: 'nieuwe_offerte', l: 'Nieuwe offerte', d: 'Een nieuwe sale. Telt nooit mee voor een oude event-bonus, tenzij toegewezen.' },
+];
+export const AANPASSING_OPTIES = [
+  { v: 'uitstel', l: 'Uitstel' }, { v: 'lager_bedrag', l: 'Lager bedrag' }, { v: 'regeling', l: 'Regeling' },
+];
+export function soortLabel(sub) {
+  if (!sub?.soort) return null;
+  const o = SOORT_OPTIES.find((x) => x.v === sub.soort);
+  const a = AANPASSING_OPTIES.find((x) => x.v === sub.aanpassing_type);
+  return (o ? o.l : sub.soort) + (a ? ' · ' + a.l.toLowerCase() : '');
+}
+/** HTML-velden (gedeeld met de wizard). `st` = { soort, aanpassing_type, sale_deal_id }, `sales` = lijst. */
+export function soortVeldenHtml(st, sales, { prefix = 'kv-soort', fout = null } = {}) {
+  const radios = SOORT_OPTIES.map((o) => `
+    <label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;cursor:pointer">
+      <input type="radio" name="${prefix}-soort" value="${esc(o.v)}" ${st.soort === o.v ? 'checked' : ''} data-${prefix}-soort />
+      <span><b style="font-size:12.5px">${esc(o.l)}</b><br><span style="font-size:11.5px;color:var(--text-3)">${esc(o.d)}</span></span>
+    </label>`).join('');
+  const typeSel = st.soort === 'aanpassing' ? `
+    <div class="kv-edit-field"><label>Soort aanpassing <span class="kv-edit-req">*</span></label>
+      <select data-${prefix}-type>${['<option value="">— kies —</option>', ...AANPASSING_OPTIES.map((o) => `<option value="${esc(o.v)}" ${st.aanpassing_type === o.v ? 'selected' : ''}>${esc(o.l)}</option>`)].join('')}</select></div>` : '';
+  const saleNodig = st.soort === 'aanpassing' || st.soort === 'incasso_regeling' || st.soort === 'origineel';
+  const saleSel = saleNodig ? `
+    <div class="kv-edit-field"><label>Hoort bij sale ${st.soort === 'origineel' ? '' : '<span class="kv-edit-req">*</span>'}</label>
+      <select data-${prefix}-sale>
+        <option value="">${st.soort === 'origineel' ? '— deze offerte / nieuwe sale —' : '— kies de oorspronkelijke sale —'}</option>
+        ${(sales || []).map((s) => `<option value="${esc(s.id)}" ${st.sale_deal_id === s.id ? 'selected' : ''}>${esc((s.referentie || 'Offerte') + ' · ' + (s.getekend_op ? String(s.getekend_op).slice(0, 10) : 'niet getekend') + (s.bedrag != null ? ' · ' + fmtEur(s.bedrag) : '') + (s.gearchiveerd ? ' · gearchiveerd' : ''))}</option>`).join('')}
+      </select></div>` : '';
+  return `
+    <div class="kv-edit-field ${fout ? 'kv-edit-field-error' : ''}">
+      <label>Soort abonnement <span class="kv-edit-req">*</span></label>${radios}
+      ${fout ? `<div class="kv-edit-field-msg">${esc(fout)}</div>` : ''}
+    </div>${typeSel}${saleSel}`;
+}
+export function soortVeldenWire(box, st, onChange, { prefix = 'kv-soort' } = {}) {
+  box.querySelectorAll(`[data-${prefix}-soort]`).forEach((r) => r.addEventListener('change', (e) => {
+    st.soort = e.target.value; if (st.soort !== 'aanpassing') st.aanpassing_type = null; onChange();
+  }));
+  box.querySelector(`[data-${prefix}-type]`)?.addEventListener('change', (e) => { st.aanpassing_type = e.target.value || null; });
+  box.querySelector(`[data-${prefix}-sale]`)?.addEventListener('change', (e) => { st.sale_deal_id = e.target.value || null; });
+}
+export function soortVeldenFout(st) {
+  if (!st.soort) return 'Kies de soort abonnement.';
+  if (st.soort === 'aanpassing' && !st.aanpassing_type) return 'Kies het soort aanpassing.';
+  if ((st.soort === 'aanpassing' || st.soort === 'incasso_regeling') && !st.sale_deal_id) return 'Kies de oorspronkelijke sale.';
+  return null;
+}
+export async function laadSoortContext(customerId) {
+  return K().authedJson(`/api/subscription-soort?customer_id=${encodeURIComponent(customerId)}`);
+}
+
+let _so = null;
+function _soHead() {
+  return `
+    <div class="kv-edit-head">
+      <div><div class="kv-edit-head-eyebrow">Mentorcommissie</div><div class="kv-edit-head-name">Soort abonnement</div></div>
+      <button type="button" class="ds-icon-btn" data-kv-so-close aria-label="Sluiten">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>`;
+}
+function _soBody() {
+  if (_so.loading) return '<div style="padding:16px;color:var(--text-3)">Laden…</div>';
+  const v = _so.voorstel;
+  const hint = v && !_so.sub.soort
+    ? `<div style="padding:8px 10px;border-radius:6px;background:${v.zeker ? 'var(--emerald-soft)' : 'var(--amber-soft)'};font-size:12px;margin-bottom:8px">
+        Voorstel: <b>${esc(v.soort ? (SOORT_OPTIES.find((o) => o.v === v.soort)?.l || v.soort) : 'te controleren')}</b> — ${esc(v.reden || '')}</div>` : '';
+  return `
+    <form class="kv-edit-form" novalidate>
+      ${_so.globalError ? `<div class="kv-edit-banner">${esc(_so.globalError)}</div>` : ''}
+      <p style="font-size:12.5px;color:var(--text-2);margin:0 0 8px">Bepaalt bij welke sale de betalingen van <b>${esc(_so.sub.description || 'dit abonnement')}</b> voor de mentorcommissie tellen. Bedragen veranderen niet; al vrijgegeven commissie blijft staan.</p>
+      ${hint}
+      ${soortVeldenHtml(_so.st, _so.sales, { fout: _so.error })}
+    </form>`;
+}
+function _soFoot() {
+  return `<div class="kv-edit-foot">
+      <button type="button" class="ds-btn ds-btn-ghost" data-kv-so-close ${_so.saving ? 'disabled' : ''}>Annuleren</button>
+      <button type="button" class="ds-btn ds-btn-primary" data-kv-so-submit ${_so.saving || _so.loading ? 'disabled' : ''}>${_so.saving ? 'Bezig…' : 'Opslaan'}</button>
+    </div>`;
+}
+async function _soSave() {
+  _so.error = soortVeldenFout(_so.st);
+  if (_so.error) { _soRerender(); return; }
+  _so.saving = true; _so.globalError = null; _soRerender();
+  try {
+    await K().authedJson('/api/subscription-soort', {
+      method: 'POST',
+      body: JSON.stringify({ subscription_id: _so.sub.id, ..._so.st }),
+    });
+    K().toast('Soort abonnement opgeslagen');
+    if (typeof _so.onSuccess === 'function') _so.onSuccess();
+    D().closeModal();
+  } catch (e) {
+    _so.globalError = e?.message || 'Opslaan mislukt'; _so.saving = false; _soRerender();
+  }
+}
+function _soWire() {
+  const box = document.getElementById('dfoModal');
+  if (!box) return;
+  box.querySelectorAll('[data-kv-so-close]').forEach((b) => b.addEventListener('click', () => D().closeModal()));
+  box.querySelector('[data-kv-so-submit]')?.addEventListener('click', _soSave);
+  soortVeldenWire(box, _so.st, () => { _so.error = null; _soRerender(); });
+}
+function _soRerender() { D().openModal({ head: _soHead(), body: _soBody(), foot: _soFoot() }); _soWire(); }
+
+export async function openSubscriptionSoortModal({ sub, customerId, onSuccess } = {}) {
+  if (!sub?.id || !customerId) { K().toast('Geen abonnement of klant geselecteerd'); return; }
+  _so = { sub, loading: true, saving: false, error: null, globalError: null, onSuccess: onSuccess || null, sales: [], voorstel: null,
+    st: { soort: sub.soort || null, aanpassing_type: sub.aanpassing_type || null, sale_deal_id: sub.sale_deal_id || null } };
+  _soRerender();
+  try {
+    const j = await laadSoortContext(customerId);
+    if (j?.migratie === false) _so.globalError = 'De database-migratie voor de soort abonnement is nog niet gedraaid; opslaan lukt pas daarna.';
+    _so.sales = j?.sales || [];
+    const a = (j?.abonnementen || []).find((x) => x.id === sub.id);
+    _so.voorstel = a?.voorstel || null;
+    if (!_so.st.soort && _so.voorstel?.soort) {
+      _so.st = { soort: _so.voorstel.soort, aanpassing_type: _so.voorstel.aanpassing_type || null, sale_deal_id: _so.voorstel.sale_deal_id || null };
+    }
+  } catch (e) {
+    _so.globalError = e?.message || 'Laden mislukt';
+  }
+  _so.loading = false; _soRerender();
+}

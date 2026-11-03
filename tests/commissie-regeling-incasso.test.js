@@ -117,7 +117,9 @@ test('twee sales: regelingsfactuur zonder keuze telt niet voor de toewijzing; ge
   zet({ tweeSales: true, facturen: [betaald] });
   await engine.releaseProportionalForPaidAmount({ customerId: K });
   assert.equal(kids('p-attr').length, 0, 'toewijzing ziet een ongekoppelde factuur niet');
-  assert.equal(som(kids('p-ev')), 15, 'oude klantbrede gedrag voor de event-sale blijft');
+  // Sinds PR 2 (3 nov 2026): twee commissie-sales → een factuur zonder deal en
+  // zonder koppeling hoort bij GEEN van beide (niet gokken, koppelen in de cockpit).
+  assert.equal(kids('p-ev').length, 0, 'niet gekoppeld bij twee sales → telt voor geen enkele sale');
 
   zet({ tweeSales: true, facturen: [betaald], koppeling: [{ invoice_id: R1, customer_id: K, deal_id: D2, bron: 'handmatig' }] });
   await engine.releaseProportionalForPaidAmount({ customerId: K });
