@@ -170,3 +170,40 @@ export async function markeerGesprekOngelezen(sb, { conv, mailboxLabel }) {
   }
   return { kanaal, email_id: null, unread_count: next };
 }
+
+// ── LATE KOPPELING (3 nov 2026, go van Maxim) ───────────────────────────────
+// Een mail die pas LATER aan een klant gekoppeld wordt (backfill-email-
+// customer-id, email-message-link-customer) telde meteen mee in de badge van
+// dat gesprek: een gelezen gesprek werd terug ongelezen, met mails van maanden
+// oud. Gemeten: 22 zo gekoppelde mails die nog ongelezen staan, en 9 die bij
+// de volgende backfill hetzelfde zouden doen.
+//
+// Regel: wie een ONGELEZEN mail koppelt die ouder is dan
+// LATE_KOPPELING_GELEZEN_NA_DAGEN, zet hem in dezelfde schrijfactie op
+// gelezen. Jongere mails blijven ongelezen: die kunnen echt nog nieuw zijn.
+// Zonder date_received is de leeftijd onbekend → blijft ongelezen.
+// Ontkoppelen (customer_id = null) raakt is_read niet.
+
+export const LATE_KOPPELING_GELEZEN_NA_DAGEN = 7;
+const DAG_MS = 24 * 60 * 60 * 1000;
+
+/** Is deze mail oud genoeg om bij koppelen als gelezen binnen te komen? */
+export function oudGenoegVoorGelezen(dateReceived, nu = Date.now()) {
+  const t = dateReceived ? Date.parse(dateReceived) : NaN;
+  if (!Number.isFinite(t)) return false;
+  return nu - t > LATE_KOPPELING_GELEZEN_NA_DAGEN * DAG_MS;
+}
+
+/**
+ * Wat er geschreven wordt bij het koppelen van één mail. Puur.
+ * @param mail       { is_read, date_received }
+ * @param customerId de nieuwe klant, of null (ontkoppelen)
+ * @returns { customer_id } of { customer_id, is_read: true }
+ */
+export function koppelPatch(mail, customerId, nu = Date.now()) {
+  const patch = { customer_id: customerId || null };
+  if (customerId && mail && mail.is_read === false && oudGenoegVoorGelezen(mail.date_received, nu)) {
+    patch.is_read = true;
+  }
+  return patch;
+}
