@@ -28,7 +28,10 @@
 
 import { mailboxLabel as labelVoorModule } from './module-mailbox.js';
 
-const ONZE_DOMEIN_ILIKE = '%@deforexopleiding.nl';
+// Mails van onze eigen adressen zijn nooit "ongelezen inkomend". Gedeeld met
+// inbox-conversations-list, zodat de badge en "terug op ongelezen" hetzelfde
+// tellen: een eigen mail maakt een gelezen gesprek niet terug ongelezen.
+export const ONZE_DOMEIN_ILIKE = '%@deforexopleiding.nl';
 
 // Eén label, een lijst of niets → een lijst zonder lege waarden.
 function labels(mailboxLabel) {
