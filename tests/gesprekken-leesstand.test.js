@@ -239,7 +239,7 @@ test('Wanbetalers › Gesprekken: één call bij openen, geen email-actions meer
   // De leesstand overleeft een lijst-fetch die vóór de schrijfactie vertrok.
   assert.ok(/st\.items = asArr\(j\?\.items\); st\.fetched = true;\s*_wbxPasLeesStandToe\(st\.items\);/.test(s));
   // Automatisch openen (eerste gesprek na laden) is geen klik.
-  assert.ok(s.includes("__wbxInboxSelect(String(first.id), { markeer: false })"));
+  assert.ok(s.includes("__wbxInboxSelect(String(gelezen.id), { markeer: false })"));
 });
 
 test('Inbox en Onboarding-inbox geven de module mee en tonen mail-ongelezen ook', () => {
@@ -265,4 +265,137 @@ test('de CRM-pagina zelf wordt niet gecachet (anders laadt de browser oude ?v=)'
     assert.ok(regel, 'geen header-regel voor ' + pad);
     assert.match(regel.headers.find((h) => h.key === 'Cache-Control').value, /no-store/);
   }
+});
+
+
+/* ── 4. open = gelezen (3 nov 2026) ───────────────────────────────────────── */
+//
+// Gemeten na #1925/#1927: een klik werkt, maar drie gaten bleven.
+//   (1) automatisch openen nam het eerste gesprek, en met ongelezen-eerst is
+//       dat net een ongelezen gesprek: open, gelezen door jou, nooit gemarkeerd.
+//   (2) de lijst telde eigen @deforexopleiding.nl-mails als ongelezen.
+//   (3) een nieuw bericht in het open gesprek bleef als ongelezen hangen.
+
+// Het script is een browser-IIFE; zo laden de andere gesprekken-tests het ook.
+const SEL = (() => {
+  const win = {};
+  new Function('window', 'module', readFileSync(new URL('../modules/shared/inbox-wanbetaler-selectie.js', import.meta.url), 'utf8'))(win, { exports: {} });
+  return win.INBOX_WANBETALER_SELECTIE;
+})();
+
+test('(1) automatisch openen: eerste zichtbare gesprek zonder ongelezen', () => {
+  const zichtbaar = [
+    { id: 'a', total_unread: 3 },
+    { id: 'b', unread_count: 1 },                         // oude respons zonder total_unread
+    { id: 'c', total_unread: 0, unread_count: 0 },
+    { id: 'd', total_unread: 0 },
+  ];
+  assert.equal(SEL.kiesAutoOpen(zichtbaar).id, 'c');
+});
+
+test('(1) automatisch openen: alles ongelezen → er opent niets', () => {
+  assert.equal(SEL.kiesAutoOpen([{ id: 'a', total_unread: 1 }, { id: 'b', total_unread: 2 }]), null);
+  assert.equal(SEL.kiesAutoOpen([]), null);
+  assert.equal(SEL.kiesAutoOpen(undefined), null);
+});
+
+test('(1) een manueel ongelezen gezet gesprek opent niet vanzelf na herladen', () => {
+  // Na mark-unread zegt de server ≥1 (laatste mail is_read=false of WA ≥1).
+  const naHerladen = SEL.kies([
+    { id: 'manueel', is_debtor: true, total_unread: 1, last_activity_at: '2026-11-03T10:00:00Z' },
+    { id: 'gelezen', is_debtor: true, total_unread: 0, last_activity_at: '2026-11-02T10:00:00Z' },
+  ], { sorteer: 'unread_first', categorie: 'alles', focusModus: 'geen' });
+  assert.equal(naHerladen[0].id, 'manueel', 'ongelezen-eerst zet het bovenaan');
+  assert.equal(SEL.kiesAutoOpen(naHerladen).id, 'gelezen');
+});
+
+test('(1) bedrading: auto-open gaat langs kiesAutoOpen, één poging na een geslaagde lijst', () => {
+  const s = code('modules/klanten-v2/views/wanbetalers-v2.js');
+  assert.ok(s.includes('window.INBOX_WANBETALER_SELECTIE?.kiesAutoOpen?.(zichtbaar)'));
+  assert.ok(!s.includes('const first = debtorItems[0]'), 'niet meer blind het eerste gesprek');
+  assert.ok(/if \(lijstGelukt && !_ui\.inbox\.autoOpenedFirst && !_ui\.inbox\.selectedConv\)/.test(s));
+});
+
+/* (2) eigen mails tellen niet in de badge ─────────────────────────────────── */
+
+test('(2) inbox-conversations-list sluit onze eigen mails uit van email_unread_count', () => {
+  const s = code('api/inbox-conversations-list.js');
+  assert.ok(s.includes("import { ONZE_DOMEIN_ILIKE } from './_lib/gesprek-leesstand.js'"),
+    'dezelfde regel als markeerGesprekOngelezen, niet een tweede kopie');
+  assert.ok(/\.eq\('is_read', false\)\s*\.not\('from_address', 'ilike', ONZE_DOMEIN_ILIKE\)/.test(s));
+});
+
+test('(2) de gedeelde regel: eigen domein eruit, klantadres erin', async () => {
+  const { ONZE_DOMEIN_ILIKE } = await import('../api/_lib/gesprek-leesstand.js');
+  assert.equal(ONZE_DOMEIN_ILIKE, '%@deforexopleiding.nl');
+  // Dezelfde nep-keten als hierboven, met de filter van het lijst-endpoint.
+  const sb = nepDb({ email_messages: [
+    { id: 'eigen', customer_id: KLANT, mailbox: 'administratie', is_read: false, from_address: 'Administratie@DeForexOpleiding.nl' },
+    { id: 'klant', customer_id: KLANT, mailbox: 'administratie', is_read: false, from_address: 'k@klant.be' },
+    { id: 'lijkt', customer_id: KLANT, mailbox: 'administratie', is_read: false, from_address: 'x@deforexopleiding.nl.nep.be' },
+  ] });
+  const { data } = await sb.from('email_messages').select('customer_id')
+    .in('customer_id', [KLANT]).eq('mailbox', 'administratie').eq('is_read', false)
+    .not('from_address', 'ilike', ONZE_DOMEIN_ILIKE).limit(5000);
+  assert.deepEqual(data.map((r) => r.id).sort(), ['klant', 'lijkt']);
+});
+
+/* (3) nieuw bericht in het open gesprek ──────────────────────────────────── */
+
+test('(3) moetOpenGesprekGelezen: open + zichtbaar + ongelezen → ja', () => {
+  const rij = { id: 'g', total_unread: 1 };
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: 'visible' }), true);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij: { id: 'g', unread_count: 2 }, zichtbaar: 'visible' }), true);
+});
+
+test('(3) moetOpenGesprekGelezen: nee bij verborgen tabblad, manueel ongelezen, ladende draad, lopende markering of niets ongelezen', () => {
+  const rij = { id: 'g', total_unread: 1 };
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: 'hidden' }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: undefined }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: 'visible', handOngelezen: true }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: 'visible', draadLaadt: true }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij, zichtbaar: 'visible', bezig: true }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij: { id: 'g', total_unread: 0 }, zichtbaar: 'visible' }), false);
+  assert.equal(SEL.moetOpenGesprekGelezen({ rij: null, zichtbaar: 'visible' }), false);
+});
+
+test('(3) bedrading: na elke lijst-fetch en bij terugkeren naar het tabblad, via de bestaande inbox-mark-read', () => {
+  const s = code('modules/klanten-v2/views/wanbetalers-v2.js');
+  assert.ok(s.includes('if (lijstGelukt) _wbxHoudOpenGesprekGelezen();'));
+  // In de visibilitychange-haak, vóór de vlag-poort (werkt ook met de vlag uit).
+  assert.ok(/if \(document\.hidden\) return;\s*if \(!document\.getElementById\('wbxInboxList'\)\) return;\s*_wbxHoudOpenGesprekGelezen\(\);\s*if \(!_gv2\(\)\) return;/.test(s));
+  const fn = s.slice(s.indexOf('async function _wbxHoudOpenGesprekGelezen'), s.indexOf('window.__wbxInboxPauseFlow'));
+  assert.ok(fn.includes('zichtbaar: zichtbaarNu()') && fn.includes('document.visibilityState'));
+  assert.ok(fn.includes('handOngelezen: !!_ui.inbox.handOngelezen[id]'));
+  // Eerst de draad (het bericht op het scherm), dan pas markeren.
+  assert.ok(fn.indexOf('await _fetchInboxThread(id') < fn.indexOf('await _wbxMarkeerGelezen(id, { stil: true })'));
+  assert.ok(fn.includes("zichtbaarNu() !== 'visible'"), 'na het laden van de draad opnieuw zichtbaarheid checken');
+  assert.ok(fn.includes('openMarkeerPauze'), 'mislukte markering → geen lus van fout, lijst, fout');
+  // Markeren gaat langs de ene bestaande weg, geen nieuw endpoint.
+  const markeer = s.slice(s.indexOf('async function _wbxMarkeerGelezen'), s.indexOf('window.__wbxInboxMarkRead'));
+  assert.ok(markeer.includes("apiPost('/api/inbox-mark-read', { conversation_id: id, module: 'finance' })"));
+});
+
+test('(3) manueel ongelezen blijft staan tot een klik of "markeer gelezen"', () => {
+  const s = code('modules/klanten-v2/views/wanbetalers-v2.js');
+  const onl = s.slice(s.indexOf('window.__wbxInboxMarkUnread'), s.indexOf('async function _wbxHoudOpenGesprekGelezen'));
+  assert.ok(onl.includes('_ui.inbox.handOngelezen[id] = true;'));
+  assert.ok(onl.includes('delete _ui.inbox.handOngelezen[id];'), 'mislukt mark-unread → vlag weer weg');
+  const markeer = s.slice(s.indexOf('async function _wbxMarkeerGelezen'), s.indexOf('window.__wbxInboxMarkRead'));
+  assert.ok(markeer.includes('delete _ui.inbox.handOngelezen[id];'));
+  // Automatisch openen (markeer:false) raakt de vlag niet.
+  const sel = s.slice(s.indexOf('window.__wbxInboxSelect = '), s.indexOf('function _repaintInboxList'));
+  assert.ok(sel.includes('if (!opts || opts.markeer !== false) _wbxMarkeerGelezen(convId, { stil: true });'));
+});
+
+test('(4) geen opkuis van bestaande data: geen bulk-updates op is_read of unread_count in deze wijziging', () => {
+  // Enkel de bestaande, per-gesprek markeringen schrijven is_read/unread_count.
+  const s = code('api/inbox-conversations-list.js');
+  assert.ok(!/\.update\(/.test(s), 'het lijst-endpoint leest enkel');
+});
+
+test('de CRM-pagina laadt de nieuwe versies (?v=)', () => {
+  const html = readFileSync(new URL('../modules/klanten-v2/index.html', import.meta.url), 'utf8');
+  assert.ok(html.includes('views/wanbetalers-v2.js?v=71'));
+  assert.ok(html.includes('../shared/inbox-wanbetaler-selectie.js?v=2'));
 });

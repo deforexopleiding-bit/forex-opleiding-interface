@@ -1906,7 +1906,8 @@
   function _openBriefBulkModal(cids) {
     _closeBriefBulkModal();
     const state = { step: 'dry_run', loading: true, dryRun: null, error: null,
-                    running: false, runningLabel: null, bulkJobId: null, result: null };
+                    running: false, runningLabel: null, bulkJobId: null, result: null,
+                    briefType: 'tussen' }; // 'tussen' (aanbevolen) | 'wik'
     const root = document.createElement('div');
     root.id = 'wbxBriefBulkRoot';
     root.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.55);padding:20px';
@@ -1920,20 +1921,22 @@
 
     const actions = {
       close: _closeBriefBulkModal,
+      setBriefType: (t) => { state.briefType = (t === 'wik') ? 'wik' : 'tussen'; render(); },
       confirm: async () => {
         if (!state.dryRun) return;
         const wouldCreate = (state.dryRun.totals && state.dryRun.totals.would_create) || 0;
         if (wouldCreate === 0) { _toast('Geen te genereren brieven (alles skipped).', 'warn'); return; }
+        const briefNaam = state.briefType === 'tussen' ? 'tussenbrie' : 'WIK-brie';
         const phrase = 'MAAK BRIEVEN VOOR ' + wouldCreate + ' KLANTEN';
         const bodyHtml =
-          '<div style="margin-bottom:10px">Je gaat <b>' + wouldCreate + '</b> WIK-brie' + (wouldCreate === 1 ? 'f' : 'ven') + ' genereren voor de geselecteerde debiteuren.</div>' +
+          '<div style="margin-bottom:10px">Je gaat <b>' + wouldCreate + '</b> ' + briefNaam + (wouldCreate === 1 ? 'f' : 'ven') + ' genereren voor de geselecteerde debiteuren.</div>' +
           '<div style="padding:9px 12px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:6px;font-size:12px">De brieven verschijnen als concept in de Brieven-tab. Download + verstuur zelf per post. Geen dunning-actie wordt ingegrepen.</div>';
         const ok = await _askTypedConfirm('Bulk-brieven aanmaken', bodyHtml, phrase, { okLabel: 'AANMAKEN' });
         if (!ok) return;
         if (!state.bulkJobId) state.bulkJobId = crypto.randomUUID();
         state.running = true; state.runningLabel = 'Brieven genereren… (kan tot 5 min duren)'; state.error = null; render();
         const r = await _apiPostH('/api/wanbetalers-bulk-brief-create',
-          { customer_ids: cids, dry_run: false, bulk_job_id: state.bulkJobId },
+          { customer_ids: cids, dry_run: false, bulk_job_id: state.bulkJobId, brief_type: state.briefType },
           null, CLIENT_TIMEOUT_LIVE_MS);
         state.running = false; state.runningLabel = null;
         if (!r.ok) {
@@ -1984,6 +1987,11 @@
         (totals.flag_address_incomplete ? '<div style="color:var(--amber,#B27A0B)"><b>' + totals.flag_address_incomplete + '</b> met adres-flag</div>' : '') +
         Object.entries(dr.skip_reason_summary || {}).map(([k, v]) => '<div style="color:var(--text-3)">' + esc(k) + ': ' + v + '</div>').join('') +
       '</div></div>' +
+      '<div style="padding:4px 18px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:12px;color:var(--text-3)">Brieftype:</span>' +
+        '<button class="btn btn-sm" data-action="setBriefType" data-arg="tussen" style="font-size:11.5px;' + (state.briefType === 'tussen' ? 'background:var(--brand,#0A7490);color:#fff;border-color:var(--brand,#0A7490)' : 'background:var(--surface);color:var(--text-2)') + '">✉ Tussenbrief (aanbevolen)</button>' +
+        '<button class="btn btn-sm" data-action="setBriefType" data-arg="wik" style="font-size:11.5px;' + (state.briefType === 'wik' ? 'background:var(--brand,#0A7490);color:#fff;border-color:var(--brand,#0A7490)' : 'background:var(--surface);color:var(--text-2)') + '">📄 WIK 14-dagenbrief</button>' +
+      '</div>' +
       '<div style="max-height:55vh;overflow:auto;padding:0 18px">' +
         recips.map(r => {
           if (r.action === 'skip') return '<div style="padding:8px 10px;border-bottom:1px solid var(--border);opacity:.55;font-size:12.5px">⨯ ' + esc(r.customer_name || r.customer_id) + ' — ' + esc(r.skip_reason) + (r.openstaand_bedrag_display ? ' · ' + esc(r.openstaand_bedrag_display) : '') + '</div>';
@@ -3207,6 +3215,12 @@
     // refreshes heen tot de server hetzelfde zegt — een lijst-fetch die vóór
     // de schrijfactie vertrok, laat de badge dan niet terugspringen.
     leesStand:     {},
+    // Gesprekken die de gebruiker zelf op ongelezen zette (per conv-id). Die
+    // blijven ongelezen tot een klik, ook als ze open staan en er iets nieuws
+    // binnenkomt (3 nov 2026). Leeft zo lang het tabblad leeft.
+    handOngelezen: {},
+    openMarkeerBezig: null,            // conv-id waarvoor het open gesprek nu gemarkeerd wordt
+    openMarkeerPauze: null,            // { id, tot } na een mislukte automatische markering
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
     compose: {
@@ -3278,6 +3292,7 @@
     //
     // _fetchOverzicht hiernaast deed het al goed (`if (!j || j.error)`). Dit is
     // dus geen keuze geweest maar een inconsistentie binnen één bestand.
+    let lijstGelukt = false;
     if (!j || j.error) {
       st.error = (j && j.error) || 'Kon de gesprekken niet laden';
       // De vorige lijst blijft staan. Een lijst die leegvalt bij een hik is
@@ -3285,6 +3300,7 @@
       // er wel is, en concludeert dat hij niets gestuurd heeft.
       st.fetched = true;
     } else {
+      lijstGelukt = true;
       st.items = asArr(j?.items); st.fetched = true;
       _wbxPasLeesStandToe(st.items);
       st.error = null;
@@ -3303,16 +3319,22 @@
     // SURFACE A: auto-open eerste gesprek na eerste fetch. Filtert de wanbetaler-
     // set client-side (zelfde criteria als _inboxConvsListHtml zodat auto-open
     // niet naar een niet-zichtbare conv wijst).
-    if (!_ui.inbox.autoOpenedFirst && !_ui.inbox.selectedConv) {
-      const debtorItems = _selectVisibleInboxItems(asArr(st.items));
-      const first = debtorItems[0];
-      if (first?.id) {
+    //
+    // 3 nov 2026: het eerste zichtbare gesprek ZONDER ongelezen berichten, en
+    // is er geen, dan opent er niets. Automatisch openen is geen klik en
+    // markeert dus niets; met ongelezen-eerst opende hier net een ongelezen
+    // gesprek, dat je dan las zonder dat het ooit gelezen werd. Zo betekent
+    // "open" altijd ook "gelezen", en blijft een manueel ongelezen gezet
+    // gesprek ongelezen na herladen (de reden voor markeer:false).
+    // Eén poging, op de eerste geslaagde lijst die iets toont: daarna springt
+    // er niet plots een gesprek open omdat er ergens eentje gelezen werd.
+    if (lijstGelukt && !_ui.inbox.autoOpenedFirst && !_ui.inbox.selectedConv) {
+      const zichtbaar = _selectVisibleInboxItems(asArr(st.items));
+      if (zichtbaar.length) {
         _ui.inbox.autoOpenedFirst = true;
+        const gelezen = window.INBOX_WANBETALER_SELECTIE?.kiesAutoOpen?.(zichtbaar) || null;
         // queueMicrotask zodat de render eerst een lijst rendert vóór de select-race.
-        // Automatisch openen is geen klik: het gesprek blijft ongelezen tot
-        // de gebruiker het zelf aanklikt (anders zou een ongelezen gezet
-        // gesprek bij elke herlaadbeurt meteen weer gelezen worden).
-        queueMicrotask(() => window.__wbxInboxSelect(String(first.id), { markeer: false }));
+        if (gelezen?.id) queueMicrotask(() => window.__wbxInboxSelect(String(gelezen.id), { markeer: false }));
       }
     }
     // SURFACE A polish (v=24-fix): surgical repaint van alleen de list (behoudt
@@ -3325,6 +3347,8 @@
     } else {
       try { window.DFO?.render?.(); } catch (_) {}
     }
+    // Nieuw bericht in het gesprek dat open staat? Dan op het scherm en gelezen.
+    if (lijstGelukt) _wbxHoudOpenGesprekGelezen();
   }
   // Repaint alleen de thread-header (boven de messages). Header toont
   // 24h-badge / brief-tag / totalUnread — deze data komt uit convs.items en
@@ -3568,6 +3592,7 @@
     // /api/email-actions {action:'mark-read'} uit — dat schrijft alleen een
     // auditregel, dus elke badge kwam terug na herladen.
     if (!opts || opts.markeer !== false) _wbxMarkeerGelezen(convId, { stil: true });
+    // (_wbxMarkeerGelezen haalt ook een manuele 'ongelezen' weg: een klik wint.)
     // BP3 v30 — scroll-preserve op #wbxInboxList (voorheen: DFO.render zette
     // scrollTop=0 bij aanklikken van een gesprek).
     _wbxSafeRender();
@@ -4227,6 +4252,7 @@
     if (!id) return false;
     const k = { stand: 'gelezen', sinds: Date.now() };
     _ui.inbox.leesStand[id] = k;
+    delete _ui.inbox.handOngelezen[id];
     _wbxOptimisticSetUnread(id, 0);
     const r = await apiPost('/api/inbox-mark-read', { conversation_id: id, module: 'finance' });
     if (!r.ok) {
@@ -4253,16 +4279,57 @@
     const id = String(convId);
     const k = { stand: 'ongelezen', sinds: Date.now() };
     _ui.inbox.leesStand[id] = k;
+    _ui.inbox.handOngelezen[id] = true;
     _wbxOptimisticSetUnread(id, 1);
     const r = await apiPost('/api/inbox-mark-unread', { conversation_id: id, module: 'finance' });
     if (!r.ok) {
       if (_ui.inbox.leesStand[id] === k) delete _ui.inbox.leesStand[id];
+      delete _ui.inbox.handOngelezen[id];
       _toast('Markeren mislukt: ' + r.error, 'error');
       _live.inbox.convs.fetched = false; _fetchInboxConvs();
       return;
     }
     _toast('Gemarkeerd als ongelezen.', 'success');
   };
+  // Het gesprek dat open staat blijft gelezen (3 nov 2026). Na elke geslaagde
+  // lijst-fetch en bij terugkeren naar het tabblad: staat er in het open
+  // gesprek iets ongelezen (nieuw WA-bericht of nieuwe mail), dan eerst de
+  // draad opnieuw halen — het bericht moet op het scherm staan vóór het
+  // "gelezen" heet; de lijst-poll ververst de draad niet — en dan markeren
+  // via de bestaande /api/inbox-mark-read. Enkel als het tabblad zichtbaar is
+  // en de gebruiker het niet zelf op ongelezen zette. Mislukt de markering,
+  // dan een minuut niet opnieuw (anders: fout → lijst opnieuw → opnieuw fout).
+  const WBX_OPEN_MARKEER_PAUZE_MS = 60 * 1000;
+  async function _wbxHoudOpenGesprekGelezen() {
+    const SEL = window.INBOX_WANBETALER_SELECTIE;
+    const id = _ui.inbox.selectedConv ? String(_ui.inbox.selectedConv) : '';
+    if (!id || typeof SEL?.moetOpenGesprekGelezen !== 'function') return;
+    const pz = _ui.inbox.openMarkeerPauze;
+    if (pz && pz.id === id && Date.now() < pz.tot) return;
+    const rij = (_live.inbox.convs.items || []).find((x) => String(x.id) === id);
+    const zichtbaarNu = () => document.visibilityState;
+    if (!SEL.moetOpenGesprekGelezen({
+      rij,
+      zichtbaar: zichtbaarNu(),
+      handOngelezen: !!_ui.inbox.handOngelezen[id],
+      draadLaadt: !!_live.inbox.thread.loading[id],
+      bezig: _ui.inbox.openMarkeerBezig === id,
+    })) return;
+    _ui.inbox.openMarkeerBezig = id;
+    try {
+      await _fetchInboxThread(id, _ui.inbox._selectSeq);
+      // Ondertussen weggeklikt, tabblad weg, manueel ongelezen of draad mislukt: niets.
+      if (String(_ui.inbox.selectedConv || '') !== id) return;
+      if (zichtbaarNu() !== 'visible' || _ui.inbox.handOngelezen[id]) return;
+      // Een draad zonder berichten (timeout geeft een lege bag) toont niets.
+      if (_live.inbox.thread.error[id] || !(_live.inbox.thread.byConv[id]?.items?.length)) return;
+      const ok = await _wbxMarkeerGelezen(id, { stil: true });
+      if (!ok) _ui.inbox.openMarkeerPauze = { id, tot: Date.now() + WBX_OPEN_MARKEER_PAUZE_MS };
+    } finally {
+      if (_ui.inbox.openMarkeerBezig === id) _ui.inbox.openMarkeerBezig = null;
+    }
+  }
+
   window.__wbxInboxPauseFlow = async (cid) => {
     if (!cid) return;
     const reason = await _askReason('Aanmaan-flow pauzeren', 'Waarom? (bv. "Wacht op klant-terugkoppeling")', { okLabel: 'Pauzeer' });
@@ -4311,6 +4378,9 @@
       const haak = () => {
         if (document.hidden) return;
         if (!document.getElementById('wbxInboxList')) return;
+        // Terug naar het tabblad: wat er ondertussen in het open gesprek
+        // binnenkwam, staat nu op het scherm (3 nov 2026, los van de vlag).
+        _wbxHoudOpenGesprekGelezen();
         if (!_gv2()) return;                       // vlag uit: niets veranderen
         _live.inbox.convs.fetched = false;
         _fetchInboxConvs();
@@ -5617,10 +5687,11 @@
     if (totalUnread === 0) items.push(item('Markeer ongelezen', '●', `__wbxInboxMarkUnread('${esc(convId)}')`));
     // 6. Dossier openen (opent SURFACE B drawer)
     if (custId) items.push(item('Dossier openen', '👤', `__wbxOpenCase('${esc(custId)}')`));
-    // 7. Stuur een brief (WIK-brief) — BP3 v20: land per klant afgeleid
+    // 7. Stuur een brief - BP3 v20: land per klant afgeleid
     //    (address_country → postcode → onbekend). Bij onbekend: NL/BE-keuze-dialog.
-    //    NIET meer hardcoded 'NL'.
-    if (custId) items.push(item('Stuur een brief', '✉', `__wbxWikGenAutoLand('${esc(custId)}')`));
+    //    Tussenbrief (vriendelijk) staat als eerste/aanbevolen optie vóór de WIK-brief.
+    if (custId) items.push(item('Stuur tussenbrief (aanbevolen)', '✉', `__wbxWikGenAutoLand('${esc(custId)}','tussen')`));
+    if (custId) items.push(item('Stuur WIK-brief', '📄', `__wbxWikGenAutoLand('${esc(custId)}','wik')`));
     // 8. Pauzeer aanmaan-flow
     if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
     return `<div id="wbxInboxKebab" style="position:absolute;top:100%;right:8px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);min-width:230px;overflow:hidden">
@@ -6209,11 +6280,15 @@
       <div class="wbx-drawer-card-h">WIK-brief — bewijs</div>
       <div class="wbx-drawer-card-b">
         ${statusLine}
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
           ${downloadBtn}
           ${sendActions}
-          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','NL')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe NL' : '📄 Genereer NL'}</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','BE')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe BE' : '📄 Genereer BE'}</button>
+          <span style="font-size:10.5px;color:var(--text-3);width:100%">Tussenbrief (vriendelijk, aanbevolen als eerste):</span>
+          <button class="btn btn-primary btn-sm" style="font-size:11.5px;color:#fff" onclick="__wbxWikGen('${esc(cid)}','NL','tussen')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>✉ Tussenbrief NL</button>
+          <button class="btn btn-primary btn-sm" style="font-size:11.5px;color:#fff" onclick="__wbxWikGen('${esc(cid)}','BE','tussen')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>✉ Tussenbrief BE</button>
+          <span style="font-size:10.5px;color:var(--text-3);width:100%">WIK 14-dagenbrief (wettelijk, pittig):</span>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','NL','wik')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe NL' : '📄 Genereer NL'}</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','BE','wik')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe BE' : '📄 Genereer BE'}</button>
         </div>
         ${items.length > 1 ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text-3);font-size:11.5px">Eerdere brieven (${items.length - 1})</summary>
           <div style="margin-top:6px">${items.slice(1).map((b) => `<div style="padding:4px 0;border-top:1px dashed var(--border);font-size:11.5px;color:var(--text-3)">${esc(_fmtDate(b.generated_at || b.created_at))} · ${esc(b.country || '?')} · ${b.sent_via ? esc(b.sent_via) : 'niet verstuurd'}${b.download_url ? ' · <a href="' + esc(b.download_url) + '" target="_blank" rel="noopener">PDF</a>' : ''}</div>`).join('')}</div>
@@ -6494,7 +6569,7 @@
   // doorspelen naar __wbxWikGen. Bij 'unknown' toon NL/BE-keuze-dialog
   // (i.p.v. stil NL te pakken). Wijzigt geen dunning-state — alleen de
   // land/template-selectie in de UI-flow.
-  window.__wbxWikGenAutoLand = async (cid) => {
+  window.__wbxWikGenAutoLand = async (cid, briefType) => {
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     if (!cid) return;
     if (_ui.caseActBusy['landdet:' + cid]) return;
@@ -6507,7 +6582,7 @@
       if (!resp.ok) { _toast('Land-detectie mislukt: ' + (j?.error || ('HTTP ' + resp.status)), 'error'); return; }
       const detected = String(j?.country || 'unknown').toUpperCase();
       if (detected === 'NL' || detected === 'BE') {
-        await window.__wbxWikGen(cid, detected);
+        await window.__wbxWikGen(cid, detected, briefType);
         return;
       }
       // Onbekend land → NL/BE-keuze-dialog (spiegelt bestaande adres-gate patroon).
@@ -6530,7 +6605,7 @@
         scrim.querySelector('#wbxLandNl').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('NL'); });
         scrim.querySelector('#wbxLandBe').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('BE'); });
       });
-      if (chosen === 'NL' || chosen === 'BE') await window.__wbxWikGen(cid, chosen);
+      if (chosen === 'NL' || chosen === 'BE') await window.__wbxWikGen(cid, chosen, briefType);
     } catch (e) {
       _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
     } finally {
@@ -6538,12 +6613,16 @@
     }
   };
 
-  window.__wbxWikGen = async (cid, country) => {
+  window.__wbxWikGen = async (cid, country, briefType) => {
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const c = (country === 'BE') ? 'BE' : 'NL';
+    const isTussen = briefType === 'tussen';
+    const briefNaam = isTussen ? 'Tussenbrief' : 'WIK-brief';
     const ok = await _askConfirm(
-      `Nieuwe WIK-brief (${c}) aanmaken?`,
-      `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>${c === 'NL' ? '14-dagenbrief' : 'eerste kosteloze herinnering'}</b>. De brief wordt bewaard als bewijs; download start direct.</div>`,
+      `Nieuwe ${briefNaam} (${c}) aanmaken?`,
+      isTussen
+        ? `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>vriendelijke tussenbrief</b> (vóór de WIK-brief). De bijbehorende factuur-PDF('s) worden meegestuurd bij het e-mailen. De brief wordt bewaard als bewijs; download start direct.</div>`
+        : `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>${c === 'NL' ? '14-dagenbrief' : 'eerste kosteloze herinnering'}</b>. De brief wordt bewaard als bewijs; download start direct.</div>`,
       { okLabel: 'Genereer PDF' }
     );
     if (!ok) return;
@@ -6553,7 +6632,7 @@
       const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
-      const resp = await fetch('/api/incasso-pre-brief', { method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: c }) });
+      const resp = await fetch('/api/incasso-pre-brief', { method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: c, brief_type: isTussen ? 'tussen' : 'wik' }) });
       if (!resp.ok) {
         let j = null; try { j = await resp.json(); } catch (_) {}
         if (resp.status === 422 && j?.code === 'ADDRESS_INCOMPLETE') {
@@ -6567,10 +6646,10 @@
       const briefId = resp.headers.get('X-Brief-Id') || null;
       const blob = await resp.blob();
       const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `WIK-brief_${c}_${cid.slice(0, 8)}.pdf`;
+      const a = document.createElement('a'); a.href = url; a.download = `${isTussen ? 'tussenbrief' : 'WIK-brief'}_${c}_${cid.slice(0, 8)}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      _toast(`${briefNaam} aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
       // Cache invalideren + refetch.
       delete _live.caseSheet.briefsByCust[cid];
       _fetchCaseBriefs(cid);
@@ -8013,22 +8092,29 @@
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const bodyHtml = `
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--amber-soft, rgba(245,158,11,.08));border:1px solid var(--amber);border-radius:6px;line-height:1.5">
-          ⚠ Genereert een <b>wettelijke 14-dagenbrief (NL)</b> of <b>eerste kosteloze herinnering (BE)</b>.
-          De brief wordt bewaard als bewijs; download start direct.
+        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
+          Kies het brieftype. De <b>tussenbrief</b> is een vriendelijke herinnering (aanbevolen als eerste); de <b>WIK 14-dagenbrief</b> (NL) / eerste kosteloze herinnering (BE) is de wettelijke, pittige variant. De brief wordt bewaard als bewijs; download start direct.
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Brieftype</div>
+          <select id="wbxBriefType" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
+            <option value="tussen" selected>Tussenbrief (vriendelijk, aanbevolen)</option>
+            <option value="wik">WIK 14-dagenbrief / eerste herinnering (pittig)</option>
+          </select>
         </div>
         <div>
           <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Land</div>
           <select id="wbxBriefLand" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
-            <option value="NL" selected>Nederland — WIK-14-dagenbrief</option>
-            <option value="BE">België — eerste kosteloze herinnering</option>
+            <option value="NL" selected>Nederland</option>
+            <option value="BE">Belgie</option>
           </select>
         </div>
       </div>`;
-    const form = await _askForm('WIK-brief aanmaken?', bodyHtml, (root) => {
+    const form = await _askForm('Brief aanmaken?', bodyHtml, (root) => {
       const country = root.querySelector('#wbxBriefLand')?.value || 'NL';
+      const briefType = root.querySelector('#wbxBriefType')?.value === 'wik' ? 'wik' : 'tussen';
       if (country !== 'NL' && country !== 'BE') { _toast('Ongeldig land.', 'warn'); return null; }
-      return { country };
+      return { country, briefType };
     }, { okLabel: 'Genereer PDF' });
     if (!form) return;
     if (_ui.actieBusy['brief:' + cid]) return;
@@ -8038,7 +8124,7 @@
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
       const resp = await fetch('/api/incasso-pre-brief', {
-        method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: form.country }),
+        method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: form.country, brief_type: form.briefType }),
       });
       if (!resp.ok) {
         // JSON-error verwacht bij 4xx/5xx (endpoint zet Content-Type: application/json bij fouten).
@@ -8057,14 +8143,15 @@
       const briefId   = resp.headers.get('X-Brief-Id')   || null;
       const blob = await resp.blob();
       const url  = URL.createObjectURL(blob);
+      const briefNaam = form.briefType === 'tussen' ? 'Tussenbrief' : 'WIK-brief';
       const a = document.createElement('a');
       a.href = url;
-      a.download = `WIK-brief_${form.country}_${cid.slice(0, 8)}.pdf`;
+      a.download = `${form.briefType === 'tussen' ? 'tussenbrief' : 'WIK-brief'}_${form.country}_${cid.slice(0, 8)}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      _toast(`${briefNaam} aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
       // Herlaad brieven-lijst + case-briefs zodat nieuwe brief zichtbaar is.
       if (_live.brieven) _live.brieven.fetched = false;
       if (_live.caseSheet?.briefsByCust?.[cid]) delete _live.caseSheet.briefsByCust[cid];

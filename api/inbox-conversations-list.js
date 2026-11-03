@@ -33,6 +33,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { mailboxLabel } from './_lib/module-mailbox.js';
+import { ONZE_DOMEIN_ILIKE } from './_lib/gesprek-leesstand.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { werkSleutel, inBlokken, isVandaag, metWerkstand } from './_lib/gesprekken-werkstand.js';
 import { filterGesprekkenOpKlantModule } from './_lib/klant-module.js';
@@ -359,6 +360,10 @@ export default async function handler(req, res) {
               .in('customer_id', blok)
               .eq('mailbox', mbLabel)
               .eq('is_read', false)
+              // Onze eigen mails (@deforexopleiding.nl) tellen niet: dezelfde
+              // regel als markeerGesprekOngelezen. Anders maakt een eigen mail
+              // in de mailbox een gelezen gesprek terug ongelezen (3 nov 2026).
+              .not('from_address', 'ilike', ONZE_DOMEIN_ILIKE)
               .limit(5000))
           );
           for (const r of unreadBlokken) {
