@@ -112,7 +112,7 @@ export async function fetchOpenInvoicesForCustomer(customerId, db = supabaseAdmi
   if (!customerId) return { openInvoices: [], totalOpenCents: 0 };
   const { data: invs, error } = await db
     .from('invoices')
-    .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
+    .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status, tl_invoice_id')
     .eq('customer_id', customerId).eq('is_test', false).in('status', OPEN_STATUSES);
   if (error) throw new Error('invoices lookup: ' + error.message);
   const openInvoices = (invs || []).filter(_isPositiveOpen);
@@ -315,6 +315,8 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody, land = null }
  * @param {object}   opts
  * @param {string}   opts.customerId          UUID van de klant.
  * @param {'NL'|'BE'|null} [opts.country]     Expliciet land; null → afgeleid uit customer.address_country.
+ * @param {'wik'|'tussen'} [opts.briefType]   'wik' (default) = WIK 14-dagenbrief / BE eerste herinnering;
+ *                                            'tussen' = vriendelijke tussenbrief VÓÓR de WIK-brief.
  * @param {string|null} [opts.generatedByUserId] auth.users.id, of null voor systeem (engine).
  * @param {string|null} [opts.runId]          dunning_workflow_runs.id (cyclus-sleutel) of null (handmatig).
  * @param {string|null} [opts.stepId]         dunning_workflow_steps.id of null.
@@ -323,6 +325,7 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody, land = null }
 export async function generatePreBriefForCustomer({
   customerId,
   country = null,
+  briefType = 'wik',
   generatedByUserId = null,
   runId = null,
   stepId = null,
@@ -342,7 +345,12 @@ export async function generatePreBriefForCustomer({
   // uit address_country + postcodeformaat (NL: 4 cijfers + 2 letters, BE: 4
   // cijfers). Zo krijgt een Belgische wanbetaler automatisch de BE-brief.
   const resolvedCountry = (country === 'BE' || country === 'NL') ? country : bepaalLand(customer);
-  const templateCode = resolvedCountry === 'BE' ? 'incasso_pre_be' : 'incasso_pre_nl';
+  // Brieftype bepaalt de template-familie: 'tussen' = vriendelijke tussenbrief
+  // (incasso_tussen_*), 'wik' (default) = de bestaande WIK/eerste-herinnering
+  // (incasso_pre_*). Onbekende waarde valt veilig terug op 'wik'.
+  const type = briefType === 'tussen' ? 'tussen' : 'wik';
+  const prefix = type === 'tussen' ? 'incasso_tussen_' : 'incasso_pre_';
+  const templateCode = prefix + (resolvedCountry === 'BE' ? 'be' : 'nl');
 
   // 3) Template ophalen (bewerkbaar in de Templates-tab).
   const { data: tpl } = await db
@@ -351,7 +359,7 @@ export async function generatePreBriefForCustomer({
     .eq('code', templateCode).eq('kind', 'brief').eq('is_active', true)
     .maybeSingle();
   if (!tpl) {
-    return { ok: false, code: 'TEMPLATE_NOT_FOUND', error: `Template '${templateCode}' niet gevonden of niet actief. Draai migratie 038.` };
+    return { ok: false, code: 'TEMPLATE_NOT_FOUND', error: `Template '${templateCode}' niet gevonden of niet actief. Draai de template-migratie (038 voor WIK, 052 voor de tussenbrief).` };
   }
 
   // 4) ADRES-GATE (juridische veiligheid). Onvolledig adres → geen rechtsgeldig

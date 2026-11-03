@@ -31,6 +31,8 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const customerId = typeof body.customer_id === 'string' && UUID_RE.test(body.customer_id) ? body.customer_id : null;
   const country    = (body.country === 'BE') ? 'BE' : 'NL';
+  // Brieftype: 'tussen' = vriendelijke tussenbrief, anders de WIK/eerste-herinnering.
+  const briefType  = (body.brief_type === 'tussen') ? 'tussen' : 'wik';
   if (!customerId) { res.setHeader('Content-Type', 'application/json'); return res.status(400).json({ error: 'customer_id (uuid) verplicht' }); }
 
   try {
@@ -39,6 +41,7 @@ export default async function handler(req, res) {
     const result = await generatePreBriefForCustomer({
       customerId,
       country,
+      briefType,
       generatedByUserId: user.id,
       runId: null,
       stepId: null,

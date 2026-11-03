@@ -1906,7 +1906,8 @@
   function _openBriefBulkModal(cids) {
     _closeBriefBulkModal();
     const state = { step: 'dry_run', loading: true, dryRun: null, error: null,
-                    running: false, runningLabel: null, bulkJobId: null, result: null };
+                    running: false, runningLabel: null, bulkJobId: null, result: null,
+                    briefType: 'tussen' }; // 'tussen' (aanbevolen) | 'wik'
     const root = document.createElement('div');
     root.id = 'wbxBriefBulkRoot';
     root.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.55);padding:20px';
@@ -1920,20 +1921,22 @@
 
     const actions = {
       close: _closeBriefBulkModal,
+      setBriefType: (t) => { state.briefType = (t === 'wik') ? 'wik' : 'tussen'; render(); },
       confirm: async () => {
         if (!state.dryRun) return;
         const wouldCreate = (state.dryRun.totals && state.dryRun.totals.would_create) || 0;
         if (wouldCreate === 0) { _toast('Geen te genereren brieven (alles skipped).', 'warn'); return; }
+        const briefNaam = state.briefType === 'tussen' ? 'tussenbrie' : 'WIK-brie';
         const phrase = 'MAAK BRIEVEN VOOR ' + wouldCreate + ' KLANTEN';
         const bodyHtml =
-          '<div style="margin-bottom:10px">Je gaat <b>' + wouldCreate + '</b> WIK-brie' + (wouldCreate === 1 ? 'f' : 'ven') + ' genereren voor de geselecteerde debiteuren.</div>' +
+          '<div style="margin-bottom:10px">Je gaat <b>' + wouldCreate + '</b> ' + briefNaam + (wouldCreate === 1 ? 'f' : 'ven') + ' genereren voor de geselecteerde debiteuren.</div>' +
           '<div style="padding:9px 12px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:6px;font-size:12px">De brieven verschijnen als concept in de Brieven-tab. Download + verstuur zelf per post. Geen dunning-actie wordt ingegrepen.</div>';
         const ok = await _askTypedConfirm('Bulk-brieven aanmaken', bodyHtml, phrase, { okLabel: 'AANMAKEN' });
         if (!ok) return;
         if (!state.bulkJobId) state.bulkJobId = crypto.randomUUID();
         state.running = true; state.runningLabel = 'Brieven genereren… (kan tot 5 min duren)'; state.error = null; render();
         const r = await _apiPostH('/api/wanbetalers-bulk-brief-create',
-          { customer_ids: cids, dry_run: false, bulk_job_id: state.bulkJobId },
+          { customer_ids: cids, dry_run: false, bulk_job_id: state.bulkJobId, brief_type: state.briefType },
           null, CLIENT_TIMEOUT_LIVE_MS);
         state.running = false; state.runningLabel = null;
         if (!r.ok) {
@@ -1984,6 +1987,11 @@
         (totals.flag_address_incomplete ? '<div style="color:var(--amber,#B27A0B)"><b>' + totals.flag_address_incomplete + '</b> met adres-flag</div>' : '') +
         Object.entries(dr.skip_reason_summary || {}).map(([k, v]) => '<div style="color:var(--text-3)">' + esc(k) + ': ' + v + '</div>').join('') +
       '</div></div>' +
+      '<div style="padding:4px 18px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:12px;color:var(--text-3)">Brieftype:</span>' +
+        '<button class="btn btn-sm" data-action="setBriefType" data-arg="tussen" style="font-size:11.5px;' + (state.briefType === 'tussen' ? 'background:var(--brand,#0A7490);color:#fff;border-color:var(--brand,#0A7490)' : 'background:var(--surface);color:var(--text-2)') + '">✉ Tussenbrief (aanbevolen)</button>' +
+        '<button class="btn btn-sm" data-action="setBriefType" data-arg="wik" style="font-size:11.5px;' + (state.briefType === 'wik' ? 'background:var(--brand,#0A7490);color:#fff;border-color:var(--brand,#0A7490)' : 'background:var(--surface);color:var(--text-2)') + '">📄 WIK 14-dagenbrief</button>' +
+      '</div>' +
       '<div style="max-height:55vh;overflow:auto;padding:0 18px">' +
         recips.map(r => {
           if (r.action === 'skip') return '<div style="padding:8px 10px;border-bottom:1px solid var(--border);opacity:.55;font-size:12.5px">⨯ ' + esc(r.customer_name || r.customer_id) + ' — ' + esc(r.skip_reason) + (r.openstaand_bedrag_display ? ' · ' + esc(r.openstaand_bedrag_display) : '') + '</div>';
@@ -5679,10 +5687,11 @@
     if (totalUnread === 0) items.push(item('Markeer ongelezen', '●', `__wbxInboxMarkUnread('${esc(convId)}')`));
     // 6. Dossier openen (opent SURFACE B drawer)
     if (custId) items.push(item('Dossier openen', '👤', `__wbxOpenCase('${esc(custId)}')`));
-    // 7. Stuur een brief (WIK-brief) — BP3 v20: land per klant afgeleid
+    // 7. Stuur een brief - BP3 v20: land per klant afgeleid
     //    (address_country → postcode → onbekend). Bij onbekend: NL/BE-keuze-dialog.
-    //    NIET meer hardcoded 'NL'.
-    if (custId) items.push(item('Stuur een brief', '✉', `__wbxWikGenAutoLand('${esc(custId)}')`));
+    //    Tussenbrief (vriendelijk) staat als eerste/aanbevolen optie vóór de WIK-brief.
+    if (custId) items.push(item('Stuur tussenbrief (aanbevolen)', '✉', `__wbxWikGenAutoLand('${esc(custId)}','tussen')`));
+    if (custId) items.push(item('Stuur WIK-brief', '📄', `__wbxWikGenAutoLand('${esc(custId)}','wik')`));
     // 8. Pauzeer aanmaan-flow
     if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
     return `<div id="wbxInboxKebab" style="position:absolute;top:100%;right:8px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);min-width:230px;overflow:hidden">
@@ -6271,11 +6280,15 @@
       <div class="wbx-drawer-card-h">WIK-brief — bewijs</div>
       <div class="wbx-drawer-card-b">
         ${statusLine}
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;align-items:center">
           ${downloadBtn}
           ${sendActions}
-          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','NL')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe NL' : '📄 Genereer NL'}</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','BE')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe BE' : '📄 Genereer BE'}</button>
+          <span style="font-size:10.5px;color:var(--text-3);width:100%">Tussenbrief (vriendelijk, aanbevolen als eerste):</span>
+          <button class="btn btn-primary btn-sm" style="font-size:11.5px;color:#fff" onclick="__wbxWikGen('${esc(cid)}','NL','tussen')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>✉ Tussenbrief NL</button>
+          <button class="btn btn-primary btn-sm" style="font-size:11.5px;color:#fff" onclick="__wbxWikGen('${esc(cid)}','BE','tussen')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>✉ Tussenbrief BE</button>
+          <span style="font-size:10.5px;color:var(--text-3);width:100%">WIK 14-dagenbrief (wettelijk, pittig):</span>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','NL','wik')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe NL' : '📄 Genereer NL'}</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','BE','wik')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe BE' : '📄 Genereer BE'}</button>
         </div>
         ${items.length > 1 ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text-3);font-size:11.5px">Eerdere brieven (${items.length - 1})</summary>
           <div style="margin-top:6px">${items.slice(1).map((b) => `<div style="padding:4px 0;border-top:1px dashed var(--border);font-size:11.5px;color:var(--text-3)">${esc(_fmtDate(b.generated_at || b.created_at))} · ${esc(b.country || '?')} · ${b.sent_via ? esc(b.sent_via) : 'niet verstuurd'}${b.download_url ? ' · <a href="' + esc(b.download_url) + '" target="_blank" rel="noopener">PDF</a>' : ''}</div>`).join('')}</div>
@@ -6556,7 +6569,7 @@
   // doorspelen naar __wbxWikGen. Bij 'unknown' toon NL/BE-keuze-dialog
   // (i.p.v. stil NL te pakken). Wijzigt geen dunning-state — alleen de
   // land/template-selectie in de UI-flow.
-  window.__wbxWikGenAutoLand = async (cid) => {
+  window.__wbxWikGenAutoLand = async (cid, briefType) => {
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     if (!cid) return;
     if (_ui.caseActBusy['landdet:' + cid]) return;
@@ -6569,7 +6582,7 @@
       if (!resp.ok) { _toast('Land-detectie mislukt: ' + (j?.error || ('HTTP ' + resp.status)), 'error'); return; }
       const detected = String(j?.country || 'unknown').toUpperCase();
       if (detected === 'NL' || detected === 'BE') {
-        await window.__wbxWikGen(cid, detected);
+        await window.__wbxWikGen(cid, detected, briefType);
         return;
       }
       // Onbekend land → NL/BE-keuze-dialog (spiegelt bestaande adres-gate patroon).
@@ -6592,7 +6605,7 @@
         scrim.querySelector('#wbxLandNl').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('NL'); });
         scrim.querySelector('#wbxLandBe').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('BE'); });
       });
-      if (chosen === 'NL' || chosen === 'BE') await window.__wbxWikGen(cid, chosen);
+      if (chosen === 'NL' || chosen === 'BE') await window.__wbxWikGen(cid, chosen, briefType);
     } catch (e) {
       _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
     } finally {
@@ -6600,12 +6613,16 @@
     }
   };
 
-  window.__wbxWikGen = async (cid, country) => {
+  window.__wbxWikGen = async (cid, country, briefType) => {
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const c = (country === 'BE') ? 'BE' : 'NL';
+    const isTussen = briefType === 'tussen';
+    const briefNaam = isTussen ? 'Tussenbrief' : 'WIK-brief';
     const ok = await _askConfirm(
-      `Nieuwe WIK-brief (${c}) aanmaken?`,
-      `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>${c === 'NL' ? '14-dagenbrief' : 'eerste kosteloze herinnering'}</b>. De brief wordt bewaard als bewijs; download start direct.</div>`,
+      `Nieuwe ${briefNaam} (${c}) aanmaken?`,
+      isTussen
+        ? `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>vriendelijke tussenbrief</b> (vóór de WIK-brief). De bijbehorende factuur-PDF('s) worden meegestuurd bij het e-mailen. De brief wordt bewaard als bewijs; download start direct.</div>`
+        : `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>${c === 'NL' ? '14-dagenbrief' : 'eerste kosteloze herinnering'}</b>. De brief wordt bewaard als bewijs; download start direct.</div>`,
       { okLabel: 'Genereer PDF' }
     );
     if (!ok) return;
@@ -6615,7 +6632,7 @@
       const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
-      const resp = await fetch('/api/incasso-pre-brief', { method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: c }) });
+      const resp = await fetch('/api/incasso-pre-brief', { method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: c, brief_type: isTussen ? 'tussen' : 'wik' }) });
       if (!resp.ok) {
         let j = null; try { j = await resp.json(); } catch (_) {}
         if (resp.status === 422 && j?.code === 'ADDRESS_INCOMPLETE') {
@@ -6629,10 +6646,10 @@
       const briefId = resp.headers.get('X-Brief-Id') || null;
       const blob = await resp.blob();
       const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `WIK-brief_${c}_${cid.slice(0, 8)}.pdf`;
+      const a = document.createElement('a'); a.href = url; a.download = `${isTussen ? 'tussenbrief' : 'WIK-brief'}_${c}_${cid.slice(0, 8)}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      _toast(`${briefNaam} aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
       // Cache invalideren + refetch.
       delete _live.caseSheet.briefsByCust[cid];
       _fetchCaseBriefs(cid);
@@ -8075,22 +8092,29 @@
     if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const bodyHtml = `
       <div style="display:flex;flex-direction:column;gap:10px">
-        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--amber-soft, rgba(245,158,11,.08));border:1px solid var(--amber);border-radius:6px;line-height:1.5">
-          ⚠ Genereert een <b>wettelijke 14-dagenbrief (NL)</b> of <b>eerste kosteloze herinnering (BE)</b>.
-          De brief wordt bewaard als bewijs; download start direct.
+        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
+          Kies het brieftype. De <b>tussenbrief</b> is een vriendelijke herinnering (aanbevolen als eerste); de <b>WIK 14-dagenbrief</b> (NL) / eerste kosteloze herinnering (BE) is de wettelijke, pittige variant. De brief wordt bewaard als bewijs; download start direct.
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Brieftype</div>
+          <select id="wbxBriefType" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
+            <option value="tussen" selected>Tussenbrief (vriendelijk, aanbevolen)</option>
+            <option value="wik">WIK 14-dagenbrief / eerste herinnering (pittig)</option>
+          </select>
         </div>
         <div>
           <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Land</div>
           <select id="wbxBriefLand" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
-            <option value="NL" selected>Nederland — WIK-14-dagenbrief</option>
-            <option value="BE">België — eerste kosteloze herinnering</option>
+            <option value="NL" selected>Nederland</option>
+            <option value="BE">Belgie</option>
           </select>
         </div>
       </div>`;
-    const form = await _askForm('WIK-brief aanmaken?', bodyHtml, (root) => {
+    const form = await _askForm('Brief aanmaken?', bodyHtml, (root) => {
       const country = root.querySelector('#wbxBriefLand')?.value || 'NL';
+      const briefType = root.querySelector('#wbxBriefType')?.value === 'wik' ? 'wik' : 'tussen';
       if (country !== 'NL' && country !== 'BE') { _toast('Ongeldig land.', 'warn'); return null; }
-      return { country };
+      return { country, briefType };
     }, { okLabel: 'Genereer PDF' });
     if (!form) return;
     if (_ui.actieBusy['brief:' + cid]) return;
@@ -8100,7 +8124,7 @@
       const headers = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = 'Bearer ' + token;
       const resp = await fetch('/api/incasso-pre-brief', {
-        method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: form.country }),
+        method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: form.country, brief_type: form.briefType }),
       });
       if (!resp.ok) {
         // JSON-error verwacht bij 4xx/5xx (endpoint zet Content-Type: application/json bij fouten).
@@ -8119,14 +8143,15 @@
       const briefId   = resp.headers.get('X-Brief-Id')   || null;
       const blob = await resp.blob();
       const url  = URL.createObjectURL(blob);
+      const briefNaam = form.briefType === 'tussen' ? 'Tussenbrief' : 'WIK-brief';
       const a = document.createElement('a');
       a.href = url;
-      a.download = `WIK-brief_${form.country}_${cid.slice(0, 8)}.pdf`;
+      a.download = `${form.briefType === 'tussen' ? 'tussenbrief' : 'WIK-brief'}_${form.country}_${cid.slice(0, 8)}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      _toast(`${briefNaam} aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
       // Herlaad brieven-lijst + case-briefs zodat nieuwe brief zichtbaar is.
       if (_live.brieven) _live.brieven.fetched = false;
       if (_live.caseSheet?.briefsByCust?.[cid]) delete _live.caseSheet.briefsByCust[cid];
