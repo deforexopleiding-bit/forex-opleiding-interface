@@ -1388,6 +1388,27 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // Betaal-hercheck vóór ELKE stap. Cruciaal voor multi-stap-rondes:
         // als de klant tussen email en whatsapp betaalt, stopt de lus hier
         // en wordt de whatsapp NIET verstuurd.
+        // PR 4 mentorcommissie: klant bij incasso of met een incasso-regeling →
+        // geen aanmaning meer. Een lopende run stopt met reden 'incasso_status'
+        // (NIET 'paid': de klant heeft niet betaald; zijn facturen lopen via het
+        // bureau of de maandlijst incasso-abonnementen).
+        {
+          const uitsl = await laadIncassoUitsluiting(supabaseAdmin, { customerIds: [run.customer_id] });
+          if (uitsl.klanten.has(run.customer_id)) {
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ status: 'cancelled', completed_at: nowIso(), completion_reason: 'incasso_status', updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStepId,
+              event_type: 'cancelled',
+              payload: { reason: 'incasso_status' },
+            });
+            runAdvanced = true;
+            break;
+          }
+        }
         const customerRows = await fetchOpenInvoices(run.customer_id);
         const aggMap = aggregatePerCustomer(customerRows);
         const agg = aggMap.get(run.customer_id);

@@ -7,7 +7,7 @@
 // blijft met de rest van het redesign.
 //
 // Endpoint (bestaand): PATCH /api/customer?id=<uuid>
-// Auth: verifyAdmin (super_admin / admin / manager)
+// Auth: verifyAdmin (super_admin / admin / manager) OF recht `customer.edit`
 // WRITABLE_FIELDS (server-side witelist):
 //   is_company, company_name, kvk_number, vat_number,
 //   first_name, last_name, email, phone, date_of_birth,

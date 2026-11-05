@@ -93,3 +93,10 @@ test('controle: zou moeten zijn, grootboek achter, te veel vrijgegeven, sale zon
   assert.ok(c.totalen.met_afwijking >= 4);
   assert.equal(typeof per.Een.rapport_vrijgegeven, 'number', 'rapportkant uit het overzicht');
 });
+
+test('controle: een geannuleerde sale (gearchiveerde offerte, zoals Jimco Schepens) is geen "sale zonder commissie"', async () => {
+  zet();
+  db.tables.deals.find((d) => d.id === D3).archived_at = '2026-10-29T16:08:50Z';
+  const c = await commissieControle(db.client);
+  assert.equal(c.rijen.find((r) => r.klant === 'Jimco'), undefined, 'annulatie: niet als afwijking getoond');
+});

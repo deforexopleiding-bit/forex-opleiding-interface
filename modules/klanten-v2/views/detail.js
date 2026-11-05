@@ -11,6 +11,7 @@
 
 import { renderProfielTab }      from './tabs/profiel.js';
 import { openEditCustomerModal }    from './modals/edit-customer.js';
+import { magKlantBewerken }         from './klant-rechten.js';
 import { openArchiveCustomerModal } from './modals/archive-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js?v=1';
@@ -149,11 +150,12 @@ function renderShell({ customer, tab }) {
           ${meta ? `<div class="kv-detail-head-meta">${meta}</div>` : ''}
         </div>
         <div class="kv-detail-head-actions">
-          ${_isPrivilegedRole() ? `
+          ${magKlantBewerken() ? `
           <button type="button" class="ds-btn ds-btn-ghost" data-kv-action="edit" title="Bewerken (PR-C)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
             Bewerken
-          </button>
+          </button>` : ''/* 2026-11-05: Bewerken = verifyAdmin OF customer.edit (zelfde check als PATCH /api/customer). */}
+          ${_isPrivilegedRole() ? `
           ${customer?.archived_at
             ? `<button type="button" class="ds-btn ds-btn-ghost" data-kv-action="unarchive" title="Heractiveren">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
@@ -164,7 +166,7 @@ function renderShell({ customer, tab }) {
                 Archiveren
               </button>`
           }
-          ` : ''/* v=1cc: header-acties Bewerken/Archiveren verborgen voor niet-privileged (bv. mentor). Server-side gates blijven (verifyAdmin) — cosmetische fix om 403-knoppen weg te halen. */}
+          ` : ''/* v=1cc: Archiveren verborgen voor niet-privileged (bv. mentor). Server-side gate blijft (verifyAdmin) — cosmetische fix om 403-knoppen weg te halen. */}
         </div>
       </header>
 

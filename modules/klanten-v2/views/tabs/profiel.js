@@ -17,6 +17,7 @@
 // staat er alleen een "Bekijk in …-tab" link.
 
 import { openEditCustomerModal }  from '../modals/edit-customer.js';
+import { magKlantBewerken }       from '../klant-rechten.js';
 import { openLinkCompanyModal }   from '../modals/link-company.js';
 import { openTagEditModal }       from '../modals/tag-edit.js';
 import { resetDetailCache }       from '../detail.js';
@@ -171,10 +172,10 @@ function renderClientDataCard(customer, dossier) {
     <div class="kv-prof-card">
       <div class="kv-prof-card-title kv-prof-card-title-row">
         <span>Klantgegevens</span>
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-action-inline="edit" title="Bewerken (PR-C)">
+        ${magKlantBewerken() ? `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-action-inline="edit" title="Bewerken (PR-C)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
           Bewerken
-        </button>
+        </button>` : ''}
       </div>
 
       <div class="kv-prof-section-h">Persoonlijk</div>
