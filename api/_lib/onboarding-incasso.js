@@ -97,7 +97,12 @@ export async function zetNaarIncasso({ onboardingId, reden, door, doorUserId = n
     + ' — niet geannuleerd: facturen, toegang en aanmaningen blijven zoals ze zijn.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'naar-incasso');
-  return { status: 200, body: { ok: true, incasso_op: nu, incasso_kaart } };
+  // INCASSO-OVERZICHT (3 nov 2026): de klant komt in "Mag naar incasso" — een
+  // VOORSTEL, geen status. Aanmaningen lopen door tot Maxim of de hoofdmentor
+  // doorzet. Fail-soft: zonder migratie of bij een fout gebeurt er niets.
+  const { stelVoorVanuitOnboarding } = await import('./incasso-traject-server.js');
+  const incasso_overzicht = await stelVoorVanuitOnboarding(db, { onboardingId, door, reden: r });
+  return { status: 200, body: { ok: true, incasso_op: nu, incasso_kaart, incasso_overzicht } };
 }
 
 /**
@@ -141,5 +146,9 @@ export async function activeerUitIncasso({ onboardingId, startDatum, door, doorU
     'Terug actief uit incasso-opvolging, gezet door ' + (door || 'onbekend') + '. Nieuwe startdatum: ' + startDatum + '.', doorUserId);
   const { spiegelNaActie } = await import('./onboarding-spiegel.js');
   await spiegelNaActie(onboardingId, 'uit-incasso');
+  // Het voorstel uit de onboarding vervalt, maar enkel zolang er nog niet
+  // doorgezet is (Mag naar incasso). Daarna beslist het incasso-overzicht.
+  const { sluitOnboardingVoorstel } = await import('./incasso-traject-server.js');
+  await sluitOnboardingVoorstel(db, { onboardingId, door });
   return { status: 200, body: { ok: true, start_date: startDatum, incasso_terug_op: nu, incasso_kaart } };
 }

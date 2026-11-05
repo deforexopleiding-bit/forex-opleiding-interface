@@ -475,6 +475,18 @@ export default async function handler(req, res) {
       stilteStand = { bron_status: BRON_ONBEREIKBAAR, stiltes: new Map(), vangnet: new Set() };
     }
 
+    // ── INCASSO (Maxim, 3 nov 2026) ──────────────────────────────────────
+    // Vanaf Doorgezet (incassostatus bij_incasso) en bij een regeling stoppen
+    // ALLE automatische aanmaningen — ook deze herinneringen. Zelfde bron als
+    // engine/bulk/bureau-cron (#1958). Fail-soft: leesfout = oude gedrag.
+    let incassoUitsl = null;
+    try {
+      const { laadIncassoUitsluiting } = await import('./_lib/incasso-termijnfacturen.js');
+      incassoUitsl = await laadIncassoUitsluiting(supabaseAdmin, { customerIds: winnerCustIds });
+    } catch (e) {
+      console.warn('[conv-reminder-cron] incasso-uitsluiting lezen faalde (oude gedrag): ' + (e?.message || e));
+    }
+
     // ── Deps + dry-run laden via shared loader ────────────────────────────
     const deps = await loadConversationReminderDeps();
     // Splitsing 2026-08-25: kies per scope. scope='test' → test-vlag,
@@ -501,6 +513,13 @@ export default async function handler(req, res) {
       if (stilteBlok) {
         summary.processed_count++;
         summary.skipped.push({ run_id: run.id, reason: 'LMS_STILTE: ' + stilteBlok.reden });
+        continue;
+      }
+
+      // Incasso-guard: doorgezet of regeling -> geen aanmaning meer.
+      if (run.customer_id && incassoUitsl?.klanten?.has(run.customer_id)) {
+        summary.processed_count++;
+        summary.skipped.push({ run_id: run.id, reason: 'INCASSO: doorgezet of regeling' });
         continue;
       }
 
