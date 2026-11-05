@@ -10,8 +10,11 @@
 //            Manager/sales/mentor hebben customer.module.access via migratie
 //            014/015 + de klanten.html page-gate; READ moet voor hen open zijn
 //            anders kunnen ze geen klant openen vanuit aanwezige/onboarding.
-//   POST   → verifyAdmin(req) — admin-only (writes blijven beschermd).
-//   PATCH  → verifyAdmin(req) — admin-only.
+//   POST   → verifyAdmin(req) OF requirePermission(req,'customer.create').
+//   PATCH  → verifyAdmin(req) OF requirePermission(req,'customer.edit')
+//            (2026-11-05: het recht stond al in de registry/Admin-UI maar werd
+//            nergens gecontroleerd → mentor/sales kregen "Admin-rol vereist").
+//            Archiveren/notities/tags/AVG blijven admin-only (eigen endpoints).
 //
 // Audit: POST/PATCH/archive schrijven naar audit_log via _lib/audit-customer.js
 // (fail-soft — audit-fail breekt de mutatie niet).
@@ -65,36 +68,45 @@ export default async function handler(req, res) {
     // klanten inschrijven). Insert doet ALLEEN customers-tabel + audit;
     // geen TL-sync, geen subscription, geen invoice, geen incasso.
     // Bewerken/archiveren/verwijderen/tags/notes blijven strikt verifyAdmin.
-    let admin = await verifyAdmin(req);
-    if (!admin) {
-      const allowed = await requirePermission(req, 'customer.create');
-      if (!allowed) {
-        return res.status(403).json({ error: 'Toegang geweigerd. `customer.create`-recht vereist.' });
-      }
-      // Non-admin path: haal user-profiel op zodat handlePost admin.user.id +
-      // admin.profile heeft (create-audit + created_by_user_id).
-      const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(
-        (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-      );
-      if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-      const { data: profile } = await supabaseAdmin
-        .from('profiles').select('id, email, full_name, role').eq('id', user.id).maybeSingle();
-      admin = { user, profile: profile || { id: user.id, email: user.email, role: 'sales' } };
-    }
-    return handlePost(req, res, admin);
+    const actor = await actorOfPermission(req, res, 'customer.create');
+    if (!actor) return;
+    return handlePost(req, res, actor);
   }
 
   if (req.method === 'PATCH') {
-    // Update blijft admin-only.
-    const admin = await verifyAdmin(req);
-    if (!admin) {
-      return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
-    }
-    return handlePatch(req, res, admin);
+    // 2026-11-05: dual-gate zoals POST — verifyAdmin OF customer.edit.
+    // Zelfde PATCH-pad (witelist, status-gate, TL-first sync, audit); alleen
+    // de toegang is verruimd voor wie het recht expliciet heeft.
+    const actor = await actorOfPermission(req, res, 'customer.edit');
+    if (!actor) return;
+    return handlePatch(req, res, actor);
   }
 
   res.setHeader('Allow', 'GET, POST, PATCH');
   return res.status(405).json({ error: `Method ${req.method} not allowed` });
+}
+
+// Admin (verifyAdmin) of een gebruiker met `permKey`. Geeft { user, profile }
+// terug (voor audit + created_by_user_id), of null nadat de 401/403 al is
+// verstuurd.
+async function actorOfPermission(req, res, permKey) {
+  const admin = await verifyAdmin(req);
+  if (admin) return admin;
+  const allowed = await requirePermission(req, permKey);
+  if (!allowed) {
+    res.status(403).json({ error: `Toegang geweigerd. \`${permKey}\`-recht vereist.` });
+    return null;
+  }
+  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(
+    (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  );
+  if (userErr || !user) {
+    res.status(401).json({ error: 'Niet geauthenticeerd' });
+    return null;
+  }
+  const { data: profile } = await supabaseAdmin
+    .from('profiles').select('id, email, full_name, role').eq('id', user.id).maybeSingle();
+  return { user, profile: profile || { id: user.id, email: user.email, role: null } };
 }
 
 // ── GET — detail ─────────────────────────────────────────────────────────────
