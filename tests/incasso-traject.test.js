@@ -340,3 +340,47 @@ test('machine-route: geheim verplicht, GET geeft het overzicht, POST een actie',
     process.env = oud;
   }
 });
+
+// ── Het bord (5 nov 2026) ────────────────────────────────────────────────
+
+test('bord: doorzetten zonder voorstel maakt het traject en zet de check op +14; tweede keer = al', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [] }));
+  let u = await actie(db, { actie: 'doorzetten', customer_id: K, lms_student_id: 'stu-9', naam: 'Proef Klant', actor: ADMIN });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  const t = db.rows('incasso_trajecten')[0];
+  assert.equal(t.lms_student_id, 'stu-9');
+  assert.equal(t.volgende_check, '2026-11-17');
+  assert.equal(db.rows('mentor_commissie_incasso')[0].status, 'bij_incasso');
+  const ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'doorgezet');
+  assert.equal(ov.rijen[0].volgende_check, '2026-11-17');
+  u = await actie(db, { actie: 'doorzetten', customer_id: K, actor: ADMIN });
+  assert.equal(u.status, 200);
+  assert.equal(u.body.data.al, true);
+  assert.equal(db.rows('incasso_trajecten').length, 1);
+});
+
+test('bord: mislukte status bij doorzetten zonder voorstel laat geen half traject', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [] }));
+  const stuk = deps(db, { zetStatus: async () => { throw Object.assign(new Error('Migratie ontbreekt'), { status: 503, code: 'MIGRATIE_ONTBREEKT' }); } });
+  const u = await actie(db, { actie: 'doorzetten', customer_id: K, actor: ADMIN }, stuk);
+  assert.equal(u.status, 503);
+  assert.equal(db.rows('incasso_trajecten').length, 0);
+});
+
+test('bord: Betaald vanuit Mag naar incasso sluit het traject zonder status; doorschuiven kijkt vooruit', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [] }));
+  await actie(db, { actie: 'voorstel', customer_id: K, actor: SEPPE });
+  let u = await actie(db, { actie: 'doorschuiven', customer_id: K, datum: '2026-11-03', actor: SEPPE });
+  assert.equal(u.status, 400, 'vandaag is geen doorschuiven');
+  u = await actie(db, { actie: 'doorschuiven', customer_id: K, datum: '2026-11-06', actor: SEPPE });
+  assert.equal(u.status, 200);
+  assert.equal(db.rows('incasso_trajecten')[0].volgende_check, '2026-11-06');
+  u = await actie(db, { actie: 'afsluiten', customer_id: K, als: 'betaald', notitie: 'overschrijving gezien', actor: SEPPE });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal(db.rows('incasso_trajecten')[0].gesloten_als, 'betaald');
+  assert.equal(db.rows('mentor_commissie_incasso').length, 0, 'geen incassostatus gezet');
+});

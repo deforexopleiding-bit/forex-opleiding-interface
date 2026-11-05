@@ -81,6 +81,7 @@ export const ACTIE_RECHT = {
   niet_naar_incasso: 'selecteren',
   vink: 'opvolgen',
   gecheckt: 'opvolgen',
+  doorschuiven: 'opvolgen',
   notitie: 'opvolgen',
   regeling: 'opvolgen',
   afsluiten: 'opvolgen',
@@ -186,6 +187,8 @@ function isConcept(f) {
 
 /** De volgende check: Bij incasso om de 14 dagen vanaf het verzenden. */
 export function volgendeCheck(traject, fase) {
+  //  Het bord (5 nov): ook Doorgezet heeft een check (doorzetten = +14 dagen).
+  if (fase === 'doorgezet') return traject?.volgende_check ? dag(traject.volgende_check) : null;
   if (fase !== 'bij_incasso') return null;
   if (traject?.volgende_check) return dag(traject.volgende_check);
   const op = dag(traject?.checklist?.dossier_verstuurd?.op || traject?.overgedragen_op);

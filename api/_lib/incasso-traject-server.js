@@ -384,7 +384,8 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
   if (!magActie(rollen, actie)) return fout(403, 'geen_recht', 'Dit mag je rol niet.');
   const notitie = String(invoer.notitie || '').trim().slice(0, 1000);
   const datum = /^\d{4}-\d{2}-\d{2}$/.test(String(invoer.datum || '')) ? String(invoer.datum) : vandaag;
-  if (datum > vandaag) return fout(400, 'datum_toekomst', 'Een datum in de toekomst kan niet.');
+  //  Doorschuiven kijkt vooruit; elke andere datum is een moment dat al voorbij is.
+  if (actie !== 'doorschuiven' && datum > vandaag) return fout(400, 'datum_toekomst', 'Een datum in de toekomst kan niet.');
 
   const customerId = await zoekKlant(crm, invoer);
   if (!customerId) return fout(404, 'klant_onbekend', 'Deze student is niet als klant gevonden in het CRM.');
@@ -470,14 +471,42 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
 
       // ── Fase 1 → 2: selecteren ─────────────────────────────────────────────
       case 'doorzetten': {
-        if (fase !== 'mag_naar_incasso') return fout(409, 'fase', `Kan alleen vanuit Mag naar incasso (nu: ${FASE_LABEL[fase]}).`);
+        //  Het bord (5 nov): al doorgezet = niets opnieuw (idempotent).
+        if (fase === 'doorgezet' || fase === 'bij_incasso') return goed('Staat al bij incasso.', { al: true, fase });
         if (minderjarig) return fout(422, 'minderjarig', 'Minderjarig: geen incasso.');
-        if (status.status !== 'bij_incasso') {
-          await wijzigStatus(deps, { customerId, status: 'bij_incasso', sinds: vandaag, reden: `Doorgezet naar incasso${notitie ? `: ${notitie}` : ''}`, actorId });
+        //  Zonder traject (het voorstel kwam niet aan, of de klant stond nog
+        //  nergens): het traject ontstaat hier, in één keer doorgezet.
+        if (fase !== 'mag_naar_incasso' && !(fase === 'te_bepalen' && !traject)) {
+          return fout(409, 'fase', `Kan alleen vanuit Mag naar incasso (nu: ${FASE_LABEL[fase]}).`);
         }
-        await bewaar(crm, traject.id, { geselecteerd_door: door, geselecteerd_op: nu.toISOString(), logboek: metLog(traject, regel(`Doorgezet. Aanmaningen staan stil.${notitie ? ` ${notitie}` : ''}`)) });
+        let t = traject;
+        if (!t) {
+          const { data: nieuw, error } = await crm.from('incasso_trajecten').insert({
+            customer_id: customerId, onboarding_id: invoer.crm_onboarding_id || null, lms_student_id: invoer.lms_student_id || null,
+            naam: String(invoer.naam || '').slice(0, 200) || null, herkomst: 'brief_2', voorgesteld_door: door,
+            logboek: [regel('Voorgesteld en meteen doorgezet vanaf het bord', 'voorstel')],
+          }).select('*').single();
+          if (error) throw new Error(error.message);
+          t = nieuw;
+        }
+        if (status.status !== 'bij_incasso') {
+          try {
+            await wijzigStatus(deps, { customerId, status: 'bij_incasso', sinds: vandaag, reden: `Doorgezet naar incasso${notitie ? `: ${notitie}` : ''}`, actorId });
+          } catch (e) {
+            if (!traject) await crm.from('incasso_trajecten').delete().eq('id', t.id);
+            throw e;
+          }
+        }
+        const volgende = plusDagen(vandaag, OPVOLG_DAGEN);
+        await bewaar(crm, t.id, { geselecteerd_door: door, geselecteerd_op: nu.toISOString(), volgende_check: volgende, logboek: metLog(t, regel(`Doorgezet. Aanmaningen staan stil.${notitie ? ` ${notitie}` : ''}`)) });
         await pipeline(deps, customerId, 'incasso', 'Incasso-overzicht: doorgezet', door);
-        return goed('Doorgezet. De aanmaningen staan stil.', { fase: 'doorgezet' });
+        return goed('Doorgezet. De aanmaningen staan stil.', { fase: 'doorgezet', volgende_check: volgende });
+      }
+      case 'doorschuiven': {
+        if (!traject) return fout(409, 'geen_traject', 'Kies eerst een fase.');
+        if (!(datum > vandaag)) return fout(400, 'datum', 'Kies een datum na vandaag.');
+        await bewaar(crm, traject.id, { volgende_check: datum, logboek: metLog(traject, regel(`Terug op de lijst op ${datum}.${notitie ? ` ${notitie}` : ''}`)) });
+        return goed('Bewaard.', { volgende_check: datum });
       }
       case 'niet_naar_incasso': {
         if (fase !== 'mag_naar_incasso') return fout(409, 'fase', 'Kan alleen vanuit Mag naar incasso.');
@@ -542,8 +571,15 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
 
       // ── Afgesloten ─────────────────────────────────────────────────────────
       case 'afsluiten': {
-        if (!['doorgezet', 'bij_incasso', 'regeling'].includes(fase)) return fout(409, 'fase', 'Afsluiten kan vanaf Doorgezet.');
         const als = String(invoer.als || '');
+        //  Het bord (5 nov): Betaald kan al in Mag naar incasso. De status blijft
+        //  dan actief (er was nog geen incasso); enkel het traject sluit.
+        if (fase === 'mag_naar_incasso' && als === 'betaald') {
+          if (notitie.length < 3) return fout(400, 'notitie', 'Schrijf kort wat er gebeurde.');
+          await bewaar(crm, traject.id, { gesloten_op: nu.toISOString(), gesloten_als: 'betaald', gesloten_door: door, gesloten_reden: notitie, logboek: metLog(traject, regel(`Afgesloten: Betaald. ${notitie}`)) });
+          return goed('Afgesloten: Betaald.', { fase: 'afgesloten' });
+        }
+        if (!['doorgezet', 'bij_incasso', 'regeling'].includes(fase)) return fout(409, 'fase', 'Afsluiten kan vanaf Doorgezet.');
         if (!['betaald', 'oninbaar', 'teruggekomen'].includes(als)) return fout(400, 'als', 'Kies: betaald, oninbaar of teruggekomen.');
         if (notitie.length < 3) return fout(400, 'notitie', 'Schrijf kort wat er gebeurde.');
         if (als === 'teruggekomen') {
