@@ -166,3 +166,54 @@ test('POST blijft op customer.create, niet op customer.edit', async () => {
   assert.match(res.body.error, /customer\.create/);
   assert.deepEqual(omgeving.permVragen, ['customer.create']);
 });
+
+// ── Knoppen in de browser (klant-rechten.js) ────────────────────────────────
+// Zelfde regel als de server: admin-rol in de shell OF customer.edit; fail-open
+// zolang de rechten niet geladen zijn. Archiveren blijft op _isPrivilegedRole.
+
+import { readFileSync } from 'node:fs';
+
+const { magKlantBewerken } = await import(url('modules/klanten-v2/views/klant-rechten.js'));
+
+function metVenster({ rollen = [], rechten = [], geladen = true, rbac = true } = {}) {
+  globalThis.window = {
+    DFO: { S: { roles: rollen } },
+    RBAC: rbac ? {
+      canSync: (k) => rechten.includes(k),
+      permissiesGeladen: () => geladen,
+    } : undefined,
+  };
+}
+
+test('knop: super_admin/manager altijd, mentor alleen met customer.edit', () => {
+  try {
+    metVenster({ rollen: ['super_admin'] });            assert.equal(magKlantBewerken(), true);
+    metVenster({ rollen: ['manager'] });                assert.equal(magKlantBewerken(), true);
+    metVenster({ rollen: ['mentor'] });                 assert.equal(magKlantBewerken(), false);
+    metVenster({ rollen: ['sales'] });                  assert.equal(magKlantBewerken(), false);
+    metVenster({ rollen: ['mentor'], rechten: ['customer.edit'] }); assert.equal(magKlantBewerken(), true);
+    metVenster({ rollen: ['mentor'], rechten: ['customer.create'] }); assert.equal(magKlantBewerken(), false);
+  } finally { delete globalThis.window; }
+});
+
+test('knop: fail-open als de rechten niet geladen zijn of RBAC ontbreekt', () => {
+  try {
+    metVenster({ rollen: ['mentor'], geladen: false }); assert.equal(magKlantBewerken(), true);
+    metVenster({ rollen: ['mentor'], rbac: false });    assert.equal(magKlantBewerken(), true);
+  } finally { delete globalThis.window; }
+});
+
+test('knoppen: alle drie de Bewerken-ingangen gebruiken magKlantBewerken; Archiveren niet', () => {
+  const lees = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+  const detail = lees('modules/klanten-v2/views/detail.js');
+  assert.match(detail, /import \{ magKlantBewerken \}\s+from '\.\/klant-rechten\.js';/);
+  assert.match(detail, /\$\{magKlantBewerken\(\) \? `\s*<button type="button" class="ds-btn ds-btn-ghost" data-kv-action="edit"/);
+  assert.match(detail, /\$\{_isPrivilegedRole\(\) \? `\s*\$\{customer\?\.archived_at/, 'archiveren blijft op de oude rol-check');
+  const profiel = lees('modules/klanten-v2/views/tabs/profiel.js');
+  assert.match(profiel, /\$\{magKlantBewerken\(\) \? `<button[^>]*data-kv-action-inline="edit"/);
+  const list = lees('modules/klanten-v2/views/list.js');
+  assert.doesNotMatch(list, /^import /m, 'list.js houdt geen statische imports');
+  assert.match(list, /await import\('\.\/klant-rechten\.js'\)/);
+  assert.match(list, /\$\{state\.magBewerken \? `<button class="ds-dd-item" data-act="row-edit">/);
+  assert.match(list, /querySelector\('\[data-act="row-edit"\]'\)\?\.addEventListener/);
+});

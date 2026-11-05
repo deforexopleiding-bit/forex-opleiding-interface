@@ -95,7 +95,14 @@ export async function renderListView(rootEl, { profile } = {}) {
     selected: new Set(),       // klant-id's
     banner: null,              // {type,text} — bulk-result banner
     kebabOpenFor: null,
+    magBewerken: true,         // verifyAdmin OF customer.edit (klant-rechten.js)
   };
+  // Bewerken-item alleen tonen als PATCH /api/customer het toestaat. Dynamisch
+  // zoals de modals: een fout hier mag de lijst nooit breken (fail-open).
+  try {
+    const m = await import('./klant-rechten.js');
+    state.magBewerken = m.magKlantBewerken() !== false;
+  } catch (_) { state.magBewerken = true; }
 
   rootEl.innerHTML = renderShell();
   wireControls(rootEl);
@@ -541,7 +548,7 @@ function rowHtml(c) {
           </button>
           <div class="ds-dd-menu">
             <button class="ds-dd-item" data-act="row-open">${eyeIcon()} Openen</button>
-            <button class="ds-dd-item" data-act="row-edit">${pencilIcon()} Bewerken</button>
+            ${state.magBewerken ? `<button class="ds-dd-item" data-act="row-edit">${pencilIcon()} Bewerken</button>` : ''}
             <button class="ds-dd-item" data-act="row-tag">${tagIcon()} Tag toevoegen</button>
             <div class="ds-dd-sep"></div>
             <button class="ds-dd-item danger" data-act="row-archive">${archiveIcon()} Archiveren</button>
@@ -592,7 +599,7 @@ function wireTableRows(el) {
       e.stopPropagation(); menu.classList.remove('open');
       window.KV.navigate({ id, tab: 'profiel' });
     });
-    menu.querySelector('[data-act="row-edit"]').addEventListener('click', async (e) => {
+    menu.querySelector('[data-act="row-edit"]')?.addEventListener('click', async (e) => {
       e.stopPropagation(); menu.classList.remove('open');
       const customer = state.rows.find((r) => r.id === id);
       if (!customer) return K().toast('Klant niet gevonden in huidige lijst');
