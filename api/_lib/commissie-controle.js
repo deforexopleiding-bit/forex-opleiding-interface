@@ -307,6 +307,39 @@ export async function commissieControle(db) {
  * definitief rapport (goedgekeurd/uitbetaald); verrekende termijnen tellen
  * niet. Oude trajectregels: hun bedrag staat in verrekening.reeds_in_rapport.
  */
+/**
+ * Puur: telt één sale uit het overzicht van één mentor op bij de rapportkant.
+ * Geëxporteerd voor tests.
+ *
+ * Oude trajectregels (verrekening.reeds_in_rapport) zaten al in een rapport en
+ * tellen als werkelijk uitbetaald. Hun STATUS telt als uitbetaald voor het deel
+ * dat in het grootboek op 'uitbetaald' staat (reeds_status_uitbetaald). Vóór
+ * 6 nov telde dat deel nooit mee als status uitbetaald, waardoor het scherm
+ * "status loopt achter" toonde terwijl de regels en de rapporten juni–september
+ * al op uitbetaald stonden. Een overzicht zonder dat veld (oude vorm) valt
+ * terug op het oude gedrag.
+ */
+export function telRapportSale(acc0, c, uid, rapportStatus, tot) {
+  const acc = acc0 || { vrijgegeven: 0, definitief: 0, werkelijk: 0, statusUit: 0 };
+  acc.vrijgegeven += Number(c.vrijgegeven_rapport) || 0;
+  for (const t of c.termijnen || []) {
+    if (t.status !== 'betaald' || !t.uitbetaald_in) continue;
+    const bedrag = (Number(t.amount) || 0) - (Number(t.verrekend) || 0);
+    if (bedrag <= 0) continue;
+    acc.definitief += bedrag;
+    const rp = rapportStatus.get(`${uid}|${t.uitbetaald_in}`);
+    if (rp?.status === 'uitbetaald') { acc.werkelijk += bedrag; acc.statusUit += bedrag; }
+    else if (rp?.status === 'goedgekeurd' && tot && t.uitbetaald_in <= tot) acc.werkelijk += bedrag;
+  }
+  const reeds = Number(c.verrekening?.reeds_in_rapport) || 0;
+  if (reeds > 0) {
+    acc.definitief += reeds;
+    acc.werkelijk += reeds;
+    acc.statusUit += Math.min(reeds, Math.max(0, Number(c.verrekening?.reeds_status_uitbetaald) || 0));
+  }
+  return acc;
+}
+
 async function rapportPerSale(db, mentorIds, uitbetaaldTot) {
   const uit = new Map();
   if (!mentorIds.length) return uit;
@@ -319,20 +352,7 @@ async function rapportPerSale(db, mentorIds, uitbetaaldTot) {
     for (const ev of o.per_event || []) {
       for (const c of ev.sales || []) {
         if (!c.deal_id || c.is_cash_traject) continue;
-        const acc = uit.get(c.deal_id) || { vrijgegeven: 0, definitief: 0, werkelijk: 0, statusUit: 0 };
-        acc.vrijgegeven += Number(c.vrijgegeven_rapport) || 0;
-        for (const t of c.termijnen || []) {
-          if (t.status !== 'betaald' || !t.uitbetaald_in) continue;
-          const bedrag = (Number(t.amount) || 0) - (Number(t.verrekend) || 0);
-          if (bedrag <= 0) continue;
-          acc.definitief += bedrag;
-          const rp = rapportStatus.get(`${uid}|${t.uitbetaald_in}`);
-          if (rp?.status === 'uitbetaald') { acc.werkelijk += bedrag; acc.statusUit += bedrag; }
-          else if (rp?.status === 'goedgekeurd' && tot && t.uitbetaald_in <= tot) acc.werkelijk += bedrag;
-        }
-        const reeds = Number(c.verrekening?.reeds_in_rapport) || 0;
-        if (reeds > 0) { acc.definitief += reeds; acc.werkelijk += reeds; }
-        uit.set(c.deal_id, acc);
+        uit.set(c.deal_id, telRapportSale(uit.get(c.deal_id), c, uid, rapportStatus, tot));
       }
     }
   }
