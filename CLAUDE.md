@@ -672,6 +672,26 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   rapportkant (computeBonusOverview: rapport / in definitief rapport / werkelijk uitbetaald), grootboek, verschil +
   afwijkingen (te veel, achter, geen commissie, soort ontbreekt, niet gekoppeld, factuur te veel betaald, traject niet
   omgezet, status loopt achter, vrijgegeven in geen rapport). Lijst 3 nov: docs/commissie/2026-11-03-afwijkingen.md.
+- Sales-bonussen (tabel `bonuses`, 6 nov 2026, regels Maxim) — NIET de mentorcommissie.
+  REGELING (ongewijzigd, `api/_lib/sales-bonus-regels.js`): pct uit `sales_bonus_configs` (leeg → 3%)
+  over het regelbedrag EXCL. btw van het eerste abonnement met 1 termijn (aanbetaling of eenmalige
+  betaling) als dat ≥ threshold (leeg → € 1.000); één bonus per deal. AANMAKEN (`sales-subscription-create`,
+  `magAutomatischeBonus`): NOOIT voor wie het abonnement aanmaakt — ontvanger = deals.sales_user_id van de
+  OFFERTE; geen bonus zonder offerte (standalone/ghost-deal), bij aanpassing/regeling/incasso, bij een
+  abonnement dat aan een andere sale hangt of als de offerte al abonnementen had (vervanging). Response
+  `bonus_skip` = reden. MEETELLEN (`api/_lib/sales-bonus-stand.js`, alleen lezen): verdiend = min(bonus,
+  pct × betaald excl. btw / 100) per sale, in volgorde verdeeld over de bonussen van die sale (bonus op de
+  offerte eerst, dan ghost-bonussen op startdatum). Factuur ↔ sale = de regels van de mentorcommissie
+  (koppeling, deal_id, abonnement/soort, ghost, enige sale) + facturen met deal_id op een ANDER klantrecord;
+  gearchiveerde getekende offertes blijven de sale; gecrediteerd/concept/incasso-stilstand/facturen van
+  vóór de deal (−3 d) tellen nooit; de betaalde reserveringsfee van de eigen offerte telt WEL (deel van de
+  prijs). Gebruikt door Finance-dashboard (`mentorBonusPending` = sales-bonus verdiend open — legacy-naam),
+  sales-dashboard (`my_bonus_verdiend_open` / `_nog_te_verdienen`), sales-rapporten en Sales › Bonussen.
+  CONTROLE: Sales › Bonussen (super_admin/admin, `api/sales-bonus-overview.js`) — per bonus ontvanger,
+  klant, deal, abonnementstatus, betaald, verdiend, voorstel houden/ongeldig/aanpassen + reden + signalen.
+  Beslissen + handmatig toekennen (ontvanger + reden + basis of "telt volledig"): `api/sales-bonus-beslissing.js`,
+  gelogd in agent_audit_log (`sales.bonus.beslissing` / `sales.bonus.toekennen`), teruggelezen door de kern.
+  NIETS automatisch voiden/herberekenen; geen migratie.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
