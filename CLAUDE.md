@@ -672,6 +672,20 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   rapportkant (computeBonusOverview: rapport / in definitief rapport / werkelijk uitbetaald), grootboek, verschil +
   afwijkingen (te veel, achter, geen commissie, soort ontbreekt, niet gekoppeld, factuur te veel betaald, traject niet
   omgezet, status loopt achter, vrijgegeven in geen rapport). Lijst 3 nov: docs/commissie/2026-11-03-afwijkingen.md.
+- Cashbetaling (6 nov 2026, Maxim) — knop "Cashbetaling registreren" op een open factuur (klantdossier ›
+  Facturen › factuurdetail + finance-detail-v2). De factuur blijft staan en wordt NOOIT gecrediteerd. Kern
+  `api/_lib/cash-betaling.js` → `POST /api/finance-invoice-register-cash` (recht finance.invoice.payment.register):
+  invoer (bedrag ≤ open, deelbetaling mag; datum niet in de toekomst; ontvangen_door + notitie ≥5 verplicht) →
+  tabel actief? (anders 503 CASH_NIET_ACTIEF, niets naar TL) → geen concept/gecrediteerd → dubbel binnen 10 min =
+  409 MOGELIJK_DUBBEL tenzij bevestig_dubbel → GEWONE betaalflow `registerPaymentInternal` met payments.payment_method
+  'cash' + TL `payment_method_id` (`tlPaymentMethodId`; app_settings `teamleader_cash_payment_method_id` of TL
+  paymentMethods.list naam cash/contant/kas). Geen cash-methode in TL → betaling WEL naar TL, methode niet, luide
+  waarschuwing + audit. Commissie = de factuurmotor in die flow, geen apart pad. Rij in `cash_ontvangsten`
+  (bewijsnummer KAS-JJJJ-NNNN, ontvangen_door, notitie, payment_id ON DELETE SET NULL = teruggedraaid) + audit
+  `finance_invoice.register_cash`. Ontvangstbewijs-PDF `GET /api/finance-cash-ontvangstbewijs?id=` (pdfkit, ZONDER
+  de interne notitie); NIETS wordt verstuurd. Betalingen + methode per factuur: `GET /api/finance-invoice-payments`;
+  label-kern `api/_lib/betaalmethode.js` (ook maandlijst incasso-abonnementen en controlescherm). Migratie
+  docs/sql-migrations/2026-11-06-cash-ontvangsten.sql (BLOKKEREND voor de knop, de rest werkt zonder).
 - Sales-bonussen (tabel `bonuses`, 6 nov 2026, regels Maxim) — NIET de mentorcommissie.
   REGELING (ongewijzigd, `api/_lib/sales-bonus-regels.js`): pct uit `sales_bonus_configs` (leeg → 3%)
   over het regelbedrag EXCL. btw van het eerste abonnement met 1 termijn (aanbetaling of eenmalige
