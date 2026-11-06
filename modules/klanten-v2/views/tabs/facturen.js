@@ -9,7 +9,8 @@
 // gate: finance.invoice.view (super_admin + manager) — sales zonder
 // permission ziet 403 → error-state met duidelijke boodschap.
 
-import { openInvoiceDetailModal } from '../modals/invoice-detail.js?v=4';
+import { openInvoiceDetailModal } from '../modals/invoice-detail.js?v=5';
+import { openInvoiceCashModal } from '../modals/invoice-cash.js?v=1';
 
 // v=1cc (2026-08-26) — privileged-check voor UI-gaten. Voor mentor (niet-
 // privileged) is de facturen-tab inkijk-only: geen "Nieuwe factuur"-knop,
@@ -259,6 +260,11 @@ function wire(rootEl) {
         onSuccess: () => actLoad(rootEl),   // list opnieuw laden, detail sluit vanzelf
       }),
       onPay:    (i) => openInvoicePaymentModal({
+        invoice:   i,
+        onSuccess: () => actLoad(rootEl),
+      }),
+      // Cashbetaling: de lijst herladen; de modal blijft open voor de PDF.
+      onCash:   (i) => openInvoiceCashModal({
         invoice:   i,
         onSuccess: () => actLoad(rootEl),
       }),
