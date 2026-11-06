@@ -179,3 +179,32 @@ export async function voidBonusForCreditedInvoice(inv, { source } = {}) {
     return { ok: false, reason: e?.message };
   }
 }
+
+/**
+ * Void ÉÉN bonus op id (beslissing van een admin, api/sales-bonus-beslissing.js).
+ * Zelfde gedrag als bij annulering: al 'paid' → clawback_pending + finance-melding.
+ * Niet fail-soft: de caller wil weten of het lukte.
+ */
+export async function voidBonusById(bonusId, { reason, source } = {}) {
+  const { data: bonus, error } = await supabaseAdmin.from('bonuses')
+    .select('id, status').eq('id', bonusId).maybeSingle();
+  if (error) throw new Error('bonus lezen: ' + error.message);
+  if (!bonus) return { ok: false, reason: 'not_found' };
+  if (bonus.status === 'voided') return { ok: true, skipped: 'already_voided' };
+  const wasPaid = bonus.status === 'paid';
+  const patch = { status: 'voided', voided_at: new Date().toISOString(), void_reason: reason || null };
+  if (wasPaid) patch.clawback_pending = true;
+  const { data: upd, error: uErr } = await supabaseAdmin.from('bonuses')
+    .update(patch).eq('id', bonusId).neq('status', 'voided').select('id').maybeSingle();
+  if (uErr) throw new Error('bonus voiden: ' + uErr.message);
+  if (!upd) return { ok: true, skipped: 'already_voided' };
+  if (wasPaid) {
+    createNotification({
+      toRole: ['manager', 'super_admin'], type: 'finance.bonus_clawback', title: 'Bonus terugvorderen',
+      body: `Reeds uitbetaalde verkoper-bonus ongeldig gemaakt (${reason || 'beslissing admin'}) — verrekenen met volgende uitbetaling.`,
+      linkUrl: '/modules/sales.html', entityType: 'bonus', entityId: bonusId,
+    }).catch(() => {});
+  }
+  console.log('[sales-bonus] bonus', bonusId, 'voided via', source || 'beslissing', '—', reason);
+  return { ok: true, voided: bonusId, clawback: wasPaid };
+}

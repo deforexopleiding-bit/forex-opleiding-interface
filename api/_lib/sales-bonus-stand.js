@@ -347,13 +347,15 @@ export function berekenBonusStand({
         if (!factuurRegels.length) {
           const eerste = groepSubsLijst.filter((x) => String(x.status || '').toLowerCase() !== 'cancelled').map((x) => x.start_date).filter(Boolean).sort()[0];
           reden += eerste ? ` (eerste factuur nog niet gemaakt; start ${eerste})` : ' (nog geen factuur)';
-        } else if (maxHaalbaar < amount - EPS) reden += ` (met wat nu open staat max ${maxHaalbaar.toFixed(2)})`;
+        } else if (!lopendAbo && maxHaalbaar < amount - EPS) reden += ` (met wat nu open staat max ${maxHaalbaar.toFixed(2)})`;
         if (!lopendAbo && openFacturen) reden += nietGeannuleerd ? '; geen termijnen meer, wel een gekoppelde factuur open' : '; abonnement geannuleerd maar er staat een gekoppelde factuur open';
       } else if (verdiend <= EPS) {
         voorstel = 'ongeldig'; reden = !groepSubsLijst.length ? 'geen abonnement en niets betaald'
           : (nietGeannuleerd
             ? (factuurRegels.length ? 'geen termijnen meer, niets betaald en niets open (factuur gecrediteerd)' : 'geen termijnen meer en nooit gefactureerd')
-            : 'alle abonnementen geannuleerd en niets betaald');
+            : (betaaldExcl > EPS
+              ? `alle abonnementen geannuleerd; wat voor de sale betaald is (${betaaldExcl.toFixed(2)} excl.) dekt al de eerdere bonus(sen) van deze sale`
+              : 'alle abonnementen geannuleerd en niets betaald'));
       } else {
         voorstel = 'aanpassen'; voorstelBedrag = verdiend;
         reden = `afgerond met minder betaald dan de basis: naar verhouding ${verdiend.toFixed(2)} (klant betaalde ${betaaldExcl.toFixed(2)} excl. btw voor de sale)`;
