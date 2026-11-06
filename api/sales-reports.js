@@ -9,13 +9,14 @@
 // Metric-definities (MVP — bewust pragmatisch, gedocumenteerd in het rapport):
 //   pipeline_value   = som total_amount van OPEN offertes (draft/sent), snapshot
 //   revenue_period   = som revenue van offertes met accepted_at in periode
-//   bonus_pending    = som bonuses.status='pending' (snapshot)
+//   bonus_pending    = VERDIEND (naar betaling) en nog niet uitbetaald (sales-bonus-stand.js)
 //   funnel.paid      = getekende deals in periode met ≥1 subscription (proxy)
 //   retention.rate   = renewed / (renewed + not_renewed) van subs geëindigd in periode
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { fetchTestDealIds } from './_lib/test-data-filter.js';
+import { laadBonusStand } from './_lib/sales-bonus-stand.js';
 
 const SIGNED = ['accepted', 'signed'];
 const OPEN = ['draft', 'sent'];
@@ -78,7 +79,18 @@ export default async function handler(req, res) {
     // → deal). NB: overige metrics (omzet/funnel) filteren test-deals nog NIET —
     // dat is bestaand gedrag en valt buiten deze bonus-fix (aparte follow-up).
     const testDealIds = await fetchTestDealIds(supabaseAdmin);
-    const bonusList = (bonuses || []).filter(b => !testDealIds.has(b.deal_id));
+    // Sinds 6 nov 2026 (regel 4 Maxim): een bonus telt naar wat er effectief
+    // betaald is (api/_lib/sales-bonus-stand.js). `amount` hieronder = het
+    // VERDIENDE deel; uitbetaald (status paid) blijft het uitbetaalde bedrag.
+    let verdiendPerBonus = null;
+    try {
+      const { stand } = await laadBonusStand(supabaseAdmin);
+      verdiendPerBonus = new Map(stand.map((x) => [x.bonus_id, x.verdiend]));
+    } catch (e) {
+      console.error('[sales-reports] bonus-stand (bonus telt als 0 verdiend):', e?.message || e);
+    }
+    const bonusList = (bonuses || []).filter(b => !testDealIds.has(b.deal_id) && b.status !== 'voided')
+      .map(b => (b.status === 'paid' ? b : { ...b, amount: verdiendPerBonus?.get(b.id) ?? 0 }));
     const entLabel = {}; for (const e of ents || []) entLabel[e.tl_department_id] = e.label;
     const trajName = {}; for (const t of trajs || []) trajName[t.id] = t.name;
     const variantById = {}; for (const v of variants || []) variantById[v.id] = { name: v.name, traject: trajName[v.traject_id] || null };
@@ -95,7 +107,7 @@ export default async function handler(req, res) {
     // ── KPIs ──
     const pipeline_value = dealList.filter(d => OPEN.includes(d.tl_quotation_status)).reduce((s, d) => s + revenueOf(d), 0);
     const revenue_period = signedInPeriod.reduce((s, d) => s + revenueOf(d), 0);
-    const bonus_pending = bonusList.filter(b => b.status === 'pending').reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    const bonus_pending = bonusList.filter(b => b.status !== 'paid').reduce((s, b) => s + (Number(b.amount) || 0), 0);
 
     // ── Funnel ──
     const funnel = {
@@ -113,7 +125,7 @@ export default async function handler(req, res) {
     for (const b of bonusList) {
       if (!b.sales_user_id || !inPeriod(b.created_at)) continue;
       const u = ensureUser(b.sales_user_id);
-      if (b.status === 'pending') u.bonus_pending += Number(b.amount) || 0;
+      if (b.status !== 'paid') u.bonus_pending += Number(b.amount) || 0;
       else if (b.status === 'paid') u.bonus_paid += Number(b.amount) || 0;
     }
     const by_sales_user = Object.values(userAgg).map(u => ({

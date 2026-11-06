@@ -21,7 +21,7 @@
 //     cashflowVerwacht30d,            // som van openstaande facturen + actieve subs (rough)
 //     joostStats: { sent, blocked, intents: { [intent]: count } },
 //     conversieWanbetalersFlow,       // % opgelost (NAGEKOMEN) over begonnen (ACTIEF + NAGEKOMEN + VERBROKEN) in periode
-//     mentorBonusPending,             // som amount van bonuses status='pending'
+//     mentorBonusPending,             // sales-bonus VERDIEND naar betaling, nog niet uitbetaald (sales-bonus-stand.js)
 //     mrrSubscriptions,               // sum(amount / billing_cycle_in_months)
 //   }
 //
@@ -36,6 +36,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { aggregateActiveBankBalances } from './_lib/bank-balance.js';
 import { computeCurrentMrr, REQUIRED_SUB_COLUMNS as MRR_COLS } from './_lib/mrr-compute.js';
 import { fetchTestDealIds } from './_lib/test-data-filter.js';
+import { laadBonusStand } from './_lib/sales-bonus-stand.js';
 
 const VALID_PERIODS = ['today', 'week', 'month', 'quarter', 'year'];
 const SWR_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -271,30 +272,17 @@ async function computeConversieWanbetalersFlow(periodStart) {
 }
 
 async function computeMentorBonusPending() {
-  // LET OP — naamgeving is een LEGACY-MISNOMER: dit leest de SALES-bonustabel
-  // (`bonuses`), NIET de mentor-bonus (die leeft in `mentor_ledger_entries`).
-  // De output-key blijft `mentorBonusPending` om de finance-dashboard-UI niet te
-  // breken; hernoemen (key + UI-label) is een aparte follow-up.
-  // Som van bonuses.amount waar status='pending', EXCL. test-deal-bonussen
-  // (is_test via customer → deal).
+  // LET OP — naamgeving is een LEGACY-MISNOMER: dit is de SALES-bonus (tabel
+  // `bonuses`), NIET de mentor-bonus (mentor_ledger_entries). De output-key
+  // blijft `mentorBonusPending` zodat de UI niet breekt; het label zegt nu
+  // "Sales-bonus verdiend (open)".
+  // Sinds 6 nov 2026 (regel 4 Maxim): enkel wat EFFECTIEF VERDIEND is (naar
+  // betaling, api/_lib/sales-bonus-stand.js) en nog niet uitbetaald. Vroeger:
+  // de som van alle pending-bonussen, ook als er nooit iets betaald werd.
+  // Testklanten tellen niet (zelfde als voorheen).
   try {
-    const { data, error } = await supabaseAdmin
-      .from('bonuses')
-      .select('amount, deal_id')
-      .eq('status', 'pending');
-    if (error) {
-      console.error('[finance-dashboard-counts] salesBonus fail:', error.message);
-      return 0;
-    }
-    let testDealIds = new Set();
-    try { testDealIds = await fetchTestDealIds(supabaseAdmin); }
-    catch (e) { console.warn('[finance-dashboard-counts] test-deal filter fail-open:', e?.message); }
-    let sum = 0;
-    for (const r of (data || [])) {
-      if (testDealIds.has(r.deal_id)) continue;
-      sum += Number(r.amount) || 0;
-    }
-    return Math.round(sum * 100) / 100;
+    const { totalen } = await laadBonusStand(supabaseAdmin);
+    return totalen.verdiend_open;
   } catch (e) {
     console.error('[finance-dashboard-counts] salesBonus exception:', e?.message);
     return 0;

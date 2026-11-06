@@ -255,7 +255,7 @@
           <div class="sv-card-head">${svg(I.repeat)}Recurring</div>
           <div class="sv-card-body">
             <div class="sv-row"><span>MRR (abonnementen)</span><b>${eur0(d.mrrSubscriptions)}</b></div>
-            <div class="sv-row"><span>Mentor-bonus openstaand</span><b>${eur0(d.mentorBonusPending)}</b></div>
+            <div class="sv-row"><span title="Sales-bonus die effectief verdiend is (klant betaalde) en nog niet uitbetaald">Sales-bonus verdiend (open)</span><b>${eur0(d.mentorBonusPending)}</b></div>
           </div>
         </div>
       </div>`;

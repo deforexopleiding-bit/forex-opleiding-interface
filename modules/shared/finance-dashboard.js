@@ -437,7 +437,7 @@
       }),
       card({
         key: 'mentorBonusPending',
-        label: 'Mentor-bonus pending',
+        label: 'Sales-bonus verdiend (open)',
         value: fmtEur(c.mentorBonusPending),
         // Geen drill: nog geen mentor-bonus view in Finance.
       }),

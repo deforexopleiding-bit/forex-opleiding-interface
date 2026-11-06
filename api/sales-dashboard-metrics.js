@@ -3,8 +3,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { fetchTestCustomerIds, fetchTestDealIds } from './_lib/test-data-filter.js';
+import { fetchTestCustomerIds } from './_lib/test-data-filter.js';
 import { periodRange } from './_lib/nl-period.js';
+import { laadBonusStand } from './_lib/sales-bonus-stand.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -35,18 +36,25 @@ export default async function handler(req, res) {
       .in('tl_quotation_status', ['draft', 'sent']);
     const myOpenQuotations = (myQuotes || []).filter(q => !isTestDeal(q.customer_id)).length;
 
-    // Mijn bonus deze maand (pending + paid). NL-tijdzone-aware maandgrens
-    // (Europe/Amsterdam) i.p.v. server-lokale/UTC 1e-van-de-maand, en test-
-    // deal-bonussen eruit (is_test via customer → deal). deal_id meenemen om te
-    // kunnen filteren.
+    // Mijn bonus. Sinds 6 nov 2026 (regel 4 Maxim, api/_lib/sales-bonus-stand.js)
+    // telt een bonus pas mee naar wat er effectief betaald is.
+    //   my_bonus_month           = VERDIEND op mijn bonussen van deze maand
+    //                              (NL-maandgrens, aanmaakdatum zoals voorheen)
+    //   my_bonus_verdiend_open   = alles wat ik verdiend heb en nog niet uitbetaald is
+    //   my_bonus_nog_te_verdienen = wat pas meetelt als de klant betaalt
+    // Testklanten tellen niet (zelfde als voorheen).
     const monthStart = periodRange('maand', new Date()).start.toISOString();
-    const testDealIds = await fetchTestDealIds(supabaseAdmin);
-    const { data: myBonuses } = await supabaseAdmin.from('bonuses')
-      .select('amount, status, created_at, deal_id').eq('sales_user_id', user.id).gte('created_at', monthStart)
-      .in('status', ['pending', 'earned', 'invoiced', 'paid']);
-    const myBonusMonth = (myBonuses || [])
-      .filter(b => !testDealIds.has(b.deal_id))
-      .reduce((s, b) => s + Number(b.amount || 0), 0);
+    let myBonusMonth = 0, myBonusOpen = 0, myBonusNogTeVerdienen = 0;
+    try {
+      const { stand, totalen: tot } = await laadBonusStand(supabaseAdmin, { salesUserId: user.id });
+      myBonusMonth = stand
+        .filter((b) => !b.is_test && b.status !== 'voided' && String(b.created_at || '') >= monthStart)
+        .reduce((s, b) => s + (Number(b.verdiend) || 0), 0);
+      myBonusOpen = tot.verdiend_open;
+      myBonusNogTeVerdienen = tot.nog_niet_verdiend;
+    } catch (e) {
+      console.error('[sales-dashboard-metrics] bonus-stand:', e?.message || e);
+    }
 
     // Mijn omzet deze maand + aantal deze maand + hoogste all-time (accepted/signed).
     // Fail-soft → 0/null bij fout of ontbrekende timestamps.
@@ -150,6 +158,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       my_open_quotations: myOpenQuotations,
       my_bonus_month: Math.round(myBonusMonth * 100) / 100,
+      my_bonus_verdiend_open: myBonusOpen,
+      my_bonus_nog_te_verdienen: myBonusNogTeVerdienen,
       my_revenue_month: Math.round(myRevenueMonth * 100) / 100,
       my_sales_count_month: mySalesCountMonth,
       my_highest_deal: myHighestDeal,
