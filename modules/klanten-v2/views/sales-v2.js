@@ -274,7 +274,8 @@
         <div class="sv-card">
           <div class="sv-card-head">${svg(I.doc)}Bonus + onboarding</div>
           <div class="sv-card-body">
-            <div class="sv-row"><span>Openstaande bonus deze maand</span><b>${eur0(m.my_bonus_month)}</b></div>
+            <div class="sv-row"><span title="Verdiend = de klant heeft betaald; nog niet uitbetaald">Bonus verdiend, nog uit te betalen</span><b>${eur0(m.my_bonus_verdiend_open ?? m.my_bonus_month)}</b></div>
+            <div class="sv-row"><span title="Telt pas mee als de klant betaalt">Bonus nog te verdienen</span><b>${eur0(m.my_bonus_nog_te_verdienen || 0)}</b></div>
             <div class="sv-row"><span>Onboardings live</span><b>${num(m.onboarding_count)}</b></div>
             <div class="sv-row"><span>Retentie-klanten (≤30d)</span><b>${num(m.retention_count)}</b></div>
             <div class="sv-row"><span>Pending subscription-koppelingen</span><b>${num(p.count)}</b></div>
@@ -670,7 +671,7 @@
         // fallback).
         { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalExcl) : eur0(0), hi: 1,
           sub: `${num(agg.signedCount)} getekend · excl. BTW${(agg.totalIncl && agg.totalExcl && agg.totalIncl > agg.totalExcl) ? ` · (${eur0(agg.totalIncl)} incl.)` : ''}` },
-        { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
+        { c: 'blue',    icon: I.doc,    label: 'Bonus verdiend (open)', val: eur0(k.bonus_pending) },
         { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
       ])}
       ${H.toolbar([
