@@ -23,6 +23,7 @@ import { assertDateNotInPast } from './_lib/onboarding-start-date.js';
 import { validateBypassRequest } from './_lib/reservation-fee-bypass.js';
 import { nlDateString } from './_lib/nl-period.js';
 import { SOORTEN, soortInvoerVan, valideerSoortenVoorKlant, soortKolomOntbreekt } from './_lib/subscription-soort.js';
+import { magAutomatischeBonus, bonusVolgensRegeling, STANDAARD_PCT, STANDAARD_DREMPEL } from './_lib/sales-bonus-regels.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -449,6 +450,19 @@ export default async function handler(req, res) {
       }
     }
 
+    // 1c. Stonden er al (geannuleerde) abonnementen op deze offerte? Dan is dit
+    //     een vervanging → nooit een nieuwe bonus (api/_lib/sales-bonus-regels.js).
+    let eerdereAbonnementen = 0;
+    if (!standalone) {
+      const { count, error: cntErr } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('deal_id', dealId);
+      // Leesfout → voorzichtig: als vervanging behandelen (geen automatische bonus).
+      eerdereAbonnementen = cntErr ? 1 : (count || 0);
+      if (cntErr) console.warn('[sub-create] telling eerdere abonnementen mislukt — geen automatische bonus:', cntErr.message);
+    }
+
     // 2. Subscriptions lokaal aanmaken. amount = som regels (EXCL); vat_percentage
     //    = tarief van de eerste regel (legacy-kolommen, behouden voor compat).
     const subRows = [];
@@ -531,11 +545,30 @@ export default async function handler(req, res) {
     // FAIL-SOFT: het hele bonus-blok is niet-kritisch. Een fout in de bonus-
     // queries/insert mag de abonnement-aanmaak (al gebeurd) én de TL-push
     // (stap 4, hierna) NOOIT afbreken — bonus faalt dan stil, de rest loopt door.
+    //
+    // REGELS MAXIM (6 nov 2026, api/_lib/sales-bonus-regels.js): wie een
+    // abonnement aanmaakt of aanpast krijgt daardoor NOOIT automatisch een
+    // bonus. Dus: geen bonus zonder offerte (standalone / ghost-deal), geen
+    // bonus bij aanpassing / regeling / incasso of een vervanging op een offerte
+    // die al abonnementen had. De ontvanger is altijd deals.sales_user_id van de
+    // offerte, nooit de ingelogde gebruiker. Aanleiding: 5 nov maakte een
+    // administratieve aanpassing (standalone, soort 'aanpassing') een ghost-deal
+    // met de aanmaker als verkoper en meteen 3% bonus.
     let bonus = null;
+    let bonusSkip = null;
     try {
+      const mag = magAutomatischeBonus({
+        standalone,
+        deal,
+        soorten: subsNorm.map((s) => s._soort || null),
+        eerdereAbonnementen,
+      });
       const downSub = subsNorm.find(s => (Number(s.term_count) || 1) === 1);
       const downAmount = downSub ? downSub._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0) : 0;
-      if (downAmount > 0 && deal.sales_user_id) {
+      if (!mag.ok) {
+        bonusSkip = mag.reden;
+        if (downAmount > 0) console.log('[sub-create] geen automatische bonus:', mag.reden, '| deal', dealId, '| door', user.id);
+      } else if (downAmount > 0 && deal.sales_user_id) {
         // (a) Geen bonus voor TEST-klanten. is_test leeft op customers (niet op
         //     deals/bonuses) — vandaar een gerichte lookup op deze klant.
         const { data: custTest } = await supabaseAdmin.from('customers')
@@ -567,10 +600,10 @@ export default async function handler(req, res) {
             .lte('active_from', today)
             .or(`active_until.is.null,active_until.gt.${today}`)
             .order('active_from', { ascending: false }).limit(1).maybeSingle();
-          const pct = cfg?.percentage ?? 3;
-          const threshold = cfg?.threshold_amount ?? 1000;
-          if (downAmount >= Number(threshold)) {
-            const bonusAmount = Math.round(downAmount * Number(pct)) / 100;
+          const pct = cfg?.percentage ?? STANDAARD_PCT;
+          const threshold = cfg?.threshold_amount ?? STANDAARD_DREMPEL;
+          const bonusAmount = bonusVolgensRegeling(downAmount, { percentage: pct, threshold_amount: threshold });
+          if (bonusAmount != null) {
             const { data: b } = await supabaseAdmin.from('bonuses').insert({
               deal_id: dealId, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
             }).select('*').single();
@@ -700,6 +733,7 @@ export default async function handler(req, res) {
       customer_id: deal.customer_id,
       subscription_ids: subRows.map(r => r.id),
       bonus,
+      bonus_skip: bonusSkip,
       tl_pushed: tlResults.filter(r => r.success).length,
       tl_failed: tlResults.filter(r => !r.success).length,
       tl_results: tlResults,
