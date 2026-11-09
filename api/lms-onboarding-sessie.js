@@ -10,7 +10,9 @@
 // En op ONBOARDING-id (Hoofdmentor > Onboarding in het LMS, 5 oktober 2026),
 // telkens met `door_email` = wie het in het LMS deed:
 //   POST { actie: 'mentor_toewijzen', onboarding_id, mentor_lms_id | null, door_email }
-//   POST { actie: 'startdatum',       onboarding_id, start_datum, door_email }
+//   POST { actie: 'startdatum',       onboarding_id, start_datum, door_email, afgesproken_met_student? }
+//        afgesproken_met_student: true (9 nov 2026, "Klaar voor opstart" van de
+//        administratie) = vandaag of later i.p.v. vandaag + 3.
 //   POST { actie: 'startstatus',      onboarding_id, status | null, notitie?, door_email }
 //   POST { actie: 'notitie',          onboarding_id, tekst, door_email }
 //   POST { actie: 'handmatig_afronden', onboarding_id, reden, door_email }  (6 okt 2026)
@@ -295,7 +297,12 @@ async function onboardingActie(res, actie, onboardingId, body) {
       uitkomst = await wijsMentorToe({ onboardingId, mentorUserId, doorUserId });
     } else if (actie === 'startdatum') {
       const startDatum = String(body?.start_datum || '').trim().slice(0, 10);
-      uitkomst = await zetStartdatumOnboarding({ onboardingId, startDatum, doorUserId });
+      //  KLAAR VOOR OPSTART (9 nov 2026): de administratie sprak de datum met
+      //  de student af - dan vandaag of later. Alleen een expliciete `true`.
+      uitkomst = await zetStartdatumOnboarding({
+        onboardingId, startDatum, doorUserId,
+        afgesprokenMetStudent: body?.afgesproken_met_student === true,
+      });
     } else if (actie === 'startstatus') {
       const status = body?.status === null || body?.status === undefined || body?.status === ''
         ? null : String(body.status).trim();
