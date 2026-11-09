@@ -20,7 +20,7 @@ const db = maakNepDb();
 mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
 mock.module(url('api/_lib/requirePermission.js'), { namedExports: { requirePermission: async () => true } });
 mock.module(url('api/_lib/notify.js'), { namedExports: { createNotification: async () => ({ ok: true }) } });
-const { commissieControle } = await import(url('api/_lib/commissie-controle.js'));
+const { commissieControle, telRapportSale } = await import(url('api/_lib/commissie-controle.js'));
 
 const K1 = '11111111-1111-4111-8111-111111111111'; // gewone sale, grootboek achter
 const K2 = '22222222-2222-4222-8222-222222222222'; // omgezet traject, te veel vrijgegeven
@@ -109,4 +109,37 @@ test('controle: de betaalmethode staat bij elke factuur van de sale (cashbetalin
   const fs = Object.fromEntries(een.facturen.map((f) => [f.id, f.betaalmethode]));
   assert.equal(fs.i1, 'Contant');
   assert.equal(fs.i2, 'Teamleader', 'betaald zonder payments-rij = via Teamleader');
+});
+
+// 6 nov 2026 (Maxim): de trajectregels en de rapporten juni–september staan in
+// de database op uitbetaald, maar het scherm meldde "waarvan status nog niet
+// uitbetaald 141,80" en "Uitbetaald, status loopt achter".
+test('controle: trajectregels op uitbetaald in een uitbetaald rapport → geen "status loopt achter"', async () => {
+  zet();
+  db.tables.mentor_payouts.find((p) => p.id === 'pay-jun').status = 'uitbetaald';
+  const k = db.tables.mentor_ledger_entries.find((e) => e.id === 'k2a');
+  k.status = 'uitbetaald';
+  const c = await commissieControle(db.client);
+  const paul = c.rijen.find((r) => r.klant === 'Paul');
+  assert.equal(paul.werkelijk_uitbetaald, 45.8, 'de regel zat in een rapport: werkelijk uitbetaald');
+  assert.equal(paul.verschil_status_werkelijkheid, 0, 'status klopt al: geen verschil');
+  assert.ok(!paul.afwijkingen.includes('status_achter'));
+});
+
+test('controle: trajectregel nog op vrijgegeven in een goedgekeurd rapport t/m de grens → wél "status loopt achter"', async () => {
+  zet();
+  const c = await commissieControle(db.client);
+  const paul = c.rijen.find((r) => r.klant === 'Paul');
+  assert.equal(paul.verschil_status_werkelijkheid, 45.8);
+  assert.ok(paul.afwijkingen.includes('status_achter'));
+});
+
+test('telRapportSale: reeds_status_uitbetaald telt als status uitbetaald, nooit meer dan reeds_in_rapport; oude vorm = oud gedrag', () => {
+  const st = new Map();
+  const a = telRapportSale(null, { vrijgegeven_rapport: 141.8, termijnen: [], verrekening: { reeds_in_rapport: 141.8, reeds_status_uitbetaald: 141.8 } }, 'u', st, '2026-09');
+  assert.deepEqual([a.werkelijk, a.statusUit], [141.8, 141.8]);
+  const b = telRapportSale(null, { termijnen: [], verrekening: { reeds_in_rapport: 50, reeds_status_uitbetaald: 80 } }, 'u', st, '2026-09');
+  assert.equal(b.statusUit, 50);
+  const c = telRapportSale(null, { termijnen: [], verrekening: { reeds_in_rapport: 50 } }, 'u', st, '2026-09');
+  assert.deepEqual([c.werkelijk, c.statusUit], [50, 0]);
 });
