@@ -154,7 +154,7 @@ export async function computeBonusOverview(effectiveUserId) {
     //  - regels die zonder factuurcheck vrijgegeven werden maar in GEEN rapport
     //    zitten, gaan NIET alsnog naar een rapport (enkel een betaalde factuur
     //    geeft commissie): apart getoond, beslissing Maxim.
-    const trajectRegelsByParent = new Map(); // parent_id -> { totaal, niet_in_rapport, perMaand: Map<ym, bedrag> }
+    const trajectRegelsByParent = new Map(); // parent_id -> { totaal, status_uitbetaald, niet_in_rapport, perMaand: Map<ym, bedrag> }
     if (rows.length > 0) {
       const parentIds = rows.map((r) => r.id);
       const { data: kids, error: kidsErr } = await supabaseAdmin
@@ -168,7 +168,7 @@ export async function computeBonusOverview(effectiveUserId) {
         const cur = releasedByParent.get(c.parent_entry_id) || 0;
         releasedByParent.set(c.parent_entry_id, cur + (Number(c.amount) || 0));
         if (isTrajectTermKey(c.idempotency_key)) {
-          const t = trajectRegelsByParent.get(c.parent_entry_id) || { totaal: 0, niet_in_rapport: 0, perMaand: new Map() };
+          const t = trajectRegelsByParent.get(c.parent_entry_id) || { totaal: 0, status_uitbetaald: 0, niet_in_rapport: 0, perMaand: new Map() };
           const amt = Number(c.amount) || 0;
           if (c.status !== 'uitbetaald' && !c.payout_id) {
             t.niet_in_rapport = round2(t.niet_in_rapport + amt);
@@ -176,6 +176,9 @@ export async function computeBonusOverview(effectiveUserId) {
             continue;
           }
           t.totaal = round2(t.totaal + amt);
+          // Deel waarvan de STATUS al uitbetaald is (controlescherm: anders
+          // lijkt het of de status achterloopt terwijl ze klopt).
+          if (c.status === 'uitbetaald') t.status_uitbetaald = round2(t.status_uitbetaald + amt);
           const ym = c.released_at ? String(c.released_at).slice(0, 7) : null;
           if (ym) t.perMaand.set(ym, round2((t.perMaand.get(ym) || 0) + amt));
           trajectRegelsByParent.set(c.parent_entry_id, t);
@@ -1233,7 +1236,7 @@ export async function computeBonusOverview(effectiveUserId) {
           vrijgegeven_rapport: round2(schemaUnknown ? entryReleased : (vrijRapport + (trajectRegels ? trajectRegels.totaal : 0))),
           // Omgezet traject: al vrijgegeven via de oude termijnregels en het
           // deel daarvan dat nog niet door betalingen ingehaald is.
-          verrekening        : trajectRegels ? { reeds_in_rapport: trajectRegels.totaal, ingehaald: verrekendTotaal, nog_te_verrekenen: verrekenaar.rest(), vrijgegeven_niet_in_rapport: trajectRegels.niet_in_rapport } : null,
+          verrekening        : trajectRegels ? { reeds_in_rapport: trajectRegels.totaal, reeds_status_uitbetaald: trajectRegels.status_uitbetaald, ingehaald: verrekendTotaal, nog_te_verrekenen: verrekenaar.rest(), vrijgegeven_niet_in_rapport: trajectRegels.niet_in_rapport } : null,
           term_count         : termCount,
           per_term_amount    : round2(perTermMentor),
           schema_unknown     : schemaUnknown,
