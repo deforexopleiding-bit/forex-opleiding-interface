@@ -18,6 +18,7 @@
 //   achterstand= lopend: verwacht met vervaldag vóór vandaag − ontvangen, ≥ 0.
 
 import { betaaldBedrag, isVolledigGecrediteerd, openBedrag } from './factuur-betaald.js';
+import { betaalmethodenVan } from './betaalmethode.js';
 import { isConcept } from './commissie-regeling.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -78,7 +79,7 @@ export function trajectFacturen({ facturen = [], subs = [], status = null }) {
  * @param {object} p
  * @param {Array} p.facturen     facturen van het traject (trajectFacturen)
  * @param {Array} p.subs         incasso_regeling-abonnementen
- * @param {Map}   p.betalingen   invoice_id → [{ amount, payment_date }]
+ * @param {Map}   p.betalingen   invoice_id → [{ amount, payment_date, payment_method?, source? }]
  * @param {string} p.vandaag     YYYY-MM-DD
  */
 export function bouwMaandlijst({ facturen = [], subs = [], betalingen = new Map(), vandaag }) {
@@ -103,6 +104,8 @@ export function bouwMaandlijst({ facturen = [], subs = [], betalingen = new Map(
       id: f.id, nummer: f.invoice_number || null, bedrag: netto, open: openBedrag(f),
       due_date: f.due_date || null, betaald: betaaldBedrag(f), status: f.status,
       gecrediteerd: isVolledigGecrediteerd(f),
+      // Hoe betaald (Contant / Bank / Teamleader …); null zolang niets betaald.
+      betaalmethode: betaalmethodenVan(betalingen.get(f.id) || [], f).label,
     });
     // Ontvangen in de maand van de betaling.
     const pays = (betalingen.get(f.id) || []).filter((p) => p && Number(p.amount) > 0 && p.payment_date);

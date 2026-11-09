@@ -249,5 +249,7 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     await spiegelFactuurstandNaWijziging(row.customer_id, 'invoice-upsert');
   }
 
-  return { id: invId, invoice_number: invoiceNumber, status, action };
+  // betaling_gewijzigd: de Teamleader-sync draait daarna de factuurmotor voor
+  // deze klant (cron-finance-sync → commissie-vrijgave-run.js).
+  return { id: invId, invoice_number: invoiceNumber, status, action, customer_id: row.customer_id || null, betaling_gewijzigd: !!(echtGewijzigd && row.customer_id) };
 }

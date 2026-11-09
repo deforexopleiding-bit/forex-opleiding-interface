@@ -69,6 +69,11 @@ function initState(invoice, opts) {
                     && (!invoice.invoice_number || String(invoice.invoice_number).startsWith('CONCEPT-')),
     onEdit:       opts?.onEdit    || null,
     onPay:        opts?.onPay     || null,
+    onCash:       opts?.onCash    || null,
+    payments:     [],
+    paysIngetrokken: [],
+    paysLoading:  true,
+    paysError:    null,
     onSend:       opts?.onSend    || null,
     onCredit:     opts?.onCredit  || null,
     onSuccess:    opts?.onSuccess || null,
@@ -91,8 +96,17 @@ async function loadCreditNotes() {
   } catch (e) { state.cnError = e?.message || 'Creditnota\'s niet geladen'; }
   finally    { state.cnLoading = false; }
 }
+// Cashbetaling (6 nov 2026): betalingen + betaalmethode + ontvangstbewijs.
+async function loadPayments() {
+  try {
+    const j = await K().authedJson(`/api/finance-invoice-payments?invoice_id=${encodeURIComponent(state.invoiceId)}`);
+    state.payments = Array.isArray(j?.betalingen) ? j.betalingen : [];
+    state.paysIngetrokken = Array.isArray(j?.ingetrokken) ? j.ingetrokken : [];
+  } catch (e) { state.paysError = e?.message || 'Betalingen niet geladen'; }
+  finally    { state.paysLoading = false; }
+}
 async function loadAll() {
-  await Promise.allSettled([loadLines(), loadCreditNotes()]);
+  await Promise.allSettled([loadLines(), loadCreditNotes(), loadPayments()]);
   rerender();
 }
 
@@ -266,10 +280,38 @@ function renderCreditNotesBlock() {
     </ul>`;
 }
 
+function renderPaymentsBlock() {
+  if (state.paysLoading) return `<div class="kv-inv-loading">Betalingen laden…</div>`;
+  if (state.paysError)   return `<div class="kv-inv-warn">Betalingen niet geladen: ${esc(state.paysError)}</div>`;
+  if (!state.payments.length && !state.paysIngetrokken.length) return '';
+  const pdfKnop = (id, nr) => `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-inv-cashpdf="${esc(id)}" data-nr="${esc(nr)}">Ontvangstbewijs (PDF)</button>`;
+  return `
+    <div class="kv-edit-section-h">Betalingen (${state.payments.length})</div>
+    <ul class="kv-inv-cn-list">
+      ${state.payments.map((p) => `
+        <li class="kv-inv-cn-row" style="cursor:default;flex-wrap:wrap">
+          <span class="ds-cell-sub">${esc(fmtDate(p.datum))}</span>
+          <span class="ds-pill ${p.methode === 'cash' ? 'ds-pill-warn' : 'ds-pill-neutral'}">${esc(p.methode_label || 'Onbekend')}</span>
+          ${p.cash ? `<span class="ds-cell-sub">ontvangen door ${esc(p.cash.ontvangen_door)} · ${esc(p.cash.bewijsnummer)}</span>` : ''}
+          <span class="mono kv-inv-cn-amt">${esc(fmtEur(p.bedrag))}</span>
+          ${p.cash ? `<div style="flex-basis:100%;font-size:12px;color:var(--text-3)">Notitie: ${esc(p.cash.notitie)}${p.cash.teamleader_methode ? '' : ' · betaalmethode niet in Teamleader'}</div><div style="flex-basis:100%">${pdfKnop(p.cash.id, p.cash.bewijsnummer)}</div>` : ''}
+        </li>`).join('')}
+      ${state.paysIngetrokken.map((x) => `
+        <li class="kv-inv-cn-row" style="cursor:default">
+          <span class="ds-cell-sub">${esc(fmtDate(x.datum))}</span>
+          <span class="ds-pill ds-pill-neutral">Contant — teruggedraaid</span>
+          <span class="mono kv-inv-cn-amt">${esc(fmtEur(x.bedrag))}</span>
+          ${pdfKnop(x.id, x.bewijsnummer)}
+        </li>`).join('')}
+    </ul>`;
+}
+
 function renderBody() {
   return `
     <div class="kv-inv-body">
       ${renderMetaGrid(state.invoice)}
+
+      ${renderPaymentsBlock()}
 
       <div class="kv-edit-section-h">Line-items</div>
       ${renderLinesBlock()}
@@ -299,6 +341,10 @@ function renderFoot() {
   const st = state.invoice?.display_status || state.invoice?.status;
   const canEdit    = isConcept(st);
   const canPay     = !isConcept(st) && st !== 'credited';
+  const inv        = state.invoice || {};
+  const openNu     = typeof inv.amount_open === 'number' ? inv.amount_open
+    : Math.max(0, (Number(inv.amount_total) || 0) - (Number(inv.amount_paid) || 0) - (Number(inv.credited_amount) || 0));
+  const canCash    = canPay && !isCredited(st) && openNu > 0.005 && typeof state.onCash === 'function';
   const canSend    = st !== 'credited';
   const canCredit  = !isConcept(st) && !isCredited(st);
 
@@ -312,6 +358,7 @@ function renderFoot() {
         <button type="button" class="ds-btn ds-btn-primary" data-kv-inv-act="pay" ${canPay ? '' : 'disabled'} title="${canPay ? 'Handmatige betaling boeken' : 'Niet beschikbaar voor concepten/gecrediteerd'}">
           Betaling boeken
         </button>
+        ${canCash ? `<button type="button" class="ds-btn ds-btn-ghost" data-kv-inv-act="cash" title="Contant ontvangen: de factuur blijft staan, niets wordt gecrediteerd">Cashbetaling registreren</button>` : ''}
         <button type="button" class="ds-btn ds-btn-ghost" data-kv-inv-act="send" ${canSend ? '' : 'disabled'} title="Volgt in PR-D4">
           Verzenden
         </button>
@@ -330,6 +377,10 @@ function wire() {
   box.querySelectorAll('[data-kv-inv-close]').forEach((b) => b.addEventListener('click', () => D().closeModal()));
   box.querySelector('[data-kv-inv-pdf]')?.addEventListener('click', openPdf);
   box.querySelector('[data-kv-inv-paylink]')?.addEventListener('click', copyPaymentLink);
+  box.querySelectorAll('[data-kv-inv-cashpdf]').forEach((b) => b.addEventListener('click', async () => {
+    const mod = await import('./invoice-cash.js?v=1');
+    mod.downloadOntvangstbewijs(b.getAttribute('data-kv-inv-cashpdf'), b.getAttribute('data-nr'));
+  }));
   box.querySelectorAll('[data-kv-inv-act]').forEach((btn) => {
     if (btn.disabled) return;
     btn.addEventListener('click', () => {
@@ -337,6 +388,7 @@ function wire() {
       const cb = {
         edit:   state.onEdit,
         pay:    state.onPay,
+        cash:   state.onCash,
         send:   state.onSend,
         credit: state.onCredit,
       }[action];
@@ -359,6 +411,8 @@ function rerender() {
  *               amounts, status, dates). Vereist id.
  *   onEdit    — callback(invoice) voor "Bewerken"-knop (PR-D2).
  *   onPay     — callback(invoice) voor "Betaling boeken"-knop (PR-D3).
+ *   onCash    — callback(invoice) voor "Cashbetaling registreren" (6 nov 2026);
+ *               zonder callback geen knop.
  *   onSend    — callback(invoice) voor "Verzenden"-knop (PR-D4).
  *   onCredit  — callback(invoice) voor "Crediteren"-knop (PR-D5).
  *   onSuccess — n.v.t. voor deze modal (geen writes), maar behouden

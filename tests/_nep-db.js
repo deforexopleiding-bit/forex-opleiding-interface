@@ -59,11 +59,12 @@ export function maakNepDb() {
           return o.asc ? c : -c;
         });
       }
+      const count = rows.length;
       if (st.limit != null) rows = rows.slice(0, st.limit);
-      return { data: rows, error: null };
+      return st.count ? { data: rows, error: null, count } : { data: rows, error: null };
     };
     const k = {
-      select() { st.selected = true; return k; },
+      select(_c, opts) { st.selected = true; if (opts && opts.count) st.count = true; return k; },
       insert(v) { st.op = 'insert'; st.rows = Array.isArray(v) ? v : [v]; return k; },
       update(v) { st.op = 'update'; st.patch = v; return k; },
       delete() { st.op = 'delete'; return k; },

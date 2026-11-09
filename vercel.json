@@ -8,6 +8,7 @@
       "maxDuration": 300,
       "memory": 1024
     },
+    "api/cron-commissie-vrijgave.js": { "maxDuration": 300 },
     "api/follow-up-ghl-appointment-poll.js": {
       "maxDuration": 300,
       "memory": 1024
@@ -301,6 +302,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron-commissie-vrijgave",
+      "schedule": "40 5 * * *"
+    },
+    {
       "path": "/api/cron-activity-log-cleanup",
       "schedule": "0 4 * * *"
     },
@@ -391,6 +396,10 @@
     {
       "path": "/api/cron-dagrapport",
       "schedule": "30 19,20 * * *"
+    },
+    {
+      "path": "/api/cron-event-herinnering",
+      "schedule": "*/15 * * * *"
     }
   ],
   "redirects": [

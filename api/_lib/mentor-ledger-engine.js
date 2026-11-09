@@ -632,347 +632,119 @@ export async function releaseProportionalForPaidInvoices({ customerId, dryRun = 
 }
 
 /**
- * Proportionele inhaal-vrijgave o.b.v. BETAALD BEDRAG (Optie 2 / "amount").
+ * FACTUURMOTOR — rekenregel 9 nov 2026 (api/_lib/commissie-rekenregel.js).
  *
- * Model: 3% van wat binnen is. Voor elke parent-obligatie:
- *   totaalBetaald  = som van betaalde bedragen op de facturen die bij deze
- *                    sale horen. Primair: invoices met tl_subscription_id
- *                    matchend op de sub die uit de parent volgt
- *                    (source_quote_id -> deal -> sub.tl_subscription_id).
- *                    Fallback: alle klant-facturen (customer-breed).
- *   parentBasis    = parent.basis (het geboekte sale-bedrag, bv. €7200).
- *                    Fallback: origAmount / bonusPct als basis ontbreekt —
- *                    hier houden we het simpel: basis is verplicht (skip
- *                    als 0 of NULL).
- *   targetReleased = round2(origAmount × min(1, totaalBetaald / parentBasis))
- *   reedsReleased  = som(amount) van bestaande children van deze parent.
- *   teReleasen     = round2(targetReleased - reedsReleased),
- *                    gecapt op (origAmount - reedsReleased).
+ * Elke factuur van de sale die in een OPEN maand betaald wordt, geeft
+ * commissie × betaald / basis, nooit meer dan de commissie min wat al
+ * vrijgegeven of uitbetaald is. Afgesloten maanden blijven exact zoals ze zijn
+ * (geen inhaal, geen correcties). Het grootboek schrijft EXACT de stukken die
+ * het overzicht (computeBonusOverview → rapport en mentorzicht) rekent: één
+ * berekening, geen tweede met vaste termijnbedragen.
  *
- * Als teReleasen <= 0 -> skip. Anders 1 child gespawnd met status
- * 'vrijgegeven', parent_entry_id = parent.id, amount = teReleasen.
- * parent.amount verlaagd met teReleasen. original_amount snapshotted bij
- * eerste aanraking (zoals de bestaande functies).
+ * Per stuk (factuur + betaaldatum) één child met sleutel
+ * `<parent>:stuk:<factuur>:<datum>:<centen cumulatief>`; idempotent, forward-
+ * only. Oude vrijgaven in open maanden (vóór deze regel) worden eerst
+ * verrekend (teSchrijvenStukken) — nooit dubbel.
  *
- * Idempotency: idempotency_key = `${parent.id}:paidamount:${paidCents}`.
- *   paidCents = Math.round(totaalBetaald * 100). Stabiel per betaald-totaal.
- *   Re-run met exact hetzelfde bedrag -> 23505 skip (of geen delta).
- *   Later meer betaald -> nieuwe key -> extra child voor het verschil.
- *   Forward-only, geen clawback.
+ * Draait per klant (register-payment, Teamleader-sync, incassostatus,
+ * toewijzing) en dagelijks voor iedereen (cron-commissie-vrijgave).
  *
- * released_at = 1e vd BETAALMAAND (de maand VAN de laatste paid_date),
- * zodat de bonus in de maand van betaling valt en tooltip + payout-rapport
- * matchen. Payout selecteert op released_at (strak M-1 venster, PR #631).
- *
- * `dryRun=true`: berekent + returned simulaties, schrijft niets. Bestaande
- * children (matching idem-key) worden opgehaald zodat de sim niet zegt dat
- * een al-vrijgegeven slice opnieuw komt.
- *
- * Returnt: {
- *   dry_run, customer_id, paid_total, last_paid_date, parents_touched,
- *   released_children, total_released, simulations: [
- *     { parent_id, mentor_user_id, customer_id, parent_basis,
- *       totaal_betaald, target_released, reeds_released, te_releasen,
- *       released_at, idempotency_key, would_release, skip_reason? }
- *   ]
- * }.
+ * @param {object} p
+ * @param {string} p.customerId
+ * @param {boolean} [p.dryRun]
+ * @param {Map} [p.overzichtCache]  mentor_user_id → overzicht (één berekening per mentor per run)
+ * @returns {Promise<{ dry_run, customer_id, parents_touched, released_children, total_released, simulations }>}
  */
-export async function releaseProportionalForPaidAmount({ customerId, dryRun = false } = {}) {
+export async function releaseProportionalForPaidAmount({ customerId, dryRun = false, overzichtCache = null } = {}) {
   if (!customerId) throw new Error('releaseProportionalForPaidAmount: customerId vereist');
   const _r2 = (n) => Math.round(Number(n) * 100) / 100;
-
-  // 1e van de BETAALMAAND als volledige ISO-timestamp (00:00:00.000Z). Zonder
-  // +1-maand-buffer, zodat de bonus in de maand van betaling valt (~termijn-
-  // maand) en tooltip + payout-rapport matchen. Payout selecteert op
-  // released_at (strak M-1 venster, PR #631).
-  function firstOfMonthTimestamp(dateStr) {
-    if (!dateStr) return null;
-    const d = new Date(String(dateStr).slice(0, 10) + 'T00:00:00Z');
-    if (isNaN(d.getTime())) return null;
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
-  }
-
-  // ── 1) Deals + subs van deze klant (tl_sub_id per deal; welke factuur
-  //    bij welke sale hoort — zie factuurVanSale in commissie-toewijzing.js)
-  const { data: dealsForCust } = await supabaseAdmin
-    .from('deals').select('id, customer_id, tl_quotation_status, tl_quotation_accepted_at, created_at, archived_at').eq('customer_id', customerId);
-  const dealIds = (dealsForCust || []).map((d) => d.id);
-  const subsForCust = await laadSubsMetSoort(supabaseAdmin, dealIds, 'id, deal_id, teamleader_subscription_id, start_date, status',
-    { order: { col: 'start_date', opts: { ascending: false, nullsFirst: false } } });
-
-  // ── 2) Facturen van de klant — paid_total per tl_sub_id + customer-breed ─
-  //    Conceptfacturen tellen nooit (o.a. de incassofactuur voor het bureau).
-  const { data: rawInvs } = await supabaseAdmin
-    .from('invoices')
-    .select('id, customer_id, deal_id, tl_subscription_id, amount_paid, amount_total, credited_amount, paid_date, status, due_date, created_at')
-    .eq('customer_id', customerId);
-  const allInvs = (rawInvs || []).filter((inv) => !isConcept(inv));
-  // Volledig gecrediteerd telt als 0 betaald (zie api/_lib/factuur-betaald.js).
-  const custPaidTotal   = _r2((allInvs || []).reduce((s, i) => s + betaaldBedrag(i), 0));
-  let custLastPaidDate  = null;
-  for (const inv of (allInvs || [])) {
-    if (betaaldBedrag(inv) > 0 && inv.paid_date && (!custLastPaidDate || inv.paid_date > custLastPaidDate)) {
-      custLastPaidDate = inv.paid_date;
-    }
-  }
-  // ── 2b) Handmatige toewijzingen (verlenging/upsell) — fail-soft ─────────
-  //   Elke sale (event of toewijzing) telt alleen de facturen van zijn eigen
-  //   deal; een toegewezen deal is een eigen commissie-sale.
-  const attrs = await loadAttributions(supabaseAdmin, { customerIds: [customerId] });
-
-  // ── 2c) Regeling na creditering + incasso (api/_lib/commissie-regeling.js)
-  //   Regelingsfacturen (geen deal, geen abonnement) krijgen hun sale via de
-  //   koppelregel. Incasso: betalingen vanaf `sinds` tellen niet. Zonder
-  //   kredieten, koppelingen of markeringen: exact het oude gedrag.
-  const regCtx = await loadRegelingContext(supabaseAdmin, [customerId]);
-  // Commissie-sales van de klant (event-parents + actieve toewijzingen): voor
-  // de koppelregel én voor facturen zonder deal/abonnement (sale-regel 4).
-  const { data: alleParents } = await supabaseAdmin
-    .from('mentor_ledger_entries')
-    .select('customer_id, source_quote_id, status')
-    .eq('entry_type', 'bonus')
-    .eq('customer_id', customerId)
-    .is('parent_entry_id', null);
-  const salesPerKlant = commissieSalesVan(alleParents || [], attrs.list || []);
-  for (const inv of allInvs) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
-  const betalingenPerFactuur = new Map();
-  if (regCtx.incasso.length && allInvs.length) {
-    const { data: pays } = await supabaseAdmin
-      .from('payments').select('invoice_id, amount, payment_date')
-      .in('invoice_id', allInvs.map((i) => i.id).filter(Boolean));
-    for (const p of pays || []) {
-      if (!betalingenPerFactuur.has(p.invoice_id)) betalingenPerFactuur.set(p.invoice_id, []);
-      betalingenPerFactuur.get(p.invoice_id).push(p);
-    }
-  }
-
-  const saleScope = maakSaleScope({ deals: dealsForCust || [], subs: subsForCust, commissieSales: salesPerKlant });
-
-  // ── 3) Parents ───────────────────────────────────────────────────────────
   const { data: parents, error: pErr } = await supabaseAdmin
     .from('mentor_ledger_entries')
-    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at, idempotency_key')
+    .select('id, mentor_user_id, team_member_id, event_id, attendee_id, customer_id, basis, amount, original_amount, source_invoice_id, source_quote_id, status, created_at, idempotency_key, attribution_id')
     .eq('entry_type', 'bonus')
     .eq('customer_id', customerId)
     .in('status', ['pending', 'wachten_op_betaling'])
     .is('parent_entry_id', null)
     .order('created_at', { ascending: true });
   if (pErr) throw new Error('releaseProportionalForPaidAmount parents: ' + pErr.message);
+  const leeg = { dry_run: !!dryRun, customer_id: customerId, parents_touched: 0, released_children: 0, total_released: 0, simulations: [] };
+  if (!parents || !parents.length) return leeg;
 
-  // Betaald + laatste betaaldatum over een deelverzameling facturen. Met een
-  // incasso-`sinds`: alleen wat vóór die datum betaald werd.
-  const somBetaald = (invs, sinds = null) => {
-    let paid = 0;
-    let last = null;
-    for (const inv of invs) {
-      const p = sinds ? betaaldVoor(inv, betalingenPerFactuur.get(inv.id), sinds) : betaaldBedrag(inv);
-      paid += p;
-      if (p <= 0) continue;
-      let d = inv.paid_date || null;
-      if (sinds && (!d || d >= sinds)) {
-        d = (betalingenPerFactuur.get(inv.id) || []).map((x) => String(x.payment_date).slice(0, 10))
-          .filter((x) => x < sinds).sort().pop() || null;
-      }
-      if (d && (!last || d > last)) last = d;
+  const { computeBonusOverview } = await import('../mentor-bonus-overview.js');
+  const { teSchrijvenStukken } = await import('./commissie-rekenregel.js');
+  const stukkenPerParent = new Map();
+  const geslotenPerMentor = new Map();
+  for (const uid of [...new Set(parents.map((x) => x.mentor_user_id).filter(Boolean))]) {
+    let o = overzichtCache?.get(uid);
+    if (!o) {
+      o = await computeBonusOverview(uid);
+      if (overzichtCache) overzichtCache.set(uid, o);
     }
-    return { paid: _r2(paid), lastPaidDate: last };
-  };
-
-  // Bestaande children per parent — voor reedsReleased-som én dry-run dedup.
-  const parentIds = (parents || []).map((p) => p.id);
-  const kidsByParent = new Map(); // parent_id -> [{ amount, idempotency_key }]
-  if (parentIds.length) {
-    const { data: kids } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .select('parent_entry_id, amount, idempotency_key, status')
-      .in('parent_entry_id', parentIds);
-    for (const k of (kids || [])) {
-      if (!k.parent_entry_id) continue;
-      // Reeds vrijgegeven = vrijgegeven + uitbetaald. Een geannuleerde child
-      // telt niet (de idempotency-key blijft wel bestaan → nooit opnieuw).
-      if (k.status && !['vrijgegeven', 'uitbetaald'].includes(k.status)) {
-        if (!kidsByParent.has(k.parent_entry_id)) kidsByParent.set(k.parent_entry_id, []);
-        kidsByParent.get(k.parent_entry_id).push({ ...k, amount: 0 });
-        continue;
-      }
-      if (!kidsByParent.has(k.parent_entry_id)) kidsByParent.set(k.parent_entry_id, []);
-      kidsByParent.get(k.parent_entry_id).push(k);
+    const laatste = o.laatste_gesloten_maand || null;
+    geslotenPerMentor.set(uid, (m) => !!(laatste && m && m <= laatste));
+    for (const ev of o.per_event || []) for (const c of ev.sales || []) for (const st of c.vrijgave_stukken || []) {
+      if (!stukkenPerParent.has(st.parent_id)) stukkenPerParent.set(st.parent_id, []);
+      stukkenPerParent.get(st.parent_id).push(st);
     }
   }
+
+  const { data: kids, error: kErr } = await supabaseAdmin
+    .from('mentor_ledger_entries')
+    .select('parent_entry_id, amount, idempotency_key, status, released_at')
+    .in('parent_entry_id', parents.map((x) => x.id));
+  if (kErr) throw new Error('releaseProportionalForPaidAmount children: ' + kErr.message);
+  const kidsVan = (id) => (kids || []).filter((k) => k.parent_entry_id === id);
 
   const simulations = [];
-  const releasedIds = [];
-
-  for (const parent of parents || []) {
+  let released = 0;
+  for (const parent of parents) {
     const attrId = attributionIdOf(parent);
-    const incasso = incassoVoor(regCtx.incasso, customerId, parent.source_quote_id);
-    const sinds = incasso ? String(incasso.sinds).slice(0, 10) : null;
-    // Eén regel voor event-bonus én toewijzing (PR 2, 3 nov 2026): alleen de
-    // facturen van de EIGEN sale tellen (commissie-toewijzing.js
-    // factuurVanSale: deal, abonnementen volgens hun soort, en losse facturen
-    // enkel bij de enige commissie-sale). Nooit meer klantbreed; een nieuwe
-    // offerte telt nooit mee voor een oude event-bonus.
-    const dealId = parent.source_quote_id || null;
-    const acc = dealId
-      ? somBetaald(allInvs.filter((inv) => factuurVanSale(inv, dealId, saleScope, customerId)), sinds)
-      : { paid: 0, lastPaidDate: null };
-    const saleTotaalBetaald = acc.paid;
-    const saleLastPaidDate  = acc.lastPaidDate;
-
-    const parentBasis = Number(parent.basis) || 0;
-    const kids        = kidsByParent.get(parent.id) || [];
-    const reedsReleased = _r2(kids.reduce((s, k) => s + (Number(k.amount) || 0), 0));
-    const paidCents     = Math.round(saleTotaalBetaald * 100);
-    const idem          = `${parent.id}:paidamount:${paidCents}`;
-    const releasedAt    = firstOfMonthTimestamp(saleLastPaidDate);
-
-    if (parentBasis <= 0) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: 0, totaal_betaald: saleTotaalBetaald,
-        target_released: 0, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: releasedAt, idempotency_key: idem,
-        would_release: false, skip_reason: 'parent_basis<=0',
-      });
-      continue;
-    }
-    if (saleTotaalBetaald <= 0) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: parentBasis, totaal_betaald: 0,
-        target_released: 0, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: null, idempotency_key: idem,
-        would_release: false, skip_reason: 'no_payment',
-      });
-      continue;
-    }
-
-    // Snapshot original_amount bij eerste aanraking.
-    let origAmount = parent.original_amount != null
-      ? Number(parent.original_amount) : Number(parent.amount);
-    if (!Number.isFinite(origAmount) || origAmount <= 0) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: parentBasis, totaal_betaald: saleTotaalBetaald,
-        target_released: 0, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: releasedAt, idempotency_key: idem,
-        would_release: false, skip_reason: 'origAmount<=0',
-      });
-      continue;
-    }
-
-    const ratio          = Math.min(1, saleTotaalBetaald / parentBasis);
-    const targetReleased = _r2(origAmount * ratio);
-    let   teReleasen     = _r2(targetReleased - reedsReleased);
-    // Cap: nooit boven origAmount uit.
-    const maxRest = _r2(origAmount - reedsReleased);
-    if (teReleasen > maxRest) teReleasen = maxRest;
-    if (teReleasen <= 0) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: parentBasis, totaal_betaald: saleTotaalBetaald,
-        target_released: targetReleased, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: releasedAt, idempotency_key: idem,
-        would_release: false, skip_reason: 'no_delta',
-      });
-      continue;
-    }
-
-    // Idempotency dry-run: bestaat er al een child met deze paidamount-key?
-    const idemExists = kids.some((k) => k.idempotency_key === idem);
-    if (idemExists) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: parentBasis, totaal_betaald: saleTotaalBetaald,
-        target_released: targetReleased, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: releasedAt, idempotency_key: idem,
-        would_release: false, skip_reason: 'idem_exists',
-      });
-      continue;
-    }
-
-    // Cap ook op de huidige parent.amount voor safety.
-    const parentAmount = Number(parent.amount) || 0;
-    if (teReleasen > parentAmount) teReleasen = _r2(parentAmount);
-    if (teReleasen <= 0) {
-      simulations.push({
-        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-        parent_basis: parentBasis, totaal_betaald: saleTotaalBetaald,
-        target_released: targetReleased, reeds_released: reedsReleased, te_releasen: 0,
-        released_at: releasedAt, idempotency_key: idem,
-        would_release: false, skip_reason: 'parent_amount<=0',
-      });
-      continue;
-    }
-
-    simulations.push({
-      parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
-      parent_basis: parentBasis, totaal_betaald: saleTotaalBetaald,
-      target_released: targetReleased, reeds_released: reedsReleased, te_releasen: teReleasen,
-      released_at: releasedAt, idempotency_key: idem, would_release: true,
+    const rest = Number(parent.amount) || 0;
+    const rijen = teSchrijvenStukken({
+      parentId: parent.id, stukken: stukkenPerParent.get(parent.id) || [], kinderen: kidsVan(parent.id),
+      gesloten: geslotenPerMentor.get(parent.mentor_user_id) || (() => false), rest,
     });
-
-    if (dryRun) continue;
-
-    // ── Schrijfpad ─────────────────────────────────────────────────────
-    // Snapshot original_amount als NULL.
-    if (parent.original_amount == null) {
-      const { error: snapErr } = await supabaseAdmin
-        .from('mentor_ledger_entries')
-        .update({ original_amount: origAmount })
-        .eq('id', parent.id)
-        .is('original_amount', null);
-      if (snapErr) throw new Error('paidamount snapshot: ' + snapErr.message);
+    if (!rijen.length) {
+      simulations.push({ parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id, te_releasen: 0, would_release: false, skip_reason: 'no_delta' });
+      continue;
     }
-
-    const childRow = {
-      mentor_user_id : parent.mentor_user_id,
-      team_member_id : parent.team_member_id,
-      event_id       : parent.event_id,
-      entry_type     : 'bonus',
-      attendee_id    : parent.attendee_id,
-      customer_id    : parent.customer_id,
-      amount         : teReleasen,
-      status         : 'vrijgegeven',
-      source_invoice_id: parent.source_invoice_id || null,
-      source_quote_id  : parent.source_quote_id  || null,
-      parent_entry_id  : parent.id,
-      released_at      : releasedAt,
-      idempotency_key  : idem,
-    };
-    if (attrId) childRow.attribution_id = attrId;
-    const { data: inserted, error: cErr } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .insert(childRow)
-      .select('id')
-      .maybeSingle();
-    if (cErr) {
-      if (cErr.code === '23505') continue; // race → skip
-      throw new Error('paidamount child insert: ' + cErr.message);
+    let bedragNu = rest;
+    for (const rij of rijen) {
+      simulations.push({
+        parent_id: parent.id, mentor_user_id: parent.mentor_user_id, customer_id: parent.customer_id,
+        invoice_id: rij.stuk.invoice_id, betaald_op: rij.stuk.datum, maand: rij.released_month,
+        te_releasen: rij.bedrag, idempotency_key: rij.sleutel, released_at: `${rij.released_month}-01T00:00:00.000Z`, would_release: true,
+      });
+      if (dryRun) continue;
+      if (parent.original_amount == null) {
+        const { error: snapErr } = await supabaseAdmin.from('mentor_ledger_entries')
+          .update({ original_amount: Number(parent.amount) || 0 }).eq('id', parent.id).is('original_amount', null);
+        if (snapErr) throw new Error('stuk snapshot: ' + snapErr.message);
+        parent.original_amount = Number(parent.amount) || 0;
+      }
+      const childRow = {
+        mentor_user_id: parent.mentor_user_id, team_member_id: parent.team_member_id, event_id: parent.event_id,
+        entry_type: 'bonus', attendee_id: parent.attendee_id, customer_id: parent.customer_id,
+        amount: rij.bedrag, status: 'vrijgegeven', source_invoice_id: rij.stuk.invoice_id || parent.source_invoice_id || null,
+        source_quote_id: parent.source_quote_id || null, parent_entry_id: parent.id,
+        released_at: `${rij.released_month}-01T00:00:00.000Z`, idempotency_key: rij.sleutel,
+      };
+      if (attrId) childRow.attribution_id = attrId;
+      const { error: cErr } = await supabaseAdmin.from('mentor_ledger_entries').insert(childRow).select('id').maybeSingle();
+      if (cErr) {
+        if (cErr.code === '23505') continue; // al geschreven (race of tweede run)
+        throw new Error('stuk child insert: ' + cErr.message);
+      }
+      released += 1;
+      bedragNu = _r2(Math.max(0, bedragNu - rij.bedrag));
+      const { error: uErr } = await supabaseAdmin.from('mentor_ledger_entries').update({ amount: bedragNu }).eq('id', parent.id);
+      if (uErr) throw new Error('stuk parent update: ' + uErr.message);
     }
-    if (inserted?.id) releasedIds.push(inserted.id);
-
-    const newAmount = _r2(Math.max(0, parentAmount - teReleasen));
-    const { error: uErr } = await supabaseAdmin
-      .from('mentor_ledger_entries')
-      .update({ amount: newAmount })
-      .eq('id', parent.id);
-    if (uErr) throw new Error('paidamount parent update: ' + uErr.message);
-    parent.amount = newAmount;
+    parent.amount = bedragNu;
   }
-
-  const total_released = _r2(
-    simulations.filter((s) => s.would_release).reduce((sum, s) => sum + Number(s.te_releasen), 0)
-  );
-
   return {
-    dry_run          : !!dryRun,
-    customer_id      : customerId,
-    paid_total       : custPaidTotal,
-    last_paid_date   : custLastPaidDate,
-    parents_touched  : (parents || []).length,
-    released_children: releasedIds.length,
-    total_released,
+    dry_run: !!dryRun, customer_id: customerId, parents_touched: parents.length, released_children: released,
+    total_released: _r2(simulations.filter((x) => x.would_release).reduce((t, x) => t + Number(x.te_releasen || 0), 0)),
     simulations,
   };
 }

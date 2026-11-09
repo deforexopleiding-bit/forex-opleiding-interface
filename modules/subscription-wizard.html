@@ -911,10 +911,19 @@ function renderStep3(){
   const down = state.subs.find(s=>(Number(s.term_count)||1)===1 && subExcl(s)>0);
   const downAmt = down ? subExcl(down) : 0;
   const bb=document.getElementById('bonusBlock');
-  if(downAmt>=1000){
+  // Regels Maxim (6 nov 2026, api/_lib/sales-bonus-regels.js): wie een abonnement
+  // aanmaakt of aanpast krijgt daardoor nooit automatisch een bonus. Zonder
+  // offerte of bij aanpassing/regeling/incasso: geen bonus (blijft bij de sale).
+  const soortNu = state.soort && state.soort.soort;
+  if(state.mode==='standalone' || soortNu==='aanpassing' || soortNu==='incasso_regeling'){
+    bb.className='bonus gray';
+    bb.innerHTML = state.mode==='standalone'
+      ? 'Geen bonus: een abonnement zonder offerte geeft geen automatische bonus. Een admin kan een bonus met de hand toekennen (Sales › Bonussen).'
+      : 'Geen nieuwe bonus: een aanpassing, regeling of incasso-abonnement blijft bij de bonus van de oorspronkelijke sale.';
+  } else if(downAmt>=1000){
     const bonus=(downAmt*0.03).toFixed(2);
     bb.className='bonus green';
-    bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(downAmt)}<br><small>Status: pending — wordt 'paid' wanneer de factuur betaald is. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
+    bb.innerHTML=`<strong>Bonus (indicatief 3%):</strong> ${eur(bonus)} over aanbetaling ${eur(downAmt)}<br><small>Voor de verkoper van de offerte (niet voor wie het abonnement invoert). Telt pas mee naarmate er effectief betaald wordt. Exacte % / drempel volgen uit sales_bonus_configs.</small>`;
   } else { bb.className='bonus gray'; bb.innerHTML='Geen bonus: geen aanbetaling-termijn ≥ €1.000.'; }
   const zero=isZeroVat();
   let lines=['Bij Teamleader worden de volgende subscriptions aangemaakt:',''];

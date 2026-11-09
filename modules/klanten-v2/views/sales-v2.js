@@ -274,7 +274,8 @@
         <div class="sv-card">
           <div class="sv-card-head">${svg(I.doc)}Bonus + onboarding</div>
           <div class="sv-card-body">
-            <div class="sv-row"><span>Openstaande bonus deze maand</span><b>${eur0(m.my_bonus_month)}</b></div>
+            <div class="sv-row"><span title="Verdiend = de klant heeft betaald; nog niet uitbetaald">Bonus verdiend, nog uit te betalen</span><b>${eur0(m.my_bonus_verdiend_open ?? m.my_bonus_month)}</b></div>
+            <div class="sv-row"><span title="Telt pas mee als de klant betaalt">Bonus nog te verdienen</span><b>${eur0(m.my_bonus_nog_te_verdienen || 0)}</b></div>
             <div class="sv-row"><span>Onboardings live</span><b>${num(m.onboarding_count)}</b></div>
             <div class="sv-row"><span>Retentie-klanten (≤30d)</span><b>${num(m.retention_count)}</b></div>
             <div class="sv-row"><span>Pending subscription-koppelingen</span><b>${num(p.count)}</b></div>
@@ -670,7 +671,7 @@
         // fallback).
         { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalExcl) : eur0(0), hi: 1,
           sub: `${num(agg.signedCount)} getekend · excl. BTW${(agg.totalIncl && agg.totalExcl && agg.totalIncl > agg.totalExcl) ? ` · (${eur0(agg.totalIncl)} incl.)` : ''}` },
-        { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
+        { c: 'blue',    icon: I.doc,    label: 'Bonus verdiend (open)', val: eur0(k.bonus_pending) },
         { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
       ])}
       ${H.toolbar([
@@ -717,47 +718,92 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════════
-     BONUSSEN (v=18) — per-verkoper bonus-overzicht, super_admin-only.
-     Weergave-gat opgelost: bestaand dashboard filtert op sales_user_id=user.id;
-     hier zien we cross-user. Puur read-only endpoint /api/sales-bonus-overview.
+     BONUSSEN (v=21, 6 nov 2026) — controle-overzicht van de SALES-bonussen
+     voor super_admin / admin. Regels Maxim: (1) wie een abonnement aanmaakt
+     of aanpast krijgt daardoor nooit automatisch een bonus; (2) aanpassing /
+     regeling / incasso maakt geen nieuwe bonus; (4) een bonus telt pas mee naar
+     wat effectief betaald is. Per bonus een voorstel (houden / ongeldig /
+     aanpassen) met reden; Maxim beslist per bonus. Data: /api/sales-bonus-overview
+     (rekenkern api/_lib/sales-bonus-stand.js); beslissen + handmatig toekennen:
+     /api/sales-bonus-beslissing (gelogd in agent_audit_log). Niets automatisch.
      ══════════════════════════════════════════════════════════════════════ */
-  const _bonus = { loading: false, fetched: false, error: null, data: null, expanded: {} };
+  const _bonus = { loading: false, fetched: false, error: null, data: null, open: {}, filter: 'te_beslissen', verkoper: '', voided: false, toekennen: false, busy: false };
   const _bonusEsc = (window.KV && window.KV.esc) || ((s) => String(s == null ? '' : s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;'));
+  const _bonusRerender = () => { if (window.DFO?.render) window.DFO.render(); };
 
-  // v=19: gebruik dezelfde canonieke rol-bron als de rest van de v2-shell
-  // (instellingen-v2 isSuperAdmin r35-40). AuthShared.profile kan bij first-
-  // render nog niet gevuld zijn → 403-block ten onrechte. DFO.S.role reflecteert
-  // de shell-rol-state (echte rol of "Bekijk als"-simulatie) en is bij render
-  // altijd al gezet door klanten-v2.js init.
-  function _bonusIsSuperAdmin() {
+  // Canonieke rol-bron van de v2-shell (echte rol of "Bekijk als").
+  function _bonusIsAdmin() {
     try {
       const role = window.DFO?.S?.role || window.KV_V2?.role || null;
-      return role === 'super_admin';
+      return role === 'super_admin' || role === 'admin';
     } catch (_) { return false; }
   }
   async function _bonusFetch(force) {
     if (_bonus.loading) return;
     if (_bonus.fetched && !force && !_bonus.error) return;
     _bonus.loading = true; _bonus.error = null;
-    if (window.DFO?.render) window.DFO.render();
+    _bonusRerender();
     try {
-      const j = await window.KV.authedJson('/api/sales-bonus-overview');
+      const j = await window.KV.authedJson('/api/sales-bonus-overview' + (_bonus.voided ? '?voided=1' : ''));
       if (j?.error) throw new Error(j.error);
       _bonus.data = j; _bonus.fetched = true;
     } catch (e) {
       _bonus.error = e?.message || String(e);
     } finally {
       _bonus.loading = false;
-      if (window.DFO?.render) window.DFO.render();
+      _bonusRerender();
     }
   }
-  window.__bonusToggle = (uid) => {
-    _bonus.expanded[uid] = !_bonus.expanded[uid];
-    if (window.DFO?.render) window.DFO.render();
-  };
   window.__bonusRefresh = () => _bonusFetch(true);
+  window.__bonusToggle = (id) => { _bonus.open[id] = !_bonus.open[id]; _bonusRerender(); };
+  window.__bonusFilter = (f) => { _bonus.filter = f; _bonusRerender(); };
+  window.__bonusVerkoper = (v) => { _bonus.verkoper = v || ''; _bonusRerender(); };
+  window.__bonusVoided = (on) => { _bonus.voided = !!on; _bonusFetch(true); };
+  window.__bonusToekennenOpen = () => { _bonus.toekennen = !_bonus.toekennen; _bonusRerender(); };
+
+  async function _bonusPost(body) {
+    if (_bonus.busy) return null;
+    _bonus.busy = true;
+    try {
+      return await window.KV.authedJson('/api/sales-bonus-beslissing', { method: 'POST', body: JSON.stringify(body) });
+    } catch (e) {
+      window.KV?.toast?.('⚠ ' + (e?.message || String(e)), { duration: 5000 });
+      return null;
+    } finally { _bonus.busy = false; }
+  }
+  const _val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+
+  window.__bonusBeslis = async (id) => {
+    const beslissing = _val('bb-b-' + id);
+    const reden = _val('bb-r-' + id);
+    const bedrag = _val('bb-a-' + id);
+    const ontvanger = _val('bb-o-' + id);
+    if (!beslissing) return window.KV?.toast?.('Kies een beslissing.');
+    if (reden.length < 3) return window.KV?.toast?.('Geef een reden.');
+    const zin = beslissing === 'ongeldig' ? 'Deze bonus ONGELDIG maken?' : (beslissing === 'aanpassen' ? 'Deze bonus aanpassen?' : 'Deze bonus houden?');
+    if (!window.confirm(zin + '\n\nReden: ' + reden + '\n\nWordt gelogd met jouw naam.')) return;
+    const j = await _bonusPost({ actie: 'beslis', bonus_id: id, beslissing, reden, bedrag: bedrag || null, ontvanger_id: ontvanger || null });
+    if (j?.ok) {
+      window.KV?.toast?.(j.clawback ? 'Ongeldig — was al uitbetaald: finance krijgt een terugvorder-melding.' : 'Beslissing opgeslagen.');
+      _bonus.open[id] = false;
+      _bonusFetch(true);
+    }
+  };
+  window.__bonusToekennen = async () => {
+    const deal = _val('bt-deal');
+    const ontvanger_id = _val('bt-ontv');
+    const bedrag = _val('bt-bedrag');
+    const basis = _val('bt-basis');
+    const volledig = !!document.getElementById('bt-volledig')?.checked;
+    const reden = _val('bt-reden');
+    if (!deal || !ontvanger_id || !bedrag || reden.length < 3) return window.KV?.toast?.('Vul deal, ontvanger, bedrag en reden in.');
+    const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(deal);
+    if (!window.confirm('Bonus handmatig toekennen?\n\nBedrag: € ' + bedrag + (basis ? ' (telt naar betaling op basis € ' + basis + ')' : (volledig ? ' (telt meteen volledig)' : '')) + '\nReden: ' + reden + '\n\nWordt gelogd met jouw naam.')) return;
+    const j = await _bonusPost({ actie: 'toekennen', ...(isId ? { deal_id: deal } : { quote_reference: deal }), ontvanger_id, bedrag, basis: basis || null, telt_volledig: volledig, reden });
+    if (j?.ok) { window.KV?.toast?.('Bonus toegekend en gelogd.'); _bonus.toekennen = false; _bonusFetch(true); }
+  };
 
   function _bonusFmtEur(n) {
     const v = Number(n) || 0;
@@ -769,123 +815,162 @@
     try { return new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: '2-digit' }); }
     catch (_) { return iso; }
   }
+  const _pill = (c, l, title) => `<span ${title ? `title="${_bonusEsc(title)}"` : ''} style="padding:1px 7px;border-radius:10px;background:var(--${c}-soft);color:var(--${c});font-size:10.5px;font-weight:600;white-space:nowrap">${_bonusEsc(l)}</span>`;
   function _bonusStatusBadge(status) {
-    const map = {
-      pending:  { c: 'amber',   l: 'pending' },
-      earned:   { c: 'emerald', l: 'earned' },
-      invoiced: { c: 'emerald', l: 'invoiced' },
-      paid:     { c: 'emerald', l: 'paid' },
-      voided:   { c: 'rose',    l: 'voided' },
-    };
-    const m = map[status] || { c: 'text-3', l: status || '—' };
-    return `<span style="padding:1px 7px;border-radius:10px;background:var(--${m.c}-soft);color:var(--${m.c});font-size:10.5px;font-weight:600">${_bonusEsc(m.l)}</span>`;
+    const map = { pending: ['amber', 'pending'], earned: ['emerald', 'earned'], invoiced: ['emerald', 'invoiced'], paid: ['blue', 'uitbetaald'], voided: ['rose', 'ongeldig'] };
+    const m = map[status] || ['text-3', status || '—'];
+    return _pill(m[0], m[1]);
+  }
+  function _voorstelBadge(v) {
+    return v === 'houden' ? _pill('emerald', 'houden') : v === 'ongeldig' ? _pill('rose', 'ongeldig') : v === 'aanpassen' ? _pill('amber', 'aanpassen') : _pill('text-3', v || '—');
+  }
+  const _aboBadge = (s) => s === 'actief' ? _pill('emerald', 'actief') : s === 'geannuleerd' ? _pill('rose', 'geannuleerd') : s === 'afgelopen' ? _pill('text-3', 'afgelopen') : _pill('text-3', 'geen');
+  const _teBeslissen = (b) => b.status !== 'voided' && !b.beslissing && (b.voorstel === 'ongeldig' || b.voorstel === 'aanpassen');
+
+  function _bonusDetail(b, ontvangers) {
+    const fact = (b.facturen || []).map((f) => `<tr>
+        <td style="padding:3px 8px;font-family:'IBM Plex Mono',monospace">${_bonusEsc(f.nummer || '—')}</td>
+        <td style="padding:3px 8px">${_bonusFmtDate(f.datum)}</td>
+        <td style="padding:3px 8px">${_bonusEsc(f.status || '')}</td>
+        <td style="padding:3px 8px;text-align:right">${_bonusFmtEur(f.totaal)}</td>
+        <td style="padding:3px 8px;text-align:right">${_bonusFmtEur(f.betaald)}</td>
+        <td style="padding:3px 8px;text-align:right">${f.gecrediteerd ? _bonusFmtEur(f.gecrediteerd) : '—'}</td>
+        <td style="padding:3px 8px;color:var(--text-3)">${_bonusEsc(f.via)}</td></tr>`).join('');
+    const abo = (b.abonnementen || []).map((a) => `<div>${_aboBadge(a.status === 'cancelled' ? 'geannuleerd' : 'actief')} ${_bonusEsc(a.term_count)}× ${_bonusFmtEur(a.amount)} · start ${_bonusFmtDate(a.start_date)}${a.soort ? ' · ' + _bonusEsc(a.soort) : ''}${a.deal_id !== b.deal_id ? ' <span style="color:var(--text-3)">(andere deal)</span>' : ''}</div>`).join('');
+    const onb = (b.onbekende_facturen || []).map((f) => `${_bonusEsc(f.nummer || f.id)} (${_bonusFmtEur(f.betaald)} betaald)`).join(', ');
+    const opt = (v, l) => `<option value="${v}" ${b.voorstel === v ? 'selected' : ''}>${l}</option>`;
+    const ontvOpts = `<option value="">— zelfde ontvanger —</option>` + (ontvangers || []).map((o) => `<option value="${_bonusEsc(o.id)}" ${b.voorstel_ontvanger_id === o.id ? 'selected' : ''}>${_bonusEsc(o.naam)} (${_bonusEsc(o.rol)})</option>`).join('');
+    const besl = b.beslissing
+      ? `<div style="padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px"><b>Beslist: ${_bonusEsc(b.beslissing.beslissing)}</b> op ${_bonusFmtDate(b.beslissing.op)} — ${_bonusEsc(b.beslissing.reden || '')}</div>`
+      : '';
+    const form = (b.status === 'voided' || !_bonus.data?.kan_beslissen) ? '' : `
+      <div style="display:grid;grid-template-columns:140px 120px 1fr;gap:8px;align-items:end;margin-top:8px">
+        <label style="font-size:11px;color:var(--text-3)">Beslissing<select id="bb-b-${b.bonus_id}" class="input" style="width:100%">${opt('houden', 'Houden')}${opt('ongeldig', 'Ongeldig')}${opt('aanpassen', 'Aanpassen')}</select></label>
+        <label style="font-size:11px;color:var(--text-3)">Nieuw bedrag<input id="bb-a-${b.bonus_id}" class="input" style="width:100%" inputmode="decimal" value="${b.voorstel_bedrag != null ? b.voorstel_bedrag : ''}" placeholder="${b.bedrag}"></label>
+        <label style="font-size:11px;color:var(--text-3)">Ontvanger (bij aanpassen)<select id="bb-o-${b.bonus_id}" class="input" style="width:100%">${ontvOpts}</select></label>
+      </div>
+      <label style="display:block;font-size:11px;color:var(--text-3);margin-top:6px">Reden (wordt gelogd)<textarea id="bb-r-${b.bonus_id}" class="input" rows="2" style="width:100%">${_bonusEsc(b.reden || '')}</textarea></label>
+      <div style="margin-top:6px"><button class="btn btn-sm" onclick="event.stopPropagation();window.__bonusBeslis('${b.bonus_id}')">Beslissing opslaan</button>
+      <span style="font-size:11px;color:var(--text-3);margin-left:8px">Houden = enkel gelogd. Ongeldig = bonus vervalt (al uitbetaald → terugvorder-melding). Aanpassen = bedrag en/of ontvanger.</span></div>`;
+    return `<tr><td colspan="9" style="padding:10px 14px;background:var(--surface-2);font-size:12px" onclick="event.stopPropagation()">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-weight:600;margin-bottom:4px">Waarom dit voorstel</div>
+          <div>${_voorstelBadge(b.voorstel)} ${_bonusEsc(b.reden)}</div>
+          ${(b.signalen || []).length ? `<ul style="margin:6px 0 0 16px;padding:0;color:var(--amber)">${b.signalen.map((x) => `<li>${_bonusEsc(x)}</li>`).join('')}</ul>` : ''}
+          <div style="margin-top:8px;color:var(--text-2)">Basis ${_bonusFmtEur(b.basis)} × ${_bonusEsc(b.pct)}% · betaald voor de sale ${_bonusFmtEur(b.betaald_excl_sale)} excl. · nog open ${_bonusFmtEur(b.open_excl_sale)} excl. · max haalbaar ${_bonusFmtEur(b.max_haalbaar)}</div>
+          <div style="margin-top:4px;color:var(--text-3)">Sale ${_bonusEsc(b.sale_ref || String(b.sale_deal_id || '').slice(0, 8))}${b.sale_verkoper_naam ? ' · verkoper ' + _bonusEsc(b.sale_verkoper_naam) : ''} · bonusdeal ${_bonusEsc(String(b.deal_id || '').slice(0, 8))}${b.deal_bron ? ' (' + _bonusEsc(b.deal_bron) + ')' : ''}</div>
+          ${onb ? `<div style="margin-top:4px;color:var(--rose)">Niet gekoppeld: ${onb}. Koppel ze via commissie_factuur_koppeling.</div>` : ''}
+          ${b.toekenning ? `<div style="margin-top:4px">Handmatig toegekend: ${_bonusEsc(b.toekenning.reden || '')}${b.toekenning.telt_volledig ? ' (telt meteen volledig)' : ''}</div>` : ''}
+        </div>
+        <div>
+          <div style="font-weight:600;margin-bottom:4px">Abonnementen</div>${abo || '<div style="color:var(--text-3)">geen</div>'}
+        </div>
+      </div>
+      <div style="font-weight:600;margin:10px 0 4px">Facturen die meetellen voor de sale</div>
+      ${fact ? `<table style="border-collapse:collapse;font-size:11.5px"><thead><tr style="color:var(--text-3);text-align:left"><th style="padding:3px 8px">Nr</th><th style="padding:3px 8px">Datum</th><th style="padding:3px 8px">Status</th><th style="padding:3px 8px;text-align:right">Totaal</th><th style="padding:3px 8px;text-align:right">Betaald</th><th style="padding:3px 8px;text-align:right">Gecrediteerd</th><th style="padding:3px 8px">Via</th></tr></thead><tbody>${fact}</tbody></table>` : '<div style="color:var(--text-3)">nog geen factuur</div>'}
+      <div style="margin-top:10px">${besl}${form}</div>
+    </td></tr>`;
+  }
+
+  function _toekennenForm(ontvangers) {
+    if (!_bonus.toekennen) return '';
+    const opts = (ontvangers || []).map((o) => `<option value="${_bonusEsc(o.id)}">${_bonusEsc(o.naam)} (${_bonusEsc(o.rol)})</option>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface);margin-bottom:14px">
+      <div style="font-weight:600;margin-bottom:6px">Bonus handmatig toekennen (uitzondering)</div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 110px 110px;gap:8px;align-items:end">
+        <label style="font-size:11px;color:var(--text-3)">Deal-id of offertenummer<input id="bt-deal" class="input" style="width:100%"></label>
+        <label style="font-size:11px;color:var(--text-3)">Ontvanger<select id="bt-ontv" class="input" style="width:100%"><option value="">— kies —</option>${opts}</select></label>
+        <label style="font-size:11px;color:var(--text-3)">Bedrag (€)<input id="bt-bedrag" class="input" style="width:100%" inputmode="decimal"></label>
+        <label style="font-size:11px;color:var(--text-3)">Basis excl. (€)<input id="bt-basis" class="input" style="width:100%" inputmode="decimal" placeholder="optioneel"></label>
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:6px"><input type="checkbox" id="bt-volledig"> Telt meteen volledig (zonder basis). Met een basis telt de bonus naar betaling, zoals elke bonus.</label>
+      <label style="display:block;font-size:11px;color:var(--text-3);margin-top:6px">Reden (wordt gelogd)<textarea id="bt-reden" class="input" rows="2" style="width:100%"></textarea></label>
+      <div style="margin-top:6px"><button class="btn btn-sm" onclick="window.__bonusToekennen()">Toekennen</button> <button class="btn btn-ghost btn-sm" onclick="window.__bonusToekennenOpen()">Annuleren</button></div>
+    </div>`;
   }
 
   function bonussenView() {
-    if (!_bonusIsSuperAdmin()) {
+    if (!_bonusIsAdmin()) {
       return `<div style="padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;margin:20px auto;text-align:center">
-        <div style="font-size:14px;font-weight:600;margin-bottom:8px">Alleen super_admin</div>
-        <div style="font-size:12.5px;color:var(--text-3)">Dit cross-verkoper-overzicht is beperkt tot super_admin. Jij ziet je eigen bonussen op het Sales-dashboard.</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px">Alleen super_admin of admin</div>
+        <div style="font-size:12.5px;color:var(--text-3)">Jij ziet je eigen bonussen op het Sales-dashboard.</div>
       </div>`;
     }
     if (!_bonus.fetched && !_bonus.loading) queueMicrotask(() => _bonusFetch());
-    if (_bonus.loading && !_bonus.data) {
-      return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
-    }
+    if (_bonus.loading && !_bonus.data) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
     if (_bonus.error) {
       return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${_bonusEsc(_bonus.error)} <button class="btn btn-ghost btn-sm" style="margin-left:12px" onclick="window.__bonusRefresh()">Opnieuw</button></div>`;
     }
-    const data = _bonus.data || { per_sales_user: [], grand_totals: {} };
-    const gt = data.grand_totals || {};
+    const data = _bonus.data || { per_sales_user: [], totalen: {}, voorstellen: {} };
+    const alle = (data.per_sales_user || []).flatMap((u) => u.bonuses || []);
+    const t = data.totalen || {};
+    const teBeslissen = alle.filter(_teBeslissen);
+    const controleren = alle.filter((b) => b.controleren && b.status !== 'voided');
 
-    const legend = `<div style="padding:10px 14px;background:var(--info-soft,var(--surface-2));color:var(--text-2);border-radius:8px;font-size:11.5px;line-height:1.5;margin-bottom:14px">
-      <b>Uitleg statussen.</b>
-      <span style="margin-left:6px">${_bonusStatusBadge('pending')} = aanbetalings-abonnement aangemaakt, factuur staat nog open — bonus wacht tot de factuur op <i>paid</i> gaat.</span>
-      <span style="margin-left:8px">${_bonusStatusBadge('earned')} = aanbetalingsfactuur betaald (⇢ invoiced/paid rekenen we bij earned mee).</span>
-      <span style="margin-left:8px">${_bonusStatusBadge('voided')} = geannuleerd of gecrediteerd (bij <i>paid</i>: clawback voor finance).</span>
+    let lijst = alle;
+    if (_bonus.filter === 'te_beslissen') lijst = teBeslissen;
+    else if (_bonus.filter === 'controleren') lijst = controleren;
+    else if (_bonus.filter === 'ongeldig') lijst = alle.filter((b) => b.voorstel === 'ongeldig' && b.status !== 'voided');
+    else if (_bonus.filter === 'aanpassen') lijst = alle.filter((b) => b.voorstel === 'aanpassen' && b.status !== 'voided');
+    else if (_bonus.filter === 'beslist') lijst = alle.filter((b) => b.beslissing);
+    if (_bonus.verkoper) lijst = lijst.filter((b) => (b.ontvanger_id || '') === _bonus.verkoper);
+
+    const kaart = (c, l, v, sub) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
+        <div style="font-size:11px;color:var(--${c})">${l}</div>
+        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${v}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${sub}</div></div>`;
+    const strip = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+      ${kaart('emerald', 'Verdiend, nog uit te betalen', _bonusFmtEur(t.verdiend_open), 'de klant betaalde')}
+      ${kaart('amber', 'Nog te verdienen', _bonusFmtEur(t.nog_niet_verdiend), 'telt pas mee als de klant betaalt')}
+      ${kaart('blue', 'Uitbetaald', _bonusFmtEur(t.uitbetaald), (t.aantal_actief || 0) + ' actieve bonussen · ' + _bonusFmtEur(t.bonus_bedrag_actief))}
+      ${kaart('rose', 'Te beslissen', String(teBeslissen.length), 'voorstel ongeldig of aanpassen · ' + controleren.length + ' te controleren')}
+    </div>`;
+    const chip = (k, l, n) => `<button class="btn btn-sm ${_bonus.filter === k ? '' : 'btn-ghost'}" onclick="window.__bonusFilter('${k}')">${l}${n != null ? ` <span style="opacity:.7">${n}</span>` : ''}</button>`;
+    const verkopers = (data.per_sales_user || []).map((u) => `<option value="${_bonusEsc(u.user_id || '')}" ${_bonus.verkoper === (u.user_id || '') ? 'selected' : ''}>${_bonusEsc(u.user_name)}</option>`).join('');
+    const filters = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      ${chip('te_beslissen', 'Te beslissen', teBeslissen.length)}${chip('controleren', 'Controleren', controleren.length)}${chip('ongeldig', 'Voorstel ongeldig')}${chip('aanpassen', 'Voorstel aanpassen')}${chip('beslist', 'Beslist')}${chip('alles', 'Alles', alle.length)}
+      <select class="input" style="margin-left:auto;max-width:220px" onchange="window.__bonusVerkoper(this.value)"><option value="">Alle ontvangers</option>${verkopers}</select>
+      <label style="font-size:12px;display:flex;gap:4px;align-items:center"><input type="checkbox" ${_bonus.voided ? 'checked' : ''} onchange="window.__bonusVoided(this.checked)"> ook ongeldige</label>
     </div>`;
 
-    const grandStrip = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
-      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
-        <div style="font-size:11px;color:var(--text-3)">Totaal verkopers</div>
-        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${data.per_sales_user.length}</div>
-      </div>
-      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
-        <div style="font-size:11px;color:var(--amber)">Pending — som</div>
-        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.pending?.sum)}</div>
-        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.pending?.count || 0} bonussen</div>
-      </div>
-      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
-        <div style="font-size:11px;color:var(--emerald)">Earned — som</div>
-        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.earned?.sum)}</div>
-        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.earned?.count || 0} bonussen</div>
-      </div>
-      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
-        <div style="font-size:11px;color:var(--rose)">Voided — som</div>
-        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.voided?.sum)}</div>
-        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.voided?.count || 0} bonussen</div>
-      </div>
-    </div>`;
-
-    const perUserRows = (data.per_sales_user || []).map((u) => {
-      const uid = String(u.user_id || '__unassigned__').replace(/'/g, "\\'");
-      const isExpanded = !!_bonus.expanded[uid];
-      const t = u.totals || {};
-      const bonusesRows = isExpanded
-        ? `<tr><td colspan="6" style="padding:0;background:var(--surface-2)">
-            <table style="width:100%;border-collapse:collapse;font-size:12px">
-              <thead><tr style="color:var(--text-3);border-bottom:1px solid var(--border);text-align:left">
-                <th style="padding:6px 10px">Klant</th>
-                <th style="padding:6px 10px">Offerte</th>
-                <th style="padding:6px 10px;text-align:right">Bedrag</th>
-                <th style="padding:6px 10px">Status</th>
-                <th style="padding:6px 10px">Aangemaakt</th>
-                <th style="padding:6px 10px">Earned op</th>
-              </tr></thead>
-              <tbody>${(u.bonuses || []).map(b => `<tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:6px 10px">${_bonusEsc(b.customer_name)}</td>
-                <td style="padding:6px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)">${_bonusEsc(b.quote_reference || '—')}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(b.amount)}</td>
-                <td style="padding:6px 10px">${_bonusStatusBadge(b.status)}</td>
-                <td style="padding:6px 10px;color:var(--text-3)">${_bonusFmtDate(b.created_at)}</td>
-                <td style="padding:6px 10px;color:var(--text-3)">${_bonusFmtDate(b.earned_at)}</td>
-              </tr>`).join('')}</tbody>
-            </table>
-          </td></tr>`
-        : '';
-      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window.__bonusToggle('${uid}')">
-        <td style="padding:10px 12px;font-size:12px">
-          <span style="display:inline-block;width:12px;color:var(--text-3)">${isExpanded ? '▾' : '▸'}</span>
-          <b>${_bonusEsc(u.user_name)}</b>
-          ${u.user_email ? `<div style="font-size:11px;color:var(--text-3);margin-left:16px">${_bonusEsc(u.user_email)}</div>` : ''}
-        </td>
-        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--amber)">${_bonusFmtEur(t.pending?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.pending?.count || 0}×</div></td>
-        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--emerald)">${_bonusFmtEur(t.earned?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.earned?.count || 0}×</div></td>
-        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--rose)">${_bonusFmtEur(t.voided?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.voided?.count || 0}×</div></td>
-        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><b>${_bonusFmtEur((t.pending?.sum || 0) + (t.earned?.sum || 0))}</b></td>
-      </tr>${bonusesRows}`;
+    const rijen = lijst.map((b) => {
+      const open = !!_bonus.open[b.bonus_id];
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer;${b.status === 'voided' ? 'opacity:.6' : ''}" onclick="window.__bonusToggle('${b.bonus_id}')">
+        <td style="padding:8px 10px;font-size:12px"><span style="display:inline-block;width:12px;color:var(--text-3)">${open ? '▾' : '▸'}</span>${_bonusEsc(b.ontvanger_naam || '—')}${b.ontvanger_rol && b.ontvanger_rol !== 'sales' ? ` <span style="color:var(--text-3);font-size:10.5px">${_bonusEsc(b.ontvanger_rol)}</span>` : ''}</td>
+        <td style="padding:8px 10px;font-size:12px">${_bonusEsc(b.klant_naam || '—')}${b.is_test ? ' ' + _pill('text-3', 'test') : ''}</td>
+        <td style="padding:8px 10px;font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--text-3)">${_bonusEsc(b.deal_ref || String(b.deal_id || '').slice(0, 8))}${b.deal_bron === 'subscription_only' ? '<div style="font-family:inherit">zonder offerte</div>' : ''}</td>
+        <td style="padding:8px 10px">${_aboBadge(b.abonnement_status)}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(b.bedrag)}<div>${_bonusStatusBadge(b.status)}</div></td>
+        <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(b.betaald_excl_sale)}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--emerald)">${_bonusFmtEur(b.verdiend)}</td>
+        <td style="padding:8px 10px;font-size:11.5px;max-width:320px">${_voorstelBadge(b.voorstel)}${b.voorstel_bedrag != null ? ' → ' + _bonusFmtEur(b.voorstel_bedrag) : ''}${b.controleren ? ' ' + _pill('amber', '⚠ controleren', (b.signalen || []).join(' · ')) : ''}<div style="color:var(--text-3);margin-top:2px">${_bonusEsc(b.reden)}</div></td>
+        <td style="padding:8px 10px;font-size:11px">${b.beslissing ? _pill('blue', 'beslist: ' + b.beslissing.beslissing) : '—'}</td>
+      </tr>${open ? _bonusDetail(b, data.mogelijke_ontvangers) : ''}`;
     }).join('');
 
-    return `<div style="max-width:1200px">
+    return `<div style="max-width:1400px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:14px;font-weight:600">Bonussen per verkoper</div>
-        <button class="btn btn-ghost btn-sm" onclick="window.__bonusRefresh()">↻ Ververs</button>
+        <div style="font-size:14px;font-weight:600">Sales-bonussen — controle</div>
+        <div style="display:flex;gap:6px">${data.kan_beslissen ? '<button class="btn btn-ghost btn-sm" onclick="window.__bonusToekennenOpen()">+ Bonus toekennen</button>' : ''}<button class="btn btn-ghost btn-sm" onclick="window.__bonusRefresh()">↻ Ververs</button></div>
       </div>
-      ${legend}
-      ${grandStrip}
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="padding:10px 14px;background:var(--info-soft,var(--surface-2));color:var(--text-2);border-radius:8px;font-size:11.5px;line-height:1.5;margin-bottom:14px">
+        <b>Regels.</b> Wie een abonnement aanmaakt of aanpast krijgt daardoor nooit automatisch een bonus. Een aanpassing, regeling of incasso maakt geen nieuwe bonus: de commissie blijft bij de sale. Een bonus telt pas mee naar wat er effectief betaald is (excl. btw, gecrediteerd nooit). Het voorstel is een hulp: niets wordt automatisch ongeldig of aangepast. Jij beslist per bonus; elke beslissing wordt gelogd.
+      </div>
+      ${_toekennenForm(data.mogelijke_ontvangers)}
+      ${strip}
+      ${filters}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:auto">
         <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--text-3);font-size:11px;letter-spacing:.04em">
-            <th style="padding:8px 12px;text-align:left">Verkoper</th>
-            <th style="padding:8px 12px;text-align:right">Pending</th>
-            <th style="padding:8px 12px;text-align:right">Earned</th>
-            <th style="padding:8px 12px;text-align:right">Voided</th>
-            <th style="padding:8px 12px;text-align:right">Actief-totaal</th>
+          <thead><tr style="background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--text-3);font-size:11px;letter-spacing:.04em;text-align:left">
+            <th style="padding:8px 10px">Ontvanger</th><th style="padding:8px 10px">Klant</th><th style="padding:8px 10px">Deal</th><th style="padding:8px 10px">Abonnement</th>
+            <th style="padding:8px 10px;text-align:right">Bonus</th><th style="padding:8px 10px;text-align:right" title="Wat de klant voor de hele sale betaalde, excl. btw">Betaald (sale)</th><th style="padding:8px 10px;text-align:right">Verdiend</th>
+            <th style="padding:8px 10px">Voorstel</th><th style="padding:8px 10px">Beslissing</th>
           </tr></thead>
-          <tbody>${perUserRows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3)">Geen bonussen gevonden.</td></tr>'}</tbody>
+          <tbody>${rijen || '<tr><td colspan="9" style="padding:24px;text-align:center;color:var(--text-3)">Niets in deze selectie.</td></tr>'}</tbody>
         </table>
       </div>
-      <div style="font-size:11px;color:var(--text-3);margin-top:8px">Klik een verkoper aan om de losse bonussen te zien (nieuwste eerst). Actief-totaal = pending + earned.</div>
+      <div style="font-size:11px;color:var(--text-3);margin-top:8px">Klik een rij aan voor de facturen, abonnementen en het beslisformulier. "Betaald" = wat de klant voor de hele sale betaalde (excl. btw); bij meerdere bonussen op één sale wordt dat in volgorde verdeeld.</div>
     </div>`;
   }
 

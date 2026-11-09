@@ -152,7 +152,7 @@ test('incasso: alleen betalingen vóór de datum tellen; al vrijgegeven blijft; 
   db.tables.mentor_ledger_entries[0].amount = 60; // 30 al uitbetaald
   db.tables.mentor_ledger_entries[0].original_amount = 90;
   const r = await engine.releaseProportionalForPaidAmount({ customerId: K });
-  assert.equal(r.simulations[0].totaal_betaald, 1000, 'betaling van 20 nov telt niet');
+  assert.ok(!r.simulations.some((x) => x.invoice_id === R2 && x.would_release), 'betaling van 20 nov telt niet');
   assert.equal(r.released_children, 0, 'doel 30 = al vrijgegeven');
   assert.equal(som(kids('p-ev')), 30, 'al uitbetaald blijft staan');
   // Opheffen → de november-betaling telt weer mee.

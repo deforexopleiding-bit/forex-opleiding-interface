@@ -71,7 +71,9 @@ export class RegisterPaymentError extends Error {
  * @param {string} opts.invoiceId         — onze uuid in `invoices`
  * @param {number} opts.amount            — euro's > 0 (float)
  * @param {string} opts.paidAt            — 'YYYY-MM-DD'
- * @param {string} [opts.paymentMethodId] — vrije string; alleen lokaal
+ * @param {string} [opts.paymentMethodId] — vrije string; alleen lokaal (payments.payment_method, bv. 'cash')
+ * @param {string} [opts.tlPaymentMethodId] — Teamleader payment_method_id (paymentMethods.list);
+ *                                           enkel meegestuurd als gezet (cashbetaling, 6 nov 2026)
  * @param {string} [opts.source]          — 'manual' (default) | 'camt_match' | …
  * @param {string|null} opts.userId       — supabase auth-user-id voor audit; null bij service-context
  * @param {string|null} opts.ipAddress    — voor audit
@@ -82,6 +84,7 @@ export async function registerPaymentInternal(opts) {
   const {
     invoiceId, amount, paidAt,
     paymentMethodId = null,
+    tlPaymentMethodId = null,
     source = 'manual',
     userId = null,
     ipAddress = null,
@@ -109,6 +112,7 @@ export async function registerPaymentInternal(opts) {
     id: inv.tl_invoice_id,
     payment: { amount: r2(amtNum), currency: 'EUR' },
     paid_at: paidVal,
+    ...(tlPaymentMethodId ? { payment_method_id: String(tlPaymentMethodId) } : {}),
   });
   const tryRegister = async (paidVal) => {
     const body = buildBody(paidVal);
@@ -281,6 +285,7 @@ export async function registerPaymentInternal(opts) {
       entity_type: 'invoice',
       entity_id:   inv.id,
       after_json:  { amount: r2(amtNum), paid_at: dateOnly, payment_method_id: paymentMethodId || null,
+                     tl_payment_method_id: tlPaymentMethodId || null,
                      new_status: newStatus, new_amount_paid: newPaid, source },
       reason_text: `Betaling €${r2(amtNum)} geregistreerd op factuur ${inv.id} (status → ${newStatus}, source: ${source})`,
       ip_address:  ipAddress,

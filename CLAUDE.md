@@ -687,6 +687,67 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   payments/transactions.readonly; null = niet gelezen). Bestaande klanten: NIETS automatisch; ze staan in Nog te bepalen
   tot Maxim kiest. Onboarding op incasso (zetNaarIncasso) = voorstel (`stelVoorVanuitOnboarding`); terug actief vóór
   doorzetten sluit het voorstel. Teamleader nooit, geen mail/brief. Migratie docs/sql-migrations/2026-11-03-incasso-trajecten.sql.
+- REKENREGEL MENTORCOMMISSIE (9 nov 2026, Maxim) — één berekening voor rapport, grootboek, mentorzicht en
+  controlescherm: `api/_lib/commissie-rekenregel.js` (puur). Elke betaalde factuur van de sale (per betaling met datum:
+  payments, anders paid_date) = commissie × betaald / basis, nooit meer dan commissie − max(bevroren rapporten, oud
+  grootboek in afgesloten maanden). Aanbetaling, losse factuur, verschillende abonnementsbedragen, de 13e factuur:
+  elk voor haar eigen bedrag. Gecrediteerd telt nooit. Verwacht = open facturen + geplande termijnen vanaf deze maand
+  (gedekt per maand). AFGESLOTEN MAANDEN (rapport goedgekeurd/uitbetaald, maakAfsluiting) blijven EXACT: de oude
+  termijnberekening in computeBonusOverview leeft nog ENKEL voor termijnen in afgesloten maanden (`bevroren: true`);
+  een betaling in een afgesloten maand die in geen rapport zat = status 'afgesloten', 0 — GEEN inhaal, geen
+  correctievoorstellen (knop weg), ook niet in het nadeel van het bedrijf. Voorschot = oude trajectregels in rapporten
+  die aan geen bevroren factuur toegerekend zijn → eerst verrekend. FACTUURMOTOR `releaseProportionalForPaidAmount`
+  rekent niet zelf: computeBonusOverview per mentor → `vrijgave_stukken` → `teSchrijvenStukken` (sleutel
+  `<parent>:stuk:<factuur>:<datum>:<centen>`; oude vrijgaven in OPEN maanden eerst verrekend; idempotent). GAT
+  GEDICHT: de motor draaide nooit voor facturen die in Teamleader betaald worden (BV Ky, Richiano, Rasmussen) →
+  cron-finance-sync draait hem nu voor klanten met een gewijzigde betaalstand (`upsertInvoiceFromTl` →
+  `betaling_gewijzigd`) + dagelijks vangnet `api/cron-commissie-vrijgave.js` (05:40 UTC, `?dry_run=1`,
+  `api/_lib/commissie-vrijgave-run.js`). Ook bonus-release-sync (beide modi) en historical-event-commit gebruiken deze
+  motor; de oude 1/N-termijnmotor schrijft niets meer. Toewijzing-preview `termijnSchema` = dezelfde regel. Controle:
+  zou moeten zijn = rapport; grootboek OPEN maanden vs stukken (te veel/achter); `bevroren_verschil` apart;
+  `vergelijking_open` = voor/na per open maand (totalen + per sale). Tests: tests/commissie-rekenregel.test.js +
+  tests/commissie-rekenregel-8-klanten.test.js (echte stand 9 nov, tests/fixtures/commissie-8-klanten.json).
+- Cashbetaling (6 nov 2026, Maxim) — knop "Cashbetaling registreren" op een open factuur (klantdossier ›
+  Facturen › factuurdetail + finance-detail-v2). De factuur blijft staan en wordt NOOIT gecrediteerd. Kern
+  `api/_lib/cash-betaling.js` → `POST /api/finance-invoice-register-cash` (recht finance.invoice.payment.register):
+  invoer (bedrag ≤ open, deelbetaling mag; datum niet in de toekomst; ontvangen_door + notitie ≥5 verplicht) →
+  tabel actief? (anders 503 CASH_NIET_ACTIEF, niets naar TL) → geen concept/gecrediteerd → dubbel binnen 10 min =
+  409 MOGELIJK_DUBBEL tenzij bevestig_dubbel → GEWONE betaalflow `registerPaymentInternal` met payments.payment_method
+  'cash' + TL `payment_method_id` (`tlPaymentMethodId`; app_settings `teamleader_cash_payment_method_id` of TL
+  paymentMethods.list naam cash/contant/kas). Geen cash-methode in TL → betaling WEL naar TL, methode niet, luide
+  waarschuwing + audit. Commissie = de factuurmotor in die flow, geen apart pad. Rij in `cash_ontvangsten`
+  (bewijsnummer KAS-JJJJ-NNNN, ontvangen_door, notitie, payment_id ON DELETE SET NULL = teruggedraaid) + audit
+  `finance_invoice.register_cash`. Ontvangstbewijs-PDF `GET /api/finance-cash-ontvangstbewijs?id=` (pdfkit, ZONDER
+  de interne notitie); NIETS wordt verstuurd. Betalingen + methode per factuur: `GET /api/finance-invoice-payments`;
+  label-kern `api/_lib/betaalmethode.js` (ook maandlijst incasso-abonnementen en controlescherm). Migratie
+  docs/sql-migrations/2026-11-06-cash-ontvangsten.sql (BLOKKEREND voor de knop, de rest werkt zonder).
+- Sales-bonussen (tabel `bonuses`, 6 nov 2026, regels Maxim) — NIET de mentorcommissie.
+  REGELING (ongewijzigd, `api/_lib/sales-bonus-regels.js`): pct uit `sales_bonus_configs` (leeg → 3%)
+  over het regelbedrag EXCL. btw van het eerste abonnement met 1 termijn (aanbetaling of eenmalige
+  betaling) als dat ≥ threshold (leeg → € 1.000); één bonus per deal.
+  VASTGELEGD (beslissing Maxim 9 nov 2026, NIET meer ter discussie): "Dave krijgt bonus op aanbetalingen en
+  grote facturen" = UITSLUITEND dit eerste abonnement met één termijn (aanbetaling of eenmalige betaling) vanaf
+  € 1.000, 3% excl. btw, één bonus per deal. GEEN bonus op grote termijnfacturen of andere facturen; geen
+  nieuwe drempel of extra bonusregel toevoegen.
+  NOG OPEN (huidige werking blijft tot Maxim beslist, niet wijzigen): (a) abonnement zonder offerte → geen
+  automatische bonus, enkel handmatig toekennen; (b) betaalde reserveringsfee van de eigen offerte telt mee als
+  betaling; (c) deelbetaling telt naar verhouding (Andy De Landtsheer: 46,27 + 30,00). AANMAKEN (`sales-subscription-create`,
+  `magAutomatischeBonus`): NOOIT voor wie het abonnement aanmaakt — ontvanger = deals.sales_user_id van de
+  OFFERTE; geen bonus zonder offerte (standalone/ghost-deal), bij aanpassing/regeling/incasso, bij een
+  abonnement dat aan een andere sale hangt of als de offerte al abonnementen had (vervanging). Response
+  `bonus_skip` = reden. MEETELLEN (`api/_lib/sales-bonus-stand.js`, alleen lezen): verdiend = min(bonus,
+  pct × betaald excl. btw / 100) per sale, in volgorde verdeeld over de bonussen van die sale (bonus op de
+  offerte eerst, dan ghost-bonussen op startdatum). Factuur ↔ sale = de regels van de mentorcommissie
+  (koppeling, deal_id, abonnement/soort, ghost, enige sale) + facturen met deal_id op een ANDER klantrecord;
+  gearchiveerde getekende offertes blijven de sale; gecrediteerd/concept/incasso-stilstand/facturen van
+  vóór de deal (−3 d) tellen nooit; de betaalde reserveringsfee van de eigen offerte telt WEL (deel van de
+  prijs). Gebruikt door Finance-dashboard (`mentorBonusPending` = sales-bonus verdiend open — legacy-naam),
+  sales-dashboard (`my_bonus_verdiend_open` / `_nog_te_verdienen`), sales-rapporten en Sales › Bonussen.
+  CONTROLE: Sales › Bonussen (super_admin/admin, `api/sales-bonus-overview.js`) — per bonus ontvanger,
+  klant, deal, abonnementstatus, betaald, verdiend, voorstel houden/ongeldig/aanpassen + reden + signalen.
+  Beslissen + handmatig toekennen (ontvanger + reden + basis of "telt volledig"): `api/sales-bonus-beslissing.js`,
+  gelogd in agent_audit_log (`sales.bonus.beslissing` / `sales.bonus.toekennen`), teruggelezen door de kern.
+  NIETS automatisch voiden/herberekenen; geen migratie.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

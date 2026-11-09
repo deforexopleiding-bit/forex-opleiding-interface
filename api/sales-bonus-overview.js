@@ -1,20 +1,48 @@
 // api/sales-bonus-overview.js
-// GET → per-verkoper bonus-overzicht + drill-down. super_admin-only (cross-user).
+// GET → sales-bonusoverzicht + controle per bonus. super_admin / admin.
+//
+// Sinds 6 nov 2026 (regels Maxim) rekent alles via api/_lib/sales-bonus-stand.js:
+// een bonus telt pas mee naar wat er EFFECTIEF BETAALD is. Per bonus: ontvanger,
+// klant, deal + sale, abonnementstatus, betaald, verdiend, en een VOORSTEL
+// (houden / ongeldig / aanpassen) met reden. Maxim beslist per bonus via
+// api/sales-bonus-beslissing.js; dit endpoint schrijft niets.
+//
+// Query: ?voided=1 → ook de ongeldige bonussen (historiek).
 //
 // Response:
 //   {
-//     per_sales_user: [{
-//       user_id, user_name, user_email,
-//       totals:  { pending:{count,sum}, earned:{count,sum}, voided:{count,sum} },
-//       bonuses: [{ id, deal_id, amount, status, created_at, earned_at,
-//                   customer_name, quote_reference }]
-//     }],
-//     grand_totals: { pending:{count,sum}, earned:{count,sum}, voided:{count,sum} }
+//     per_sales_user: [{ user_id, user_name, user_email,
+//       totals: { verdiend_open, nog_niet_verdiend, uitbetaald, voided, pending, earned }  // {count,sum}
+//       bonuses: [ stand-rij ] }],
+//     grand_totals: idem,
+//     totalen: { verdiend_open, nog_niet_verdiend, uitbetaald, aantal_actief, bonus_bedrag_actief },
+//     voorstellen: { houden:{count,sum}, ongeldig:{count,sum}, aanpassen:{count,sum} },
+//     total_bonuses
 //   }
-//
-// 0 incasso-writes; puur read-only op `bonuses` + join `profiles` + `deals` + `customers`.
+// `pending` en `earned` blijven voor oude schermen: pending = bonusbedrag van
+// alles wat nog niet uitbetaald is, earned = het VERDIENDE deel daarvan.
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { laadBonusStand } from './_lib/sales-bonus-stand.js';
+
+export const BONUS_ADMIN_ROLLEN = ['super_admin', 'admin'];
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const leegTotaal = () => ({
+  verdiend_open: { count: 0, sum: 0 }, nog_niet_verdiend: { count: 0, sum: 0 },
+  uitbetaald: { count: 0, sum: 0 }, voided: { count: 0, sum: 0 },
+  pending: { count: 0, sum: 0 }, earned: { count: 0, sum: 0 },
+});
+function tel(t, s) {
+  const plus = (k, v) => { t[k].count += 1; t[k].sum += v; };
+  if (s.status === 'voided') return plus('voided', s.bedrag);
+  if (s.status === 'paid') return plus('uitbetaald', s.bedrag);
+  if (s.verdiend > 0) plus('verdiend_open', s.verdiend);
+  if (s.nog_niet_verdiend > 0) plus('nog_niet_verdiend', s.nog_niet_verdiend);
+  plus('pending', s.bedrag);
+  if (s.verdiend > 0) plus('earned', s.verdiend);
+}
+const rond = (t) => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, { count: v.count, sum: r2(v.sum) }]));
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -22,114 +50,60 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
   const admin = await verifyAdmin(req);
-  if (!admin || admin.profile.role !== 'super_admin') {
-    return res.status(403).json({ error: 'Alleen super_admin.' });
+  if (!admin || !BONUS_ADMIN_ROLLEN.includes(admin.profile?.role)) {
+    return res.status(403).json({ error: 'Alleen super_admin of admin.' });
   }
 
   try {
-    // 1. Alle bonussen. `bonuses`-tabel blijft klein (max paar duizend).
-    //    invoiced/paid mappen we voor het overzicht op 'earned' (uitbetaalstroom
-    //    zit in mentor-payouts-scope; sales-verkoperbonus laat ze samen zien).
-    const { data: bonuses, error: bErr } = await supabaseAdmin
-      .from('bonuses')
-      .select('id, deal_id, sales_user_id, amount, status, created_at, earned_at')
-      .order('created_at', { ascending: false })
-      .limit(5000);
-    if (bErr) return res.status(500).json({ error: 'bonuses: ' + bErr.message });
+    const metVoided = String(req.query?.voided || '') === '1';
+    const { stand, totalen } = await laadBonusStand(supabaseAdmin, { metVoided });
 
-    // 2. Sales-users + deals + customers voor joins.
-    const salesUserIds = [...new Set((bonuses || []).map(b => b.sales_user_id).filter(Boolean))];
-    const dealIds      = [...new Set((bonuses || []).map(b => b.deal_id).filter(Boolean))];
-
-    const [{ data: users }, { data: deals }] = await Promise.all([
-      salesUserIds.length
-        ? supabaseAdmin.from('profiles').select('id, full_name, email').in('id', salesUserIds)
-        : Promise.resolve({ data: [] }),
-      dealIds.length
-        ? supabaseAdmin.from('deals').select('id, customer_id, quote_reference').in('id', dealIds)
-        : Promise.resolve({ data: [] }),
-    ]);
-
-    const userById = Object.create(null);
-    for (const u of (users || [])) userById[u.id] = u;
-    const dealById = Object.create(null);
-    for (const d of (deals || [])) dealById[d.id] = d;
-
-    const customerIds = [...new Set((deals || []).map(d => d.customer_id).filter(Boolean))];
-    const { data: customers } = customerIds.length
-      ? await supabaseAdmin.from('customers').select('id, first_name, last_name, company_name, is_company').in('id', customerIds)
-      : { data: [] };
-    const customerById = Object.create(null);
-    for (const c of (customers || [])) {
-      customerById[c.id] = c.is_company
-        ? (c.company_name || '—')
-        : ([c.first_name, c.last_name].filter(Boolean).join(' ').trim() || '—');
-    }
-
-    // 3. Normalize status buckets (map invoiced/paid → earned voor het overzicht).
-    const bucketFor = (s) => {
-      if (s === 'voided') return 'voided';
-      if (s === 'earned' || s === 'invoiced' || s === 'paid') return 'earned';
-      return 'pending';
-    };
-
-    // 4. Groepeer per sales_user_id.
-    const perUserMap = Object.create(null);
-    const grand = { pending: { count: 0, sum: 0 }, earned: { count: 0, sum: 0 }, voided: { count: 0, sum: 0 } };
-
-    for (const b of (bonuses || [])) {
-      const uid = b.sales_user_id || '__unassigned__';
-      if (!perUserMap[uid]) {
-        const u = uid !== '__unassigned__' ? userById[uid] : null;
-        perUserMap[uid] = {
-          user_id:    uid !== '__unassigned__' ? uid : null,
-          user_name:  u ? (u.full_name || u.email || u.id) : (uid === '__unassigned__' ? '(geen sales_user_id)' : uid),
-          user_email: u ? u.email : null,
-          totals:     { pending: { count: 0, sum: 0 }, earned: { count: 0, sum: 0 }, voided: { count: 0, sum: 0 } },
-          bonuses:    [],
-        };
+    const perUser = new Map();
+    const grand = leegTotaal();
+    const voorstellen = { houden: { count: 0, sum: 0 }, ongeldig: { count: 0, sum: 0 }, aanpassen: { count: 0, sum: 0 } };
+    for (const s of stand) {
+      const uid = s.ontvanger_id || '__unassigned__';
+      if (!perUser.has(uid)) {
+        perUser.set(uid, {
+          user_id: s.ontvanger_id || null,
+          user_name: s.ontvanger_naam || (s.ontvanger_id ? s.ontvanger_id : '(geen ontvanger)'),
+          user_email: null,
+          totals: leegTotaal(),
+          bonuses: [],
+        });
       }
-      const row = perUserMap[uid];
-      const amt = Number(b.amount) || 0;
-      const bkt = bucketFor(b.status);
-      row.totals[bkt].count++;
-      row.totals[bkt].sum += amt;
-      grand[bkt].count++;
-      grand[bkt].sum += amt;
-
-      const deal = b.deal_id ? dealById[b.deal_id] : null;
-      row.bonuses.push({
-        id:              b.id,
-        deal_id:         b.deal_id,
-        amount:          amt,
-        status:          b.status,
-        created_at:      b.created_at,
-        earned_at:       b.earned_at,
-        customer_name:   deal?.customer_id ? (customerById[deal.customer_id] || '—') : '—',
-        quote_reference: deal?.quote_reference || null,
-      });
+      const row = perUser.get(uid);
+      tel(row.totals, s);
+      if (!s.is_test) tel(grand, s);
+      row.bonuses.push(s);
+      if (s.status !== 'voided' && !s.beslissing && voorstellen[s.voorstel]) {
+        voorstellen[s.voorstel].count += 1;
+        voorstellen[s.voorstel].sum += s.bedrag;
+      }
     }
+    const per_sales_user = [...perUser.values()]
+      .map((r) => ({ ...r, totals: rond(r.totals), bonuses: r.bonuses.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))) }))
+      .sort((a, b) => (b.totals.verdiend_open.sum + b.totals.nog_niet_verdiend.sum) - (a.totals.verdiend_open.sum + a.totals.nog_niet_verdiend.sum));
 
-    // 5. Sort per verkoper op totale earned+pending sum (desc).
-    const per_sales_user = Object.values(perUserMap)
-      .map((r) => ({
-        ...r,
-        totals: {
-          pending: { count: r.totals.pending.count, sum: Math.round(r.totals.pending.sum * 100) / 100 },
-          earned:  { count: r.totals.earned.count,  sum: Math.round(r.totals.earned.sum  * 100) / 100 },
-          voided:  { count: r.totals.voided.count,  sum: Math.round(r.totals.voided.sum  * 100) / 100 },
-        },
-      }))
-      .sort((a, b) => (b.totals.earned.sum + b.totals.pending.sum) - (a.totals.earned.sum + a.totals.pending.sum));
+    // Wie kan een bonus krijgen (aanpassen / handmatig toekennen)?
+    let mogelijke_ontvangers = [];
+    try {
+      const { data } = await supabaseAdmin.from('profiles')
+        .select('id, full_name, email, role, is_active')
+        .in('role', ['sales', 'mentor', 'manager', 'admin', 'super_admin']);
+      mogelijke_ontvangers = (data || []).filter((p) => p.is_active !== false)
+        .map((p) => ({ id: p.id, naam: p.full_name || p.email || p.id, rol: p.role }))
+        .sort((a, b) => String(a.naam).localeCompare(String(b.naam)));
+    } catch (e) { console.warn('[sales-bonus-overview] ontvangers:', e?.message || e); }
 
     return res.status(200).json({
+      mogelijke_ontvangers,
       per_sales_user,
-      grand_totals: {
-        pending: { count: grand.pending.count, sum: Math.round(grand.pending.sum * 100) / 100 },
-        earned:  { count: grand.earned.count,  sum: Math.round(grand.earned.sum  * 100) / 100 },
-        voided:  { count: grand.voided.count,  sum: Math.round(grand.voided.sum  * 100) / 100 },
-      },
-      total_bonuses: (bonuses || []).length,
+      grand_totals: rond(grand),
+      totalen,
+      voorstellen: Object.fromEntries(Object.entries(voorstellen).map(([k, v]) => [k, { count: v.count, sum: r2(v.sum) }])),
+      total_bonuses: stand.length,
+      kan_beslissen: BONUS_ADMIN_ROLLEN.includes(admin.profile?.role),
     });
   } catch (e) {
     console.error('[sales-bonus-overview]', e?.message || e);

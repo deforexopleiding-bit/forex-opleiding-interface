@@ -77,7 +77,7 @@ test('nieuwe offerte zonder commissie: geeft NIETS vrij op de oude event-bonus',
   });
   const r = await engine.releaseProportionalForPaidAmount({ customerId: K });
   assert.equal(vrij(), 12, 'enkel 400 van de oude sale: 144 × 400 / 4800');
-  assert.equal(r.simulations[0].totaal_betaald, 400);
+  assert.deepEqual(r.simulations.filter((x) => x.would_release).map((x) => x.invoice_id), ['o1'], 'enkel de factuur van de oude sale');
 });
 
 test('nieuwe offerte die WEL toegewezen is: telt voor de toewijzing, niet voor de oude bonus', () => {

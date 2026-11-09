@@ -57,7 +57,7 @@ export async function bouwIncassoMaandlijst(db, { customerId = null, vandaag = v
   const ids = facturen.map((f) => f.id);
   const betalingen = new Map();
   for (let i = 0; i < ids.length; i += 150) {
-    const { data: pays, error } = await db.from('payments').select('invoice_id, amount, payment_date').in('invoice_id', ids.slice(i, i + 150));
+    const { data: pays, error } = await db.from('payments').select('invoice_id, amount, payment_date, payment_method, source').in('invoice_id', ids.slice(i, i + 150));
     if (error) { console.warn('[incasso-maandlijst] payments:', error.message); break; }
     for (const p of pays || []) {
       if (!betalingen.has(p.invoice_id)) betalingen.set(p.invoice_id, []);

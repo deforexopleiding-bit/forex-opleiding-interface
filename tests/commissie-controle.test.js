@@ -20,7 +20,7 @@ const db = maakNepDb();
 mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
 mock.module(url('api/_lib/requirePermission.js'), { namedExports: { requirePermission: async () => true } });
 mock.module(url('api/_lib/notify.js'), { namedExports: { createNotification: async () => ({ ok: true }) } });
-const { commissieControle } = await import(url('api/_lib/commissie-controle.js'));
+const { commissieControle, telRapportSale } = await import(url('api/_lib/commissie-controle.js'));
 
 const K1 = '11111111-1111-4111-8111-111111111111'; // gewone sale, grootboek achter
 const K2 = '22222222-2222-4222-8222-222222222222'; // omgezet traject, te veel vrijgegeven
@@ -76,9 +76,17 @@ test('controle: zou moeten zijn, grootboek achter, te veel vrijgegeven, sale zon
   assert.equal(per.Een.vrijgegeven, 0);
   assert.ok(per.Een.afwijkingen.includes('achter'));
 
-  assert.equal(per.Paul.zou_moeten_zijn, 12, '126 × 400 / 4200');
+  // Rekenregel 9 nov 2026: zou moeten zijn = wat het rapport uitkeert of zal
+  // uitkeren. 45,80 zat al in het junirapport (bevroren); de factuur van juni
+  // (open maand) geeft 126 × 400 / 4200 = 12, volledig verrekend met dat
+  // voorschot → 0 nieuw. Grootboek open maanden: 45,80 (regel van oktober,
+  // in geen rapport) tegenover 0 stukken → 45,80 te veel.
+  assert.equal(per.Paul.zou_moeten_zijn, 45.8);
   assert.equal(per.Paul.vrijgegeven, 91.6);
-  assert.equal(per.Paul.verschil, 79.6);
+  assert.equal(per.Paul.grootboek_open, 45.8);
+  assert.equal(per.Paul.stukken_open, 0);
+  assert.equal(per.Paul.verschil, 45.8);
+  assert.equal(per.Paul.bevroren_verschil, 0, 'afgesloten maanden: grootboek = rapport');
   assert.ok(per.Paul.afwijkingen.includes('te_veel_vrijgegeven'));
   assert.ok(per.Paul.afwijkingen.includes('vrijgegeven_niet_in_rapport'), 'de termijn zonder rapport wordt apart gemeld');
   assert.equal(per.Paul.vrijgegeven_niet_in_rapport, 45.8);
@@ -99,4 +107,47 @@ test('controle: een geannuleerde sale (gearchiveerde offerte, zoals Jimco Schepe
   db.tables.deals.find((d) => d.id === D3).archived_at = '2026-10-29T16:08:50Z';
   const c = await commissieControle(db.client);
   assert.equal(c.rijen.find((r) => r.klant === 'Jimco'), undefined, 'annulatie: niet als afwijking getoond');
+});
+
+test('controle: de betaalmethode staat bij elke factuur van de sale (cashbetaling, 6 nov)', async () => {
+  zet();
+  db.tables.payments = [{ id: 'pay1', invoice_id: 'i1', amount: 400, payment_date: '2026-06-03', payment_method: 'cash', source: 'manual' }];
+  const c = await commissieControle(db.client);
+  const een = c.rijen.find((r) => r.klant === 'Een');
+  const fs = Object.fromEntries(een.facturen.map((f) => [f.id, f.betaalmethode]));
+  assert.equal(fs.i1, 'Contant');
+  assert.equal(fs.i2, 'Teamleader', 'betaald zonder payments-rij = via Teamleader');
+});
+
+// 6 nov 2026 (Maxim): de trajectregels en de rapporten juni–september staan in
+// de database op uitbetaald, maar het scherm meldde "waarvan status nog niet
+// uitbetaald 141,80" en "Uitbetaald, status loopt achter".
+test('controle: trajectregels op uitbetaald in een uitbetaald rapport → geen "status loopt achter"', async () => {
+  zet();
+  db.tables.mentor_payouts.find((p) => p.id === 'pay-jun').status = 'uitbetaald';
+  const k = db.tables.mentor_ledger_entries.find((e) => e.id === 'k2a');
+  k.status = 'uitbetaald';
+  const c = await commissieControle(db.client);
+  const paul = c.rijen.find((r) => r.klant === 'Paul');
+  assert.equal(paul.werkelijk_uitbetaald, 45.8, 'de regel zat in een rapport: werkelijk uitbetaald');
+  assert.equal(paul.verschil_status_werkelijkheid, 0, 'status klopt al: geen verschil');
+  assert.ok(!paul.afwijkingen.includes('status_achter'));
+});
+
+test('controle: trajectregel nog op vrijgegeven in een goedgekeurd rapport t/m de grens → wél "status loopt achter"', async () => {
+  zet();
+  const c = await commissieControle(db.client);
+  const paul = c.rijen.find((r) => r.klant === 'Paul');
+  assert.equal(paul.verschil_status_werkelijkheid, 45.8);
+  assert.ok(paul.afwijkingen.includes('status_achter'));
+});
+
+test('telRapportSale: reeds_status_uitbetaald telt als status uitbetaald, nooit meer dan reeds_in_rapport; oude vorm = oud gedrag', () => {
+  const st = new Map();
+  const a = telRapportSale(null, { vrijgegeven_rapport: 141.8, termijnen: [], verrekening: { reeds_in_rapport: 141.8, reeds_status_uitbetaald: 141.8 } }, 'u', st, '2026-09');
+  assert.deepEqual([a.werkelijk, a.statusUit], [141.8, 141.8]);
+  const b = telRapportSale(null, { termijnen: [], verrekening: { reeds_in_rapport: 50, reeds_status_uitbetaald: 80 } }, 'u', st, '2026-09');
+  assert.equal(b.statusUit, 50);
+  const c = telRapportSale(null, { termijnen: [], verrekening: { reeds_in_rapport: 50 } }, 'u', st, '2026-09');
+  assert.deepEqual([c.werkelijk, c.statusUit], [50, 0]);
 });

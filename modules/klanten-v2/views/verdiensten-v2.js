@@ -754,6 +754,8 @@
     if (status === 'gecrediteerd')  return H.pill('neutral', 'Gecrediteerd');
     if (status === 'achterstallig') return H.pill('danger', 'Achterstallig');
     if (status === 'incasso')       return H.pill('danger', 'Incasso — staat stil');
+    if (status === 'verrekend')     return H.pill('neutral', 'Verrekend');
+    if (status === 'afgesloten')    return H.pill('neutral', 'Afgesloten maand');
     return H.pill('warn', 'Open');
   }
   window.__verdBonusSetTab = (t) => {
