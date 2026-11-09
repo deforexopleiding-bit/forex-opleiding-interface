@@ -190,6 +190,9 @@
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud', 'Opvolging', 'Toegang', 'Lisa', 'Bulk'] },
     { g: 'Operatie',               id: 'agents',           naam: 'AI Agents',         icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Configuratie', 'Kennisbank', 'Prestaties'] },
+    // E-handtekening (2026-11-09): documenten laten ondertekenen door teamleden.
+    // GEEN rollen: alleen wie esign.view heeft (standaard enkel super_admin via '*').
+    { g: 'Operatie',               id: 'esign',            naam: 'E-handtekening',    icon: I.edit,     color: 'blue',    roles: [], permKey: 'esign.view', tabs: ['Overzicht'] },
     { g: 'Operatie',               id: 'logboek',          naam: 'Toegangslog',       icon: I.shield,   color: 'slate',   roles: SAM,                  tabs: ['Tijdlijn', 'Activiteit', 'Per gebruiker'] },
 
     { g: 'Systeem',                id: 'instellingen',     naam: 'Instellingen',      icon: I.settings, color: 'slate',   roles: SAM,                  tabs: [] },

@@ -140,6 +140,12 @@ const FEATURE_REGISTRY = [
     { key:'checkin.view', label:'Module zichtbaar (antwoorden, KPI\'s, export)' },
     { key:'checkin.run', label:'Run — activeer in het LMS, pauzeren, testtoewijzingen, opties' },
   ]},
+  // E-handtekening (2026-11-09): standaard ALLEEN super_admin (geen role_permissions);
+  // anderen per persoon via user_permissions.
+  { moduleKey:'esign', moduleLabel:'E-handtekening', moduleIcon:'ti-signature', features:[
+    { key:'esign.view', label:'Module zichtbaar (envelopes, status, getekende documenten)' },
+    { key:'esign.send', label:'Envelopes aanmaken, versturen, opnieuw versturen en intrekken' },
+  ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },
     { key:'customer.view', label:'Klant bekijken' },

@@ -28,6 +28,14 @@
       "maxDuration": 300,
       "memory": 1024
     },
+    "api/esign.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/esign-teken.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/scan-rapport.js": {
       "maxDuration": 60,
       "memory": 1024,
@@ -417,9 +425,18 @@
     { "source": "/display", "destination": "/display.html" },
     { "source": "/tv",      "destination": "/api/tv" },
     { "source": "/scan",    "destination": "/modules/scan/index.html" },
+    { "source": "/teken",   "destination": "/modules/esign/teken.html" },
     { "source": "/r/:token", "destination": "/api/r/:token" }
   ],
   "headers": [
+    {
+      "source": "/teken",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "no-store" },
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+      ]
+    },
     {
       "source": "/(.*)\\.html",
       "headers": [
