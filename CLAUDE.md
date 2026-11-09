@@ -672,6 +672,21 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   rapportkant (computeBonusOverview: rapport / in definitief rapport / werkelijk uitbetaald), grootboek, verschil +
   afwijkingen (te veel, achter, geen commissie, soort ontbreekt, niet gekoppeld, factuur te veel betaald, traject niet
   omgezet, status loopt achter, vrijgegeven in geen rapport). Lijst 3 nov: docs/commissie/2026-11-03-afwijkingen.md.
+- Incasso-overzicht (2026-11-03) — getoond in het LMS (Administratie › Incasso + cijfers op Weekmeeting), het CRM is
+  de enige bron: machine-route `api/lms-incasso.js` (x-dfo-secret; GET overzicht, POST actie met `actor` {email, naam,
+  rollen} uit hlms_rol). ÉÉN STATUS: de #1957-status (mentor_commissie_incasso); tabel `incasso_trajecten` bewaart enkel
+  voorstel/selectie/afvinklijst/bureau/overgedragen bedrag/volgende check/logboek. FASE = afleiding (`faseVan` in
+  `api/_lib/incasso-traject.js`): geen traject + spoor = Nog te bepalen · traject + actief = Mag naar incasso
+  (aanmaningen LOPEN DOOR) · bij_incasso zonder dossier_verstuurd = Doorgezet (aanmaningen STIL via #1958 + ook de
+  no-reply-herinneringen) · bij_incasso + dossier_verstuurd = Bij incasso (check om de 14 d) · incasso_regeling = Regeling
+  (maandlijst #1958) · traject dicht/afgesloten = Afgesloten (betaald · oninbaar · teruggekomen · niet naar incasso).
+  Vervangt de regel van 9 okt "incasso legt de aanmaanmotor niet stil". Rechten (`RECHTEN`): voorstel = admin/
+  administratie/hoofdmentor; doorzetten/kies_fase/niet_naar_incasso = admin/hoofdmentor; afvinken/gecheckt/regeling/
+  afsluiten = admin/administratie. Minderjarig (customers.date_of_birth of LMS-vlag) → 422. Openstaand = getekende offertes
+  incl. BTW (computeDealTotals) − betaaldBedrag TL (geen creditnota/concept) − GHL (`api/_lib/ghl-betalingen.js`, scope
+  payments/transactions.readonly; null = niet gelezen). Bestaande klanten: NIETS automatisch; ze staan in Nog te bepalen
+  tot Maxim kiest. Onboarding op incasso (zetNaarIncasso) = voorstel (`stelVoorVanuitOnboarding`); terug actief vóór
+  doorzetten sluit het voorstel. Teamleader nooit, geen mail/brief. Migratie docs/sql-migrations/2026-11-03-incasso-trajecten.sql.
 - REKENREGEL MENTORCOMMISSIE (9 nov 2026, Maxim) — één berekening voor rapport, grootboek, mentorzicht en
   controlescherm: `api/_lib/commissie-rekenregel.js` (puur). Elke betaalde factuur van de sale (per betaling met datum:
   payments, anders paid_date) = commissie × betaald / basis, nooit meer dan commissie − max(bevroren rapporten, oud
