@@ -1,15 +1,18 @@
 // api/cron-events-auto-archive.js
 //
-// Dagelijkse cron: archiveert events die >3 dagen voorbij zijn (op basis van
-// coalesce(ends_at, starts_at)) door status van 'published' naar 'archived'
-// te zetten. Doel: het "Gepubliceerd"-tab in modules/events.html toont dan
-// alleen actueel-relevante events; oude events verhuizen automatisch naar
-// het "Gearchiveerd"-tab.
+// Dagelijkse cron: archiveert AFGERONDE events die >3 dagen voorbij zijn (op
+// basis van coalesce(ends_at, starts_at)) door status van 'published' naar
+// 'archived' te zetten. Doel: het "Gepubliceerd"-tab in modules/events.html
+// toont dan alleen actueel-relevante events; oude, afgeronde events verhuizen
+// automatisch naar het "Gearchiveerd"-tab.
 //
 // Regel:
-//   - status='published' EN coalesce(ends_at, starts_at) < now() - 3 dagen
-//   - Al-afgeronde events (completed_at IS NOT NULL) mogen ook mee — die
-//     staan nog op 'published' totdat deze cron ze archiveert. Prima gedrag.
+//   - status='published' EN completed_at IS NOT NULL EN
+//     coalesce(ends_at, starts_at) < now() - 3 dagen
+//   - NIET-afgeronde events (completed_at IS NULL) blijven op 'published',
+//     hoe oud ook, tot ze afgerond zijn. De knop "Event afronden" verschijnt
+//     alleen bij published + niet afgerond; archiveren vóór het afronden liet
+//     events met sales nooit afronden (en dus geen mentorbonus).
 //   - Toekomstige events / events <3 dagen oud blijven op 'published'.
 //   - Cancelled / draft / al-archived worden niet aangeraakt.
 //
@@ -61,6 +64,7 @@ export default async function handler(req, res) {
       .from('events')
       .select('id, title, starts_at, ends_at, status')
       .eq('status', 'published')
+      .not('completed_at', 'is', null) // alleen afgeronde events
       .or(orExpr)
       .order('starts_at', { ascending: true });
 
@@ -81,7 +85,8 @@ export default async function handler(req, res) {
           .from('events')
           .update({ status: 'archived', updated_at: new Date().toISOString() })
           .eq('id', ev.id)
-          .eq('status', 'published'); // race-guard: alleen als 'ie nog published is
+          .eq('status', 'published') // race-guard: alleen als 'ie nog published is
+          .not('completed_at', 'is', null); // ... én nog altijd afgerond
         if (updErr) {
           summary.errors++;
           summary.error_details.push({ id: ev.id, error: updErr.message });
