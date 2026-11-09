@@ -101,6 +101,16 @@ test('controle: een geannuleerde sale (gearchiveerde offerte, zoals Jimco Schepe
   assert.equal(c.rijen.find((r) => r.klant === 'Jimco'), undefined, 'annulatie: niet als afwijking getoond');
 });
 
+test('controle: de betaalmethode staat bij elke factuur van de sale (cashbetaling, 6 nov)', async () => {
+  zet();
+  db.tables.payments = [{ id: 'pay1', invoice_id: 'i1', amount: 400, payment_date: '2026-06-03', payment_method: 'cash', source: 'manual' }];
+  const c = await commissieControle(db.client);
+  const een = c.rijen.find((r) => r.klant === 'Een');
+  const fs = Object.fromEntries(een.facturen.map((f) => [f.id, f.betaalmethode]));
+  assert.equal(fs.i1, 'Contant');
+  assert.equal(fs.i2, 'Teamleader', 'betaald zonder payments-rij = via Teamleader');
+});
+
 // 6 nov 2026 (Maxim): de trajectregels en de rapporten juni–september staan in
 // de database op uitbetaald, maar het scherm meldde "waarvan status nog niet
 // uitbetaald 141,80" en "Uitbetaald, status loopt achter".

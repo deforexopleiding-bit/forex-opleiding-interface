@@ -98,7 +98,7 @@
     const huidig = vandaag().slice(0, 7);
     const rijen = (k.maanden || []).map((m) => `<tr style="${m.maand === huidig ? 'background:var(--accent-soft, rgba(59,130,246,.06))' : ''}">
       <td style="padding-left:24px">${esc(maandLabel(m.maand))}</td>
-      <td>${(m.facturen || []).map((f) => `<div style="font-size:12px">${esc(f.nummer || 'factuur')} · ${eur(f.bedrag)}${f.gecrediteerd ? ' · gecrediteerd' : (f.open > 0.005 ? ` · open ${eur(f.open)} <button class="ds-btn ds-btn-ghost ds-btn-sm" style="margin-left:4px" onclick="event.stopPropagation();__imBetaal('${esc(k.customer_id)}','${esc(f.id)}')">Betaling ontvangen</button>` : ' · betaald')}</div>`).join('') || (m.gepland > 0 ? '<span style="font-size:12px;color:var(--text-3)">nog geen factuur</span>' : '')}</td>
+      <td>${(m.facturen || []).map((f) => `<div style="font-size:12px">${esc(f.nummer || 'factuur')} · ${eur(f.bedrag)}${!f.gecrediteerd && f.betaald > 0.005 && f.betaalmethode ? ` · betaald ${eur(f.betaald)} (${esc(f.betaalmethode)})` : ''}${f.gecrediteerd ? ' · gecrediteerd' : (f.open > 0.005 ? ` · open ${eur(f.open)} <button class="ds-btn ds-btn-ghost ds-btn-sm" style="margin-left:4px" onclick="event.stopPropagation();__imBetaal('${esc(k.customer_id)}','${esc(f.id)}')">Betaling ontvangen</button>` : ' · betaald')}</div>`).join('') || (m.gepland > 0 ? '<span style="font-size:12px;color:var(--text-3)">nog geen factuur</span>' : '')}</td>
       <td class="r mono">${eur(m.verwacht)}</td><td class="r mono">${eur(m.ontvangen)}</td>
       <td class="r mono" style="${m.achterstand > 0 ? 'color:var(--rose)' : ''}">${eur(m.achterstand)}</td><td></td></tr>`).join('');
     return kop + rijen;

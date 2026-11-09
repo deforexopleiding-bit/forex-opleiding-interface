@@ -160,13 +160,17 @@
       if (seq !== _inv.seq) return;
       _inv.data = (j?.items && j.items[0]) || null;
       // Parallel: lines + creditnotes (fail-tolerant)
-      const [linesRes, cnRes] = await Promise.allSettled([
+      const [linesRes, cnRes, payRes] = await Promise.allSettled([
         window.KV.authedJson('/api/finance-invoice-lines?invoice_id=' + encodeURIComponent(id)),
         window.KV.authedJson('/api/finance-invoice-creditnotes?invoice_id=' + encodeURIComponent(id)),
+        window.KV.authedJson('/api/finance-invoice-payments?invoice_id=' + encodeURIComponent(id)),
       ]);
       if (seq !== _inv.seq) return;
       _inv.lines = (linesRes.status === 'fulfilled' && Array.isArray(linesRes.value?.lines)) ? linesRes.value.lines : [];
       _inv.creditNotes = (cnRes.status === 'fulfilled' && Array.isArray(cnRes.value?.credit_notes)) ? cnRes.value.credit_notes : [];
+      // Betalingen + betaalmethode (cashbetaling, 6 nov 2026). Faalzacht.
+      _inv.payments = (payRes.status === 'fulfilled' && Array.isArray(payRes.value?.betalingen)) ? payRes.value.betalingen : [];
+      _inv.paysIngetrokken = (payRes.status === 'fulfilled' && Array.isArray(payRes.value?.ingetrokken)) ? payRes.value.ingetrokken : [];
     } catch (e) {
       if (seq !== _inv.seq) return;
       _inv.error = e?.message || 'load failed';
@@ -229,6 +233,14 @@
     if (inv.due_date)   events.push(`Vervalt op <b>${esc(fmtDate(inv.due_date))}</b>`);
     if (inv.paid_date)  events.push(`Betaald op <b>${esc(fmtDate(inv.paid_date))}</b>`);
     if (Number(inv.paid) > 0 && !inv.paid_date) events.push(`Deels betaald: <b>${eur(inv.paid)}</b>`);
+    for (const p of (_inv.payments || [])) {
+      const pdf = p.cash ? ` <button class="btn btn-ghost btn-sm" onclick="__fnCashPdf('${esc(p.cash.id)}','${esc(p.cash.bewijsnummer)}')">Ontvangstbewijs (PDF)</button>` : '';
+      events.push(`Betaling <b>${eur(p.bedrag)}</b> op ${esc(fmtDate(p.datum))} · <b>${esc(p.methode_label || 'onbekend')}</b>`
+        + (p.cash ? ` · ontvangen door ${esc(p.cash.ontvangen_door)} (${esc(p.cash.bewijsnummer)})<br><span style="color:var(--text-3)">Notitie: ${esc(p.cash.notitie)}${p.cash.teamleader_methode ? '' : ' · betaalmethode niet in Teamleader'}</span>${pdf}` : ''));
+    }
+    for (const x of (_inv.paysIngetrokken || [])) {
+      events.push(`Contante betaling <b>${eur(x.bedrag)}</b> op ${esc(fmtDate(x.datum))} · teruggedraaid (${esc(x.bewijsnummer)}) <button class="btn btn-ghost btn-sm" onclick="__fnCashPdf('${esc(x.id)}','${esc(x.bewijsnummer)}')">Bewijs (PDF)</button>`);
+    }
     for (const cn of _inv.creditNotes) {
       events.push(`Creditnota <b>${esc(cn.number || '—')}</b> op ${esc(fmtDate(cn.date))} · ${eur(cn.amount_total)}`);
     }
@@ -296,6 +308,7 @@
             : `<button class="btn btn-ghost" disabled title="Factuur is nog niet naar TeamLeader gepusht — geen PDF beschikbaar" style="opacity:.5;cursor:not-allowed">📄 PDF (n.v.t.)</button>`}
           ${tlHref ? `<a class="btn btn-ghost" href="${tlHref}" target="_blank" rel="noopener">↗ Open in TL</a>` : ''}
           ${canRegister ? `<button class="btn btn-primary" onclick="__fnInvPay()" title="Handmatige betaling registreren + naar TL synchroniseren">💶 Betaling registreren</button>` : ''}
+          ${canRegister && !volledigGecrediteerd ? `<button class="btn" onclick="__fnInvCash()" title="Contant ontvangen: de factuur blijft staan, niets wordt gecrediteerd">💵 Cashbetaling registreren</button>` : ''}
           ${canRemove ? `<button class="btn" onclick="__fnInvRemovePay()" title="ALLE geregistreerde betalingen terugdraaien in TeamLeader (destructief)" style="background:var(--rose-soft, #FDECEE); border-color:var(--rose-line, #F5C2C9); color:var(--rose, #C22B3E)">↩ Betaling(en) terugdraaien</button>` : ''}
           ${canSend ? `<button class="btn" onclick="__fnInvSend()" title="Factuur per e-mail versturen (mail-template kiezen in modal)">✉ ${isPaid || isCredited ? 'Opnieuw versturen' : 'Verzenden'}</button>` : ''}
           ${canUpdate ? `<button class="btn" onclick="__fnInvUpdate()" title="Concept-factuur aanpassen (regels, PO-nummer, taal)">✎ Aanpassen</button>` : ''}
@@ -604,6 +617,19 @@
       const mod = await import('./modals/invoice-payment.js?v=2');
       mod.openInvoicePaymentModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-payment import fail:', e); window.KV.toast('Kon betaling-modal niet laden'); }
+  };
+  window.__fnInvCash = async function () {
+    const inv = _invOrToast(); if (!inv) return;
+    try {
+      const mod = await import('./modals/invoice-cash.js?v=1');
+      mod.openInvoiceCashModal({ invoice: inv, onSuccess: _refreshInv });
+    } catch (e) { console.error('[fnd] invoice-cash import fail:', e); window.KV.toast('Kon cash-modal niet laden'); }
+  };
+  window.__fnCashPdf = async function (id, nr) {
+    try {
+      const mod = await import('./modals/invoice-cash.js?v=1');
+      mod.downloadOntvangstbewijs(id, nr);
+    } catch (e) { window.KV.toast('Kon ontvangstbewijs niet laden'); }
   };
   window.__fnInvRemovePay = async function () {
     const inv = _invOrToast(); if (!inv) return;

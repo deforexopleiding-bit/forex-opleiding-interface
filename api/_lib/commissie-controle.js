@@ -36,6 +36,7 @@ import {
 } from './commissie-toewijzing.js';
 import { loadRegelingContext, koppelDeal, incassoVoor, incassoStatusVoor, betaaldVoor, isConcept } from './commissie-regeling.js';
 import { betaaldBedrag } from './factuur-betaald.js';
+import { betaalmethodenVan } from './betaalmethode.js';
 import { laadSubsMetSoort } from './subscription-soort.js';
 import { huidigeStatus } from './klant-incassostatus.js';
 import { laadUitbetaaldTot, regelStand } from './commissie-uitbetaald.js';
@@ -121,7 +122,8 @@ export function rekenSale({ parents, kids, facturen, scope, customerId, dealId, 
     werkelijk_uitbetaald: round2(werkelijk), status_uitbetaald: round2(statusUit),
     verschil_status_werkelijkheid: round2(werkelijk - statusUit), vrijgegeven_niet_in_rapport: round2(nietInRapport),
     verschil, incasso_stop: sinds, afwijkingen: [...afw], per_mentor: perMentor,
-    facturen: vanSale.map((i) => ({ id: i.id, nummer: i.invoice_number || null, bedrag: round2(i.amount_total), betaald: round2(betaaldBedrag(i)), status: i.status, due_date: i.due_date || null })),
+    facturen: vanSale.map((i) => ({ id: i.id, nummer: i.invoice_number || null, bedrag: round2(i.amount_total), betaald: round2(betaaldBedrag(i)), status: i.status, due_date: i.due_date || null,
+      betaalmethode: betaalmethodenVan(betalingen.get(i.id) || [], i).label })),
   };
 }
 
@@ -161,13 +163,12 @@ export async function commissieControle(db) {
   const scope = maakSaleScope({ deals, subs, commissieSales: salesPerKlant });
   const facturen = invoices.filter((i) => !isConcept(i));
   for (const inv of facturen) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
+  // Alle betalingen (klein: één rij per geregistreerde betaling). Gebruikt
+  // voor de incassostop (betaaldVoor) en de betaalmethode per factuur.
   const betalingen = new Map();
-  if (regCtx.incasso.length) {
-    const ids = facturen.filter((f) => regCtx.incasso.some((m) => m.customer_id === f.customer_id)).map((f) => f.id);
-    for (const p of ids.length ? await inChunks(ids, (c) => alle(db, 'payments', 'invoice_id, amount, payment_date', (q) => q.in('invoice_id', c))) : []) {
-      if (!betalingen.has(p.invoice_id)) betalingen.set(p.invoice_id, []);
-      betalingen.get(p.invoice_id).push(p);
-    }
+  for (const p of await alle(db, 'payments', 'invoice_id, amount, payment_date, payment_method, source', (q) => q.not('invoice_id', 'is', null))) {
+    if (!betalingen.has(p.invoice_id)) betalingen.set(p.invoice_id, []);
+    betalingen.get(p.invoice_id).push(p);
   }
   const payoutIds = [...new Set([...kids, ...parentsAlle].map((k) => k.payout_id).filter(Boolean))];
   const payouts = payoutIds.length ? await inChunks(payoutIds, (ids) => alle(db, 'mentor_payouts', 'id, status, period_month', (q) => q.in('id', ids))) : [];

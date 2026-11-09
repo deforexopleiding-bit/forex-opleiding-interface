@@ -937,7 +937,7 @@
         const detail = open ? `<tr><td colspan="11" style="background:var(--surface-2);font-size:12px">
           ${r.uitleg ? `<div style="margin-bottom:6px">${esc(r.uitleg)}</div>` : ''}
           ${asArr(r.per_mentor).length ? `<div><b>Per mentor:</b> ${asArr(r.per_mentor).map((m) => `${esc(m.mentor_user_id)} — commissie ${eur(m.commissie)}, zou ${eur(m.doel)}, vrij ${eur(m.vrijgegeven)}, uitbetaald ${eur(m.werkelijk_uitbetaald)}`).join(' · ')}</div>` : ''}
-          ${asArr(r.facturen).length ? `<div style="margin-top:4px"><b>Facturen van de sale:</b> ${asArr(r.facturen).map((f) => `${esc(f.nummer || '—')} ${eur(f.bedrag)} (betaald ${eur(f.betaald)}, ${esc(f.status)})`).join(' · ')}</div>` : '<div style="margin-top:4px">Geen facturen bij deze sale.</div>'}
+          ${asArr(r.facturen).length ? `<div style="margin-top:4px"><b>Facturen van de sale:</b> ${asArr(r.facturen).map((f) => `${esc(f.nummer || '—')} ${eur(f.bedrag)} (betaald ${eur(f.betaald)}${f.betaalmethode ? ' · ' + esc(f.betaalmethode) : ''}, ${esc(f.status)})`).join(' · ')}</div>` : '<div style="margin-top:4px">Geen facturen bij deze sale.</div>'}
           ${r.incasso_stop ? `<div style="margin-top:4px">Incasso: betalingen vanaf ${esc(r.incasso_stop)} tellen niet (stilstand).</div>` : ''}
         </td></tr>` : '';
         return `<tr style="cursor:pointer" onclick="window.__commCtrlOpen('${esc(r.sleutel)}')">
