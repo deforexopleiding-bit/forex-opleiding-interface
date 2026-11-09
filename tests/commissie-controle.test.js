@@ -76,9 +76,17 @@ test('controle: zou moeten zijn, grootboek achter, te veel vrijgegeven, sale zon
   assert.equal(per.Een.vrijgegeven, 0);
   assert.ok(per.Een.afwijkingen.includes('achter'));
 
-  assert.equal(per.Paul.zou_moeten_zijn, 12, '126 × 400 / 4200');
+  // Rekenregel 9 nov 2026: zou moeten zijn = wat het rapport uitkeert of zal
+  // uitkeren. 45,80 zat al in het junirapport (bevroren); de factuur van juni
+  // (open maand) geeft 126 × 400 / 4200 = 12, volledig verrekend met dat
+  // voorschot → 0 nieuw. Grootboek open maanden: 45,80 (regel van oktober,
+  // in geen rapport) tegenover 0 stukken → 45,80 te veel.
+  assert.equal(per.Paul.zou_moeten_zijn, 45.8);
   assert.equal(per.Paul.vrijgegeven, 91.6);
-  assert.equal(per.Paul.verschil, 79.6);
+  assert.equal(per.Paul.grootboek_open, 45.8);
+  assert.equal(per.Paul.stukken_open, 0);
+  assert.equal(per.Paul.verschil, 45.8);
+  assert.equal(per.Paul.bevroren_verschil, 0, 'afgesloten maanden: grootboek = rapport');
   assert.ok(per.Paul.afwijkingen.includes('te_veel_vrijgegeven'));
   assert.ok(per.Paul.afwijkingen.includes('vrijgegeven_niet_in_rapport'), 'de termijn zonder rapport wordt apart gemeld');
   assert.equal(per.Paul.vrijgegeven_niet_in_rapport, 45.8);

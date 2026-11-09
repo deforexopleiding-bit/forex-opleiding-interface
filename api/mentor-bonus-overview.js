@@ -47,6 +47,7 @@ import { betaaldBedrag, openBedrag, telAlsBetaald, isVolledigGecrediteerd } from
 import { requirePermission } from './_lib/requirePermission.js';
 import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.js';
 import { isTrajectTermKey, maakVerrekenaar } from './_lib/cash-traject-omzetten.js';
+import { rekenSaleCommissie, isStukSleutel } from './_lib/commissie-rekenregel.js';
 import { laadSubsMetSoort } from './_lib/subscription-soort.js';
 import { mentorLabel, statusVan } from './_lib/klant-incassostatus.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
@@ -155,6 +156,10 @@ export async function computeBonusOverview(effectiveUserId) {
     //    zitten, gaan NIET alsnog naar een rapport (enkel een betaalde factuur
     //    geeft commissie): apart getoond, beslissing Maxim.
     const trajectRegelsByParent = new Map(); // parent_id -> { totaal, status_uitbetaald, niet_in_rapport, perMaand: Map<ym, bedrag> }
+    // Rekenregel 9 nov 2026: alle vrijgegeven/uitbetaalde children per parent
+    // (sleutel + maand), om oude vrijgaven in afgesloten maanden te scheiden
+    // van de stukken van de nieuwe regel (commissie-rekenregel.js).
+    const kidsByParent = new Map(); // parent_id -> [{ idempotency_key, amount, status, released_at, payout_id }]
     if (rows.length > 0) {
       const parentIds = rows.map((r) => r.id);
       const { data: kids, error: kidsErr } = await supabaseAdmin
@@ -165,6 +170,8 @@ export async function computeBonusOverview(effectiveUserId) {
       if (kidsErr) throw new Error('children fetch: ' + kidsErr.message);
       for (const c of (kids || [])) {
         if (!c.parent_entry_id) continue;
+        if (!kidsByParent.has(c.parent_entry_id)) kidsByParent.set(c.parent_entry_id, []);
+        kidsByParent.get(c.parent_entry_id).push(c);
         const cur = releasedByParent.get(c.parent_entry_id) || 0;
         releasedByParent.set(c.parent_entry_id, cur + (Number(c.amount) || 0));
         if (isTrajectTermKey(c.idempotency_key)) {
@@ -469,6 +476,7 @@ export async function computeBonusOverview(effectiveUserId) {
       for (const arr of invoicesByCust.values()) for (const inv of arr) inv._k = koppelDeal(inv, regCtx, salesPerKlant);
     }
     const addMonthsIso = (iso, n) => addMonths(new Date(String(iso).slice(0, 10) + 'T00:00:00Z'), n).toISOString().slice(0, 10);
+    const ym7 = (d) => String(d).slice(0, 7);
 
     // Elke sale (event of toewijzing) ziet alleen de facturen van zijn eigen
     // sale — nooit klantbreed (PR 2, 3 nov 2026). Zelfde regel als de
@@ -1009,6 +1017,14 @@ export async function computeBonusOverview(effectiveUserId) {
       // Vrijgegeven zoals het payout-rapport het ziet: betaalde termijnen die
       // in een maand tellen (projection paid) + inhaal (via correctie).
       let vrijRapport = 0;
+      // Rekenregel 9 nov 2026 (commissie-rekenregel.js): wat al in een
+      // afgesloten maand zat, blijft exact zoals het was (bevroren); al de
+      // rest rekent de nieuwe regel per factuur. voorOpen = wat de OUDE
+      // termijnberekening in open maanden gaf (vergelijking voor/na).
+      const bevrorenIds = new Set();
+      let bevrorenBedrag = 0;
+      let bevrorenVerrekend = 0;
+      const voorOpen = new Map();
 
       const termijnen = [];
       for (let i = 0; i < termRows.length; i++) {
@@ -1066,11 +1082,26 @@ export async function computeBonusOverview(effectiveUserId) {
             plaats.inhaal = false;
           }
         }
-        if (!schemaUnknown && isPaidTerm && tStatus !== 'incasso' && (plaats.telt || plaats.inhaal)) {
-          vrijRapport = round2(vrijRapport + telBedrag);
-        }
         const inhaalToken = invForTerm?.id || `${r.id}:${i + 1}`;
         const voorgesteld = plaats.inhaal ? (inhaalVoorgesteld.get(inhaalToken) || null) : null;
+        // Bevroren = zat al in een definitief rapport, of betaald in een maand
+        // die al afgesloten is. Alleen die termijnen houdt deze oude berekening.
+        const bevrorenT = !schemaUnknown && isPaidTerm && !isCreditedTerm
+          && (!!plaats.uitbetaald_in || afsluiting.gesloten(plaats.maand));
+        if (!bevrorenT) {
+          if (!schemaUnknown && isPaidTerm && plaats.telt && tStatus !== 'incasso' && telBedrag > 0) {
+            voorOpen.set(plaats.maand, round2((voorOpen.get(plaats.maand) || 0) + telBedrag));
+          }
+          continue;
+        }
+        if (invForTerm?.id) bevrorenIds.add(invForTerm.id);
+        if (verrekendHier > 0) bevrorenVerrekend = round2(bevrorenVerrekend + verrekendHier);
+        // Inhaal (betaald in een afgesloten maand, in geen rapport): geen
+        // correctie meer (beslissing 9 nov 2026) — telt enkel als er al één
+        // voorgesteld/geboekt werd.
+        const teltBevroren = tStatus !== 'incasso' && (plaats.telt || !!voorgesteld);
+        if (teltBevroren) bevrorenBedrag = round2(bevrorenBedrag + telBedrag);
+        if (teltBevroren) vrijRapport = round2(vrijRapport + telBedrag);
 
         termijnen.push({
           index   : i + 1,
@@ -1085,8 +1116,9 @@ export async function computeBonusOverview(effectiveUserId) {
           achterstallig_sinds: tStatus === 'incasso' ? null : plaats.achterstallig_sinds,
           ...(row.vervangen ? { vervangen: true } : {}),
           ...(row.gepland ? { gepland: true } : {}),
+          bevroren: true,
         });
-        if (!schemaUnknown && telBedrag > 0 && !isCancelled && tStatus !== 'incasso' && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
+        if (!schemaUnknown && telBedrag > 0 && !isCancelled && tStatus !== 'incasso' && (!plaats.inhaal || voorgesteld) && (plaats.verschoven || plaats.inhaal || tStatus === 'achterstallig')) {
           const custObj = r.customer_id ? customerById.get(r.customer_id) : null;
           const rapport = afsluiting.rapportVoor(plaats.maand);
           verschoven.push({
@@ -1144,6 +1176,95 @@ export async function computeBonusOverview(effectiveUserId) {
           }
         }
       }
+
+      // ── Rekenregel 9 nov 2026: elke factuur van de sale die in een OPEN
+      // maand betaald wordt, geeft commissie × betaald / basis, nooit meer dan
+      // de commissie min wat al vrijgegeven of uitbetaald is. Verwacht = de
+      // open facturen + geplande termijnen, met dezelfde regel. Het grootboek
+      // (factuurmotor) schrijft exact deze stukken (vrijgave_stukken).
+      let nieuw = null;
+      let legacyAfgesloten = 0;
+      if (!isCancelled && mentorAmount > 0) {
+        const kidsR = kidsByParent.get(r.id) || [];
+        const teltKid = (k) => ['vrijgegeven', 'uitbetaald'].includes(k.status);
+        legacyAfgesloten = (r.status === 'vrijgegeven' || r.status === 'uitbetaald') ? mentorAmount
+          : round2(kidsR.filter((k) => teltKid(k) && !isStukSleutel(k.idempotency_key)
+            && afsluiting.gesloten(k.released_at ? String(k.released_at).slice(0, 7) : null))
+            .reduce((t, k) => t + (Number(k.amount) || 0), 0));
+        nieuw = rekenSaleCommissie({
+          commissie: mentorAmount, basis,
+          facturen: (invListCust && invListCust.length) ? invListCust : (invList || []),
+          betalingen: betalingenPerFactuur,
+          subs: eigenDeal ? saleScope.subsVan(eigenDeal) : [],
+          afsluiting, vandaag: todayISO, incassoSinds: sindsI,
+          bevrorenFacturen: bevrorenIds,
+          bevrorenBedrag: round2(bevrorenBedrag + (trajectRegels ? trajectRegels.totaal : 0)),
+          legacyAfgesloten,
+          voorschot: trajectRegels ? Math.max(0, round2(trajectRegels.totaal - bevrorenVerrekend)) : 0,
+          perTermijnIncl: inclPerTerm, cyclusMaanden: billingCycleMonths, addMonthsIso,
+        });
+        const custObjN = r.customer_id ? customerById.get(r.customer_id) : null;
+        for (const t of nieuw.termijnen) {
+          const idx = termijnen.length + 1;
+          termijnen.push({
+            index: idx, due_date: t.due_date, amount: t.amount, status: t.status,
+            ...(t.verrekend > 0 ? { verrekend: t.verrekend } : {}),
+            betaald_op: t.betaald_op || null, maand: t.maand, uitbetaald_in: null, inhaal: false,
+            achterstallig_sinds: t.achterstallig_sinds || null,
+            ...(t.gepland ? { gepland: true } : {}),
+            ...(t.vervangen ? { vervangen: true } : {}),
+            invoice_id: t.invoice_id || null, factuur_nummer: t.factuur_nummer || null, regel: 'factuur',
+            ...(t.uitleg ? { uitleg: t.uitleg } : {}),
+          });
+          if (!(t.amount > 0)) continue;
+          const k = t.maand;
+          const isPaidN = t.status === 'betaald';
+          if (isPaidN) {
+            vrijRapport = round2(vrijRapport + t.amount);
+            if (monthPaid.has(k)) monthPaid.set(k, round2((monthPaid.get(k) || 0) + t.amount));
+          } else {
+            open_total += t.amount;
+            if (monthOpen.has(k)) monthOpen.set(k, round2((monthOpen.get(k) || 0) + t.amount));
+            if (t.status === 'achterstallig' && monthOpen.has(k)) monthAchterstallig.set(k, round2((monthAchterstallig.get(k) || 0) + t.amount));
+          }
+          if (monthAmount.has(k)) {
+            monthAmount.set(k, round2((monthAmount.get(k) || 0) + t.amount));
+            if (!monthBreakdown.has(k)) monthBreakdown.set(k, []);
+            monthBreakdown.get(k).push({
+              label: customerLabel(custObjN), term: idx, amount: round2(t.amount),
+              status: isPaidN ? 'betaald' : (t.status === 'achterstallig' ? 'achterstallig' : 'verwacht'),
+              ...(t.status === 'achterstallig' ? { achterstallig_sinds: t.achterstallig_sinds } : {}),
+              ...(isPaidN && t.due_date && ym7(t.due_date) !== k ? { vervaldag: t.due_date } : {}),
+            });
+          }
+          if ((isPaidN && t.due_date && ym7(t.due_date) !== k) || t.status === 'achterstallig') {
+            const rapport = afsluiting.rapportVoor(k);
+            verschoven.push({
+              klant: customerLabel(custObjN), customer_id: r.customer_id || null,
+              bron: attrId ? 'handmatig' : 'event', event_id: attrId ? null : (r.event_id || null), attribution_id: attrId || null,
+              index: idx, term_count: termCount, due_date: t.due_date, status: t.status, betaald_op: t.betaald_op || null,
+              maand: k, uitbetaald_in: null, rapport_periode: addYm(k, 1), rapport_status: rapport?.status || null,
+              inhaal: false, inhaal_token: null, inhaal_voorstel_periode: null, inhaal_voorgesteld: null,
+              achterstallig_sinds: t.achterstallig_sinds || null, amount: t.amount,
+            });
+          }
+        }
+      }
+      // Vergelijking voor/na voor de open maanden (t/m deze maand): de oude
+      // termijnberekening tegenover de rekenregel.
+      const vergelijkingOpen = [];
+      {
+        const naMaand = new Map();
+        for (const st of (nieuw ? nieuw.stukken : [])) naMaand.set(st.maand, round2((naMaand.get(st.maand) || 0) + st.bedrag));
+        const maanden = [...new Set([...voorOpen.keys(), ...naMaand.keys()])].filter((m) => m && m <= thisYm && !afsluiting.gesloten(m)).sort();
+        for (const m of maanden) vergelijkingOpen.push({ maand: m, voor: round2(voorOpen.get(m) || 0), na: round2(naMaand.get(m) || 0) });
+      }
+      const vrijgaveStukken = nieuw ? nieuw.stukken.map((st) => ({ ...st, parent_id: r.id })) : [];
+      const regelInfo = nieuw ? {
+        bevroren: round2(bevrorenBedrag + (trajectRegels ? trajectRegels.totaal : 0)),
+        grootboek_afgesloten: legacyAfgesloten, ruimte: nieuw.ruimte,
+        nieuw_betaald: nieuw.nieuw_betaald, nieuw_verwacht: nieuw.nieuw_verwacht,
+      } : null;
 
       // Status-afleiding voor UI-badges.
       //   schema_unknown          → 'geen_abonnement'
@@ -1233,7 +1354,12 @@ export async function computeBonusOverview(effectiveUserId) {
           // Eén getal "vrijgegeven" = wat in het rapport komt (zie vrijRapport).
           // released_share blijft het grootboek (audit).
           // Zonder schema rekent het rapport niets; dan het grootboek.
-          vrijgegeven_rapport: round2(schemaUnknown ? entryReleased : (vrijRapport + (trajectRegels ? trajectRegels.totaal : 0))),
+          // Rekenregel 9 nov 2026: bevroren (afgesloten maanden) + de stukken
+          // van de nieuwe regel — ook zonder abonnement (de facturen tellen).
+          vrijgegeven_rapport: round2(vrijRapport + (trajectRegels ? trajectRegels.totaal : 0)),
+          vrijgave_stukken   : vrijgaveStukken,
+          vergelijking_open  : vergelijkingOpen,
+          rekenregel         : regelInfo,
           // Omgezet traject: al vrijgegeven via de oude termijnregels en het
           // deel daarvan dat nog niet door betalingen ingehaald is.
           verrekening        : trajectRegels ? { reeds_in_rapport: trajectRegels.totaal, reeds_status_uitbetaald: trajectRegels.status_uitbetaald, ingehaald: verrekendTotaal, nog_te_verrekenen: verrekenaar.rest(), vrijgegeven_niet_in_rapport: trajectRegels.niet_in_rapport } : null,
@@ -1272,7 +1398,13 @@ export async function computeBonusOverview(effectiveUserId) {
         const cell = evNode._sales.get(saleKey);
         cell.mentor_share_total = round2(cell.mentor_share_total + mentorAmount);
         cell.released_share     = round2((cell.released_share || 0) + entryReleased);
-        cell.vrijgegeven_rapport = round2((cell.vrijgegeven_rapport || 0) + (schemaUnknown ? entryReleased : (vrijRapport + (trajectRegels ? trajectRegels.totaal : 0))));
+        cell.vrijgegeven_rapport = round2((cell.vrijgegeven_rapport || 0) + vrijRapport + (trajectRegels ? trajectRegels.totaal : 0));
+        cell.vrijgave_stukken = [...(cell.vrijgave_stukken || []), ...vrijgaveStukken];
+        for (const v of vergelijkingOpen) {
+          const bestaand = (cell.vergelijking_open || []).find((x) => x.maand === v.maand);
+          if (bestaand) { bestaand.voor = round2(bestaand.voor + v.voor); bestaand.na = round2(bestaand.na + v.na); }
+          else (cell.vergelijking_open ||= []).push({ ...v });
+        }
         if (sindsI) {
           cell.incasso = { sinds: sindsI, vervallen: round2((cell.incasso?.vervallen || 0) + vervallen) };
         }
@@ -1369,9 +1501,11 @@ export async function computeBonusOverview(effectiveUserId) {
       // Maand van betaling (2026-10-22): termijnen die niet in hun vervalmaand
       // tellen + inhaalcommissie (betaald in een al gesloten maand).
       verschoven: verschoven.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date))),
-      inhaal: verschoven.filter((v) => v.inhaal),
+      // Geen inhaal/correcties meer (beslissing 9 nov 2026): enkel wat al
+      // voorgesteld/geboekt werd, blijft zichtbaar.
+      inhaal: verschoven.filter((v) => v.inhaal && v.inhaal_voorgesteld),
       achterstallig_totaal: round2(verschoven.filter((v) => v.status === 'achterstallig').reduce((t, v) => t + v.amount, 0)),
-      inhaal_totaal: round2(verschoven.filter((v) => v.inhaal && !v.inhaal_voorgesteld).reduce((t, v) => t + v.amount, 0)),
+      inhaal_totaal: 0,
       laatste_gesloten_maand: afsluiting.laatsteGesloten,
       volgend_rapport: volgendRapport,
     };

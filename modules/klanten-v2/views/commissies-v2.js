@@ -349,7 +349,7 @@
 
   function saleDetail(s) {
     const termijnen = asArr(s.termijnen);
-    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'], incasso: ['danger', 'Incasso — staat stil'] };
+    const TS = { betaald: ['ok', 'Betaald'], open: ['neutral', 'Open'], achterstallig: ['danger', 'Achterstallig'], gecrediteerd: ['neutral', 'Gecrediteerd'], incasso: ['danger', 'Incasso — staat stil'], verrekend: ['neutral', 'Verrekend'], afgesloten: ['neutral', 'Afgesloten maand — geen inhaal'] };
     const tabel = termijnen.length ? `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Vervaldatum</th><th>Status</th><th class="num">Commissie (alle mentoren)</th></tr></thead><tbody>
       ${termijnen.map((t) => { const m = TS[t.status] || TS.open; return `<tr><td class="mono">${t.index}</td><td>${esc(fmtDate(t.due_date))}</td><td>${H.pill(m[0], m[1])}${t.vervangen ? ' <span style="font-size:11px;color:var(--text-3)">→ vervangen door regeling</span>' : ''}</td><td class="num mono">${eur(t.aandeel)}</td></tr>`; }).join('')}
       </tbody></table></div>` : '<div style="font-size:12.5px;color:var(--text-3)">Geen termijnschema bekend.</div>';
@@ -694,7 +694,7 @@
         <td>${esc(fmtDate(v.due_date))}</td>
         <td style="font-size:12px">${v.inhaal ? H.pill('violet', 'Inhaal', true) + ' ' : v.status === 'achterstallig' ? H.pill('warn', 'Achterstallig', true) + ' ' : H.pill('ok', 'Later betaald', true) + ' '}${verschovenTekst(v)}</td>
         <td class="num mono">${eur(v.amount)}</td>
-        <td>${v.inhaal && !v.inhaal_voorgesteld && isAdmin() ? `<button class="btn btn-ghost btn-sm" onclick="window.__commInhaalOpen(${rijen.indexOf(v)})">Correctie voorstellen</button>` : ''}</td>
+        <td></td>
       </tr>`).join('')}
       </tbody></table></div>`;
     _st._verschovenRijen = rijen;
@@ -929,9 +929,15 @@
       <input style="${selectStijl}" placeholder="Zoek klant, event of mentor" value="${esc(c.zoek || '')}" onchange="window.__commCtrl('zoek', this.value)">
       <button class="btn btn-ghost btn-sm" onclick="window.__commCtrlVernieuw()">↻ Vernieuwen</button>
     </div>
-    <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">${t.sales || 0} sales · ${t.met_afwijking || 0} met afwijking · zou moeten zijn ${eur(t.zou_moeten_zijn)} · rapport ${eur(t.rapport_vrijgegeven)} (definitief ${eur(t.in_definitief_rapport)}) · grootboek ${eur(t.vrijgegeven)} (te veel ${eur(t.te_veel_vrijgegeven)}, achter ${eur(t.achter)}) · werkelijk uitbetaald ${eur(t.werkelijk_uitbetaald)}, waarvan status nog niet uitbetaald ${eur(t.verschil_status_werkelijkheid)} (rapporten t/m ${esc(String(c.data.uitbetaald_tot || '').slice(0, 7))}) · vrijgegeven in geen rapport ${eur(t.vrijgegeven_niet_in_rapport)}. Alleen lezen — er wordt niets aangepast.</div>`;
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">${t.sales || 0} sales · ${t.met_afwijking || 0} met afwijking · zou moeten zijn ${eur(t.zou_moeten_zijn)} · rapport ${eur(t.rapport_vrijgegeven)} (definitief ${eur(t.in_definitief_rapport)}) · grootboek ${eur(t.vrijgegeven)} (te veel ${eur(t.te_veel_vrijgegeven)}, achter ${eur(t.achter)}) · werkelijk uitbetaald ${eur(t.werkelijk_uitbetaald)}, waarvan status nog niet uitbetaald ${eur(t.verschil_status_werkelijkheid)} (rapporten t/m ${esc(String(c.data.uitbetaald_tot || '').slice(0, 7))}) · vrijgegeven in geen rapport ${eur(t.vrijgegeven_niet_in_rapport)} · bevroren verschil afgesloten maanden ${eur(t.bevroren_verschil)}. Alleen lezen — er wordt niets aangepast.</div>
+    <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Rekenregel (9 nov 2026): elke betaalde factuur van de sale = commissie × betaald / basis, nooit meer dan de commissie min wat al vrijgegeven of uitbetaald is. Rapport, grootboek, mentorzicht en dit scherm rekenen hetzelfde. Afgesloten maanden blijven exact zoals ze zijn (geen inhaal, geen correcties): hun verschil met het grootboek staat apart als "bevroren".</div>
+    ${asArr(c.data.vergelijking_open).length ? `<div style="border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;max-width:640px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">Open maanden: oude termijnberekening tegenover de rekenregel</div>
+      <table class="tbl" style="width:100%;font-size:12.5px"><thead><tr><th>Bonusmaand</th><th class="r">Voor (vast termijnbedrag)</th><th class="r">Na (rekenregel)</th><th class="r">Verschil</th></tr></thead>
+      <tbody>${asArr(c.data.vergelijking_open).map((v) => `<tr><td>${esc(fmtYm(v.maand, true))}</td><td class="r mono">${eur(v.voor)}</td><td class="r mono">${eur(v.na)}</td><td class="r mono" style="color:${v.verschil < -0.005 ? 'var(--amber)' : (v.verschil > 0.005 ? 'var(--emerald)' : 'inherit')}">${eur(v.verschil)}</td></tr>`).join('')}</tbody></table>
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Wat in het rapport van die maand komt (betaalde facturen), over alle sales. Per sale: open de rij.</div></div>` : ''}`;
     const tabel = `<div style="overflow-x:auto"><table class="tbl" style="width:100%;font-size:12.5px">
-      <thead><tr><th>Klant</th><th>Event / bron</th><th>Mentoren</th><th>Klantstatus</th><th class="r">Betaald</th><th class="r">Zou moeten zijn</th><th class="r" title="Wat het mentorrapport voor deze sale uitkeert of zal uitkeren; daaronder het deel in een definitief rapport">Rapport</th><th class="r">Werkelijk uitbetaald</th><th class="r" title="Vrijgegeven in het grootboek (audit)">Grootboek</th><th class="r" title="Grootboek − zou moeten zijn">Verschil</th><th>Afwijkingen</th></tr></thead>
+      <thead><tr><th>Klant</th><th>Event / bron</th><th>Mentoren</th><th>Klantstatus</th><th class="r">Betaald</th><th class="r">Zou moeten zijn</th><th class="r" title="Wat het mentorrapport voor deze sale uitkeert of zal uitkeren; daaronder het deel in een definitief rapport">Rapport</th><th class="r">Werkelijk uitbetaald</th><th class="r" title="Vrijgegeven in het grootboek (audit); daaronder het deel in open maanden">Grootboek</th><th class="r" title="Grootboek in open maanden − de stukken van de rekenregel (te veel wordt verrekend; achter = de motor moet nog draaien)">Verschil</th><th>Afwijkingen</th></tr></thead>
       <tbody>${rijen.map((r) => {
         const open = c.open === r.sleutel;
         const detail = open ? `<tr><td colspan="11" style="background:var(--surface-2);font-size:12px">
@@ -939,6 +945,8 @@
           ${asArr(r.per_mentor).length ? `<div><b>Per mentor:</b> ${asArr(r.per_mentor).map((m) => `${esc(m.mentor_user_id)} — commissie ${eur(m.commissie)}, zou ${eur(m.doel)}, vrij ${eur(m.vrijgegeven)}, uitbetaald ${eur(m.werkelijk_uitbetaald)}`).join(' · ')}</div>` : ''}
           ${asArr(r.facturen).length ? `<div style="margin-top:4px"><b>Facturen van de sale:</b> ${asArr(r.facturen).map((f) => `${esc(f.nummer || '—')} ${eur(f.bedrag)} (betaald ${eur(f.betaald)}${f.betaalmethode ? ' · ' + esc(f.betaalmethode) : ''}, ${esc(f.status)})`).join(' · ')}</div>` : '<div style="margin-top:4px">Geen facturen bij deze sale.</div>'}
           ${r.incasso_stop ? `<div style="margin-top:4px">Incasso: betalingen vanaf ${esc(r.incasso_stop)} tellen niet (stilstand).</div>` : ''}
+          ${r.stukken_open != null ? `<div style="margin-top:4px"><b>Rekenregel:</b> bevroren (afgesloten rapporten) ${eur(r.bevroren)} · stukken open maanden ${eur(r.stukken_open)} · grootboek open maanden ${eur(r.grootboek_open)} · grootboek afgesloten maanden ${eur(r.grootboek_afgesloten)}${Math.abs(r.bevroren_verschil || 0) > 0.005 ? ` (bevroren verschil ${eur(r.bevroren_verschil)}, geen correctie)` : ''}</div>` : ''}
+          ${asArr(r.vergelijking_open).length ? `<div style="margin-top:4px"><b>Voor/na open maanden:</b> ${asArr(r.vergelijking_open).map((v) => `${esc(fmtYm(v.maand, true))} ${eur(v.voor)} → ${eur(v.na)}`).join(' · ')}</div>` : ''}
         </td></tr>` : '';
         return `<tr style="cursor:pointer" onclick="window.__commCtrlOpen('${esc(r.sleutel)}')">
           <td><b>${esc(r.klant)}</b>${r.geannuleerd ? ' <span style="font-size:11px;color:var(--text-3)">geannuleerd</span>' : ''}</td>
@@ -949,7 +957,7 @@
           <td class="r mono">${n(r.zou_moeten_zijn)}</td>
           <td class="r mono">${n(r.rapport_vrijgegeven)}<div style="font-size:10.5px;color:var(--text-3)">definitief ${n(r.in_definitief_rapport)}</div></td>
           <td class="r mono">${n(r.werkelijk_uitbetaald)}${r.verschil_status_werkelijkheid > 0.005 ? `<div style="font-size:10.5px;color:var(--amber)">status: ${eur(r.rapport_status_uitbetaald ?? r.status_uitbetaald)}</div>` : ''}</td>
-          <td class="r mono">${n(r.vrijgegeven)}</td>
+          <td class="r mono">${n(r.vrijgegeven)}${r.grootboek_open != null ? `<div style="font-size:10.5px;color:var(--text-3)">open ${n(r.grootboek_open)}</div>` : ''}</td>
           <td class="r mono" style="${(r.verschil || 0) > 0.005 ? 'color:var(--rose);font-weight:700' : ((r.verschil || 0) < -0.005 ? 'color:var(--amber)' : '')}">${r.verschil == null ? '—' : eur(r.verschil)}</td>
           <td>${pills(r)}</td></tr>${detail}`;
       }).join('') || '<tr><td colspan="11" style="padding:16px;color:var(--text-3)">Geen sales met deze filter.</td></tr>'}</tbody></table></div>`;

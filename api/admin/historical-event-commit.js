@@ -15,7 +15,7 @@
 
 import { verifyAdmin, supabaseAdmin } from '../supabase.js';
 import { runEventsCompleteCore } from '../_lib/events-complete-core.js';
-import { releaseProportionalForPaidInvoices } from '../_lib/mentor-ledger-engine.js';
+import { releaseProportionalForPaidAmount } from '../_lib/mentor-ledger-engine.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -168,7 +168,8 @@ export default async function handler(req, res) {
 
     for (const cid of uniqCustomerIds) {
       try {
-        const r = await releaseProportionalForPaidInvoices({ customerId: cid, dryRun: false });
+        // Rekenregel 9 nov 2026: dezelfde factuurmotor als overal.
+        const r = await releaseProportionalForPaidAmount({ customerId: cid, dryRun: false });
         releaseReport.push({
           customer_id      : cid,
           ok               : true,

@@ -59,10 +59,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "mode moet 'terms' of 'amount' zijn" });
   }
   const mode = modeRaw;
-  const releaseFn = mode === 'amount'
-    ? releaseProportionalForPaidAmount
-    : releaseProportionalForPaidInvoices;
-  const sliceField = mode === 'amount' ? 'te_releasen' : 'slice_amount';
+  // Rekenregel 9 nov 2026: er is nog maar één factuurmotor. 'terms' (vaste
+  // 1/N-termijnen) schrijft niet meer naar het grootboek — beide modi lopen
+  // via releaseProportionalForPaidAmount (commissie × betaald / basis, enkel
+  // open maanden, idempotent).
+  void releaseProportionalForPaidInvoices;
+  const releaseFn = releaseProportionalForPaidAmount;
+  const sliceField = 'te_releasen';
 
   try {
     // 1) Verzamel unieke customer_ids uit parent-obligaties (bonus, geen

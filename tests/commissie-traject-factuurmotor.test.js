@@ -23,7 +23,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const url = (p) => pathToFileURL(join(ROOT, p)).href;
 
 const db = maakNepDb();
-mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client } });
+mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
 const core = await import(url('api/_lib/mentor-cash-release-core.js'));
 const omz = await import(url('api/_lib/cash-traject-omzetten.js'));
 const engine = await import(url('api/_lib/mentor-ledger-engine.js'));
@@ -164,19 +164,32 @@ test('factuurmotor na omzetten: niets vrij zolang te veel vrijgegeven (verrekeni
   assert.equal(s.mentor_entries_count, 0);
 });
 
-test('factuurmotor na omzetten: zodra de betalingen het inhalen, precies het verschil — en nooit dubbel', async () => {
-  // 3200 betaald → doel 108 × 3200/7200 = 48 per mentor; reeds 42 → 6 erbij.
+test('rekenregel 9 nov: open maanden = commissie × betaald / basis min het voorschot; afgesloten maand geen inhaal; nooit dubbel', async () => {
+  // 8 × 400 betaald: i-1 in mei (afgesloten — rapporten jun–sep definitief), 7 in okt/nov (open).
+  // Open: 7 × (108 × 400/7200) = 42 per mentor; voorschot = oude regels in rapporten (4 × 6 = 24) → 18.
+  // De oude regels 5–7 (18, in geen rapport) dekken die 18 al: geen nieuwe grootboekregel.
   basis({ facturen: [factuur('i-1', 400), ...Array.from({ length: 7 }, (_, i) => factuur(`i-${i + 2}`, 400, { paid_date: `2026-1${i % 2}-0${i + 1}` }))] });
   await omz.omzetTraject({ trajectId: T, customerId: K, dealId: D, dryRun: false });
   const r1 = await engine.releaseProportionalForPaidAmount({ customerId: K });
-  assert.equal(r1.total_released, 12, '2 mentoren × 6');
+  assert.equal(r1.total_released, 0, 'oude vrijgaven in open maanden worden eerst verrekend');
   for (const uid of [SEPPE, DANNY]) {
     const p = L().find((e) => e.idempotency_key === omz.saleParentKey(T, uid));
     const vrij = L().filter((e) => e.parent_entry_id === p.id).reduce((s, e) => s + Number(e.amount), 0);
-    assert.equal(Math.round(vrij * 100) / 100, 48, 'reeds 42 + 6 = doel 48, niet meer');
+    assert.equal(Math.round(vrij * 100) / 100, 42, 'grootboek = 24 in rapporten + 18 open = wat de rekenregel geeft');
   }
   const r2 = await engine.releaseProportionalForPaidAmount({ customerId: K });
   assert.equal(r2.total_released, 0, 'tweede run: niets dubbel');
+});
+
+test('rekenregel 9 nov: zijn de oude regels zonder rapport geannuleerd (zoals in productie), dan geeft de motor precies 18 per mentor — één keer', async () => {
+  basis({ facturen: [factuur('i-1', 400), ...Array.from({ length: 7 }, (_, i) => factuur(`i-${i + 2}`, 400, { paid_date: `2026-1${i % 2}-0${i + 1}` }))] });
+  for (const e of L()) if (!e.payout_id) e.status = 'geannuleerd';
+  await omz.omzetTraject({ trajectId: T, customerId: K, dealId: D, dryRun: false });
+  const r1 = await engine.releaseProportionalForPaidAmount({ customerId: K });
+  assert.equal(r1.total_released, 36, '2 mentoren × 18');
+  assert.ok(r1.simulations.filter((x) => x.would_release).every((x) => x.maand >= '2026-10'), 'enkel in open maanden');
+  const r2 = await engine.releaseProportionalForPaidAmount({ customerId: K });
+  assert.equal(r2.total_released, 0, 'idempotent');
 });
 
 test('maakVerrekenaar: eerst het reeds vergoede bedrag, daarna telt alles', () => {

@@ -27,6 +27,7 @@ import {
   loadRegelingContext, koppelDeal, isConcept,
 } from './commissie-regeling.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn } from './commissie-maand.js';
+import { rekenSaleCommissie } from './commissie-rekenregel.js';
 import {
   REDENEN, REDEN_LABEL, DEFAULT_PCT, aandeelPerMentor, attrIdempotencyKey, attributionIdOf,
   isSchemaOntbreekt, loadAttributions, maakSaleScope, factuurVanSale, commissieSalesVan,
@@ -163,81 +164,33 @@ async function afsluitingVoor(userIds) {
 }
 
 /**
- * Termijnschema van één deal met het mentor-aandeel per termijn.
- * Bron: de subs van de sale (aanbetaling + termijnen, incl. TL-abonnementen op
- * een ghost-deal), echte facturen voor vervaldatum + betaalstatus. Facturen
- * zonder abonnementskoppeling vullen de vrije termijnen van het abonnement
- * met hetzelfde termijnbedrag (anders het enige abonnement). Zonder sub: de
- * facturen van de sale zelf; zonder facturen: één termijn "bij betaling".
+ * Termijnschema van één deal met het mentor-aandeel per termijn — voor de
+ * voorvertoning van een (nieuwe) toewijzing.
  *
- * Maand van betaling (PR5, api/_lib/commissie-maand.js), zoals het rapport:
- * betaald → betaalmaand; onbetaald + vervallen → huidige maand
- * (achterstallig); open → vervalmaand; betaald in een al gesloten maand →
- * inhaal (telt in geen maand, gaat via een correctie).
+ * REKENREGEL 9 nov 2026 (commissie-rekenregel.js), dezelfde als rapport,
+ * grootboek en mentorzicht: elke factuur van de sale telt voor commissie ×
+ * betaald / basis (verwacht: × open bedrag / basis), de geplande termijnen
+ * van lopende abonnementen vanaf deze maand, nooit boven het aandeel. Een
+ * betaling in een al afgesloten maand telt niet (geen inhaal). Geen vaste
+ * termijnbedragen meer.
  */
 export function termijnSchema({ subs, facturen, basis, aandeel, startFallback = null, betalingen = new Map(), afsluiting = maakAfsluiting([]), vandaagIso = vandaag() }) {
-  const actief = (subs || []).filter((s) => String(s.status || '').toLowerCase() !== 'cancelled');
-  const pool = (actief.length ? actief : (subs || [])).slice()
-    .sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
-  const termijnen = [];
   const lijst = (facturen || []).filter((i) => !isConcept(i));
-  const subWaarde = pool.reduce((s, x) => s + inclPerTerm(x) * (Number(x.term_count) || 0), 0);
-  if (pool.length && subWaarde > 0) {
-    const tlIds = new Set(pool.map((s) => s.teamleader_subscription_id).filter(Boolean));
-    const perSub = new Map(pool.map((s) => [s, lijst.filter((i) => i.tl_subscription_id && i.tl_subscription_id === s.teamleader_subscription_id)]));
-    // Facturen zonder (bekende) abonnementskoppeling: op vervaldatum verdelen.
-    const los = lijst.filter((i) => !i.tl_subscription_id || !tlIds.has(i.tl_subscription_id))
-      .sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
-    for (const inv of los) {
-      const vrij = pool.filter((s) => perSub.get(s).length < (Number(s.term_count) || 0));
-      const bedrag = Number(inv.amount_total) || 0;
-      const past = vrij.find((s) => Math.abs(inclPerTerm(s) - bedrag) <= Math.max(1, inclPerTerm(s) * 0.02))
-        || (vrij.length === 1 ? vrij[0] : null);
-      if (past) perSub.get(past).push(inv);
-    }
-    for (const s of pool) {
-      const n = Number(s.term_count) || 0;
-      const per = inclPerTerm(s);
-      const invs = perSub.get(s).sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
-      const cyc = billingCycleMonths(s.billing_cycle);
-      for (let i = 0; i < n; i++) {
-        const inv = invs[i] || null;
-        const due = inv?.due_date || (s.start_date ? addMonthsIso(s.start_date, i * cyc) : null);
-        termijnen.push({ due_date: due, bedrag_klant: round2(per), aandeel: aandeel * per / subWaarde, inv });
-      }
-    }
-  } else if (lijst.length) {
-    const tot = lijst.reduce((s, i) => s + (Number(i.amount_total) || 0), 0) || basis || 1;
-    for (const inv of lijst.slice().sort((a, b) => String(a.due_date || '').localeCompare(String(b.due_date || '')))) {
-      termijnen.push({ due_date: inv.due_date || null, bedrag_klant: round2(inv.amount_total), aandeel: aandeel * (Number(inv.amount_total) || 0) / tot, inv });
-    }
-  } else {
-    termijnen.push({ due_date: startFallback, bedrag_klant: round2(basis), aandeel, inv: null, schema_onbekend: true });
-  }
-  termijnen.sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
-  // Afronding: centen, rest op de laatste termijn zodat de som exact klopt.
-  let som = 0;
-  termijnen.forEach((t, i) => {
-    t.index = i + 1;
-    t.aandeel = i === termijnen.length - 1 ? round2(aandeel - som) : round2(t.aandeel);
-    som = round2(som + t.aandeel);
-    const inv = t.inv;
-    delete t.inv;
-    const gecrediteerd = !!(inv && isVolledigGecrediteerd(inv));
-    const betaald = !!(inv && !gecrediteerd && (Number(inv.amount_total) || 0) > 0 && telAlsBetaald(inv));
-    const plaats = plaatsTermijn({
-      dueYmd: t.due_date || vandaagIso, betaald, gecrediteerd,
-      betaaldatum: betaald ? effectieveBetaaldatum(inv, betalingen.get(inv.id)) : null,
-      vandaag: vandaagIso, afsluiting,
-    });
-    t.status = plaats.status;
-    t.maand = plaats.maand;
-    t.telt = plaats.telt;
-    t.inhaal = plaats.inhaal;
-    t.betaald_op = plaats.betaaldatum || null;
-    t.achterstallig_sinds = plaats.achterstallig_sinds || null;
+  const r = rekenSaleCommissie({
+    commissie: aandeel, basis, facturen: lijst, betalingen, subs: subs || [], afsluiting, vandaag: vandaagIso,
+    perTermijnIncl: inclPerTerm, cyclusMaanden: billingCycleMonths, addMonthsIso,
   });
-  return termijnen;
+  if (!r.termijnen.length) {
+    return [{ index: 1, due_date: startFallback, bedrag_klant: round2(basis), aandeel: round2(aandeel), inv: undefined, schema_onbekend: true,
+      status: 'open', maand: startFallback ? ym(startFallback) : null, telt: true, inhaal: false, betaald_op: null, achterstallig_sinds: null }]
+      .map(({ inv, ...t }) => t);
+  }
+  return r.termijnen.map((t, i) => ({
+    index: i + 1, due_date: t.due_date || null, bedrag_klant: round2(t.klant_bedrag || 0), aandeel: round2(t.amount),
+    status: t.status, maand: t.maand || null, telt: t.amount > 0, inhaal: false,
+    betaald_op: t.betaald_op || null, achterstallig_sinds: t.achterstallig_sinds || null,
+    ...(t.gepland ? { gepland: true } : {}),
+  }));
 }
 
 /**

@@ -128,12 +128,14 @@ test('termijnSchema: maand van betaling — betaald later, achterstallig naar hu
   assert.equal(pm[1].achterstallig, 6);
 });
 
-test('termijnSchema: betaald in een al afgesloten maand → inhaal, in geen enkele maand', () => {
+test('termijnSchema: betaald in een al afgesloten maand → telt niet (geen inhaal, 9 nov 2026), in geen enkele maand', () => {
   const subs = [{ id: 's', teamleader_subscription_id: 'tl', amount: 100, vat_percentage: 0, term_count: 1, billing_cycle: 'per_month', start_date: '2026-07-05', status: 'active' }];
   const facturen = [{ id: 'a', tl_subscription_id: 'tl', amount_total: 100, amount_paid: 100, credited_amount: 0, status: 'paid', due_date: '2026-07-05', paid_date: '2026-08-12' }];
   const afs = maakAfsluiting([{ period_month: '2026-09-01', status: 'goedgekeurd', generated_at: '2026-09-02T06:00:00Z' }]);
   const t = core.termijnSchema({ subs, facturen, basis: 100, aandeel: 3, vandaagIso: '2026-10-22', afsluiting: afs });
-  assert.equal(t[0].inhaal, true);
+  assert.equal(t[0].status, 'afgesloten');
+  assert.equal(t[0].aandeel, 0);
+  assert.equal(t[0].inhaal, false, 'geen correctie meer');
   assert.deepEqual(core.perMaand(t), []);
 });
 

@@ -672,6 +672,26 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   rapportkant (computeBonusOverview: rapport / in definitief rapport / werkelijk uitbetaald), grootboek, verschil +
   afwijkingen (te veel, achter, geen commissie, soort ontbreekt, niet gekoppeld, factuur te veel betaald, traject niet
   omgezet, status loopt achter, vrijgegeven in geen rapport). Lijst 3 nov: docs/commissie/2026-11-03-afwijkingen.md.
+- REKENREGEL MENTORCOMMISSIE (9 nov 2026, Maxim) — één berekening voor rapport, grootboek, mentorzicht en
+  controlescherm: `api/_lib/commissie-rekenregel.js` (puur). Elke betaalde factuur van de sale (per betaling met datum:
+  payments, anders paid_date) = commissie × betaald / basis, nooit meer dan commissie − max(bevroren rapporten, oud
+  grootboek in afgesloten maanden). Aanbetaling, losse factuur, verschillende abonnementsbedragen, de 13e factuur:
+  elk voor haar eigen bedrag. Gecrediteerd telt nooit. Verwacht = open facturen + geplande termijnen vanaf deze maand
+  (gedekt per maand). AFGESLOTEN MAANDEN (rapport goedgekeurd/uitbetaald, maakAfsluiting) blijven EXACT: de oude
+  termijnberekening in computeBonusOverview leeft nog ENKEL voor termijnen in afgesloten maanden (`bevroren: true`);
+  een betaling in een afgesloten maand die in geen rapport zat = status 'afgesloten', 0 — GEEN inhaal, geen
+  correctievoorstellen (knop weg), ook niet in het nadeel van het bedrijf. Voorschot = oude trajectregels in rapporten
+  die aan geen bevroren factuur toegerekend zijn → eerst verrekend. FACTUURMOTOR `releaseProportionalForPaidAmount`
+  rekent niet zelf: computeBonusOverview per mentor → `vrijgave_stukken` → `teSchrijvenStukken` (sleutel
+  `<parent>:stuk:<factuur>:<datum>:<centen>`; oude vrijgaven in OPEN maanden eerst verrekend; idempotent). GAT
+  GEDICHT: de motor draaide nooit voor facturen die in Teamleader betaald worden (BV Ky, Richiano, Rasmussen) →
+  cron-finance-sync draait hem nu voor klanten met een gewijzigde betaalstand (`upsertInvoiceFromTl` →
+  `betaling_gewijzigd`) + dagelijks vangnet `api/cron-commissie-vrijgave.js` (05:40 UTC, `?dry_run=1`,
+  `api/_lib/commissie-vrijgave-run.js`). Ook bonus-release-sync (beide modi) en historical-event-commit gebruiken deze
+  motor; de oude 1/N-termijnmotor schrijft niets meer. Toewijzing-preview `termijnSchema` = dezelfde regel. Controle:
+  zou moeten zijn = rapport; grootboek OPEN maanden vs stukken (te veel/achter); `bevroren_verschil` apart;
+  `vergelijking_open` = voor/na per open maand (totalen + per sale). Tests: tests/commissie-rekenregel.test.js +
+  tests/commissie-rekenregel-8-klanten.test.js (echte stand 9 nov, tests/fixtures/commissie-8-klanten.json).
 - Cashbetaling (6 nov 2026, Maxim) — knop "Cashbetaling registreren" op een open factuur (klantdossier ›
   Facturen › factuurdetail + finance-detail-v2). De factuur blijft staan en wordt NOOIT gecrediteerd. Kern
   `api/_lib/cash-betaling.js` → `POST /api/finance-invoice-register-cash` (recht finance.invoice.payment.register):
