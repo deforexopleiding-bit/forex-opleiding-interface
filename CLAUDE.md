@@ -689,7 +689,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
 - Sales-bonussen (tabel `bonuses`, 6 nov 2026, regels Maxim) — NIET de mentorcommissie.
   REGELING (ongewijzigd, `api/_lib/sales-bonus-regels.js`): pct uit `sales_bonus_configs` (leeg → 3%)
   over het regelbedrag EXCL. btw van het eerste abonnement met 1 termijn (aanbetaling of eenmalige
-  betaling) als dat ≥ threshold (leeg → € 1.000); één bonus per deal. AANMAKEN (`sales-subscription-create`,
+  betaling) als dat ≥ threshold (leeg → € 1.000); één bonus per deal.
+  VASTGELEGD (beslissing Maxim 9 nov 2026, NIET meer ter discussie): "Dave krijgt bonus op aanbetalingen en
+  grote facturen" = UITSLUITEND dit eerste abonnement met één termijn (aanbetaling of eenmalige betaling) vanaf
+  € 1.000, 3% excl. btw, één bonus per deal. GEEN bonus op grote termijnfacturen of andere facturen; geen
+  nieuwe drempel of extra bonusregel toevoegen.
+  NOG OPEN (huidige werking blijft tot Maxim beslist, niet wijzigen): (a) abonnement zonder offerte → geen
+  automatische bonus, enkel handmatig toekennen; (b) betaalde reserveringsfee van de eigen offerte telt mee als
+  betaling; (c) deelbetaling telt naar verhouding (Andy De Landtsheer: 46,27 + 30,00). AANMAKEN (`sales-subscription-create`,
   `magAutomatischeBonus`): NOOIT voor wie het abonnement aanmaakt — ontvanger = deals.sales_user_id van de
   OFFERTE; geen bonus zonder offerte (standalone/ghost-deal), bij aanpassing/regeling/incasso, bij een
   abonnement dat aan een andere sale hangt of als de offerte al abonnementen had (vervanging). Response
