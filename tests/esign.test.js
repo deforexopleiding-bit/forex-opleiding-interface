@@ -195,17 +195,25 @@ test('PDF: versleutelde of kapotte PDF wordt geweigerd', async () => {
 });
 
 // ── 6. Publieke tekenroute ──────────────────────────────────────────────────
-const omg = { limited: false, lookups: 0 };
+const omg = { limited: false, lookups: 0, rijen: null };
 mock.module(url('api/supabase.js'), {
   namedExports: {
+    supabase: { auth: { getUser: async () => ({ data: { user: { id: '00000000-0000-4000-8000-000000000001', email: 'test@dfo.nl' } }, error: null }) } },
     supabaseAdmin: {
       from() {
-        const q = { select: () => q, eq: () => q, maybeSingle: async () => { omg.lookups++; return { data: null, error: null }; } };
+        // Elke filtermethode geeft de keten terug; awaiten zonder maybeSingle
+        // levert omg.rijen (lijsten zoals teamleden/klanten).
+        const q = {
+          maybeSingle: async () => { omg.lookups++; return { data: null, error: null }; },
+          then: (ok, nok) => Promise.resolve({ data: omg.rijen, error: null }).then(ok, nok),
+        };
+        for (const m of ['select', 'eq', 'not', 'is', 'or', 'order', 'limit', 'in']) q[m] = () => q;
         return q;
       },
     },
   },
 });
+mock.module(url('api/_lib/requirePermission.js'), { namedExports: { requirePermission: async () => true } });
 mock.module(url('api/_lib/rate-limit.js'), { namedExports: { checkRateLimit: async () => ({ limited: omg.limited }) } });
 mock.module(url('api/mailer.js'), { namedExports: { sendMail: async () => ({ success: true }) } });
 const { default: teken } = await import(url('api/esign-teken.js'));
@@ -228,6 +236,25 @@ test('tekenroute: rate limit → 429, onbekende actie → 400, GET → 405', asy
   omg.limited = false;
   assert.equal((await roep({ actie: 'wis' })).statusCode, 400);
   const res = nepRes(); await teken({ method: 'GET', headers: {} }, res); assert.equal(res.statusCode, 405);
+});
+
+// Regressie preview 9 nov: de editor laadt eerst ?actie=teamleden (zonder id) en
+// kreeg "Ongeldig envelope-id" omdat de id-controle vóór die acties stond.
+const { default: crm } = await import(url('api/esign.js'));
+const crmGet = async (query) => { const res = nepRes(); await crm({ method: 'GET', query, headers: { authorization: 'Bearer x' } }, res); return res; };
+
+test('CRM-route: teamleden en klanten hebben geen envelope-id nodig; detail wel', async () => {
+  omg.rijen = [{ id: 'p1', full_name: 'Amigo', email: 'amigo@dfo.nl', role: 'super_admin', is_active: true }];
+  try {
+    const t = await crmGet({ actie: 'teamleden' });
+    assert.equal(t.statusCode, 200, JSON.stringify(t.body));
+    assert.deepEqual(t.body.teamleden.map((x) => x.email), ['amigo@dfo.nl']);
+    const k = await crmGet({ actie: 'klanten', q: 'am' });
+    assert.equal(k.statusCode, 200, JSON.stringify(k.body));
+    assert.equal((await crmGet({ actie: 'detail', id: 'geen-uuid' })).statusCode, 400);
+    assert.equal((await crmGet({ actie: 'download' })).statusCode, 400);
+    assert.equal((await crmGet({ actie: 'iets' })).statusCode, 400);
+  } finally { omg.rijen = null; }
 });
 
 // ── 7. SQL + bedrading ──────────────────────────────────────────────────────

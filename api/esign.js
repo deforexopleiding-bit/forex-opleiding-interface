@@ -164,17 +164,19 @@ export default async function handler(req, res) {
           })),
         });
       }
-      const id = String(req.query?.id || '');
-      if (!UUID_RE.test(id)) return fout(res, 400, 'Ongeldig envelope-id');
-      const pakket = await laadEnvelope(supabaseAdmin, id);
-      if (!pakket) return fout(res, 404, 'Envelope niet gevonden');
-      if (actie === 'detail') {
-        const events = await laadEvents(supabaseAdmin, id);
-        const doc = pakket.documenten[0];
-        const url = doc ? await signedUrl(supabaseAdmin, doc.pad, 600) : null;
-        return res.status(200).json({ envelope: samenvatting(pakket), events, document_url: url });
-      }
-      if (actie === 'download') {
+      // Alleen detail/download gaan over één envelope; teamleden/klanten
+      // (hieronder) hebben geen id en mogen hier niet op de id-controle stuiten.
+      if (actie === 'detail' || actie === 'download') {
+        const id = String(req.query?.id || '');
+        if (!UUID_RE.test(id)) return fout(res, 400, 'Ongeldig envelope-id');
+        const pakket = await laadEnvelope(supabaseAdmin, id);
+        if (!pakket) return fout(res, 404, 'Envelope niet gevonden');
+        if (actie === 'detail') {
+          const events = await laadEvents(supabaseAdmin, id);
+          const doc = pakket.documenten[0];
+          const url = doc ? await signedUrl(supabaseAdmin, doc.pad, 600) : null;
+          return res.status(200).json({ envelope: samenvatting(pakket), events, document_url: url });
+        }
         const soort = String(req.query?.soort || 'getekend');
         const pad = soort === 'origineel' ? pakket.documenten[0]?.pad : pakket.envelope.eind_pad;
         if (!pad) return fout(res, 404, soort === 'origineel' ? 'Nog geen document' : 'Nog niet voltooid');
