@@ -384,3 +384,22 @@ test('bord: Betaald vanuit Mag naar incasso sluit het traject zonder status; doo
   assert.equal(db.rows('incasso_trajecten')[0].gesloten_als, 'betaald');
   assert.equal(db.rows('mentor_commissie_incasso').length, 0, 'geen incassostatus gezet');
 });
+
+test('status zonder traject (met de hand gezet): de eerste opvolgactie maakt het traject, de status blijft', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [], mentor_commissie_incasso: [
+    { id: 'm1', customer_id: K, deal_id: null, sinds: '2026-11-05', reden: 'bureau', bron: 'handmatig', gezet_op: '2026-11-05T10:00:00Z', opgeheven_op: null, status: 'bij_incasso', afgesloten_als: null, incasso_sinds: '2026-11-05' },
+  ] }));
+  let ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'doorgezet');
+  let u = await actie(db, { actie: 'vink', customer_id: K, item: 'restfactuur', actor: SEPPE });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  assert.equal(db.rows('incasso_trajecten').length, 1);
+  assert.equal(db.rows('incasso_trajecten')[0].herkomst, 'bestaand');
+  u = await actie(db, { actie: 'notitie', customer_id: K, notitie: 'bureau gebeld', actor: SEPPE });
+  assert.equal(u.status, 200);
+  assert.equal(db.rows('incasso_trajecten').length, 1, 'geen tweede traject');
+  assert.equal(db.rows('mentor_commissie_incasso').length, 1, 'status onaangeroerd');
+  ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'doorgezet');
+});

@@ -392,11 +392,27 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
   const { klant, status } = await klantStand(deps, customerId);
   if (!klant) return fout(404, 'klant_onbekend', 'Klant niet gevonden.');
   const minderjarig = isMinderjarig(klant.date_of_birth, vandaag) || invoer.minderjarig === true;
-  const { ontbreekt, traject } = await openTraject(crm, customerId);
-  if (ontbreekt) return fout(503, 'trajecten_niet_actief', 'De migratie 2026-11-03-incasso-trajecten.sql is nog niet gedraaid.');
+  const open = await openTraject(crm, customerId);
+  if (open.ontbreekt) return fout(503, 'trajecten_niet_actief', 'De migratie 2026-11-03-incasso-trajecten.sql is nog niet gedraaid.');
+  let traject = open.traject;
   const fase = faseVan({ traject, status: status.status });
   const actorId = await profielId(crm, actor.email);
   const regel = (tekst, soort = actie) => logRegel({ door, tekst, soort, nu });
+
+  //  STATUS ZONDER TRAJECT (gemeten 9 nov: 22 klanten, met de hand gezet in
+  //  klanten-v2 vóór dit overzicht bestond). De status is de beslissing; het
+  //  traject ontstaat bij de eerste opvolgactie, zonder de status te raken.
+  const OPVOLG = ['vink', 'gecheckt', 'notitie', 'doorschuiven', 'regeling', 'afsluiten'];
+  if (!traject && status.status !== 'actief' && OPVOLG.includes(actie)) {
+    const { data: nieuw, error } = await crm.from('incasso_trajecten').insert({
+      customer_id: customerId, onboarding_id: invoer.crm_onboarding_id || null, lms_student_id: invoer.lms_student_id || null,
+      naam: String(invoer.naam || '').slice(0, 200) || null, herkomst: 'bestaand', voorgesteld_door: 'Incassostatus in het CRM',
+      geselecteerd_op: status.gezet_op || null,
+      logboek: [regel(`Traject aangemaakt bij de eerste actie (status: ${status.label}).`, 'bestaand')],
+    }).select('*').single();
+    if (error && error.code !== '23505') return fout(500, 'interne_fout', 'Het traject kon niet aangemaakt worden.');
+    traject = nieuw || (await openTraject(crm, customerId)).traject;
+  }
 
   try {
     switch (actie) {
