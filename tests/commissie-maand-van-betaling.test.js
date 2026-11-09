@@ -169,7 +169,7 @@ test('overzicht: al uitbetaald in een definitief rapport → niet nog eens in de
   assert.equal(maand(out, twee).paid, 0, 'nooit dubbel');
 });
 
-test('overzicht: betaald in gesloten maand → inhaal, telt nergens; met [inhaal:]-correctie = voorgesteld', async () => {
+test('overzicht: betaald in gesloten maand → telt nergens, GEEN inhaal of correctievoorstel (9 nov 2026); een al geboekte [inhaal:]-correctie blijft zichtbaar', async () => {
   const vier = ymNu(-4), drie = ymNu(-3), twee = ymNu(-2), een = ymNu(-1);
   const basis = {
     facturen: [{ due_date: `${vier}-05`, amount_paid: 100, status: 'paid', paid_date: `${drie}-20` }],
@@ -181,25 +181,26 @@ test('overzicht: betaald in gesloten maand → inhaal, telt nergens; met [inhaal
   };
   zet(basis);
   let out = await computeBonusOverview(A);
-  assert.equal(out.inhaal.length, 1);
+  assert.equal(out.inhaal.length, 0, 'geen correctievoorstellen meer');
+  assert.equal(out.inhaal_totaal, 0);
   assert.equal(maand(out, drie).paid, 0);
   assert.equal(maand(out, vier).paid, 0);
-  assert.equal(out.inhaal_totaal, 3);
-  // Laatste definitieve rapport = periode vorige maand → volgend rapport = periode deze maand.
-  assert.equal(out.inhaal[0].inhaal_voorstel_periode, ymNu(0));
+  for (const k of [0, 1, 2]) assert.equal(maand(out, ymNu(k)).paid, 0, 'ook geen inhaal in een open maand');
   zet({ ...basis, adjs: [{ period_month: `${ymNu(0)}-01`, label: 'Inhaalcommissie J. termijn 1/1 [inhaal:f0]', amount_incl: 3 }] });
   out = await computeBonusOverview(A);
   assert.deepEqual(out.inhaal[0].inhaal_voorgesteld, { period_month: `${ymNu(0)}-01`, amount_incl: 3 });
   assert.equal(out.inhaal_totaal, 0);
 });
 
-test('overzicht: deelbetaling via payments bepaalt de maand', async () => {
+test('overzicht: deelbetaling via payments telt per betaling in haar maand', async () => {
   const twee = ymNu(-2), een = ymNu(-1);
   zet({
     facturen: [{ due_date: `${twee}-05`, amount_paid: 100, status: 'paid', paid_date: `${twee}-06` }],
     betalingen: [{ invoice_id: 'f0', amount: 40, payment_date: `${twee}-06` }, { invoice_id: 'f0', amount: 60, payment_date: `${een}-11` }],
   });
   const out = await computeBonusOverview(A);
-  assert.equal(maand(out, twee).paid, 0);
-  assert.equal(maand(out, een).paid, 3);
+  // Rekenregel 9 nov 2026: commissie × betaald / basis per betaling, in de
+  // maand van die betaling (40 → 1,20; 60 → 1,80).
+  assert.equal(maand(out, twee).paid, 1.2);
+  assert.equal(maand(out, een).paid, 1.8);
 });

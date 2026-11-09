@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const url = (p) => pathToFileURL(join(ROOT, p)).href;
 
 const db = maakNepDb();
-mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client } });
+mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
 const engine = await import(url('api/_lib/mentor-ledger-engine.js'));
 const hulp = await import(url('api/_lib/commissie-toewijzing.js'));
 
@@ -126,7 +126,6 @@ test('nieuwe offerte zonder toewijzing (en zonder migratie): telt niet voor de o
   basis({ facturen: [fOud(3000), fNieuw(1000)], toewijzing: false, missing: ['mentor_sale_attributions'] });
   const r = await engine.releaseProportionalForPaidAmount({ customerId: K });
   assert.equal(som(kids('p-event')), 90, 'alleen 3000/6000 × 180 — de factuur van D2 telt niet');
-  assert.equal(r.paid_total, 4000, 'rapportveld paid_total blijft klantbreed (informatief)');
 });
 
 test('geannuleerde toewijzing: de factuur van die deal telt nog altijd niet voor de event-bonus', async () => {

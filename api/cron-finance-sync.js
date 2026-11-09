@@ -23,6 +23,7 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { upsertInvoiceFromTl } from './_lib/invoice-upsert.js';
+import { vrijgaveVoorKlanten } from './_lib/commissie-vrijgave-run.js';
 import { upsertCreditNoteFromTl, recomputeCreditedAmount } from './_lib/creditnote-upsert.js';
 import { upsertContactFromTl } from './_lib/contact-upsert.js';
 import { upsertCompanyFromTl } from './_lib/company-upsert.js';
@@ -328,6 +329,10 @@ export default async function handler(req, res) {
   // contacts/companies-rijen zijn optioneel: bij ontbreken slaan we die resources
   // gewoon over (Fase 4 migratie moet nog gedraaid; cron blijft werken op finance-data).
 
+  // Klanten waarvan een factuur in deze run een andere betaalstand kreeg: de
+  // factuurmotor draait voor hen na de facturen (rekenregel 9 nov 2026). Vóór
+  // deze regel raakte een betaling in Teamleader de motor nooit.
+  const betalingGewijzigd = new Set();
   const summary = {
     started_at: startedIso,
     invoices: null, creditnotes: null,
@@ -347,7 +352,11 @@ export default async function handler(req, res) {
       startedAt,
       departments: DEPARTMENTS,
       sortField: 'invoice_date',  // TL invoices.list accepteert 'updated_at' niet.
-      upsertOne: (id) => upsertInvoiceFromTl(id, { skipIfNoCustomer: true }),
+      upsertOne: async (id) => {
+        const r = await upsertInvoiceFromTl(id, { skipIfNoCustomer: true });
+        if (r?.betaling_gewijzigd && r.customer_id) betalingGewijzigd.add(r.customer_id);
+        return r;
+      },
       onSkip: async (skip) => { skippedNoCustomer++; await recordSkippedInvoice(skip); },
     });
     const invDuration = Date.now() - invStart;
@@ -510,6 +519,19 @@ export default async function handler(req, res) {
     }
   } else {
     summary.companies = { skipped: 'sync_state.companies ontbreekt — draai migratie 2026-06-07-finance-sync-state-contacts-companies.sql' };
+  }
+
+  // 5. Factuurmotor voor klanten met een gewijzigde betaling (rekenregel
+  //    9 nov 2026). Binnen het resterende budget; wat niet past, neemt de
+  //    dagelijkse cron-commissie-vrijgave mee (idempotent). Fail-soft: de sync
+  //    zelf is al gedaan.
+  if (betalingGewijzigd.size) {
+    try {
+      summary.commissie = await vrijgaveVoorKlanten([...betalingGewijzigd], { deadline: startedAt + 285_000 });
+    } catch (e) {
+      console.error('[cron-finance-sync] commissie-vrijgave', e?.message || e);
+      summary.commissie = { error: e?.message || String(e) };
+    }
   }
 
   const totalMs = Date.now() - startedAt;

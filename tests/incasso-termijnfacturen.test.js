@@ -98,6 +98,8 @@ test('maandlijst: verwacht, ontvangen en lopende achterstand per maand', () => {
   assert.equal(per['2026-10'].facturen.find((f) => f.id === 'f2').open, 60, 'knop "betaling ontvangen" op 60 open');
 });
 
+const dbMotor = maakNepDb();
+
 test('regeling zonder abonnement: de facturen vanaf de regeling vormen het traject', () => {
   const facturen = [
     { id: 'oud', customer_id: NOOR, amount_total: 400, credited_amount: 400, status: 'credited', issue_date: '2026-06-01', due_date: '2026-06-08' },
@@ -108,8 +110,8 @@ test('regeling zonder abonnement: de facturen vanaf de regeling vormen het traje
 });
 
 test('betaling ontvangen op een termijnfactuur → de factuurmotor geeft de commissie vrij (regeling)', async () => {
-  const db = maakNepDb();
-  mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client } });
+  const db = dbMotor; // één database voor de motortests: het overzicht (dat de motor gebruikt) blijft gecachet
+  mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
   const engine = await import(url('api/_lib/mentor-ledger-engine.js') + '?t=' + Date.now());
   const D = 'd1000000-0000-4000-8000-000000000001';
   db.reset({
@@ -145,8 +147,8 @@ test('bij_incasso: de open bureaufactuur krijgt geen aanmaning (auto-instroom, r
 });
 
 test('bij_incasso: ook als de bureaufactuur later op betaald komt, geeft ze geen commissie', async () => {
-  const db = maakNepDb();
-  mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client } });
+  const db = dbMotor; // één database voor de motortests: het overzicht (dat de motor gebruikt) blijft gecachet
+  mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: db.client, supabase: db.client, createUserClient: () => db.client } });
   const engine = await import(url('api/_lib/mentor-ledger-engine.js') + '?b=' + Date.now());
   const D = 'ced18cac-6d96-4805-8bbe-55a3df9de30d';
   db.reset({

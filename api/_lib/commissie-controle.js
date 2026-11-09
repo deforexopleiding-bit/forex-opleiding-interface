@@ -3,6 +3,14 @@
 // CONTROLESCHERM mentorcommissie (PR 5, 3 nov 2026) — Mentoren › Commissies ›
 // Controle. Alleen LEZEN, geen enkele correctie.
 //
+// REKENREGEL 9 nov 2026 (commissie-rekenregel.js): "zou moeten zijn" = wat het
+// rapport uitkeert of zal uitkeren — dezelfde berekening als rapport,
+// mentorzicht en factuurmotor (computeBonusOverview). Het grootboek wordt op de
+// OPEN maanden vergeleken met de stukken (te veel = wordt verrekend, achter =
+// motor moet nog draaien). Afgesloten maanden zijn bevroren: hun verschil staat
+// apart (bevroren_verschil), zonder afwijking. vergelijking_open toont per open
+// maand de oude termijnberekening (voor) naast de rekenregel (na).
+//
 // Per sale (alle events, toewijzingen en trajecten): event, mentoren,
 // klantstatus (incasso), betaald, vrijgegeven, werkelijk uitbetaald, wat het
 // zou moeten zijn, verschil, en de afwijkingen. "Zou moeten zijn" rekent
@@ -208,6 +216,7 @@ export async function commissieControle(db) {
       basis: round2(g.parents[0]?.basis), pct: g.parents[0]?.pct != null ? Number(g.parents[0].pct) : null,
       geannuleerd: g.parents.every((p) => p.status === 'geannuleerd'),
       ...r,
+      _parents: g.parents.map((p) => ({ id: p.id, mentor_user_id: p.mentor_user_id })),
     });
   }
 
@@ -264,6 +273,9 @@ export async function commissieControle(db) {
 
   // Rapportkant: per mentor het overzicht (dezelfde bron als het rapport).
   const perSaleRapport = await rapportPerSale(db, mentorIds, uitbetaaldTot);
+  const laatsteGesloten = perSaleRapport.laatsteGesloten || new Map();
+  const kidsPerParent = new Map();
+  for (const k of kids) { if (!kidsPerParent.has(k.parent_entry_id)) kidsPerParent.set(k.parent_entry_id, []); kidsPerParent.get(k.parent_entry_id).push(k); }
   for (const r of rijen) {
     const rp = r.deal_id ? perSaleRapport.get(r.deal_id) : null;
     if (r.bron === 'traject' && !r.deal_id) continue;
@@ -271,11 +283,38 @@ export async function commissieControle(db) {
     r.in_definitief_rapport = rp ? round2(rp.definitief) : 0;
     r.rapport_werkelijk_uitbetaald = rp ? round2(rp.werkelijk) : 0;
     r.rapport_status_uitbetaald = rp ? round2(rp.statusUit) : 0;
-    if (r.zou_moeten_zijn != null && !r.afwijkingen.includes('geen_commissie')) {
-      const dv = round2(r.rapport_vrijgegeven - r.zou_moeten_zijn);
-      r.verschil_rapport = dv;
-      if (dv > 0.5) r.afwijkingen.push('rapport_te_veel');
-      if (dv < -0.5) r.afwijkingen.push('rapport_te_weinig');
+    // ── Rekenregel 9 nov 2026: één berekening. "Zou moeten zijn" = wat het
+    // rapport uitkeert of zal uitkeren (bevroren afgesloten maanden + de
+    // stukken van de regel). Het grootboek wordt gecontroleerd op de OPEN
+    // maanden: wat daar vrijgegeven staat moet gelijk zijn aan de stukken.
+    // Een verschil in afgesloten maanden is bevroren (geen correcties).
+    if (rp && r._parents && !r.afwijkingen.includes('geen_commissie')) {
+      r.zou_moeten_zijn = r.rapport_vrijgegeven;
+      let open = 0;
+      let afgesloten = 0;
+      for (const p of r._parents) {
+        const laatste = laatsteGesloten.get(p.mentor_user_id) || null;
+        for (const k of kidsPerParent.get(p.id) || []) {
+          if (!['vrijgegeven', 'uitbetaald'].includes(k.status)) continue;
+          const m = k.released_at ? String(k.released_at).slice(0, 7) : null;
+          if (laatste && m && m <= laatste) afgesloten += Number(k.amount) || 0;
+          else open += Number(k.amount) || 0;
+        }
+      }
+      r.grootboek_open = round2(open);
+      r.grootboek_afgesloten = round2(afgesloten);
+      r.stukken_open = round2(rp.stukken || 0);
+      r.bevroren = round2(rp.bevroren || 0);
+      r.bevroren_verschil = round2(r.grootboek_afgesloten - r.bevroren);
+      r.verschil = round2(r.grootboek_open - r.stukken_open);
+      r.afwijkingen = r.afwijkingen.filter((a) => !['te_veel_vrijgegeven', 'achter', 'rapport_te_veel', 'rapport_te_weinig'].includes(a));
+      if (r.verschil > EPS) r.afwijkingen.push('te_veel_vrijgegeven');
+      if (r.verschil < -EPS) r.afwijkingen.push('achter');
+      r.vergelijking_open = (rp.vergelijking || []).map((v) => ({ maand: v.maand, voor: round2(v.voor), na: round2(v.na), verschil: round2(v.na - v.voor) }));
+      for (const pm of r.per_mentor || []) {
+        const x = rp.perMentor?.get(pm.mentor_user_id);
+        if (x) { pm.doel = round2(x.zou); pm.verschil = round2(pm.vrijgegeven - pm.doel); }
+      }
     }
     // Werkelijk uitbetaald = rapportkant (de echte betaling); verschil status.
     r.werkelijk_uitbetaald = r.rapport_werkelijk_uitbetaald;
@@ -284,6 +323,7 @@ export async function commissieControle(db) {
     if (r.verschil_status_werkelijkheid > EPS) r.afwijkingen.push('status_achter');
   }
 
+  for (const r of rijen) delete r._parents;
   rijen.sort((a, b) => (b.afwijkingen.length > 0) - (a.afwijkingen.length > 0) || Math.abs(b.verschil || 0) - Math.abs(a.verschil || 0) || String(a.klant).localeCompare(String(b.klant)));
   const som = (k) => round2(rijen.reduce((t, r) => t + (Number(r[k]) || 0), 0));
   return {
@@ -296,7 +336,19 @@ export async function commissieControle(db) {
       verschil_status_werkelijkheid: som('verschil_status_werkelijkheid'), vrijgegeven_niet_in_rapport: som('vrijgegeven_niet_in_rapport'),
       te_veel_vrijgegeven: round2(rijen.reduce((t, r) => t + Math.max(0, r.verschil || 0), 0)),
       achter: round2(rijen.reduce((t, r) => t + Math.max(0, -(r.verschil || 0)), 0)),
+      bevroren_verschil: som('bevroren_verschil'),
     },
+    // Voor/na per open maand (t/m deze maand): oude termijnberekening tegenover
+    // de rekenregel, over alle sales.
+    vergelijking_open: (() => {
+      const m = new Map();
+      for (const r of rijen) for (const v of r.vergelijking_open || []) {
+        const a = m.get(v.maand) || { maand: v.maand, voor: 0, na: 0 };
+        a.voor = round2(a.voor + v.voor); a.na = round2(a.na + v.na);
+        m.set(v.maand, a);
+      }
+      return [...m.values()].sort((a, b) => a.maand.localeCompare(b.maand)).map((v) => ({ ...v, verschil: round2(v.na - v.voor) }));
+    })(),
     uitbetaald_tot: uitbetaaldTot,
     labels: AFWIJKING_LABEL,
   };
@@ -343,6 +395,7 @@ export function telRapportSale(acc0, c, uid, rapportStatus, tot) {
 
 async function rapportPerSale(db, mentorIds, uitbetaaldTot) {
   const uit = new Map();
+  uit.laatsteGesloten = new Map(); // mentor → laatste afgesloten bonusmaand (YYYY-MM)
   if (!mentorIds.length) return uit;
   const rapporten = await alle(db, 'mentor_payouts', 'mentor_user_id, period_month, status', (q) => q.in('mentor_user_id', mentorIds));
   const rapportStatus = new Map(rapporten.map((r) => [`${r.mentor_user_id}|${String(r.period_month).slice(0, 7)}`, r]));
@@ -350,10 +403,26 @@ async function rapportPerSale(db, mentorIds, uitbetaaldTot) {
   for (const uid of mentorIds) {
     let o;
     try { o = await computeBonusOverview(uid); } catch (e) { console.warn('[commissie-controle] overzicht', uid, e?.message || e); continue; }
+    uit.laatsteGesloten.set(uid, o.laatste_gesloten_maand || null);
     for (const ev of o.per_event || []) {
       for (const c of ev.sales || []) {
         if (!c.deal_id || c.is_cash_traject) continue;
-        uit.set(c.deal_id, telRapportSale(uit.get(c.deal_id), c, uid, rapportStatus, tot));
+        const acc = telRapportSale(uit.get(c.deal_id), c, uid, rapportStatus, tot);
+        // Rekenregel 9 nov 2026: stukken (open maanden), bevroren deel,
+        // vergelijking voor/na — en per mentor wat het zou moeten zijn.
+        const stukken = (c.vrijgave_stukken || []).reduce((t, x) => t + (Number(x.bedrag) || 0), 0);
+        acc.stukken = round2((acc.stukken || 0) + stukken);
+        acc.bevroren = round2((acc.bevroren || 0) + (Number(c.rekenregel?.bevroren) || 0));
+        acc.perMentor ||= new Map();
+        const pm = acc.perMentor.get(uid) || { zou: 0 };
+        pm.zou = round2(pm.zou + (Number(c.vrijgegeven_rapport) || 0));
+        acc.perMentor.set(uid, pm);
+        acc.vergelijking ||= [];
+        for (const v of c.vergelijking_open || []) {
+          const b = acc.vergelijking.find((x) => x.maand === v.maand);
+          if (b) { b.voor = round2(b.voor + v.voor); b.na = round2(b.na + v.na); } else acc.vergelijking.push({ maand: v.maand, voor: v.voor, na: v.na });
+        }
+        uit.set(c.deal_id, acc);
       }
     }
   }
