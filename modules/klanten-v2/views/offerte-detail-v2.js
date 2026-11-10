@@ -264,6 +264,9 @@
         padding: 11px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; line-height: 1.45;
       }
       .odv-ob-link-row { display: flex; gap: 8px; align-items: center; }
+      .odv-ob-wissel { border: 1px solid var(--amber, #C2700A); background: rgba(194,112,10,.08); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.45; }
+      .odv-ob-wissel b { font-weight: 600; }
+      .odv-ob-wissel ul { margin: 6px 0 0 18px; padding: 0; }
       .odv-ob-link-row .ib-input { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 
       /* btn-danger/btn-success zijn niet in klanten-v2.css — voeg toe. */
@@ -308,11 +311,12 @@
       <div class="odv-modal-back" id="odvObBack">
         <div class="odv-modal">
           <div class="odv-modal-head">
-            <div class="odv-modal-title">Onboarding-traject aanmelden</div>
+            <div class="odv-modal-title" id="odvObTitle">Onboarding-traject aanmelden</div>
             <button class="icon-btn" onclick="obClose()" title="Sluiten" aria-label="Sluiten">×</button>
           </div>
           <div class="odv-modal-body" id="odvObBody">
             <div id="odvObForm">
+              <div class="odv-ob-wissel" id="odvObWisselInfo" hidden></div>
               <span class="odv-mini-label">Klant</span>
               <div class="odv-read-only" id="odvObCust">—</div>
               <span class="odv-mini-label">Type begeleiding</span>
@@ -495,9 +499,16 @@
       // De 409-afvang in obSubmit blijft staan als vangnet voor de race dat
       // iemand net tussen page-load en submit is aangemeld.
       const ob = d.existing_onboarding || null;
+      // OFFERTEWISSEL (10 nov 2026): loopt de onboarding nog en komt hij uit
+      // een ANDERE offerte, dan vervangt deze offerte hem (traject + start op
+      // de bestaande onboarding; niets naar de klant). Zie
+      // api/_lib/onboarding-offerte-wissel.js.
+      const wisselBtn = (ob && ob.id && ob.kan_vervangen)
+        ? ` <button class="btn" style="background:var(--amber,#C2700A);color:#fff" onclick="obOpenWissel()" title="Werk de lopende onboarding bij met het traject en de startdatum van deze offerte. Token, startcode, antwoorden en LMS-account blijven; er gaat niets naar de klant.">🔁 Deze offerte vervangt de lopende onboarding</button>`
+        : '';
       const onboardBtn = c.id
         ? (ob && ob.id
-            ? `<button class="btn btn-success" style="background:var(--emerald,#07835A);border-color:var(--emerald,#07835A);color:#fff" onclick="__odvOpenOnboarding('${esc(ob.id)}')" title="Bekijk het lopende onboarding-traject van deze klant (status: ${esc(String(ob.status || 'onbekend'))})">✓ Onboarding al aangemeld</button>`
+            ? `<button class="btn btn-success" style="background:var(--emerald,#07835A);border-color:var(--emerald,#07835A);color:#fff" onclick="__odvOpenOnboarding('${esc(ob.id)}')" title="Bekijk het lopende onboarding-traject van deze klant (status: ${esc(String(ob.status || 'onbekend'))})">✓ Onboarding al aangemeld</button>${wisselBtn}`
             : `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`)
         : '';
       // 2026-09-18 — rode "Definitief verwijderen"-knop voor GETEKENDE
@@ -1035,6 +1046,12 @@
     const sb = document.getElementById('odvObSubmitBtn');
     sb.disabled = true; sb.textContent = 'Aanmelden'; sb.style.display = '';
     document.getElementById('odvObCancelBtn').textContent = 'Annuleren';
+    _odv.obMode = 'aanmelden';
+    _odv.obWisselId = null;
+    const ttl = document.getElementById('odvObTitle');
+    if (ttl) ttl.textContent = 'Onboarding-traject aanmelden';
+    const wi = document.getElementById('odvObWisselInfo');
+    if (wi) { wi.hidden = true; wi.innerHTML = ''; }
     _odv.obSelectedType = null;
     obTypeSwitchRender();
     obTrajectOptsRender();
@@ -1075,6 +1092,49 @@
     setTimeout(tryOpen, 60);
   };
 
+  // Zet de aanmeld-modal in VERVANG-modus (offertewissel, 10 nov 2026). Zelfde
+  // velden (type, traject, startdatum), andere titel, een vergelijking met de
+  // lopende onboarding en een andere knop. obSubmit kiest het endpoint op de modus.
+  function obZetWisselModus(obInfo) {
+    _odv.obMode = 'wissel';
+    _odv.obWisselId = obInfo?.id || null;
+    const ttl = document.getElementById('odvObTitle');
+    if (ttl) ttl.textContent = 'Deze offerte vervangt de lopende onboarding';
+    const wi = document.getElementById('odvObWisselInfo');
+    if (wi) {
+      const deal = _odv.data?.deal || {};
+      wi.innerHTML = `<b>De lopende onboarding wordt bijgewerkt — er komt geen tweede.</b>
+        <ul>
+          <li>Nu: <b>${esc(obInfo?.traject_label || 'traject onbekend')}</b>, start <b>${esc(obInfo?.start_date ? fmtDate(obInfo.start_date) : '—')}</b> (status ${esc(String(obInfo?.status || '—'))}).</li>
+          <li>Wordt: het traject en de startdatum hieronder, uit offerte <b>${esc(deal.quote_reference || deal.title || deal.id || '')}</b>.</li>
+          <li>Blijft: token, startcode, ingevulde antwoorden, mentor en het LMS-account. Het LMS-traject (soort, maanden, calls, start/eind) gaat mee.</li>
+          <li>Er wordt <b>niets</b> naar de klant gestuurd: geen welkomstmail, geen WhatsApp, geen nieuwe LMS-uitnodiging.</li>
+        </ul>`;
+      wi.hidden = false;
+    }
+    const sb = document.getElementById('odvObSubmitBtn');
+    if (sb) { sb.textContent = 'Vervang lopende onboarding'; sb.style.display = ''; }
+    // Type van de lopende onboarding voorselecteren scheelt een klik; het
+    // traject zelf kiest de medewerker bewust opnieuw.
+    if (obInfo?.traject_type && OB_TYPES.includes(obInfo.traject_type) && !_odv.obSelectedType) obSelectType(obInfo.traject_type);
+  }
+  window.obOpenWissel = function () {
+    const obInfo = _odv.data?.existing_onboarding || null;
+    if (!obInfo?.id) { toast('Geen lopende onboarding gevonden'); return; }
+    window.obOpen();
+    obZetWisselModus(obInfo);
+  };
+  // Vanuit de 409 van onboarding-create (de race: net tussen laden en klikken
+  // aangemeld). Houdt de gekozen velden.
+  window.obNaarWissel = function (existingId, status) {
+    const obInfo = Object.assign({ id: existingId, status }, _odv.data?.existing_onboarding?.id === existingId ? _odv.data.existing_onboarding : {});
+    document.getElementById('odvObErr').hidden = true;
+    obZetWisselModus(obInfo);
+    const sel = document.getElementById('odvObTraject');
+    const sb = document.getElementById('odvObSubmitBtn');
+    if (sb) sb.disabled = !(sel && sel.value);
+  };
+
   window.obOpen = function () {
     _ensureModalsRoot();
     const cust = _odv.data?.customer || {};
@@ -1098,6 +1158,45 @@
     const el = document.getElementById('odvObBack');
     if (el) el.classList.remove('is-open');
   };
+  async function obSubmitWissel({ trajectId, startDate, dealId }) {
+    const sb = document.getElementById('odvObSubmitBtn');
+    const err = document.getElementById('odvObErr');
+    const obId = _odv.obWisselId;
+    if (!obId || !dealId || !startDate) {
+      err.textContent = !startDate ? 'Kies een startdatum.' : 'Onboarding of offerte ontbreekt.';
+      err.hidden = false;
+      sb.disabled = false; sb.textContent = 'Vervang lopende onboarding';
+      return;
+    }
+    try {
+      const r = await apiFetch('/api/onboarding-offerte-wissel', {
+        method: 'POST',
+        body: JSON.stringify({ onboarding_id: obId, deal_id: dealId, traject_id: trajectId, start_date: startDate }),
+      });
+      let d = null; try { d = await r.json(); } catch (_) {}
+      if (!r.ok || !d?.ok) throw new Error(d?.error || ('HTTP ' + r.status));
+      const w = Array.isArray(d.waarschuwingen) ? d.waarschuwingen : [];
+      const done = document.getElementById('odvObDone');
+      done.innerHTML = `
+        <div class="odv-ob-success">
+          <strong>✓ Onboarding bijgewerkt.</strong> ${esc(d.voor?.traject || '—')} → <b>${esc(d.na?.traject || '—')}</b>,
+          start ${esc(d.voor?.start_date ? fmtDate(d.voor.start_date) : '—')} → <b>${esc(d.na?.start_date ? fmtDate(d.na.start_date) : '—')}</b>.
+        </div>
+        <div class="odv-hint" style="margin-top:8px">LMS-student: ${d.lms?.bijgewerkt ? 'bijgezet' : 'niet bijgezet'}. Er is niets naar de klant verstuurd.</div>
+        ${w.length ? `<div class="odv-err" style="margin-top:8px">${w.map(x => esc(x)).join('<br>')}</div>` : ''}`;
+      document.getElementById('odvObForm').hidden = true;
+      done.hidden = false;
+      sb.style.display = 'none';
+      document.getElementById('odvObCancelBtn').textContent = 'Sluiten';
+      // Pagina-data verversen zodat de knop verdwijnt.
+      try { _odv.data = null; _odv.error = null; _odvLoad(_odv.dealId); } catch (_) {}
+    } catch (e) {
+      err.textContent = 'Vervangen mislukt: ' + (e?.message || e);
+      err.hidden = false;
+      sb.disabled = false; sb.textContent = 'Vervang lopende onboarding';
+    }
+  }
+
   window.obSubmit = async function () {
     const sel = document.getElementById('odvObTraject');
     const sb  = document.getElementById('odvObSubmitBtn');
@@ -1118,8 +1217,11 @@
         return;
       }
     }
+    const dealId = _odv.data?.deal?.id || null;
+    if (_odv.obMode === 'wissel') return obSubmitWissel({ trajectId, startDate, dealId });
     const payload = { customer_id: cust.id, traject_id: trajectId };
     if (startDate) payload.start_date = startDate;
+    if (dealId) payload.deal_id = dealId;
     payload.lms_provision = false;
     try {
       const r = await apiFetch('/api/onboarding-create', {
@@ -1128,7 +1230,12 @@
       let d = null; try { d = await r.json(); } catch (_) {}
       if (r.status === 409) {
         const err = document.getElementById('odvObErr');
-        err.textContent = 'Er bestaat al een (actieve) onboarding voor deze klant.';
+        if (d?.kan_vervangen && d?.existing_id) {
+          err.innerHTML = `Er loopt al een onboarding voor deze klant. Komt deze aanmelding uit een nieuwe offerte? `
+            + `<button type="button" class="btn btn-sm" style="margin-top:6px;background:var(--amber,#C2700A);color:#fff" onclick="obNaarWissel('${esc(d.existing_id)}','${esc(String(d.existing_status || ''))}')">🔁 Deze offerte vervangt de lopende onboarding</button>`;
+        } else {
+          err.textContent = 'Er bestaat al een (actieve) onboarding voor deze klant.';
+        }
         err.hidden = false;
         sb.disabled = false; sb.textContent = 'Aanmelden';
         return;

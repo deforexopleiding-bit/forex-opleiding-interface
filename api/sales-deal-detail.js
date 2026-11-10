@@ -5,6 +5,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { syncDealStatusFromTl } from './_lib/teamleader-deal-sync.js';
+import { leesOnboardingVoorWissel, onboardingLoopt, hoortBijOfferte, kanOfferteVervangen } from './_lib/onboarding-offerte-wissel.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -128,6 +129,11 @@ export default async function handler(req, res) {
     // NIET verwarren met customers.onboarding_status — dat is de welkomstmail-
     // tracking, iets anders. Fail-soft: bij lookup-fout returnen we null en
     // vertrouwen op de bestaande 409-afvang na klik.
+    //
+    // OFFERTEWISSEL (10 nov 2026): loopt die onboarding nog en komt hij niet
+    // uit DEZE offerte, dan zegt `kan_vervangen: true` en toont de pagina
+    // "Deze offerte vervangt de lopende onboarding" (api/onboarding-offerte-
+    // wissel.js). Traject en start gaan mee voor de vergelijking in de modal.
     let existing_onboarding = null;
     if (customer?.id) {
       try {
@@ -138,7 +144,32 @@ export default async function handler(req, res) {
           .neq('status', 'gearchiveerd')
           .limit(1)
           .maybeSingle();
-        if (obRow?.id) existing_onboarding = { id: obRow.id, status: obRow.status || null };
+        if (obRow?.id) {
+          existing_onboarding = { id: obRow.id, status: obRow.status || null, kan_vervangen: false };
+          try {
+            const { ob } = await leesOnboardingVoorWissel(supabaseAdmin, obRow.id);
+            if (ob) {
+              let trajectLabel = null;
+              if (ob.traject_id) {
+                const { data: tr } = await supabaseAdmin.from('onboarding_trajecten')
+                  .select('label, key, type').eq('id', ob.traject_id).maybeSingle();
+                trajectLabel = tr?.label || tr?.key || null;
+                existing_onboarding.traject_type = tr?.type || null;
+              }
+              Object.assign(existing_onboarding, {
+                traject_id: ob.traject_id || null,
+                traject_label: trajectLabel,
+                start_date: ob.start_date || null,
+                deal_id: ob.deal_id || null,
+                loopt: onboardingLoopt(ob),
+                hoort_bij_deze_offerte: hoortBijOfferte(ob, deal),
+                kan_vervangen: kanOfferteVervangen(ob, deal),
+              });
+            }
+          } catch (wErr) {
+            console.warn('[sales-deal-detail] offertewissel-stand (soft):', wErr?.message || wErr);
+          }
+        }
       } catch (obErr) {
         console.warn('[sales-deal-detail] onboardings lookup (soft):', obErr?.message || obErr);
       }
