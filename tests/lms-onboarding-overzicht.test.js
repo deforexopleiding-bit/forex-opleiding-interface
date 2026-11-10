@@ -62,7 +62,7 @@ test('DE SCHRIJFACTIES: acht op onboarding-id, en GEEN annuleren of archiveren',
   // koppel_student op 7 oktober 2026: een bedrijf aan zijn LMS-student.
   // geen_herinneringen op 28 oktober 2026: de schakelaar in de lade van het bord.
   assert.deepEqual([...ONBOARDING_ACTIES].sort(),
-    ['geen_herinneringen', 'handmatig_afronden', 'koppel_student', 'mentor_toewijzen', 'naar_incasso', 'notitie', 'startdatum', 'startstatus', 'terug_activeren']);
+    ['geen_herinneringen', 'handmatig_afronden', 'heropenen', 'koppel_student', 'mentor_toewijzen', 'naar_incasso', 'notitie', 'startdatum', 'startstatus', 'terug_activeren']);
   const oud = { ...process.env };
   try {
     process.env.DFO_LMS_PUSH_SECRET = 'geheim';

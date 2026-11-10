@@ -1,6 +1,11 @@
 // api/onboarding-handmatig-afronden.js
 //
-// POST { onboarding_id, reden } — een onboarding met de hand afronden, vanuit
+// POST { onboarding_id, reden }                     — met de hand afronden
+// POST { onboarding_id, reden, actie: 'heropenen' } — een met de hand afgeronde
+//      onboarding heropenen (10 nov 2026, zelfde rechten; zie
+//      heropenOnboardingHandmatig in api/_lib/onboarding-handmatig.js).
+//
+// Een onboarding met de hand afronden, vanuit
 // het CRM-detailscherm (6 oktober 2026). Dezelfde uitvoering als de route van
 // het LMS (`lms-onboarding-sessie.js`, actie handmatig_afronden):
 // api/_lib/onboarding-handmatig.js.
@@ -10,7 +15,7 @@
 
 import { createUserClient } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
-import { rondOnboardingHandmatigAf } from './_lib/onboarding-handmatig.js';
+import { rondOnboardingHandmatigAf, heropenOnboardingHandmatig } from './_lib/onboarding-handmatig.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -32,7 +37,8 @@ export default async function handler(req, res) {
   if (!UUID_RE.test(onboardingId)) return res.status(400).json({ error: 'onboarding_id (uuid) is verplicht.' });
 
   try {
-    const { status, body: uit } = await rondOnboardingHandmatigAf({
+    const doe = body.actie === 'heropenen' ? heropenOnboardingHandmatig : rondOnboardingHandmatigAf;
+    const { status, body: uit } = await doe({
       onboardingId,
       reden: typeof body.reden === 'string' ? body.reden : '',
       door: String(user.email || user.id),
