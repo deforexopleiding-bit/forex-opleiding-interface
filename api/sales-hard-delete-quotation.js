@@ -34,8 +34,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { sendMail, wrapEmailHtml } from './mailer.js';
+import { getEffectiveRoles, hasAnyRole, computeHighestRole } from './_lib/roles.js';
 
-const TOEGESTANE_ROLLEN = new Set(['super_admin', 'sales']);
 const CONFIRM_TOKEN = 'VERWIJDER'; // case-sensitive
 const DEFAULT_ALARM_EMAIL = 'biemoldjeffrey@gmail.com';
 
@@ -64,11 +64,18 @@ async function checkAuth(req) {
     .select('id, role, is_active, full_name, email').eq('id', user.id).maybeSingle();
   if (!profile)               return { ok: false, status: 403, error: 'Geen profiel gevonden' };
   if (!profile.is_active)     return { ok: false, status: 403, error: 'Profiel is niet actief' };
-  if (!TOEGESTANE_ROLLEN.has(profile.role)) {
+  // Effectieve rollen = union van profiles.role + user_roles (multi-rol). De
+  // scalaire profiles.role is als "primaire" rol onbetrouwbaar: een super_admin
+  // die ook mentor is kan primair='mentor' hebben. Zie api/_lib/roles.js.
+  const rollen = await getEffectiveRoles(user.id, supabaseAdmin);
+  if (!hasAnyRole(rollen, ['super_admin', 'sales'])) {
     return { ok: false, status: 403,
-      error: `Alleen super_admin en sales mogen hard-deleten (jouw rol: ${profile.role})` };
+      error: `Alleen super_admin en sales mogen hard-deleten (jouw rollen: ${rollen.join(', ') || 'geen'})` };
   }
-  return { ok: true, user, profile };
+  // Audit-/response-rol = hoogste effectieve rol, niet de (mogelijk afwijkende)
+  // primaire profiles.role, zodat het logboek de echte uitvoerder-rol toont.
+  profile.role = computeHighestRole(rollen);
+  return { ok: true, user, profile, rollen };
 }
 
 /**
