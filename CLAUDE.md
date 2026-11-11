@@ -434,6 +434,21 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   nachtelijke spiegel-sync en bij "Koppeling opnieuw controleren"; nooit op een mislukte lezing.
   Machine-route `api/lms-geannuleerde-studenten.js` (GET lijst voor "Alle geannuleerden verwijderen" + backfill;
   POST {actie:'verwijderd'} na een verwijdering in het LMS).
+- E-handtekening (2026-11-09, fase 1) — eigen DocuSign-vervanger: teamleden tekenen PDF's. MODS-item "E-handtekening"
+  (Operatie, GEEN rollen, permKey `esign.view`; knoppen `esign.send`) = `views/esign-v2.js` (overzicht, opnieuw versturen,
+  intrekken, downloads, audit-tijdlijn). Rechten ALLEEN super_admin (geen role_permissions; anderen per persoon via
+  user_permissions). Losse pagina's: `/modules/esign/editor.html` (envelope + velden plaatsen, pdf.js 4.10.38 van jsdelivr)
+  en `/teken` (rewrite → `/modules/esign/teken.html`, publiek, token in de #-hash, Referrer-Policy no-referrer).
+  Tabellen `esign_envelopes/_documenten/_ontvangers/_velden/_events` (RLS + REVOKE, service role only); `esign_events`
+  is ALLEEN TOEVOEGEN (trigger weigert UPDATE/DELETE/TRUNCATE). Ontvanger `soort` intern|extern (extern = naam+e-mail
+  zonder profiel: DB staat het toe, API weigert het in fase 1). Velden = FRACTIES van de getoonde pagina (linksboven 0,0);
+  `modules/esign/esign-coords.js` (gedeeld browser + server, incl. /Rotate) rekent om naar PDF-punten. Token 32 bytes,
+  in de DB alleen SHA-256, 14 dagen geldig; opnieuw versturen = nieuw token (oude vervalt). Afronden (`rondAf` in
+  `api/_lib/esign-server.js`): atomaire claim `afronden_gestart_op` → pdf-lib inbranden + certificaatpagina
+  (`api/_lib/esign-pdf.js`) → SHA-256 → bucket `e-handtekening` (privé) → mail met bijlage aan alle partijen (sendMail,
+  info@). Endpoints `api/esign.js` (CRM) + `api/esign-teken.js` (publiek, rate limit open 30/min, teken 10/10 min).
+  Env optioneel `ESIGN_BASIS_URL` (links in de mail; anders preview-URL of crm.deforexopleiding.nl). Migraties
+  docs/sql-migrations/2026-11-09-e-handtekening-fase1-tabellen.sql + -bucket.sql.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
