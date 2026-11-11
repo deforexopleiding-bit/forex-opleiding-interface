@@ -257,6 +257,30 @@ test('CRM-route: teamleden en klanten hebben geen envelope-id nodig; detail wel'
   } finally { omg.rijen = null; }
 });
 
+// Preview 10 nov: de lijst toonde 92 viewers + 4 studenten (leads/studenten met
+// een account). Alleen CRM-medewerkers mogen erin en mogen ondertekenen.
+const crmPost = async (body) => { const res = nepRes(); await crm({ method: 'POST', body, query: {}, headers: { authorization: 'Bearer x' } }, res); return res; };
+test('CRM-route: teamleden en ondertekenaars alleen CRM-medewerkers (geen viewer/student)', async () => {
+  const id = (n) => `00000000-0000-4000-8000-00000000000${n}`;
+  omg.rijen = [
+    { id: id(1), full_name: 'Amigo', email: 'amigo@dfo.nl', role: 'super_admin', is_active: true },
+    { id: id(2), full_name: 'Lead', email: 'lead@x.nl', role: 'viewer', is_active: true },
+    { id: id(3), full_name: 'Student', email: 'stu@x.nl', role: 'student', is_active: true },
+    { id: id(4), full_name: 'Romy', email: 'romy@dfo.nl', role: 'appointmentsetter', is_active: true },
+    { id: id(5), full_name: 'Zonder rol', email: 'leeg@x.nl', role: null, is_active: true },
+  ];
+  try {
+    const t = await crmGet({ actie: 'teamleden' });
+    assert.equal(t.statusCode, 200, JSON.stringify(t.body));
+    assert.deepEqual(t.body.teamleden.map((x) => x.email), ['amigo@dfo.nl', 'romy@dfo.nl']);
+    for (const n of [2, 3, 5]) {
+      const r = await crmPost({ actie: 'aanmaken', titel: 'x', ontvangers: [id(n)] });
+      assert.equal(r.statusCode, 400, `profiel ${n} mag niet ondertekenen`);
+      assert.equal(r.body.field, 'ontvangers');
+    }
+  } finally { omg.rijen = null; }
+});
+
 // ── 7. SQL + bedrading ──────────────────────────────────────────────────────
 test('SQL: audit alleen-toevoegen, RLS + REVOKE, extern-ready, geen role_permissions', () => {
   const sql = lees('docs/sql-migrations/2026-11-09-e-handtekening-fase1-tabellen.sql');

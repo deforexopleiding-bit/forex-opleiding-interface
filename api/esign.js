@@ -3,7 +3,7 @@
 // GET  ?actie=lijst                        → envelopes + ontvangers (esign.view)
 // GET  ?actie=detail&id=                   → pakket + events + signed URL origineel (esign.view)
 // GET  ?actie=download&id=&soort=getekend|origineel → { url } (5 min) (esign.view)
-// GET  ?actie=teamleden                    → actieve profielen met e-mail (esign.send)
+// GET  ?actie=teamleden                    → actieve CRM-medewerkers met e-mail (esign.send)
 // GET  ?actie=klanten&q=                   → klanten zoeken voor de koppeling (esign.send)
 // POST { actie: 'aanmaken', titel, bericht?, volgorde, ontvangers:[profile_id], entiteit? }
 // POST { actie: 'bijwerken', id, titel?, bericht?, volgorde?, ontvangers?, entiteit? }   (concept)
@@ -23,6 +23,7 @@
 import { supabase, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendMail } from './mailer.js';
+import { CRM_STAFF_ROLES, isCrmStaffRole } from './_lib/crm-roles.js';
 import {
   BUCKET, MAX_ONTVANGERS, MAX_PDF_BYTES, klaarOmTeVersturen, valideerVeldDefinities, sha256Hex, ACTIEF,
 } from './_lib/esign-core.js';
@@ -55,19 +56,21 @@ function migratieOfFout(res, e, label) {
 }
 
 // Ontvangers uit profile-id's: altijd intern in fase 1, naam + e-mail als momentopname.
+// Alleen CRM-medewerkers (CRM_STAFF_ROLES): viewer/student-accounts van leads en
+// studenten zijn geen teamleden en kunnen in fase 1 niet ondertekenen.
 async function ontvangersUitProfielen(ids) {
   if (!Array.isArray(ids)) return { fout: 'ontvangers moet een lijst van profiel-id\'s zijn' };
   const uniek = [...new Set(ids.map(String))];
   if (uniek.length === 0) return { lijst: [] };
   if (uniek.length > MAX_ONTVANGERS) return { fout: `maximaal ${MAX_ONTVANGERS} ondertekenaars` };
   if (uniek.some((id) => !UUID_RE.test(id))) return { fout: 'ongeldig profiel-id' };
-  const { data, error } = await supabaseAdmin.from('profiles').select('id, email, full_name, is_active').in('id', uniek);
+  const { data, error } = await supabaseAdmin.from('profiles').select('id, email, full_name, role, is_active').in('id', uniek);
   if (error) return { fout: 'profielen lezen: ' + error.message };
   const per = new Map((data || []).map((p) => [p.id, p]));
   const lijst = [];
   for (const id of uniek) {
     const p = per.get(id);
-    if (!p || p.is_active === false || !p.email) return { fout: 'Een gekozen teamlid bestaat niet, is niet actief of heeft geen e-mail.' };
+    if (!p || p.is_active === false || !p.email || !isCrmStaffRole(p.role)) return { fout: 'Een gekozen teamlid bestaat niet, is niet actief, is geen medewerker of heeft geen e-mail.' };
     lijst.push({ profile_id: p.id, naam: p.full_name || p.email, email: p.email });
   }
   return { lijst };
@@ -185,10 +188,14 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && actie === 'teamleden') {
+      // Alleen medewerkers: elk auth-account krijgt automatisch een profiel
+      // (viewer/student), dus zonder rolfilter stonden leads en studenten erin.
       const { data, error } = await supabaseAdmin.from('profiles').select('id, full_name, email, role, is_active')
-        .eq('is_active', true).not('email', 'is', null).order('full_name');
+        .eq('is_active', true).not('email', 'is', null).in('role', CRM_STAFF_ROLES).order('full_name');
       if (error) throw error;
-      return res.status(200).json({ teamleden: (data || []).map((p) => ({ id: p.id, naam: p.full_name || p.email, email: p.email, rol: p.role })) });
+      const teamleden = (data || []).filter((p) => isCrmStaffRole(p.role))
+        .map((p) => ({ id: p.id, naam: p.full_name || p.email, email: p.email, rol: p.role }));
+      return res.status(200).json({ teamleden });
     }
     if (req.method === 'GET' && actie === 'klanten') {
       const q = String(req.query?.q || '').trim().replace(/[%,()]/g, ' ').slice(0, 60);
