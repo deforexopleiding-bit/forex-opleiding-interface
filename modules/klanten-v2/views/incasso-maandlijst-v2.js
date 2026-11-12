@@ -19,6 +19,15 @@
   const MND = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
   const maandLabel = (k) => { const [y, m] = String(k).split('-'); return `${MND[Number(m) - 1] || m} ${y}`; };
   const vandaag = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(new Date());
+  // Stand per maand (api/_lib/incasso-maandlijst.js maandStand): enkel een
+  // vervallen, onbetaalde factuur is rood; toekomst is neutraal.
+  const STAND = {
+    gepland: { label: 'gepland', kleur: 'var(--text-3)' },
+    te_betalen: { label: 'te betalen', kleur: 'var(--amber)' },
+    achterstand: { label: 'achterstand', kleur: 'var(--rose)' },
+    factuur_ontbreekt: { label: 'termijn zonder factuur', kleur: 'var(--amber)' },
+    betaald: { label: 'betaald', kleur: 'var(--green, #16a34a)' },
+  };
 
   const st = window.__imState = window.__imState || { loading: false, fetched: false, error: null, klanten: [], open: {}, betaal: null };
   const rerender = () => { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); };
@@ -96,11 +105,16 @@
       <td class="r">${open ? '▾' : '▸'}</td></tr>`;
     if (!open) return kop;
     const huidig = vandaag().slice(0, 7);
-    const rijen = (k.maanden || []).map((m) => `<tr style="${m.maand === huidig ? 'background:var(--accent-soft, rgba(59,130,246,.06))' : ''}">
-      <td style="padding-left:24px">${esc(maandLabel(m.maand))}</td>
-      <td>${(m.facturen || []).map((f) => `<div style="font-size:12px">${esc(f.nummer || 'factuur')} · ${eur(f.bedrag)}${!f.gecrediteerd && f.betaald > 0.005 && f.betaalmethode ? ` · betaald ${eur(f.betaald)} (${esc(f.betaalmethode)})` : ''}${f.gecrediteerd ? ' · gecrediteerd' : (f.open > 0.005 ? ` · open ${eur(f.open)} <button class="ds-btn ds-btn-ghost ds-btn-sm" style="margin-left:4px" onclick="event.stopPropagation();__imBetaal('${esc(k.customer_id)}','${esc(f.id)}')">Betaling ontvangen</button>` : ' · betaald')}</div>`).join('') || (m.gepland > 0 ? '<span style="font-size:12px;color:var(--text-3)">nog geen factuur</span>' : '')}</td>
+    const rijen = (k.maanden || []).map((m) => {
+      const stand = m.stand || (m.maand > huidig ? 'gepland' : (m.achterstand > 0 ? 'achterstand' : ''));
+      const sl = STAND[stand];
+      const toekomst = stand === 'gepland';
+      return `<tr style="${m.maand === huidig ? 'background:var(--accent-soft, rgba(59,130,246,.06))' : ''}${toekomst ? ';color:var(--text-3)' : ''}">
+      <td style="padding-left:24px">${esc(maandLabel(m.maand))}${sl ? ` <span style="font-size:11px;margin-left:6px;color:${sl.kleur}">${esc(sl.label)}</span>` : ''}</td>
+      <td>${(m.facturen || []).map((f) => `<div style="font-size:12px">${esc(f.nummer || 'factuur')}${f.gekoppeld_op === 'periode_bedrag' ? ' <span style="font-size:10.5px;color:var(--text-3)" title="Teamleader gaf geen abonnement mee; gekoppeld op klant + periode + bedrag">(gekoppeld)</span>' : ''} · ${eur(f.bedrag)}${!f.gecrediteerd && f.betaald > 0.005 && f.betaalmethode ? ` · betaald ${eur(f.betaald)} (${esc(f.betaalmethode)})` : ''}${f.gecrediteerd ? ' · gecrediteerd' : (f.open > 0.005 ? ` · open ${eur(f.open)} <button class="ds-btn ds-btn-ghost ds-btn-sm" style="margin-left:4px" onclick="event.stopPropagation();__imBetaal('${esc(k.customer_id)}','${esc(f.id)}')">Betaling ontvangen</button>` : ' · betaald')}</div>`).join('') || (m.gepland > 0 ? '<span style="font-size:12px;color:var(--text-3)">nog geen factuur</span>' : '')}</td>
       <td class="r mono">${eur(m.verwacht)}</td><td class="r mono">${eur(m.ontvangen)}</td>
-      <td class="r mono" style="${m.achterstand > 0 ? 'color:var(--rose)' : ''}">${eur(m.achterstand)}</td><td></td></tr>`).join('');
+      <td class="r mono" style="${stand === 'achterstand' && m.achterstand > 0 ? 'color:var(--rose)' : ''}">${toekomst ? '—' : eur(m.achterstand)}</td><td></td></tr>`;
+    }).join('');
     return kop + rijen;
   }
 
