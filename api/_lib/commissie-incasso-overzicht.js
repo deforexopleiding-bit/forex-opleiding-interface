@@ -74,7 +74,11 @@ export async function commissieIncassoOverzicht(db) {
 
   // 2a) Commissie open op een offerte die weg/gearchiveerd is of geen actief abonnement meer heeft.
   await veilig('Commissie zonder abonnement', async () => {
-    const open = parents.filter((p) => OPEN_STATUSSEN.includes(p.status) && p.source_quote_id && p.customer_id);
+    // Klanten met een open incasso-markering overslaan: daar staat de
+    // commissie al stil en verklaart de incassostatus het (tab Incasso).
+    const markeringen = await alle(db, 'mentor_commissie_incasso', 'customer_id', (q) => q.is('opgeheven_op', null)).catch(() => []);
+    const bijIncasso = new Set(markeringen.map((m) => m.customer_id).filter(Boolean));
+    const open = parents.filter((p) => OPEN_STATUSSEN.includes(p.status) && p.source_quote_id && p.customer_id && !bijIncasso.has(p.customer_id));
     const custIds = [...new Set(open.map((p) => p.customer_id))];
     if (!custIds.length) return;
     const deals = await inChunks(custIds, (ids) => alle(db, 'deals', 'id, customer_id, quote_reference, archived_at', (q) => q.in('customer_id', ids)));

@@ -79,3 +79,12 @@ test('incasso: chip rood, kaart toont stilstand; mentor/sales ziet geen toewijsk
   assert.match(h, /Bij incasso sinds 10 nov 2026 — commissie staat stil/);
   assert.ok(!h.includes('Sale toewijzen'));
 });
+
+test('fix 3: korte chip voor lijsten kapt de namen af, bedrag blijft, volledige tekst in tooltip', () => {
+  const C = laad();
+  const z = { ...basis, commissie: { ...basis.commissie, mentoren: [{ user_id: 'a', naam: 'Chesney Van Der Langenaam', bedrag: 54 }, { user_id: 'b', naam: 'Bart', bedrag: 54 }] } };
+  const h = C.chip(z, { kort: true });
+  assert.match(h, /max-width:120px;overflow:hidden;text-overflow:ellipsis/);
+  assert.match(h, /<\/span> · <b>€\s108<\/b><\/span>$/);
+  assert.match(h, /title="Chesney Van Der Langenaam, Bart · Event Gent · 7 nov 2026"/);
+});

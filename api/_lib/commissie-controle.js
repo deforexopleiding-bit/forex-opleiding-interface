@@ -87,6 +87,9 @@ const inChunks = async (ids, fn) => {
   return out;
 };
 
+/** Een abonnement zonder soort telt alleen als het nog loopt (active / paused). */
+export const heeftSoortNodig = (s) => ['active', 'paused'].includes(String(s?.status || '').toLowerCase());
+
 /**
  * Puur: één sale-rij uit zijn parents + context. Geëxporteerd voor tests.
  */
@@ -97,7 +100,11 @@ export function rekenSale({ parents, kids, facturen, scope, customerId, dealId, 
   const betaald = round2(vanSale.reduce((t, inv) => t + (sinds ? betaaldVoor(inv, betalingen.get(inv.id), sinds) : betaaldBedrag(inv)), 0));
   const afw = new Set();
   if (vanSale.some((inv) => (Number(inv.amount_paid) || 0) > (Number(inv.amount_total) || 0) + 0.005)) afw.add('factuur_te_veel_betaald');
-  const zonderSoort = dealId ? scope.zonderSoort(dealId) : [];
+  // Soort is enkel nodig voor een abonnement dat nog iets opbrengt (actief of
+  // gepauzeerd) en nooit bij een sale waarvan de commissie geannuleerd is
+  // (Maxim 12 nov). Zelfde regel als Finance › Commissie & incasso.
+  const saleGeannuleerd = (parents || []).length > 0 && parents.every((p) => p.status === 'geannuleerd');
+  const zonderSoort = dealId && !saleGeannuleerd ? scope.zonderSoort(dealId).filter(heeftSoortNodig) : [];
   if (zonderSoort.length) afw.add('soort_ontbreekt');
 
   const perMentor = [];
