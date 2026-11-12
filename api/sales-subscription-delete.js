@@ -13,6 +13,15 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { commissieVraagBijStop, annuleerCommissie } from './_lib/commissie-annulering.js';
+
+// Regel C (12 nov 2026): stopt het LAATSTE actieve abonnement van een sale met
+// open mentorcommissie (geen ander actief abonnement op deal_id of
+// sale_deal_id), dan kiest de gebruiker: klant annuleert (commissie →
+// geannuleerd) of er komt een nieuwe regeling (commissie blijft; link het
+// nieuwe abonnement via Soort → Aanpassing). Een gelinkte aanpassing houdt
+// de sale actief, dus vraagt niets.
+const COMMISSIE_KEUZES = new Set(['klant_annuleert', 'nieuwe_regeling']);
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -33,6 +42,22 @@ export default async function handler(req, res) {
   try {
     const { data: sub } = await supabaseAdmin.from('subscriptions').select('*').eq('id', subscriptionId).maybeSingle();
     if (!sub) return res.status(404).json({ error: 'Abonnement niet gevonden' });
+
+    let commissieVraag = { vraag: false, sales: [] };
+    try {
+      commissieVraag = await commissieVraagBijStop(supabaseAdmin, { subscriptionId });
+    } catch (e) {
+      // Faalzacht: de commissie blijft dan gewoon open staan (niets verloren).
+      console.error('[sub-delete] commissie-vraag:', e.message);
+    }
+    const commissieKeuze = req.body?.commissie_keuze || null;
+    if (commissieVraag.vraag && sub.status !== 'cancelled' && !COMMISSIE_KEUZES.has(commissieKeuze)) {
+      return res.status(409).json({
+        error: 'Dit is het laatste actieve abonnement van een sale met mentorcommissie. Kies: klant annuleert of er komt een nieuwe regeling.',
+        code: 'COMMISSIE_KEUZE_VEREIST',
+        commissie: commissieVraag.sales,
+      });
+    }
 
     // TL-FIRST (Issue 2): deactiveer eerst in TL. Faalt dat én geen force →
     // 502 zonder lokale wijziging (geen out-of-sync state). Met force=true of
@@ -87,7 +112,35 @@ export default async function handler(req, res) {
       });
     } catch (e) { console.error('[sub-delete] audit:', e.message); }
 
-    return res.status(200).json({ success: true, tl, local_updated: true });
+    // Mentorcommissie volgens de keuze (fail-soft: het abonnement is gestopt).
+    let commissie = null;
+    if (commissieVraag.vraag && commissieKeuze === 'klant_annuleert') {
+      commissie = [];
+      for (const c of commissieVraag.sales) {
+        try {
+          const r = await annuleerCommissie(supabaseAdmin, {
+            dealId: c.deal_id, soort: 'klant_annuleert', reden: 'laatste abonnement gestopt',
+            extraNote: `Abonnement ${sub.description || subscriptionId} gestopt`, bron: 'abonnement', actorId: user.id,
+          });
+          commissie.push({ deal_id: c.deal_id, ok: true, geannuleerd_regels: r.geannuleerd_regels, al_vrijgegeven: r.al_vrijgegeven });
+        } catch (e) {
+          console.error('[sub-delete] commissie annuleren:', e.message);
+          commissie.push({ deal_id: c.deal_id, ok: false, error: e.message });
+        }
+      }
+    } else if (commissieVraag.vraag && commissieKeuze === 'nieuwe_regeling') {
+      commissie = commissieVraag.sales.map((c) => ({ deal_id: c.deal_id, ok: true, blijft: true }));
+      try {
+        await supabaseAdmin.from('audit_log').insert({
+          user_id: user.id, action: 'commissie.blijft_nieuwe_regeling', entity_type: 'subscription', entity_id: subscriptionId,
+          after_json: { sales: commissieVraag.sales.map((c) => c.deal_id) },
+          reason_text: 'Laatste abonnement gestopt; er komt een nieuwe regeling (commissie blijft, link via Soort → Aanpassing)',
+          ip_address: getClientIp(req),
+        });
+      } catch (e) { console.error('[sub-delete] audit commissie:', e.message); }
+    }
+
+    return res.status(200).json({ success: true, tl, local_updated: true, commissie, commissie_keuze: commissieVraag.vraag ? commissieKeuze : null });
   } catch (e) {
     console.error('[sales-subscription-delete]', e.message);
     return res.status(500).json({ error: e.message });

@@ -23,7 +23,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { createNotification } from './notify.js';
 import { syncDfoLmsMentor } from './dfo-lms-student.js';
 import { spiegelNaActie } from './onboarding-spiegel.js';
-import { assertStartDateNotTooEarly } from './onboarding-start-date.js';
+import { assertDateNotInPast, assertStartDateNotTooEarly } from './onboarding-start-date.js';
 
 function uit(status, body) {
   return { status, body };
@@ -165,14 +165,25 @@ export async function wijsMentorToe({ onboardingId, mentorUserId, doorUserId = n
 /**
  * DE STARTDATUM. Dezelfde ondergrens als altijd: vandaag + 3 (NL-tijd).
  * Geeft 400 met `code: START_DATE_TOO_EARLY` en `min` als het te vroeg is.
+ *
+ * UITZONDERING (9 nov 2026, "Klaar voor opstart" in het LMS): heeft de
+ * administratie de datum MET DE STUDENT afgesproken (`afgesprokenMetStudent`),
+ * dan mag vandaag of later. Alleen de machine-route uit het LMS zet die vlag,
+ * en alleen op uitdrukkelijk verzoek; elk ander pad houdt vandaag + 3.
  */
-export async function zetStartdatumOnboarding({ onboardingId, startDatum, doorUserId = null }) {
+export async function zetStartdatumOnboarding({ onboardingId, startDatum, doorUserId = null, afgesprokenMetStudent = false }) {
     //  DE GRENS STAAT OOK HIER, niet alleen in het endpoint: de machine-route
     //  uit het LMS komt via deze functie binnen en mag hem niet overslaan.
     if (typeof startDatum !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(startDatum)) {
       return uit(400, { error: 'start_date (YYYY-MM-DD) is verplicht.' });
     }
-    const startTooEarly = assertStartDateNotTooEarly(startDatum);
+    if (afgesprokenMetStudent === true) {
+      const inVerleden = assertDateNotInPast(startDatum, 'start_date');
+      if (inVerleden) {
+        return uit(400, { error: inVerleden.message, code: inVerleden.code, field: 'start_date', min: inVerleden.today, got: inVerleden.got });
+      }
+    }
+    const startTooEarly = afgesprokenMetStudent === true ? null : assertStartDateNotTooEarly(startDatum);
     if (startTooEarly) {
       return uit(400, {
         error: startTooEarly.message,
@@ -198,7 +209,8 @@ export async function zetStartdatumOnboarding({ onboardingId, startDatum, doorUs
       .single();
     if (updErr) throw new Error('start_date update: ' + updErr.message);
 
-    const noteText = 'Startdatum gewijzigd naar ' + fmtDateNL(startDatum);
+    const noteText = 'Startdatum gewijzigd naar ' + fmtDateNL(startDatum)
+      + (afgesprokenMetStudent === true ? ' (met de student afgesproken door de administratie)' : '');
     const { data: tlrow, error: tlErr } = await supabaseAdmin
       .from('onboarding_mentor_updates')
       .insert({

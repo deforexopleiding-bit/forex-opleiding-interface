@@ -669,21 +669,21 @@
   window.__fnSubUpdate = async function () {
     const sub = _subOrToast(); if (!sub) return;
     try {
-      const mod = await import('./modals/subscription-actions.js');
+      const mod = await import('./modals/subscription-actions.js?v=3');
       mod.openSubscriptionUpdateModal({ sub, onSuccess: _refreshSub });
     } catch (e) { console.error('[fnd] sub-update import fail:', e); window.KV.toast('Kon aanpas-modal niet laden'); }
   };
   window.__fnSubPostpone = async function () {
     const sub = _subOrToast(); if (!sub) return;
     try {
-      const mod = await import('./modals/subscription-actions.js');
+      const mod = await import('./modals/subscription-actions.js?v=3');
       mod.openSubscriptionPostponeModal({ sub, onSuccess: _refreshSub });
     } catch (e) { console.error('[fnd] sub-postpone import fail:', e); window.KV.toast('Kon uitstel-modal niet laden'); }
   };
   window.__fnSubDelete = async function () {
     const sub = _subOrToast(); if (!sub) return;
     try {
-      const mod = await import('./modals/subscription-actions.js');
+      const mod = await import('./modals/subscription-actions.js?v=3');
       mod.openSubscriptionDeleteModal({ sub, onSuccess: _refreshSub });
     } catch (e) { console.error('[fnd] sub-delete import fail:', e); window.KV.toast('Kon deactiveer-modal niet laden'); }
   };

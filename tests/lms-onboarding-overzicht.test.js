@@ -95,6 +95,22 @@ test('DE STARTDATUMGRENS GELDT OOK VIA DE GEDEELDE FUNCTIE — vóór er iets ge
   assert.equal(fout.status, 400);
 });
 
+test('KLAAR VOOR OPSTART (9 nov 2026): afgesproken met de student = vandaag of later, nooit gisteren', async () => {
+  const gisteren = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  const uit = await zetStartdatumOnboarding({ onboardingId: 'x', startDatum: gisteren, afgesprokenMetStudent: true });
+  assert.equal(uit.status, 400);
+  assert.equal(uit.body.code, 'DATE_IN_PAST');
+  //  Alleen een echte `true` opent de uitzondering; elk ander pad houdt vandaag + 3.
+  const morgen = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const zonder = await zetStartdatumOnboarding({ onboardingId: 'x', startDatum: morgen, afgesprokenMetStudent: 'true' });
+  assert.equal(zonder.body.code, 'START_DATE_TOO_EARLY');
+  //  De machine-route geeft alleen een expliciete true door.
+  const bron = lees('api/lms-onboarding-sessie.js');
+  assert.match(bron, /afgesprokenMetStudent: body\?\.afgesproken_met_student === true/);
+  //  En de CRM-knop zelf (admin-onboarding-start-date) zet de vlag nooit.
+  assert.doesNotMatch(lees('api/admin-onboarding-start-date.js'), /afgesprokenMetStudent/);
+});
+
 test('DE STARTSTATUS weigert een woord buiten de lijst — vóór er iets gelezen wordt', async () => {
   const uit = await zetStartstatus({ onboardingId: 'x', status: 'gestart' });
   assert.equal(uit.status, 400);

@@ -812,6 +812,26 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
       steps.offertes_cancel = { ok: allOk, results: out };
     }
 
+    // d) Mentorcommissie (regel A, 12 nov 2026): klant annuleert → commissie
+    //    van de geannuleerde offertes en van sales zonder actief abonnement op
+    //    'geannuleerd' (reden "Klant geannuleerd: onboarding geannuleerd").
+    //    Vrijgegeven/uitbetaald blijft staan. Fail-soft: blokkeert nooit.
+    //    NIET bij "Doorzetten naar incasso": dan volgt de commissie de
+    //    incassostatus (stilstand), ze wordt niet geannuleerd.
+    if (keuze.incasso) {
+      steps.commissie_annuleren = { ok: true, skipped: true, reason: 'incasso' };
+    } else try {
+      const { annuleerNaKlantAnnulering } = await import('./commissie-annulering.js');
+      const gearchiveerd = (steps.offertes_cancel?.results || []).filter((x) => x.local_ok).map((x) => x.deal_id);
+      steps.commissie_annuleren = await annuleerNaKlantAnnulering(supabaseAdmin, {
+        customerId: ctx.customerId || ctx.ob?.customer_id || null, dealIds: gearchiveerd,
+        reden: 'onboarding geannuleerd', bron: 'onboarding_annuleren', actorId: user?.id || null,
+      });
+    } catch (e) {
+      console.error('[onboarding-annuleren] commissie annuleren:', e?.message || e);
+      steps.commissie_annuleren = { ok: false, error: e?.message || String(e) };
+    }
+
     // e) onboardings.status='geannuleerd'.
     if (teAnnulerenObs.length === 0) {
       steps.onboarding_status = { ok: true, skipped: true, reason: ctx.onboardings.length ? 'niet-gekozen' : 'geen-open-onboarding' };
