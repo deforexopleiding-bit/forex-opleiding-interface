@@ -466,7 +466,28 @@ function _dlBody() {
         Het abonnement stopt en wordt ${hasTl ? '<strong>in TeamLeader gedeactiveerd</strong>' : 'lokaal beëindigd'} (blijft in de historie staan). Termijnbedrag: ${esc(fmtEur(_subAmountExcl(s)))} excl.
       </p>
       ${_dl.tlFailed ? `<p style="font-size:12px;color:var(--rose);margin:8px 0 0"><strong>TL-deactivatie mislukte.</strong> Wil je alleen lokaal deactiveren (TL handmatig afhandelen)?</p>` : ''}
+      ${_dlCommissieHtml()}
     </form>`;
+}
+// Regel C (12 nov 2026): laatste actieve abonnement van een sale met
+// mentorcommissie → de server vraagt een keuze (409 COMMISSIE_KEUZE_VEREIST).
+function _dlCommissieHtml() {
+  const sales = _dl.commissie;
+  if (!Array.isArray(sales) || !sales.length) return '';
+  const C = window.KV_COMM;
+  const blok = sales.map((c) => (C ? C.waarschuwingHtml(c) : '')).join('');
+  const opt = (v, l, d) => `
+    <label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1.5px solid ${_dl.keuze === v ? 'var(--brand,#0A7490)' : 'var(--border)'};border-radius:8px;cursor:pointer;margin-top:6px">
+      <input type="radio" name="kv-dl-comm" value="${v}" ${_dl.keuze === v ? 'checked' : ''} data-kv-dl-comm />
+      <span><b style="font-size:12.5px">${esc(l)}</b><br><span style="font-size:11.5px;color:var(--text-3)">${esc(d)}</span></span>
+    </label>`;
+  return `<div style="margin-top:10px">
+    <p style="font-size:12.5px;margin:0 0 4px"><b>Dit is het laatste actieve abonnement van deze sale.</b> Wat gebeurt er met de mentorcommissie?</p>
+    ${blok}
+    ${opt('klant_annuleert', 'Klant annuleert', 'Commissie → Geannuleerd (reden "Klant geannuleerd"). Al vrijgegeven of uitbetaald blijft staan.')}
+    ${opt('nieuwe_regeling', 'Er komt een nieuwe regeling', 'Commissie blijft. Link het nieuwe abonnement via Soort → Aanpassing (of Incasso-regeling) aan deze sale.')}
+    ${_dl.keuzeFout ? `<div class="kv-edit-field-msg" style="color:var(--rose)">${esc(_dl.keuzeFout)}</div>` : ''}
+  </div>`;
 }
 function _dlFoot() {
   return `
@@ -483,9 +504,16 @@ async function _dlSave() {
   try {
     const resp = await K().authedFetch('/api/sales-subscription-delete', {
       method: 'POST',
-      body: JSON.stringify({ subscription_id: _dl.sub.id, force: !!_dl.tlFailed }),
+      body: JSON.stringify({ subscription_id: _dl.sub.id, force: !!_dl.tlFailed, commissie_keuze: _dl.keuze || undefined }),
     });
     const d = await resp.json().catch(() => ({}));
+    if (resp.status === 409 && d?.code === 'COMMISSIE_KEUZE_VEREIST') {
+      _dl.keuzeFout = _dl.commissie ? 'Kies wat er met de commissie gebeurt.' : null;
+      _dl.commissie = d.commissie || [];
+      _dl.saving = false;
+      _dlRerender();
+      return;
+    }
     if (resp.status === 502 && d?.tl_failed && !_dl.tlFailed) {
       _dl.tlFailed = true;
       _dl.globalError = 'TeamLeader-deactivatie mislukt: ' + (d?.tl?.error || 'onbekend');
@@ -498,6 +526,8 @@ async function _dlSave() {
     if (tl.deactivated) K().toast('Abonnement gedeactiveerd (lokaal + TL)');
     else if (tl.skipped) K().toast('Abonnement lokaal gedeactiveerd (geen TL-koppeling)');
     else K().toast('Lokaal gedeactiveerd, maar TL-deactivatie mislukte: ' + (tl.error || 'onbekend'));
+    if (d?.commissie_keuze === 'klant_annuleert') setTimeout(() => K().toast('Mentorcommissie van deze sale op Geannuleerd (klant geannuleerd)'), 2600);
+    else if (d?.commissie_keuze === 'nieuwe_regeling') setTimeout(() => K().toast('Commissie blijft — link het nieuwe abonnement via Soort → Aanpassing'), 2600);
     if (typeof _dl.onSuccess === 'function') _dl.onSuccess();
     D().closeModal();
   } catch (e) {
@@ -510,13 +540,17 @@ function _dlWire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
   box.querySelectorAll('[data-kv-dl-close]').forEach((b) => b.addEventListener('click', () => D().closeModal()));
-  box.querySelector('[data-kv-dl-submit]')?.addEventListener('click', _dlSave);
+  box.querySelector('[data-kv-dl-submit]')?.addEventListener('click', () => {
+    if (Array.isArray(_dl.commissie) && _dl.commissie.length && !_dl.keuze) { _dl.keuzeFout = 'Kies wat er met de commissie gebeurt.'; _dlRerender(); return; }
+    _dlSave();
+  });
+  box.querySelectorAll('[data-kv-dl-comm]').forEach((r) => r.addEventListener('change', (e) => { _dl.keuze = e.target.value; _dl.keuzeFout = null; _dlRerender(); }));
 }
 function _dlRerender() { D().openModal({ head: _dlHead(), body: _dlBody(), foot: _dlFoot() }); _dlWire(); }
 
 export function openSubscriptionDeleteModal({ sub, onSuccess } = {}) {
   if (!sub?.id) { K().toast('Geen abonnement geselecteerd'); return; }
-  _dl = { sub, saving: false, globalError: null, tlFailed: false, onSuccess: onSuccess || null };
+  _dl = { sub, saving: false, globalError: null, tlFailed: false, onSuccess: onSuccess || null, commissie: null, keuze: null, keuzeFout: null };
   _dlRerender();
 }
 

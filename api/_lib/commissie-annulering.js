@@ -30,7 +30,7 @@
 
 import { createNotification } from './notify.js';
 import { customerDisplayName } from './customer-name.js';
-import { saleVanSoort } from './subscription-soort.js';
+import { saleVanSoort, laadSubsMetSoort } from './subscription-soort.js';
 
 export const OPEN_STATUSSEN = ['pending', 'wachten_op_betaling'];
 export const ANNULERING_SOORTEN = ['klant_annuleert', 'vervangen', 'handmatig'];
@@ -470,6 +470,63 @@ export async function vorigeVervangenCommissie(db, { customerId, dealId }) {
     bedrag: round2(vanVorige.reduce((s, p) => s + Number(p.original_amount ?? p.amount ?? 0), 0)),
     bron,
   };
+}
+
+// ── Regel C: abonnement stopt ───────────────────────────────────────────────
+
+/** Alle deals + abonnementen (met soort) van een klant. */
+async function klantContext(db, customerId) {
+  const deals = await alle(db.from('deals').select('id, customer_id, quote_reference, archived_at').eq('customer_id', customerId), 'deals');
+  const subs = await laadSubsMetSoort(db, deals.map((d) => d.id), 'id, deal_id, status, description, start_date');
+  return { deals, subs };
+}
+
+/**
+ * Wordt dit abonnement het LAATSTE actieve van een sale met open commissie?
+ * Dan moet het stopvenster vragen: klant annuleert of nieuwe regeling.
+ * Geeft { vraag: bool, sales: [samenvatting] }.
+ */
+export async function commissieVraagBijStop(db, { subscriptionId }) {
+  const { data: sub, error } = await db.from('subscriptions').select('id, deal_id').eq('id', subscriptionId).maybeSingle();
+  if (error) throw new Error('subscription: ' + error.message);
+  if (!sub?.deal_id) return { vraag: false, sales: [] };
+  const { data: deal } = await db.from('deals').select('id, customer_id').eq('id', sub.deal_id).maybeSingle();
+  if (!deal?.customer_id) return { vraag: false, sales: [] };
+  const { deals, subs } = await klantContext(db, deal.customer_id);
+  const per = await laadCommissieVanDeals(db, deals.map((d) => d.id));
+  const metOpen = new Set([...per.values()].filter((c) => c.open).map((c) => c.deal_id));
+  const geraakt = salesZonderAbonnementNa(subs, subscriptionId, metOpen);
+  const sales = geraakt.map((d) => ({ ...per.get(d), offerte: deals.find((x) => x.id === d)?.quote_reference || null }));
+  return { vraag: sales.length > 0, sales, customer_id: deal.customer_id };
+}
+
+/**
+ * Klant annuleert (bv. onboarding annuleren): commissie op geannuleerd voor
+ * de gearchiveerde deals én voor elke sale met open commissie die geen actief
+ * abonnement meer heeft. Een sale die nog een (gelinkt) actief abonnement
+ * heeft, blijft staan.
+ */
+export async function annuleerNaKlantAnnulering(db, { customerId, dealIds = [], reden = '', bron, actorId = null }) {
+  if (!UUID_RE.test(String(customerId || ''))) return { ok: true, sales: [] };
+  const { deals, subs } = await klantContext(db, customerId);
+  const per = await laadCommissieVanDeals(db, deals.map((d) => d.id));
+  const doel = new Set(dealIds.filter((d) => per.get(d)?.open));
+  for (const c of per.values()) {
+    if (!c.open) continue;
+    const eigenSubs = subs.filter((s) => hoortBijSale(s, c.deal_id));
+    if (eigenSubs.length && !eigenSubs.some(isActiefAbonnement)) doel.add(c.deal_id);
+  }
+  const out = [];
+  for (const dealId of doel) {
+    try {
+      const r = await annuleerCommissie(db, { dealId, soort: 'klant_annuleert', reden, bron, actorId });
+      out.push({ deal_id: dealId, ok: true, geannuleerd_regels: r.geannuleerd_regels, al_vrijgegeven: r.al_vrijgegeven });
+    } catch (e) {
+      console.error('[commissie-annulering] na klantannulering', dealId, e?.message || e);
+      out.push({ deal_id: dealId, ok: false, error: e?.message || String(e) });
+    }
+  }
+  return { ok: out.every((x) => x.ok), sales: out };
 }
 
 /** Label voor een klant (voor meldingen). */

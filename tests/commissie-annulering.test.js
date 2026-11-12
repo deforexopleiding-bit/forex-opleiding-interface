@@ -44,6 +44,7 @@ const client = {
 };
 
 mock.module(url('api/supabase.js'), { namedExports: { supabaseAdmin: client, createUserClient: () => ({ auth: { getUser: async () => ({ data: { user: { id: ACTOR } } }) } }) } });
+mock.module(url('api/_lib/requirePermission.js'), { namedExports: { requirePermission: async () => true } });
 mock.module(url('api/_lib/notify.js'), { namedExports: { createNotification: async (o) => { meldingen.push(o); return { ok: true }; } } });
 mock.module(url('api/_lib/roles.js'), { namedExports: { getEffectiveRoles: async () => ['super_admin'], hasAnyRole: () => true, computeHighestRole: () => 'super_admin' } });
 mock.module(url('api/_lib/teamleader-token.js'), { namedExports: {
@@ -54,6 +55,7 @@ mock.module(url('api/mailer.js'), { namedExports: { sendMail: async () => ({ suc
 
 const A_ = await import(url('api/_lib/commissie-annulering.js'));
 const hardDelete = (await import(url('api/sales-hard-delete-quotation.js'))).default;
+const subDelete = (await import(url('api/sales-subscription-delete.js'))).default;
 
 const K = '11111111-1111-4111-8111-111111111111';
 const D1 = 'd1000000-0000-4000-8000-000000000001';
@@ -264,4 +266,67 @@ test('B — handmatige toewijzing op de offerte → blocker (deal kan niet weg z
   assert.equal(res.body.blocker.type, 'mentor_sale_attributions');
   assert.equal(tlCalls.length, 0);
   assert.equal(rij('p-a').status, 'wachten_op_betaling');
+});
+
+// ── Regel C: laatste abonnement stopt ───────────────────────────────────────
+function zetSubs(extra = []) {
+  zet();
+  db.tables.subscriptions = [
+    { id: 's1', deal_id: D1, status: 'active', description: 'Termijnen', teamleader_subscription_id: null, soort: 'origineel', sale_deal_id: D1 },
+    ...extra,
+  ];
+}
+
+test('C — laatste actieve abonnement van een sale met commissie: zonder keuze 409, niets gestopt', async () => {
+  zetSubs();
+  const res = nepRes();
+  await subDelete(req({ subscription_id: 's1' }), res);
+  assert.equal(res.code, 409, JSON.stringify(res.body));
+  assert.equal(res.body.code, 'COMMISSIE_KEUZE_VEREIST');
+  assert.equal(res.body.commissie[0].deal_id, D1);
+  assert.equal(db.rows('subscriptions')[0].status, 'active');
+});
+
+test('C — "klant annuleert": abonnement gestopt + commissie geannuleerd', async () => {
+  zetSubs();
+  const res = nepRes();
+  await subDelete(req({ subscription_id: 's1', commissie_keuze: 'klant_annuleert' }), res);
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(db.rows('subscriptions')[0].status, 'cancelled');
+  assert.equal(rij('p-a').status, 'geannuleerd');
+  assert.match(rij('p-a').note, /Geannuleerd \(Klant geannuleerd: laatste abonnement gestopt — was: wachten_op_betaling\)/);
+});
+
+test('C — "nieuwe regeling": abonnement gestopt, commissie blijft', async () => {
+  zetSubs();
+  const res = nepRes();
+  await subDelete(req({ subscription_id: 's1', commissie_keuze: 'nieuwe_regeling' }), res);
+  assert.equal(res.code, 200);
+  assert.equal(rij('p-a').status, 'wachten_op_betaling');
+  assert.equal(res.body.commissie[0].blijft, true);
+});
+
+test('C — vervangen door een gelinkte aanpassing: geen vraag, commissie blijft', async () => {
+  zetSubs([{ id: 's2', deal_id: D2, status: 'active', soort: 'aanpassing', aanpassing_type: 'regeling', sale_deal_id: D1 }]);
+  const res = nepRes();
+  await subDelete(req({ subscription_id: 's1' }), res);
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.commissie, null);
+  assert.equal(rij('p-a').status, 'wachten_op_betaling');
+});
+
+test('A — onboarding annuleren: sale zonder actief abonnement + gearchiveerde offerte → geannuleerd', async () => {
+  zetSubs();
+  db.tables.subscriptions[0].status = 'cancelled';
+  const r = await A_.annuleerNaKlantAnnulering(client, { customerId: K, dealIds: [], reden: 'onboarding geannuleerd', bron: 'onboarding_annuleren' });
+  assert.equal(r.sales.length, 1);
+  assert.equal(rij('p-b').status, 'geannuleerd');
+  assert.match(rij('p-b').note, /Klant geannuleerd: onboarding geannuleerd/);
+});
+
+test('A — onboarding annuleren: sale met nog een actief abonnement blijft', async () => {
+  zetSubs();
+  const r = await A_.annuleerNaKlantAnnulering(client, { customerId: K, dealIds: [], reden: 'x', bron: 'onboarding_annuleren' });
+  assert.equal(r.sales.length, 0);
+  assert.equal(rij('p-b').status, 'pending');
 });

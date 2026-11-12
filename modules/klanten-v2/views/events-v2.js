@@ -1324,6 +1324,7 @@
 
         </div>
 
+        ${_completeSalesWarnBlok(form, attListAll)}
         <div style="padding:14px 22px;border-top:1px solid var(--border);background:var(--surface-2);display:flex;gap:8px;justify-content:space-between;align-items:center;position:sticky;bottom:0">
           <div style="font-size:11.5px;color:var(--text-3)">Bonus wordt automatisch berekend: <b>3% van sale-bedrag</b> (${form.basis_incl_btw ? 'incl.' : 'excl.'} BTW), gelijk verdeeld over de <b>${presentMentorIds.length}</b> aanwezige mentor${presentMentorIds.length === 1 ? '' : 'en'}.</div>
           <div style="display:flex;gap:8px">
@@ -1334,6 +1335,45 @@
       </div>
     </div>`;
   }
+
+  // Regel D (12 nov 2026): een gekoppelde sale telt enkel mee als de
+  // deelnemer op Aanwezig staat (events-complete-core: presentSold). Staat
+  // hij er niet op, dan krijgt niemand commissie — dat mag niet meer stil
+  // gebeuren. Afronden toont dan eerst deze waarschuwing.
+  function _completeSalesZonderAanwezig(form, attList) {
+    return asArr(attList).filter((a) => a.has_signed_deal && !a.bonus_excluded
+      && a.status !== 'geannuleerd' && a.status !== 'switched_to_other_event'
+      && (form.attendees[a.id] || {}).attendance_status !== 'aanwezig');
+  }
+  function _completeSalesWarnBlok(form, attList) {
+    if (!form.salesWarn) return '';
+    const lijst = _completeSalesZonderAanwezig(form, attList);
+    if (!lijst.length) return '';
+    const namen = lijst.map((a) => [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—');
+    return `<div style="margin:0 22px 12px;padding:12px 14px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:10px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:13px;font-weight:600;color:var(--amber)">⚠ ${lijst.length} gekoppelde sale${lijst.length === 1 ? ' staat' : 's staan'} niet op Aanwezig — die ${lijst.length === 1 ? 'krijgt' : 'krijgen'} geen commissie</div>
+      <div style="font-size:12.5px;color:var(--text-2)">${namen.map((n) => esc(n)).join(', ')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="window.__evCompleteSalesAanwezig()">Zet ze op Aanwezig · Klant geworden</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__evCompleteSalesToch()">Toch afronden</button>
+      </div>
+    </div>`;
+  }
+  window.__evCompleteSalesAanwezig = () => {
+    const m = _ui.completeModal; const form = _ui.completeForm;
+    if (!m || !form) return;
+    for (const a of _completeSalesZonderAanwezig(form, _live.attendees.data[m.event_id])) {
+      form.attendees[a.id] = { ...(form.attendees[a.id] || {}), attendance_status: 'aanwezig', outcome: 'klant_geworden', followup: null, afwezig: null, outcome_reason: '' };
+    }
+    form.salesWarn = false;
+    window.__evCompleteSubmit();
+  };
+  window.__evCompleteSalesToch = () => {
+    const form = _ui.completeForm;
+    if (!form) return;
+    form.salesWarnBevestigd = true; form.salesWarn = false;
+    window.__evCompleteSubmit();
+  };
 
   function _completeAttendeeRow(a, form) {
     const naam = [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || '—';
@@ -1491,6 +1531,12 @@
   window.__evCompleteSubmit = async () => {
     const m = _ui.completeModal; const form = _ui.completeForm;
     if (!m || !form) return;
+    // Regel D: gekoppelde sales zonder Aanwezig → eerst waarschuwen.
+    if (!form.salesWarnBevestigd && _completeSalesZonderAanwezig(form, _live.attendees.data[m.event_id]).length) {
+      form.salesWarn = true;
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
     // Bouw body 1-op-1 volgens events-complete-core.js body-shape.
     const attendees = Object.entries(form.attendees)
       .filter(([, v]) => v.attendance_status)
@@ -2098,7 +2144,7 @@
       await window.KV.authedJson('/api/events-attendee-link-deal', {
         method: 'POST', body: JSON.stringify({ attendee_id: attId, deal_id: dealId }),
       });
-      if (window.KV.toast) window.KV.toast('Deal gekoppeld — bonus wordt bij afronden meegerekend.', 'ok');
+      if (window.KV.toast) window.KV.toast('Deal gekoppeld — telt mee zodra de deelnemer op Aanwezig staat.', 'ok');
       await _evCompleteRefreshAttendees(eventId);
     } catch (e) {
       const msg = e?.body?.error || e?.message || 'onbekend';
@@ -2187,7 +2233,7 @@
       await window.KV.authedJson('/api/events-attendee-link-deal', {
         method: 'POST', body: JSON.stringify({ attendee_id: s.attendeeId, deal_id: dealId }),
       });
-      if (window.KV.toast) window.KV.toast('Deal gekoppeld.', 'ok');
+      if (window.KV.toast) window.KV.toast('Deal gekoppeld — telt mee zodra de deelnemer op Aanwezig staat.', 'ok');
       const evId = s.eventId;
       window.__evCompleteCloseDealSearch();
       await _evCompleteRefreshAttendees(evId);

@@ -23,7 +23,7 @@ import {
   openSubscriptionPostponeAllModal,
   openSubscriptionUpdateModal,
   openSubscriptionDeleteModal,
-} from '../modals/subscription-actions.js?v=2';
+} from '../modals/subscription-actions.js?v=3';
 
 const K = () => window.KV;
 
