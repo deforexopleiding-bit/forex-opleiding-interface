@@ -49,6 +49,7 @@ import { releaseDate as cashReleaseDate } from './_lib/mentor-cash-release-core.
 import { isTrajectTermKey, maakVerrekenaar } from './_lib/cash-traject-omzetten.js';
 import { rekenSaleCommissie, isStukSleutel } from './_lib/commissie-rekenregel.js';
 import { laadSubsMetSoort } from './_lib/subscription-soort.js';
+import { leesAnnulering } from './_lib/commissie-annulering.js';
 import { mentorLabel, statusVan } from './_lib/klant-incassostatus.js';
 import { effectieveBetaaldatum, maakAfsluiting, plaatsTermijn, addYm } from './_lib/commissie-maand.js';
 import {
@@ -134,7 +135,7 @@ export async function computeBonusOverview(effectiveUserId) {
     // weergave halen we de children-som per parent apart op (zie hieronder).
     const { data: entries, error: entErr } = await supabaseAdmin
       .from('mentor_ledger_entries')
-      .select('id, mentor_user_id, event_id, entry_type, basis, amount, original_amount, parent_entry_id, pct, status, attendee_id, customer_id, source_invoice_id, source_quote_id, idempotency_key, created_at')
+      .select('id, mentor_user_id, event_id, entry_type, basis, amount, original_amount, parent_entry_id, pct, status, attendee_id, customer_id, source_invoice_id, source_quote_id, idempotency_key, created_at, note')
       .eq('mentor_user_id', effectiveUserId)
       .eq('entry_type', 'bonus')
       .is('parent_entry_id', null)
@@ -729,7 +730,16 @@ export async function computeBonusOverview(effectiveUserId) {
       // mentorAmount = 0 → geen invloed op earned_total, betaald_uit,
       // open_total, month-buckets, mentor_share_total. saleStatus wordt
       // hieronder geforceerd op 'geannuleerd'.
-      const isCancelled  = r.status === 'geannuleerd';
+      // Annulering (12 nov 2026, commissie-annulering.js): heeft een
+      // geannuleerde ouder al vrijgegeven/uitbetaalde stukken, dan blijven
+      // die staan. De sale rekent dan door tot de annuleerdatum — zelfde
+      // afkappunt als incasso (oninbaar): wat vóór die datum betaald werd
+      // telt (ook in afgesloten maanden, exact zoals voorheen), daarna niets.
+      // Zonder stukken: het oude gedrag (telt nergens mee).
+      const annulering   = r.status === 'geannuleerd' ? leesAnnulering(r) : null;
+      const behoudVrij   = !!annulering && round2(releasedByParent.get(r.id) || 0) > 0;
+      const annGrens     = behoudVrij ? (annulering.op || todayISO) : null;
+      const isCancelled  = r.status === 'geannuleerd' && !behoudVrij;
       // Volledige mentor-aandeel: bij proportional-releases is parent.amount
       // verlaagd (rest); original_amount is het snapshot van vóór de eerste
       // slice. Gebruik dat als "totaal" zodat mentor_share_total consistent
@@ -997,7 +1007,8 @@ export async function computeBonusOverview(effectiveUserId) {
       }
       // Incasso: vanaf `sinds` geen commissie meer voor deze sale/klant.
       const incasso = incassoVoor(regCtx.incasso, r.customer_id, eigenDeal);
-      const sindsI = incasso ? String(incasso.sinds).slice(0, 10) : null;
+      const sindsIncasso = incasso ? String(incasso.sinds).slice(0, 10) : null;
+      const sindsI = [sindsIncasso, annGrens].filter(Boolean).sort()[0] || null;
       let vervallen = 0;
       // Omgezet traject: al vrijgegeven termijnregels in hun eigen maand
       // (zoals het rapport ze al zag) + verrekening op de betaalde termijnen.
@@ -1290,7 +1301,7 @@ export async function computeBonusOverview(effectiveUserId) {
       // Incasso (PR 3): bij_incasso = stilstand (niet weg, wel niet verwacht);
       // enkel afgesloten-oninbaar is echt weggevallen en telt niet als verdiend.
       const statusRij = incassoStatusVoor(regCtx.incasso, r.customer_id, eigenDeal);
-      const weggevallen = !!(statusRij && statusVan(statusRij) === 'afgesloten' && statusRij.afgesloten_als === 'oninbaar');
+      const weggevallen = behoudVrij || !!(statusRij && statusVan(statusRij) === 'afgesloten' && statusRij.afgesloten_als === 'oninbaar');
       if (vervallen > 0 && !schemaUnknown && weggevallen) earned_total = round2(earned_total - vervallen);
       if (schemaUnknown)          saleStatus = 'geen_abonnement';
       else if (subCancelled)      saleStatus = 'geannuleerd';
@@ -1301,7 +1312,7 @@ export async function computeBonusOverview(effectiveUserId) {
       // Geannuleerde ledger-entry overschrijft alle andere status-afleiding:
       // sale is zichtbaar in de lijst met de grijze 'Geannuleerd'-badge en
       // telt nergens mee (mentorAmount was al 0).
-      if (isCancelled) saleStatus = 'geannuleerd';
+      if (isCancelled || behoudVrij) saleStatus = 'geannuleerd';
       else if (sindsI)  saleStatus = 'incasso';
       // Label voor de mentor: bij incasso / regeling / geannuleerd / weggevallen,
       // met reden en verwachting (geen dossierdetails, geen vrije tekst).
@@ -1385,7 +1396,15 @@ export async function computeBonusOverview(effectiveUserId) {
           created_at         : attr?.created_at || r.created_at || null,
           mentor_count       : Math.max(1, mentorsPerSale.get(deelSleutel(r))?.size || 1),
           // Incasso: alleen datum + wat vervalt (geen dossierdetails voor de mentor).
-          incasso            : sindsI ? { sinds: sindsI, vervallen: round2(vervallen), stilstand: !weggevallen } : null,
+          incasso            : (sindsI && !behoudVrij) ? { sinds: sindsI, vervallen: round2(vervallen), stilstand: !weggevallen } : null,
+          // Geannuleerd: reden/datum + toezegging (de mentor ziet "dit was je
+          // commissie, de klant heeft geannuleerd"). vervallen = wat door de
+          // annulering niet meer komt (enkel bij behouden stukken).
+          annulering         : annulering ? {
+            reden: annulering.reden, op: annulering.op, soort: annulering.soort,
+            oorspronkelijk: round2(r.original_amount != null ? Number(r.original_amount) : Number(r.amount) || 0),
+            behoud_vrijgegeven: behoudVrij, vervallen: behoudVrij ? round2(vervallen) : 0,
+          } : null,
           status_label       : statusLabel,
           // Regeling na creditering: deel van de commissie dat door geen
           // (vervangende) factuur of abonnementstermijn gedekt is.
@@ -1405,7 +1424,7 @@ export async function computeBonusOverview(effectiveUserId) {
           if (bestaand) { bestaand.voor = round2(bestaand.voor + v.voor); bestaand.na = round2(bestaand.na + v.na); }
           else (cell.vergelijking_open ||= []).push({ ...v });
         }
-        if (sindsI) {
+        if (sindsI && !behoudVrij) {
           cell.incasso = { sinds: sindsI, vervallen: round2((cell.incasso?.vervallen || 0) + vervallen) };
         }
         // Als er een nieuwere betaling is (paid_date), bewaar de laatste.

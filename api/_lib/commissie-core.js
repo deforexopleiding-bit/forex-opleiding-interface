@@ -564,6 +564,7 @@ function saleStatus(cel) {
   const share = Number(cel.share) || 0;
   const rel = Number(cel.vrijgegeven) || 0;
   if (cel.geannuleerd) return 'geannuleerd';
+  if (cel.annulering && !cel.niet_alles_geannuleerd) return 'geannuleerd';
   if (cel.incasso) return 'incasso';
   if (share > 0 && rel >= share - 0.01) return 'volledig';
   if (cel.achterstallig) return 'achterstallig';
@@ -650,16 +651,24 @@ export function bouwOverzicht({ mentoren, overzichten, wanbetalers = new Set(), 
         // Een sale met aandeel 0 is een geannuleerde grootboekregel.
         const mentorGeannuleerd = share <= 0 && s.status === 'geannuleerd';
         if (!mentorGeannuleerd) cel.geannuleerd = false;
+        // Annulering (commissie-annulering.js): reden + toezegging voor de UI.
+        // Behouden stukken: de sale telt wat vrijgegeven werd, de rest vervalt.
+        if (s.annulering) {
+          cel.annulering = cel.annulering || { ...s.annulering, oorspronkelijk: 0 };
+          cel.annulering.oorspronkelijk = round2(cel.annulering.oorspronkelijk + (Number(s.annulering.oorspronkelijk) || 0));
+        }
+        if (s.status !== 'geannuleerd') cel.niet_alles_geannuleerd = true;
         if (s.status === 'geannuleerd' && share > 0) cel.sub_geannuleerd = true;
         cel.share = round2(cel.share + share);
         cel.vrijgegeven = round2(cel.vrijgegeven + rel);
         cel.vrijgegeven_grootboek = round2(cel.vrijgegeven_grootboek + relGb);
-        const verv = round2(s.incasso?.vervallen || 0);
+        const verv = round2((s.incasso?.vervallen || 0) + (s.annulering?.vervallen || 0));
         if (s.incasso) cel.incasso = { sinds: s.incasso.sinds, vervallen: round2((cel.incasso?.vervallen || 0) + verv), stilstand: s.incasso.stilstand !== false };
         if (s.status_label && !cel.status_label) cel.status_label = s.status_label;
         cel.vervallen = round2(cel.vervallen + verv);
         cel.niet_gedekt = round2(cel.niet_gedekt + (Number(s.regeling?.niet_gedekt) || 0));
-        cel.mentoren.push({ user_id: m.user_id, naam: m.naam, aandeel: share, vrijgegeven: rel, vervallen: verv, geannuleerd: mentorGeannuleerd });
+        cel.mentoren.push({ user_id: m.user_id, naam: m.naam, aandeel: share, vrijgegeven: rel, vervallen: verv, geannuleerd: mentorGeannuleerd,
+          ...(s.annulering ? { annulering: s.annulering } : {}) });
         (s.termijnen || []).forEach((t, i) => {
           if (cel.termijnen[i]) cel.termijnen[i].aandeel = round2(cel.termijnen[i].aandeel + (Number(t.amount) || 0));
         });

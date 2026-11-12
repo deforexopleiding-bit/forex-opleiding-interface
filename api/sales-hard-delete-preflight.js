@@ -21,6 +21,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getEffectiveRoles, hasAnyRole, computeHighestRole } from './_lib/roles.js';
+import { commissieVanDeal } from './_lib/commissie-annulering.js';
 
 async function checkAuth(req) {
   const sb = createUserClient(req);
@@ -160,6 +161,34 @@ export default async function handler(req, res) {
       });
     }
 
+    //    2e) Mentorcommissie (regel B, 12 nov 2026). Een HANDMATIGE
+    //        toewijzing (mentor_sale_attributions) houdt de deal vast (FK
+    //        RESTRICT, deal_id NOT NULL): een lokale DELETE zou na de
+    //        TL-delete mislukken (partial). Daarom blocker. Een event-bonus
+    //        blokkeert niet, maar vraagt een keuze: klant annuleert of
+    //        vervangen door een nieuwe offerte (zie commissie hieronder).
+    let commissie = null;
+    try {
+      commissie = await commissieVanDeal(supabaseAdmin, deal_id);
+    } catch (e) {
+      console.error('[sales-hard-delete-preflight] commissie:', e?.message || e);
+      return res.status(500).json({ error: 'Commissie-lookup fout', detail: e?.message || String(e) });
+    }
+    const { data: attrRows, error: attrErr } = await supabaseAdmin.from('mentor_sale_attributions')
+      .select('id, status, reden, created_at').eq('deal_id', deal_id);
+    if (attrErr && !/does not exist|42P01/i.test(`${attrErr.code} ${attrErr.message}`)) {
+      console.warn('[sales-hard-delete-preflight] attributions:', attrErr.message);
+    }
+    if ((attrRows || []).length > 0) {
+      blockers.push({
+        type   : 'mentor_sale_attributions',
+        label  : 'Handmatige commissietoewijzing gekoppeld',
+        count  : attrRows.length,
+        detail : 'Aan deze offerte hangt een handmatige commissietoewijzing (Mentoren → Commissies). Die moet bewaard blijven, dus de offerte kan niet definitief verwijderd worden. Annuleer de commissie via Commissies (klant annuleert of vervangen) en laat de offerte staan, of archiveer ze.',
+        rijen  : attrRows.map((a) => ({ id: a.id, status: a.status, reden: a.reden, aangemaakt: a.created_at })),
+      });
+    }
+
     // 3) CASCADE + SET NULL (informatief voor de UI) ──────────────────────
     const [subs, lineItems, capiEvents, eventAttendees] = await Promise.all([
       supabaseAdmin.from('subscriptions').select('id, amount, term_count, status').eq('deal_id', deal_id),
@@ -222,6 +251,11 @@ export default async function handler(req, res) {
         archived_at      : deal.archived_at,
       },
       blockers,
+      // Commissie op deze offerte: wie, hoeveel, bron. Staat er nog OPEN
+      // commissie (pending / wachten_op_betaling), dan MOET de POST een
+      // commissie_keuze meesturen: 'klant_annuleert' of 'vervangen'.
+      commissie,
+      commissie_keuze_nodig: !!(commissie && commissie.open),
       cascade,
       set_null,
       note: deletable

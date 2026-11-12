@@ -241,30 +241,15 @@ export async function releaseProportionalForPayment({
  * Idempotent op rows die al geannuleerd zijn.
  * Returnt { cancelled: <int>, ids: uuid[] }.
  */
-export async function cancelForCancelledQuote({ quoteId } = {}) {
+export async function cancelForCancelledQuote({ quoteId, reden = 'deal verloren in Teamleader', bron = 'tl_webhook' } = {}) {
   if (!quoteId) throw new Error('cancelForCancelledQuote: quoteId vereist');
-  const { data, error } = await supabaseAdmin
-    .from('mentor_ledger_entries')
-    .update({ status: 'geannuleerd' })
-    .eq('entry_type', 'bonus')
-    .eq('source_quote_id', quoteId)
-    .in('status', ['pending', 'wachten_op_betaling'])
-    .select('id');
-  if (error) throw new Error('cancelForCancelledQuote: ' + error.message);
-  const rows = data || [];
-  // Handmatige toewijzing op deze deal mee annuleren (fail-soft: tabel kan
-  // nog ontbreken). Al vrijgegeven/uitbetaald blijft staan (forward-only).
-  try {
-    const { error: aErr } = await supabaseAdmin
-      .from('mentor_sale_attributions')
-      .update({ status: 'geannuleerd', cancelled_at: new Date().toISOString() })
-      .eq('deal_id', quoteId)
-      .eq('status', 'actief');
-    if (aErr && !isSchemaOntbreekt(aErr)) console.warn('[cancelForCancelledQuote] toewijzing:', aErr.message);
-  } catch (e) {
-    console.warn('[cancelForCancelledQuote] toewijzing:', e?.message || e);
-  }
-  return { cancelled: rows.length, ids: rows.map((r) => r.id) };
+  // Sinds 12 nov 2026 via de ene annuleer-kern (commissie-annulering.js):
+  // reden "Klant geannuleerd: …" + datum in de note, actieve toewijzing mee
+  // geannuleerd, audit-regel. Al vrijgegeven/uitbetaald blijft staan.
+  const { annuleerCommissie } = await import('./commissie-annulering.js');
+  const r = await annuleerCommissie(supabaseAdmin, { dealId: quoteId, soort: 'klant_annuleert', reden, bron, actorId: null });
+  const ids = (r.regels || []).map((x) => x.entry_id);
+  return { cancelled: ids.length, ids };
 }
 
 /**
