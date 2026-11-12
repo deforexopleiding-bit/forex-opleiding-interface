@@ -58,6 +58,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/commissie-incasso-overzicht.js": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
     "api/contentmachine/genereer.js": {
       "maxDuration": 300,
       "memory": 1024,
