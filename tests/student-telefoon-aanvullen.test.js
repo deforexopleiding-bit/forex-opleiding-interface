@@ -39,7 +39,8 @@ test('KOPPELING: onboarding > bubble-id > e-mail; twee klanten op één adres is
 
 test('NOOIT OVERSCHRIJVEN: de lege-voorwaarde zit in de update zelf', () => {
   const bron = lees('api/_lib/student-telefoon-aanvullen.js');
-  assert.match(bron, /from\('hlms_student'\)\s*\.update\(\{ telefoon: t\.telefoon \}\)\s*\.eq\('id', s\.id\)\s*\.or\('telefoon\.is\.null,telefoon\.eq\.'\)/);
+  // Sinds 12 nov 2026 via metGewijzigdOp: alleen telefoon + gewijzigd_op.
+  assert.match(bron, /from\('hlms_student'\)\s*\.update\(metGewijzigdOp\(\{ telefoon: t\.telefoon \}\)\)\s*\.eq\('id', s\.id\)\s*\.or\('telefoon\.is\.null,telefoon\.eq\.'\)/);
   // Geen enkele andere schrijfactie: niets in het CRM, niets verwijderd.
   assert.equal((bron.match(/\.(insert|upsert|delete|update)\(/g) || []).length, 1);
 });

@@ -39,6 +39,7 @@ import { onboardingAfgesloten } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { spiegelNaActie } from './onboarding-spiegel.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -273,6 +274,7 @@ export async function vervangOnboardingDoorOfferte(p) {
     let lmsUit = { bijgewerkt: false };
     let studentVoor = null;
     let studentPatch = null;
+    let gewijzigdVoor = null;
     if (!ob.dfo_lms_student_id) {
       lmsUit = { bijgewerkt: false, reden: 'geen_lms_student' };
       waarschuwingen.push('Er hangt geen LMS-student aan deze onboarding: in het LMS is niets bijgezet. Maak hem aan met "Student aanmaken in LMS" als dat nodig is.');
@@ -280,7 +282,7 @@ export async function vervangOnboardingDoorOfferte(p) {
       return uit(503, { error: 'Het LMS is niet geconfigureerd (DFO_LMS_SUPABASE_URL/KEY). Er is niets gewijzigd.', code: 'lms_niet_geconfigureerd' });
     } else {
       const { data: st, error: sErr } = await lms.from('hlms_student')
-        .select('id, product_soort, traject_maanden, calls_totaal, start_datum, eind_datum, overrides')
+        .select('id, product_soort, traject_maanden, calls_totaal, start_datum, eind_datum, overrides, gewijzigd_op')
         .eq('id', ob.dfo_lms_student_id).maybeSingle();
       if (sErr) return uit(502, { error: 'LMS-student lezen mislukt: ' + sErr.message + '. Er is niets gewijzigd.', code: 'lms_fout' });
       if (!st) {
@@ -291,7 +293,8 @@ export async function vervangOnboardingDoorOfferte(p) {
         if (sp.fout) return uit(422, { error: sp.fout + ' Er is niets gewijzigd.', code: 'traject_onvolledig' });
         studentVoor = kies(st, STUDENT_VELDEN);
         studentPatch = sp.patch;
-        const { error: uErr } = await lms.from('hlms_student').update(studentPatch).eq('id', st.id);
+        gewijzigdVoor = st.gewijzigd_op ?? null;
+        const { error: uErr } = await lms.from('hlms_student').update(metGewijzigdOp(studentPatch, nu)).eq('id', st.id);
         if (uErr) return uit(502, { error: 'LMS-student bijwerken mislukt: ' + uErr.message + '. Er is niets gewijzigd.', code: 'lms_fout' });
         lmsUit = { bijgewerkt: true, student_id: st.id, behouden: sp.behouden };
         for (const v of sp.behouden) {
@@ -317,7 +320,8 @@ export async function vervangOnboardingDoorOfferte(p) {
       if (studentVoor && lms && lmsUit.student_id) {
         const terug = {};
         for (const k of Object.keys(studentPatch || {})) terug[k] = studentVoor[k];
-        const { error: rbErr } = await lms.from('hlms_student').update(terug).eq('id', lmsUit.student_id);
+        // Netto is er niets gewijzigd: ook gewijzigd_op terug naar wat er stond.
+        const { error: rbErr } = await lms.from('hlms_student').update({ ...terug, gewijzigd_op: gewijzigdVoor }).eq('id', lmsUit.student_id);
         if (rbErr) console.error('[offerte-wissel] LMS terugzetten mislukt voor ' + lmsUit.student_id + ': ' + rbErr.message);
       }
       return uit(500, { error: 'Onboarding bijwerken mislukt: ' + upErr.message, code: 'crm_fout' });

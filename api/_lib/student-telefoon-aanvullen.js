@@ -29,6 +29,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { telefoonsVoorPersonen } from './onboarding-telefoon.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 const PAGINA = 1000;
 const IN_CHUNK = 200;
@@ -184,7 +185,7 @@ export async function draaiStudentTelefoonAanvullen({ dry = false, door = 'cron'
       // Per rij, met eigen try/catch: één fout houdt de rest niet tegen.
       try {
         const { data, error } = await lms.from('hlms_student')
-          .update({ telefoon: t.telefoon })
+          .update(metGewijzigdOp({ telefoon: t.telefoon }))
           .eq('id', s.id)
           .or('telefoon.is.null,telefoon.eq.')
           .select('id');
