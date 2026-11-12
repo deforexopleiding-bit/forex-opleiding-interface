@@ -74,7 +74,7 @@ export function statusPil({ commissie, incasso, achterstallig }) {
  *   commissie_zonder_abonnement      open commissie, offerte gearchiveerd/weg of geen actief abonnement meer
  *   soort_ontbreekt                  sale met commissie heeft een abonnement zonder soort
  */
-export function teChecken({ deal, commissie, verkoper, membership, subs }) {
+export function teChecken({ deal, commissie, verkoper, membership, subs, incasso = null }) {
   const uit = [];
   const getekend = deal ? isGetekend(deal) : false;
   if (deal && getekend && !deal.archived_at && verkoper?.is_mentor && !commissie?.heeft_commissie && !membership) {
@@ -82,8 +82,11 @@ export function teChecken({ deal, commissie, verkoper, membership, subs }) {
   }
   if (commissie?.open) {
     const actief = (subs || []).some(isActiefAbonnement);
-    if (!deal || deal.archived_at || ((subs || []).length && !actief)) uit.push('commissie_zonder_abonnement');
-    if ((subs || []).some((s) => !s.soort)) uit.push('soort_ontbreekt');
+    // Bij een open incasso-markering verklaart de incassostatus het al
+    // (commissie staat stil); die klant staat onder het tabblad Incasso.
+    if (!incasso && (!deal || deal.archived_at || ((subs || []).length && !actief))) uit.push('commissie_zonder_abonnement');
+    // Soort enkel voor abonnementen die nog lopen (active / paused).
+    if ((subs || []).some((s) => !s.soort && ['active', 'paused'].includes(String(s.status || '').toLowerCase()))) uit.push('soort_ontbreekt');
   }
   return uit;
 }
@@ -184,7 +187,7 @@ export async function laadZicht(db, dealIds, { metFacturen = true } = {}) {
       basis_incl: f ? f.basis_incl : (d ? round2(d.total_amount) : null),
       vrijkomen: f ? vrijkomenTekst(f.subs) : null,
       status: statusPil({ commissie: c, incasso: incassoUit, achterstallig: f?.achterstallig || 0 }),
-      te_checken: teChecken({ deal: d, commissie: c, verkoper, membership: mem.has(id), subs: f ? f.subs : [] }),
+      te_checken: teChecken({ deal: d, commissie: c, verkoper, membership: mem.has(id), subs: f ? f.subs : [], incasso: incassoUit }),
     });
   }
   return out;

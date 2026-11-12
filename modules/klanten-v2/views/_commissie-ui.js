@@ -166,17 +166,24 @@
   window.__kvCommNaarCommissies = () => { try { window.DFO.goMod('mentoren'); window.DFO.goTab('Commissies'); } catch (_) { /* fail-soft */ } };
 
   /** Chip voor kop / lijsten: "Chesney · Event 7/11 · € 108". */
-  function chip(z, { bedrag = true } = {}) {
+  function chip(z, { bedrag = true, kort = false } = {}) {
     if (!z) return '';
     const c = z.commissie;
-    const box = (bg, fg, stip, tekst, title) => `<span title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;background:${bg};color:${fg};font-size:11.5px;font-weight:500;white-space:nowrap">${stip ? `<span style="width:7px;height:7px;border-radius:50%;background:${stip}"></span>` : ''}${tekst}</span>`;
+    // kort (lijsten): de tekst kapt af met … zodat de kolom smal blijft; het
+    // bedrag (<b>) blijft altijd zichtbaar, de volledige tekst staat in de tooltip.
+    const binnen = (tekst) => {
+      if (!kort) return tekst;
+      const m = /^(.*?)( · <b>.*<\/b>| · <s>.*<\/s>)?$/.exec(tekst) || [null, tekst, ''];
+      return `<span style="display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom">${m[1]}</span>${m[2] || ''}`;
+    };
+    const box = (bg, fg, stip, tekst, title) => `<span title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;background:${bg};color:${fg};font-size:11.5px;font-weight:500;white-space:nowrap">${stip ? `<span style="width:7px;height:7px;border-radius:50%;background:${stip}"></span>` : ''}${binnen(tekst)}</span>`;
     if (c && c.heeft_commissie && c.status === 'geannuleerd') {
       return box('var(--surface-2)', 'var(--text-3)', null, `Geannuleerd${bedrag ? ' · <s>' + esc(eur0(c.totaal_oorspronkelijk)) + '</s>' : ''}`, c.annulering?.reden || 'Geannuleerd');
     }
     if (c && c.heeft_commissie) {
       const namen = uniek(mentorNamen(c, true)).join(', ');
       if (z.incasso && z.incasso.status === 'bij_incasso') return box('var(--rose-soft)', 'var(--rose)', 'var(--rose)', `Incasso · ${esc(namen)}`, z.incasso.label + (z.incasso.sinds ? ' sinds ' + datum(z.incasso.sinds) : ''));
-      return box('var(--surface-2)', 'var(--text)', bronStip(c), `${esc(namen)} · ${esc(bronTekst(c, true))}${bedrag ? ' · <b>' + esc(eur0(c.totaal)) + '</b>' : ''}`, bronTekst(c));
+      return box('var(--surface-2)', 'var(--text)', bronStip(c), `${esc(namen)} · ${esc(bronTekst(c, true))}${bedrag ? ' · <b>' + esc(eur0(c.totaal)) + '</b>' : ''}`, `${namen} · ${bronTekst(c)}`);
     }
     if (z.membership) return box('var(--surface-2)', 'var(--text-3)', null, 'Geen · membership', 'Membership: geen mentorcommissie');
     if (z.verkoper?.is_mentor && z.getekend && !z.gearchiveerd) return box('var(--amber-soft)', 'var(--amber)', 'var(--amber)', 'Geen · verkoper is mentor', `Verkoper ${z.verkoper.naam} is mentor — toewijzen?`);
