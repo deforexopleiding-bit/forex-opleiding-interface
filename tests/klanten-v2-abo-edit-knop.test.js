@@ -75,7 +75,7 @@ async function laadTab({ updateGooit = false } = {}) {
     },
     location: { href: '' },
   };
-  const modalUrl = url('modules/klanten-v2/views/modals/subscription-actions.js') + '?v=2';
+  const modalUrl = url('modules/klanten-v2/views/modals/subscription-actions.js') + '?v=3';
   mock.module(modalUrl, {
     namedExports: {
       openSubscriptionUpdateModal: ({ sub }) => {
@@ -153,7 +153,7 @@ test('fout in het modal → gelogd en gemeld', async () => {
   } finally { t.herstel(); }
 });
 
-test('cache-buster: detail.js laadt abonnementen.js?v=10', async () => {
+test('cache-buster: detail.js laadt abonnementen.js?v=11', async () => {
   const { readFileSync } = await import('node:fs');
-  assert.match(readFileSync(join(ROOT, 'modules/klanten-v2/views/detail.js'), 'utf8'), /\.\/tabs\/abonnementen\.js\?v=10'/);
+  assert.match(readFileSync(join(ROOT, 'modules/klanten-v2/views/detail.js'), 'utf8'), /\.\/tabs\/abonnementen\.js\?v=11'/);
 });

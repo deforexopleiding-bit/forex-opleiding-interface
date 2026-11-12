@@ -15,7 +15,7 @@ import { magKlantBewerken }         from './klant-rechten.js';
 import { openArchiveCustomerModal } from './modals/archive-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js?v=1';
-import { renderAbonnementenTab } from './tabs/abonnementen.js?v=10';
+import { renderAbonnementenTab } from './tabs/abonnementen.js?v=11';
 import { renderFacturenTab }     from './tabs/facturen.js';
 import { renderCreditnotasTab }  from './tabs/creditnotas.js?v=2';
 import { renderWanbetalersTab }  from './tabs/wanbetalers.js';

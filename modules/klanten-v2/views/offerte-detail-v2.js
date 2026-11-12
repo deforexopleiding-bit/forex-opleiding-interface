@@ -851,6 +851,7 @@
       + (deal.tl_quotation_id ? '<div style="font-size:12px;color:#6b7280"><b>TL-quotation:</b> ' + _escOdv(deal.tl_quotation_id) + '</div>' : '')
       + (deal.tl_deal_id ? '<div style="font-size:12px;color:#6b7280"><b>TL-deal:</b> ' + _escOdv(deal.tl_deal_id) + '</div>' : '')
       + '</div>'
+      + (window.KV_COMM && preflight.commissie ? window.KV_COMM.waarschuwingHtml(preflight.commissie) : '')
       + (blockersHtml ? '<div style="margin:10px 0"><b style="font-size:13px;color:#7f1d1d">🚫 BLOCKERS — hard-delete geweigerd:</b>' + blockersHtml + '</div>' : '')
       + (isDeletable ? '<div style="margin:10px 0"><b style="font-size:13px">📋 Gevolgen bij hard-delete:</b>' + gevolgenHtml + '</div>' : '')
       + '</div>';
@@ -872,6 +873,25 @@
     );
     if (!ok1) return;
 
+    // Stap 2b — mentorcommissie (regel B, 12 nov 2026): hangt er open
+    // commissie aan, dan kiest de gebruiker wat er mee gebeurt. De server
+    // weigert zonder keuze (COMMISSIE_KEUZE_VEREIST).
+    let commissieKeuze = null;
+    if (preflight.commissie_keuze_nodig) {
+      if (!window.KV_COMM) { toast('Commissie-venster niet geladen — herlaad de pagina'); return; }
+      commissieKeuze = await window.KV_COMM.keuze({
+        titel: 'Mentorcommissie op deze offerte',
+        intro: '<p style="margin:0 0 6px">Waarom verdwijnt deze offerte? De commissie krijgt een eindstatus; wat al vrijgegeven of uitbetaald is, blijft staan.</p>',
+        commissie: preflight.commissie,
+        opties: [
+          { v: 'klant_annuleert', l: 'Klant annuleert', d: 'Commissie → Geannuleerd, reden "Klant geannuleerd". De mentor ziet het in Mijn verdiensten › Geannuleerd.' },
+          { v: 'vervangen', l: 'Er komt een nieuwe offerte', d: 'Commissie → Geannuleerd, reden "Vervangen door nieuwe offerte". Link daarna de nieuwe offerte via "Sale toewijzen" (de nieuwe offerte toont een banner).' },
+        ],
+        okLabel: 'Verder naar bevestigen',
+      });
+      if (!commissieKeuze) return;
+    }
+
     // Stap 3 — typ-VERWIJDER-prompt.
     const ok2 = await _odvVerwijderPrompt(dealNaam);
     if (!ok2) return;
@@ -880,7 +900,7 @@
     try {
       const r = await apiFetch('/api/sales-hard-delete-quotation', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deal_id: _odv.dealId, confirm: 'VERWIJDER' }),
+        body: JSON.stringify({ deal_id: _odv.dealId, confirm: 'VERWIJDER', commissie_keuze: commissieKeuze }),
       });
       const d = await r.json();
       if (!r.ok) {
@@ -896,6 +916,13 @@
         return;
       }
       toast('Offerte definitief verwijderd (TL + CRM)');
+      if (d.commissie && window.KV_COMM) {
+        const c = d.commissie;
+        await window.KV_COMM.melding('Mentorcommissie geannuleerd',
+          '<p style="margin:0 0 8px">Reden: <b>' + _escOdv(c.reden) + '</b> · ' + (c.geannuleerd_regels || 0) + ' regel(s).</p>'
+          + (c.al_vrijgegeven > 0 ? '<p style="margin:0 0 8px">Al vrijgegeven (blijft staan): <b>' + _escOdv(window.KV_COMM.eur(c.al_vrijgegeven)) + '</b></p>' : '')
+          + (c.melding ? '<p style="margin:0;padding:8px 10px;background:var(--blue-soft,#eff6ff);border-radius:6px">' + _escOdv(c.melding) + ' De nieuwe getekende offerte van deze klant toont daarvoor een knop.</p>' : ''));
+      }
       setTimeout(() => window.__odvBack(), 900);
     } catch (e) {
       toast('Hard-delete mislukt: ' + e.message);

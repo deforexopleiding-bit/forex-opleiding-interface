@@ -35,6 +35,12 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { sendMail, wrapEmailHtml } from './mailer.js';
 import { getEffectiveRoles, hasAnyRole, computeHighestRole } from './_lib/roles.js';
+import { commissieVanDeal, annuleerCommissie, herstelCommissie } from './_lib/commissie-annulering.js';
+
+// Regel B (12 nov 2026): hangt er OPEN mentorcommissie aan de offerte, dan
+// kiest de gebruiker in het venster wat er gebeurt. Nooit meer een deal
+// weg met ledger-ouders in pending/wachten_op_betaling zonder eindstatus.
+const COMMISSIE_KEUZES = new Set(['klant_annuleert', 'vervangen']);
 
 const CONFIRM_TOKEN = 'VERWIJDER'; // case-sensitive
 const DEFAULT_ALARM_EMAIL = 'biemoldjeffrey@gmail.com';
@@ -95,6 +101,16 @@ async function guardBlockers(deal_id) {
     .select('id').eq('deal_id', deal_id);
   if ((bonuses || []).length > 0) {
     return { type: 'bonuses', count: bonuses.length, ids: bonuses.map((b) => b.id) };
+  }
+  // Handmatige commissietoewijzing: FK RESTRICT + deal_id NOT NULL → de
+  // lokale DELETE zou na de TL-delete mislukken (partial). Weigeren vooraf.
+  const { data: attrs, error: attrErr } = await supabaseAdmin.from('mentor_sale_attributions')
+    .select('id').eq('deal_id', deal_id);
+  if (attrErr && !/does not exist|42P01/i.test(`${attrErr.code} ${attrErr.message}`)) {
+    throw new Error('attributions-check: ' + attrErr.message);
+  }
+  if ((attrs || []).length > 0) {
+    return { type: 'mentor_sale_attributions', count: attrs.length, ids: attrs.map((a) => a.id) };
   }
   const { data: setterLedger } = await supabaseAdmin.from('setter_ledger_entries')
     .select('id, amount, status').eq('deal_id', deal_id);
@@ -266,9 +282,42 @@ export default async function handler(req, res) {
       });
     }
 
+    // 2b. Mentorcommissie (regel B). Open commissie → keuze verplicht. We
+    //     annuleren de commissie VÓÓR Teamleader: dat is omkeerbaar. Weigert
+    //     TL daarna, dan zetten we de commissie meteen terug.
+    const keuze = req.body?.commissie_keuze || null;
+    let commissieVoor = null;
+    let commissieResultaat = null;
+    try {
+      commissieVoor = await commissieVanDeal(supabaseAdmin, deal_id);
+    } catch (e) {
+      return res.status(500).json({ error: 'Commissie-lookup fout', detail: e?.message || String(e) });
+    }
+    if (commissieVoor.open) {
+      if (!COMMISSIE_KEUZES.has(keuze)) {
+        return res.status(409).json({
+          error : 'COMMISSIE_KEUZE_VEREIST',
+          detail: 'Aan deze offerte hangt nog mentorcommissie. Kies: "Klant annuleert" of "Er komt een nieuwe offerte".',
+          commissie: commissieVoor,
+        });
+      }
+      const ref = deal.quote_reference || deal.tl_quotation_id || deal_id;
+      commissieResultaat = await annuleerCommissie(supabaseAdmin, {
+        dealId: deal_id, soort: keuze, bron: 'hard_delete', actorId: auth.user.id,
+        extraNote: `Offerte ${ref} definitief verwijderd`,
+      });
+    }
+
     // 3. TL-hard-delete (blocking).
     const tlResult = await teamleaderHardDelete(deal);
     if (!tlResult.ok) {
+      if (commissieResultaat && commissieResultaat.geannuleerd_regels > 0) {
+        try {
+          await herstelCommissie(supabaseAdmin, { dealId: deal_id, actorId: auth.user.id, reden: 'Definitief verwijderen mislukt in Teamleader' });
+        } catch (e) {
+          console.error('[sales-hard-delete] commissie terugzetten na TL-fout:', e?.message || e);
+        }
+      }
       await logAudit({
         action       : 'quotation.hard_delete.tl_fail',
         payload      : { deal_id, tl_deal_id: deal.tl_deal_id, tl_quotation_id: deal.tl_quotation_id,
@@ -316,8 +365,9 @@ export default async function handler(req, res) {
       action  : 'quotation.hard_delete',
       payload : { deal_id, tl_deal_id: deal.tl_deal_id, tl_quotation_id: deal.tl_quotation_id,
                   quote_reference: deal.quote_reference, customer_id: deal.customer_id,
+                  commissie_keuze: commissieResultaat ? keuze : null,
                   actor: { user_id: auth.user.id, email: auth.profile.email, role: auth.profile.role } },
-      result  : { tl: tlResult, lokaal_verwijderd: true },
+      result  : { tl: tlResult, lokaal_verwijderd: true, commissie: commissieResultaat },
       status  : 'success',
       userId  : auth.user.id,
     });
@@ -325,7 +375,9 @@ export default async function handler(req, res) {
       ok: true,
       deal_id,
       tl: tlResult,
-      note: `Offerte definitief verwijderd uit Teamleader en de CRM. Actie gelogd in agent_audit_log (uitvoerder: ${auth.profile.email}).`,
+      commissie: commissieResultaat,
+      note: `Offerte definitief verwijderd uit Teamleader en de CRM. Actie gelogd in agent_audit_log (uitvoerder: ${auth.profile.email}).`
+        + (commissieResultaat ? ` Mentorcommissie op geannuleerd (${commissieResultaat.reden}).${commissieResultaat.melding ? ' ' + commissieResultaat.melding : ''}` : ''),
     });
   } catch (e) {
     console.error('[sales-hard-delete-quotation]', e?.message || e);
