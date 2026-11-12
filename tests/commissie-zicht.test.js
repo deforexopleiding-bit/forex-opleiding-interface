@@ -116,3 +116,31 @@ test('Te checken uit Controle: zelfde rijen → soort ontbreekt per abonnement +
   assert.equal(t[0].subscription_id, 's1');
   assert.equal(t[2].event_id, EV);
 });
+
+// ── Fixes 12 nov (na live nakijken) ─────────────────────────────────────────
+test('fix 1: soort enkel nodig voor active/paused; nooit bij een geannuleerde sale (zicht + Controle)', async () => {
+  const deal = { id: D1, tl_quotation_status: 'accepted' };
+  const open = { heeft_commissie: true, open: true };
+  assert.deepEqual(Z.teChecken({ deal, commissie: open, subs: [{ id: 's', status: 'active', soort: 'origineel' }, { id: 'x', status: 'cancelled', soort: null }] }), [], 'gestopt zonder soort telt niet');
+  assert.deepEqual(Z.teChecken({ deal, commissie: open, subs: [{ id: 's', status: 'paused', soort: null }] }), ['soort_ontbreekt']);
+  const { rekenSale, heeftSoortNodig } = await import(url('api/_lib/commissie-controle.js'));
+  assert.equal(heeftSoortNodig({ status: 'active' }), true);
+  assert.equal(heeftSoortNodig({ status: 'cancelled' }), false);
+  const scope = { zonderSoort: () => [{ id: 'g', status: 'cancelled' }, { id: 'a', status: 'active' }] };
+  const p = (status) => ({ id: 'p', mentor_user_id: A, status, amount: 10, original_amount: 10, basis: 100 });
+  const r1 = rekenSale({ parents: [p('pending')], kids: [], facturen: [], scope, customerId: K, dealId: D1 });
+  assert.deepEqual(r1.zonder_soort.map((x) => x.id), ['a']);
+  assert.ok(r1.afwijkingen.includes('soort_ontbreekt'));
+  const r2 = rekenSale({ parents: [p('geannuleerd')], kids: [], facturen: [], scope, customerId: K, dealId: D1 });
+  assert.deepEqual(r2.zonder_soort, []);
+  assert.ok(!r2.afwijkingen.includes('soort_ontbreekt'), 'geannuleerde sale: geen soort-afwijking');
+  const r3 = rekenSale({ parents: [p('pending')], kids: [], facturen: [], scope: { zonderSoort: () => [{ id: 'g', status: 'cancelled' }] }, customerId: K, dealId: D1 });
+  assert.ok(!r3.afwijkingen.includes('soort_ontbreekt'), 'alleen gestopte abonnementen: geen afwijking');
+});
+
+test('fix 2: commissie zonder actief abonnement niet bij een open incasso-markering', () => {
+  const open = { heeft_commissie: true, open: true };
+  const deal = { id: D1, tl_quotation_status: 'accepted', archived_at: '2026-11-01' };
+  assert.deepEqual(Z.teChecken({ deal, commissie: open, subs: [] }), ['commissie_zonder_abonnement']);
+  assert.deepEqual(Z.teChecken({ deal, commissie: open, subs: [], incasso: { status: 'bij_incasso' } }), []);
+});

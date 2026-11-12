@@ -461,16 +461,19 @@
       ])}
       <div class="sv-total">${_off.loading ? 'Laden…' : (total != null ? `${total} offerte${total === 1 ? '' : 's'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Commissie' }, { l: 'Abbo' }, { l: 'Onboarding' }],
+        // Commissie meteen na Bedrag: blijft zichtbaar bij ±1140 px (gemeten).
+        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Commissie' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Abbo' }, { l: 'Onboarding' }],
         items.map(q => [
           `<span class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
-          `<span style="font-size:12.5px;color:var(--text-3)">${q.traject_label || '—'}</span>`,
+          // Eén regel met afkapping (…) + volledige tekst als tooltip, zodat
+          // de kolom Commissie zichtbaar blijft zonder horizontaal scrollen.
+          `<span title="${esc(q.traject_label || '')}" style="display:block;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--text-3)">${esc(q.traject_label || '—')}</span>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
           `<span class="mono">${eur0(q.total_amount)}</span>`,
+          _offCommCel(q),
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           (() => { const ds = deriveOfferteStatus(q); const p = OST_TO_PILL[ds] || ['neutral', ds]; return H.pill(p[0], p[1]); })(),
-          _offCommCel(q),
           svStatusIcon(q.has_subscription, 'Abbo ingevoerd', 'Nog geen abbo'),
           svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld'),
         ]),
@@ -524,7 +527,7 @@
     if (deriveOfferteStatus(q) !== 'accepted') return '<span style="color:var(--text-3)">—</span>';
     const z = _offZicht.map.get(q.deal_id);
     if (!z) return `<span style="font-size:11.5px;color:var(--text-3)">${_offZicht.mislukt.has(q.deal_id) ? '?' : '…'}</span>`;
-    const chip = window.KV_COMM ? window.KV_COMM.chip(z) : '';
+    const chip = window.KV_COMM ? window.KV_COMM.chip(z, { kort: true }) : '';
     const toewijzen = window.KV_COMM && window.KV_COMM.magToewijzen() && (z.te_checken || []).includes('verkoper_mentor_geen_commissie')
       ? ` <a href="javascript:void(0)" style="font-size:11.5px" onclick="event.stopPropagation();window.__kvCommToewijzen('${esc(z.deal_id)}')">Toewijzen</a>` : '';
     if (window.KV_COMM) window.KV_COMM.onthoud(z);
