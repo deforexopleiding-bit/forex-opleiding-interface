@@ -117,9 +117,9 @@
 
   // Compacte gedaan/niet-gedaan indicator (groen vinkje / rood kruisje) voor de
   // Abbo- en Onboarding-kolommen op het Offertes-overzicht.
-  const svStatusIcon = (ok, doneTitle, notTitle) => ok
-    ? `<span title="${esc(doneTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:12px;font-weight:800;background:var(--emerald-soft,rgba(16,185,129,.16));color:var(--emerald,#10b981)">✓</span>`
-    : `<span title="${esc(notTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:12px;font-weight:800;background:var(--rose-soft,rgba(244,63,94,.16));color:var(--rose,#f43f5e)">✗</span>`;
+  const svStatusIcon = (ok, doneTitle, notTitle, px = 20) => ok
+    ? `<span title="${esc(doneTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:${px}px;height:${px}px;border-radius:50%;font-size:${px <= 18 ? 11 : 12}px;font-weight:800;background:var(--emerald-soft,rgba(16,185,129,.16));color:var(--emerald,#10b981)">✓</span>`
+    : `<span title="${esc(notTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:${px}px;height:${px}px;border-radius:50%;font-size:${px <= 18 ? 11 : 12}px;font-weight:800;background:var(--rose-soft,rgba(244,63,94,.16));color:var(--rose,#f43f5e)">✗</span>`;
 
   const RET_STATUS_TO_PILL = (item) => {
     if (item.retention_not_renewing) return ['warn', 'Niet verlengen'];
@@ -460,25 +460,27 @@
         </div>`,
       ])}
       <div class="sv-total">${_off.loading ? 'Laden…' : (total != null ? `${total} offerte${total === 1 ? '' : 's'}` : '—')}</div>
-      ${H.table(
-        // Commissie meteen na Bedrag: blijft zichtbaar bij ±1140 px (gemeten).
-        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Commissie' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Abbo' }, { l: 'Onboarding' }],
+      <style>.sv-off-tbl thead th,.sv-off-tbl tbody td{padding-left:6px;padding-right:6px}</style><div class="sv-off-tbl">${H.table(
+        // Commissie meteen na Bedrag; Abo + Onboarding samen in één smalle kolom
+        // en smallere celmarges (.sv-off-tbl): bij ±1140 px past alles zonder
+        // horizontaal scrollen (gemeten in Chromium met de CRM-css).
+        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Commissie' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' },
+          { l: '<span title="Links: abonnement ingevoerd · rechts: onboarding aangemeld (✓ ja, ✗ nog niet)" style="cursor:help">Abo/Onb</span>' }],
         items.map(q => [
           `<span class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
-          `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
+          `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main" title="${esc(q.customer_name || '')}" style="display:inline-block;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle">${q.customer_name || '—'}</span></div>`,
           // Eén regel met afkapping (…) + volledige tekst als tooltip, zodat
           // de kolom Commissie zichtbaar blijft zonder horizontaal scrollen.
-          `<span title="${esc(q.traject_label || '')}" style="display:block;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--text-3)">${esc(q.traject_label || '—')}</span>`,
+          `<span title="${esc(q.traject_label || '')}" style="display:block;max-width:75px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;color:var(--text-3)">${esc(q.traject_label || '—')}</span>`,
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           _offCommCel(q),
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           (() => { const ds = deriveOfferteStatus(q); const p = OST_TO_PILL[ds] || ['neutral', ds]; return H.pill(p[0], p[1]); })(),
-          svStatusIcon(q.has_subscription, 'Abbo ingevoerd', 'Nog geen abbo'),
-          svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld'),
+          `<span style="display:inline-flex;gap:4px;white-space:nowrap">${svStatusIcon(q.has_subscription, 'Abonnement ingevoerd', 'Nog geen abonnement', 18)}${svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld', 18)}</span>`,
         ]),
         '__svOfferteRowClick'
-      )}
+      )}</div>
       ${!items.length && !_off.loading ? (
         _off.error
           ? `<div class="sv-empty">${esc(_off.error)} <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11.5px" onclick="__svRetryOff()">↻ Opnieuw</button></div>`

@@ -84,7 +84,7 @@ test('fix 3: korte chip voor lijsten kapt de namen af, bedrag blijft, volledige 
   const C = laad();
   const z = { ...basis, commissie: { ...basis.commissie, mentoren: [{ user_id: 'a', naam: 'Chesney Van Der Langenaam', bedrag: 54 }, { user_id: 'b', naam: 'Bart', bedrag: 54 }] } };
   const h = C.chip(z, { kort: true });
-  assert.match(h, /max-width:120px;overflow:hidden;text-overflow:ellipsis/);
+  assert.match(h, /max-width:80px;overflow:hidden;text-overflow:ellipsis/);
   assert.match(h, /<\/span> · <b>€\s108<\/b><\/span>$/);
   assert.match(h, /title="Chesney Van Der Langenaam, Bart · Event Gent · 7 nov 2026"/);
 });

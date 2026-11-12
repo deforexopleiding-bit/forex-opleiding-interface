@@ -174,7 +174,7 @@
     const binnen = (tekst) => {
       if (!kort) return tekst;
       const m = /^(.*?)( · <b>.*<\/b>| · <s>.*<\/s>)?$/.exec(tekst) || [null, tekst, ''];
-      return `<span style="display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom">${m[1]}</span>${m[2] || ''}`;
+      return `<span style="display:inline-block;max-width:80px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom">${m[1]}</span>${m[2] || ''}`;
     };
     const box = (bg, fg, stip, tekst, title) => `<span title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;background:${bg};color:${fg};font-size:11.5px;font-weight:500;white-space:nowrap">${stip ? `<span style="width:7px;height:7px;border-radius:50%;background:${stip}"></span>` : ''}${binnen(tekst)}</span>`;
     if (c && c.heeft_commissie && c.status === 'geannuleerd') {
