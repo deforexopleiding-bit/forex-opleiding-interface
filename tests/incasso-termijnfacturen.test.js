@@ -92,9 +92,15 @@ test('maandlijst: verwacht, ontvangen en lopende achterstand per maand', () => {
   assert.equal(per['2026-09'].verwacht, 100); assert.equal(per['2026-09'].ontvangen, 100); assert.equal(per['2026-09'].achterstand, 0);
   assert.equal(per['2026-10'].verwacht, 100); assert.equal(per['2026-10'].ontvangen, 40); assert.equal(per['2026-10'].achterstand, 60);
   assert.equal(per['2026-11'].verwacht, 100, 'termijn zonder factuur: uit het abonnement');
-  assert.equal(per['2026-11'].achterstand, 160, '1 nov vervallen en nog niets ontvangen');
+  // 12 nov 2026 (Maxim): een termijn zonder factuur heeft geen vervaldag en
+  // is dus geen achterstand (vroeger 160); de lopende maand = 'te betalen'.
+  assert.equal(per['2026-11'].achterstand, 60, 'enkel de vervallen factuur van oktober');
+  assert.equal(per['2026-11'].stand, 'te_betalen');
+  assert.equal(per['2026-10'].stand, 'achterstand');
   assert.equal(per['2026-12'].verwacht, 100);
-  assert.equal(m.totaal.achterstand, 160);
+  assert.equal(per['2026-12'].stand, 'gepland');
+  assert.equal(per['2026-12'].achterstand, 0, 'toekomstige maand draagt geen achterstand');
+  assert.equal(m.totaal.achterstand, 60);
   assert.equal(per['2026-10'].facturen.find((f) => f.id === 'f2').open, 60, 'knop "betaling ontvangen" op 60 open');
 });
 

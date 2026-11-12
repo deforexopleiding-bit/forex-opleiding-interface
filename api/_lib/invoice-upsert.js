@@ -10,6 +10,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
 import { bepaalBetaalstand } from './factuur-betaald.js';
+import { zoekRegelingKoppeling } from './incasso-factuur-koppeling.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 function amt(o) {
@@ -109,7 +110,7 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
   const issue = isoDate(inv.invoice_date) || isoDate(inv.booked_on) || new Date().toISOString().slice(0, 10);
 
   const { data: existing } = await supabaseAdmin.from('invoices')
-    .select('id, status, deal_id, amount_paid').eq('tl_invoice_id', inv.id).maybeSingle();
+    .select('id, status, deal_id, amount_paid, tl_subscription_id').eq('tl_invoice_id', inv.id).maybeSingle();
 
   // GECREDITEERD ≠ BETAALD. Teamleader verrekent een creditnota met de
   // factuur (due = 0, paid = true); zonder deze stap werd dat status 'paid' +
@@ -143,11 +144,24 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
   const rawNumber = (inv.invoice_number && String(inv.invoice_number).trim()) || null;
   const invoiceNumber = rawNumber || `CONCEPT-${inv.id}`;
 
+  // ABONNEMENT-KOPPELING (12 nov 2026). Teamleader geeft sinds augustus 2026
+  // geen abonnement-id meer mee. Volgorde: wat Teamleader zegt → wat al op de
+  // rij staat (NOOIT terug naar NULL zetten: dat wiste een gekoppelde factuur
+  // bij elke sync) → klant + periode + bedrag tegen een incasso-
+  // regelingsabonnement (incasso-factuur-koppeling.js, enkel eenduidig).
+  let tlSubscriptionId = inv.subscription?.id ?? existing?.tl_subscription_id ?? null;
+  if (!tlSubscriptionId && status !== 'concept') {
+    tlSubscriptionId = await zoekRegelingKoppeling(supabaseAdmin, {
+      customerId: cust.id,
+      factuur: { id: existing?.id || null, amount_total: r2(incl), credited_amount: gecrediteerd, status, issue_date: issue, due_date: isoDate(inv.due_on) || null },
+    });
+  }
+
   const row = {
     customer_id: cust.id,
     tl_invoice_id: inv.id,
     tl_department_id: inv.department?.id || opts.fallback_department || null,
-    tl_subscription_id: inv.subscription?.id ?? null,
+    tl_subscription_id: tlSubscriptionId,
     invoice_number: invoiceNumber,
     amount_total: r2(incl),
     amount_paid: paid,
