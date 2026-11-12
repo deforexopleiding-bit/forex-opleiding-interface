@@ -9,13 +9,18 @@
 //
 // Body:
 //   { customer_id (uuid), traject_id (uuid),
-//     start_date?  (yyyy-mm-dd; optioneel, ongeldig → null) }
+//     start_date?  (yyyy-mm-dd; optioneel, ongeldig → null),
+//     deal_id?     (uuid; de getekende offerte waar deze aanmelding uit komt —
+//                   sinds 10 nov 2026, faalzacht zonder kolom onboardings.deal_id) }
 //
 // Validaties:
 //   - customer_id en traject_id moeten bestaan → anders 400/404.
 //   - Guard: er mag GEEN bestaande onboarding zijn voor (customer_id) waarvan
 //     status != 'gearchiveerd'. Anders 409 met existing_id zodat de UI naar
-//     die bestaande kan navigeren.
+//     die bestaande kan navigeren. Loopt die bestaande nog (10 nov 2026), dan
+//     zegt de 409 `kan_vervangen: true`: de UI biedt dan "Deze offerte vervangt
+//     de lopende onboarding" aan (api/onboarding-offerte-wissel.js) in plaats
+//     van een doodlopende melding.
 //
 // Response 200:
 //   { ok:true, onboarding:{id, token, status}, link }
@@ -35,6 +40,9 @@ import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
 import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 import { kenStartcodeToe } from './_lib/onboarding-startcode.js';
 import { linkVoorOnboarding } from './_lib/onboarding-link.js';
+import { onboardingLoopt, isDealKolomOntbreekt } from './_lib/onboarding-offerte-wissel.js';
+import { vulHandmatigAan } from './_lib/onboarding-handmatig.js';
+import { vulIncassoAan } from './_lib/onboarding-incasso-stand.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -99,6 +107,8 @@ export default async function handler(req, res) {
   const lmsProvision = body.lms_provision === true;
   if (!UUID_RE.test(customerId)) return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!UUID_RE.test(trajectId))  return res.status(400).json({ error: 'traject_id (uuid) vereist' });
+  // De offerte waar deze aanmelding uit komt (optioneel). Ongeldig → genegeerd.
+  const dealId = (typeof body.deal_id === 'string' && UUID_RE.test(body.deal_id.trim())) ? body.deal_id.trim() : null;
 
   // Ondergrens: startdatum moet >= vandaag + 3 kalenderdagen (NL-tijd) liggen.
   // Niet stil clampen: de user moet zien dat 'ie te vroeg koos zodat 'ie
@@ -136,16 +146,24 @@ export default async function handler(req, res) {
     // 3) Guard: bestaande, niet-gearchiveerde onboarding voor deze klant?
     const { data: existing, error: existErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, status')
+      .select('id, status, archived_at, auto_afgerond_op, auto_afgerond_sessie_id')
       .eq('customer_id', customerId)
       .neq('status', 'gearchiveerd')
       .limit(1)
       .maybeSingle();
     if (existErr) throw new Error('onboarding lookup: ' + existErr.message);
     if (existing) {
+      await vulHandmatigAan(supabaseAdmin, existing);
+      await vulIncassoAan(supabaseAdmin, existing);
+      const loopt = onboardingLoopt(existing);
       return res.status(409).json({
-        error       : 'Er bestaat al een actieve onboarding voor deze klant',
+        error       : loopt
+          ? 'Er loopt al een onboarding voor deze klant. Komt deze aanmelding uit een nieuwe offerte, kies dan "Deze offerte vervangt de lopende onboarding".'
+          : 'Er bestaat al een actieve onboarding voor deze klant',
+        code        : loopt ? 'onboarding_loopt' : 'onboarding_bestaat',
         existing_id : existing.id,
+        existing_status: existing.status || null,
+        kan_vervangen: loopt,
       });
     }
 
@@ -190,6 +208,18 @@ export default async function handler(req, res) {
       }
     }
     if (insErr) throw new Error('onboarding insert: ' + insErr.message);
+
+    // De offerte erbij (10 nov 2026). Een aparte, faalzachte update: zonder de
+    // kolom (migratie 2026-11-10-onboardings-deal-id.sql) mag de aanmelding
+    // niet omvallen — zie CLAUDE.md, lessons #789/#801.
+    if (dealId) {
+      const { error: dealErr } = await supabaseAdmin.from('onboardings')
+        .update({ deal_id: dealId }).eq('id', inserted.id);
+      if (dealErr) {
+        if (isDealKolomOntbreekt(dealErr)) console.warn('[onboarding-create] deal_id-kolom ontbreekt nog — offerte niet gekoppeld (draai de migratie)');
+        else console.error('[onboarding-create] deal_id zetten: ' + dealErr.message);
+      }
+    }
 
     // Startcode voor de portal op de website (XXXX-XXXX in de welkomstmail).
     // Meteen na de insert, vóór de uitnodiging en de automations: die mails
