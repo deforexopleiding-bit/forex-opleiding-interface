@@ -78,6 +78,7 @@
     paneel: null,                  // user_id van het zijpaneel
     wiz: null,
     annuleer: null,
+    ann: null,         // venster annuleren/herstellen per sale (regel E)
     inhaal: null,
     incasso: null,      // venster: { customer_id, deal_id, klant, sinds, reden, scope, bron, bezig, fout }
     opheffen: null,     // venster: { id, klant, reden, bezig, fout }
@@ -355,6 +356,14 @@
       </tbody></table></div>` : '<div style="font-size:12.5px;color:var(--text-3)">Geen termijnschema bekend.</div>';
     const annuleer = s.bron === 'handmatig' && s.attribution_id && !s.geannuleerd && isAdmin()
       ? `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="event.stopPropagation();window.__commAnnuleerOpen('${esc(s.attribution_id)}')">Toewijzing annuleren</button>` : '';
+    // Regel E (12 nov 2026): per sale annuleren / herstellen, reden verplicht.
+    const annKnop = !isAdmin() || !s.deal_id || s.bron === 'traject' ? ''
+      : s.status === 'geannuleerd'
+        ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.__commAnnOpen('${esc(s.key)}','herstellen')">Commissie herstellen</button>`
+        : annuleer ? '' // handmatige toewijzing: de bestaande knop "Toewijzing annuleren"
+          : `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="event.stopPropagation();window.__commAnnOpen('${esc(s.key)}','annuleren')">Commissie annuleren</button>`;
+    const annInfo = s.annulering
+      ? `<div style="color:var(--text-2)"><span style="color:var(--text-3)">Geannuleerd:</span> ${esc(s.annulering.reden || '—')}${s.annulering.op ? ' · ' + esc(fmtDate(s.annulering.op)) : ''} · toezegging was <span class="mono">${eur(s.annulering.oorspronkelijk)}</span>${s.annulering.behoud_vrijgegeven ? ' · al vrijgegeven blijft staan' : ''}</div>` : '';
     const mark = s.customer_id ? markeringVoor(s.customer_id, s.deal_id) : null;
     const incassoKnop = !isAdmin() || !s.customer_id || s.bron === 'traject' ? ''
       : mark
@@ -371,7 +380,8 @@
         ${s.risico_redenen.length ? `<div style="color:var(--rose)">Risico: ${esc(s.risico_redenen.join(', '))}</div>` : ''}
         ${s.incasso ? `<div style="color:var(--rose)">${s.status_label ? esc(s.status_label.tekst) : 'Incasso sinds ' + esc(fmtDate(s.incasso.sinds))} · ${s.incasso.stilstand === false ? 'weggevallen' : 'staat stil'} <span class="mono">${eur(s.incasso.vervallen)}</span>${mark ? ` · ${esc(mark.reden)}` : ''}</div>` : ''}
         ${s.niet_gedekt > 0 ? `<div style="color:var(--text-3)">Regeling dekt <span class="mono">${eur(s.niet_gedekt)}</span> niet (gecrediteerd zonder vervangende factuur)</div>` : ''}
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${annuleer}${incassoKnop}</div>
+        ${annInfo}
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${annuleer}${annKnop}${incassoKnop}</div>
       </div></div>`;
   }
 
@@ -435,8 +445,16 @@
      ═══════════════════════════════════════════════════════════════════════ */
   let _zoekTimer = null;
   let _zoekVolgnr = 0;
-  window.__commWizOpen = async () => {
-    _st.wiz = { stap: 1, q: '', res: null, zoekt: false, deal: null, mentoren: new Set(), reden: 'verlenging', pct: '3', inclBtw: true, note: '', toch: false, tochReden: '', preview: null, bezig: false, fout: null, mentorLijst: null };
+  // prefill (12 nov 2026, vanaf de offertepagina / banner "vorige offerte had
+  // commissie"): { deal_id, mentoren:[uid], pct, basis_incl_btw, reden, note }.
+  // Met deal_id zoekt de wizard die offerte meteen op en springt naar stap 2.
+  window.__commWizOpen = async (prefill) => {
+    const pf = prefill && typeof prefill === 'object' ? prefill : {};
+    _st.wiz = { stap: 1, q: pf.deal_id || '', res: null, zoekt: false, deal: null, mentoren: new Set(asArr(pf.mentoren)),
+      reden: ['verlenging', 'upsell', 'handmatig'].includes(pf.reden) ? pf.reden : 'verlenging',
+      pct: pf.pct != null ? String(pf.pct) : '3', inclBtw: pf.basis_incl_btw !== false, note: pf.note || '',
+      toch: false, tochReden: '', preview: null, bezig: false, fout: null, mentorLijst: null, autoKies: pf.deal_id || null };
+    if (pf.deal_id) queueMicrotask(zoek);
     if (H.registreerVuilCheck) { try { H.registreerVuilCheck(() => !!(_st.wiz && (_st.wiz.deal || _st.wiz.q))); } catch (_) { /* optioneel */ } }
     render();
     setTimeout(() => document.getElementById('comm-wiz-q')?.focus(), 30);
@@ -461,6 +479,11 @@
     if (!_st.wiz || nr !== _zoekVolgnr) return;
     w.zoekt = false;
     w.res = j?.__error ? { fout: j.__error } : asArr(j?.resultaten);
+    if (w.autoKies && Array.isArray(w.res)) {
+      const i = w.res.findIndex((d) => d.deal_id === w.autoKies);
+      w.autoKies = null;
+      if (i >= 0) { window.__commWizKies(i); return; }
+    }
     tekenResultaten();
   }
   function tekenResultaten() {
@@ -663,6 +686,52 @@
         <button class="btn btn-danger" data-comm-annuleer-btn ${String(a.typed).trim() === 'ANNULEER' && !a.bezig ? '' : 'disabled'} onclick="window.__commAnnuleerOk()">${a.bezig ? 'Bezig…' : 'Toewijzing annuleren'}</button>
       </div>`;
     return modal('Toewijzing annuleren', body, 'window.__commAnnuleerSluit()', 480);
+  }
+
+  /* ── Commissie annuleren / herstellen per sale (regel E) ─────────────── */
+  window.__commAnnOpen = (key, actie) => {
+    const s = asArr(_st.data?.sales).find((x) => x.key === key);
+    if (!s || !s.deal_id) return;
+    _st.ann = { actie, deal_id: s.deal_id, klant: s.klant, bron: s.bron_label, share: s.share, vrij: s.vrijgegeven,
+      annulering: s.annulering || null, soort: actie === 'annuleren' ? '' : null, reden: '', bezig: false, fout: null };
+    render();
+  };
+  window.__commAnnSluit = () => { _st.ann = null; render(); };
+  window.__commAnnVeld = (k, v) => { if (_st.ann) _st.ann[k] = v; if (k === 'soort') render(); };
+  window.__commAnnOk = async () => {
+    const a = _st.ann;
+    if (!a || a.bezig) return;
+    if (a.actie === 'annuleren' && !a.soort) { a.fout = 'Kies waarom de commissie vervalt.'; render(); return; }
+    if (String(a.reden || '').trim().length < 3 && (a.actie === 'herstellen' || a.soort === 'handmatig')) { a.fout = 'Geef een reden (minstens 3 tekens).'; render(); return; }
+    a.bezig = true; a.fout = null; render();
+    const j = await post('/api/commissie-annulering', { actie: a.actie, deal_id: a.deal_id, soort: a.soort || undefined, reden: a.reden }, 45000);
+    if (!_st.ann) return;
+    if (j?.__error) { a.bezig = false; a.fout = j.__error; render(); return; }
+    _st.ann = null;
+    toast(a.actie === 'herstellen'
+      ? `Commissie hersteld${Number(j?.vrijgave?.total_released) > 0 ? ` — ${eur(j.vrijgave.total_released)} ingehaald` : ''}.`
+      : `Commissie geannuleerd (${j.reden}).${j.melding ? ' ' + j.melding : ''}`);
+    _st.data = null; queueMicrotask(laad); render();
+  };
+  function annModal() {
+    const a = _st.ann;
+    if (!a) return '';
+    const radio = (v, l, d) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1.5px solid ${a.soort === v ? 'var(--violet)' : 'var(--border)'};border-radius:8px;cursor:pointer;margin-top:6px">
+      <input type="radio" name="comm-ann-soort" ${a.soort === v ? 'checked' : ''} onchange="window.__commAnnVeld('soort','${v}')"><span><b style="font-size:12.5px">${l}</b><br><span style="font-size:11.5px;color:var(--text-3)">${d}</span></span></label>`;
+    const body = a.actie === 'annuleren'
+      ? `<div style="font-size:13px;line-height:1.6;margin-bottom:8px">Commissie op <b>${esc(a.klant)}</b> (${esc(a.bron || '')}) annuleren: <span class="mono">${eur(a.share)}</span>. ${a.vrij > 0 ? `Al vrijgegeven (${eur(a.vrij)}) blijft staan.` : 'Er is nog niets vrijgegeven.'} De mentor ziet het in Mijn verdiensten › Geannuleerd.</div>
+        ${radio('klant_annuleert', 'Klant annuleert', 'Reden "Klant geannuleerd".')}
+        ${radio('vervangen', 'Vervangen door nieuwe offerte', 'Koppel daarna de nieuwe offerte via Sale toewijzen.')}
+        ${radio('handmatig', 'Andere reden', 'Typ de reden hieronder.')}
+        <label style="display:block;margin-top:10px">${lbl(a.soort === 'handmatig' ? 'Reden (verplicht)' : 'Toelichting (optioneel)')}<input type="text" value="${esc(a.reden)}" oninput="window.__commAnnVeld('reden', this.value)" style="${inputStijl}" /></label>`
+      : `<div style="font-size:13px;line-height:1.6;margin-bottom:8px">Commissie op <b>${esc(a.klant)}</b> herstellen? Ze gaat terug naar de status van vóór de annulering${a.annulering?.reden ? ` (geannuleerd: ${esc(a.annulering.reden)})` : ''}. Wat al betaald is, valt meteen vrij volgens de gewone regel.</div>
+        <label style="display:block">${lbl('Reden (verplicht)')}<input type="text" value="${esc(a.reden)}" oninput="window.__commAnnVeld('reden', this.value)" style="${inputStijl}" /></label>`;
+    return modal(a.actie === 'annuleren' ? 'Commissie annuleren' : 'Commissie herstellen', `${body}
+      ${a.fout ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-top:10px">${esc(a.fout)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn btn-ghost" onclick="window.__commAnnSluit()">Annuleren</button>
+        <button class="btn ${a.actie === 'annuleren' ? 'btn-danger' : 'btn-primary'}" ${a.bezig ? 'disabled' : ''} onclick="window.__commAnnOk()">${a.bezig ? 'Bezig…' : (a.actie === 'annuleren' ? 'Commissie annuleren' : 'Herstellen')}</button>
+      </div>`, 'window.__commAnnSluit()', 520);
   }
 
   /* ── Verschoven commissie + inhaal ───────────────────────────────────── */
@@ -977,7 +1046,7 @@
       </select>
       <button class="btn btn-primary btn-sm" onclick="window.__commWizOpen()">${svg(I.plus, 'width:14px;height:14px')} Sale toewijzen</button>
     </div>`;
-    const modals = `${wizard()}${annuleerModal()}${inhaalModal()}${incassoModal()}${opheffenModal()}${zijpaneel()}`;
+    const modals = `${wizard()}${annuleerModal()}${annModal()}${inhaalModal()}${incassoModal()}${opheffenModal()}${zijpaneel()}`;
     if (_st.error && !_st.data) return kop + errBlk(_st.error) + modals;
     if (!_st.data) return kop + skel() + modals;
 

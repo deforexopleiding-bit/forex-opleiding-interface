@@ -11,6 +11,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { SOORT_KOLOMMEN, SOORTEN, soortKolomOntbreekt } from './_lib/subscription-soort.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 
 // Bedrag incl. BTW per termijn. Prefereer line_items (mix-safe per regel);
@@ -37,6 +38,7 @@ export default async function handler(req, res) {
 
   const ownedByMe = req.query?.owned_by_me === 'true';
   const status    = req.query?.status || 'all';
+  const soortFilter = String(req.query?.soort || 'all'); // all | origineel | aanpassing | incasso_regeling | nieuwe_offerte | leeg
   const page     = Math.max(1, parseInt(req.query?.page, 10) || 1);
   const rawSize  = parseInt(req.query?.page_size, 10) || 50;
   const pageSize = Math.min(500, Math.max(1, rawSize));
@@ -60,8 +62,12 @@ export default async function handler(req, res) {
     }
 
     // 1) Subscriptions eerst — status-filter, owned_by_me-filter, page/range.
-    let subQ = supabaseAdmin.from('subscriptions')
-      .select('id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, created_at', { count: 'exact' })
+    // Soort (mentorcommissie, 12 nov 2026): faalzacht — zonder migratie
+    // opnieuw zonder de soort-kolommen.
+    const BASIS = 'id, deal_id, description, amount, vat_percentage, term_count, start_date, end_date, teamleader_subscription_id, status, line_items, created_at';
+    const bouwSubQ = (kolommen) => {
+      let q = supabaseAdmin.from('subscriptions')
+        .select(kolommen, { count: 'exact' })
       // Server-side ordering op created_at desc (nieuwste aangemaakt eerst),
       // consistent met de frontend-sortering sinds #726. Voorheen op
       // start_date desc: subs met verre-toekomst-startdatums vulden pagina 1
@@ -69,9 +75,15 @@ export default async function handler(req, res) {
       // "verdwijnen" achter latere pagina's.
       .order('created_at', { ascending: false })
       .range(from, to);
-    if (status && status !== 'all') subQ = subQ.eq('status', status);
-    if (ownedDealIds) subQ = subQ.in('deal_id', ownedDealIds);
-    const { data: subs, count: subCount, error: subErr } = await subQ;
+      if (status && status !== 'all') q = q.eq('status', status);
+      if (ownedDealIds) q = q.in('deal_id', ownedDealIds);
+      if (metSoort && soortFilter === 'leeg') q = q.is('soort', null);
+      else if (metSoort && SOORTEN.includes(soortFilter)) q = q.eq('soort', soortFilter);
+      return q;
+    };
+    let metSoort = true;
+    let { data: subs, count: subCount, error: subErr } = await bouwSubQ(`${BASIS}, ${SOORT_KOLOMMEN}`);
+    if (subErr && soortKolomOntbreekt(subErr)) { metSoort = false; ({ data: subs, count: subCount, error: subErr } = await bouwSubQ(BASIS)); }
     if (subErr) {
       console.error('[sales-subscriptions-list] subs fetch:', subErr.message);
       return res.status(500).json({ error: 'subs fetch: ' + subErr.message });
@@ -148,6 +160,9 @@ export default async function handler(req, res) {
         status: s.status || null,
         teamleader_subscription_id: s.teamleader_subscription_id || null,
         created_at: s.created_at || null,
+        soort: s.soort || null,
+        aanpassing_type: s.aanpassing_type || null,
+        sale_deal_id: s.sale_deal_id || null,
       };
     });
 

@@ -863,7 +863,12 @@
       const firstBadge = s.first_invoice_paid
         ? H.pill('ok', '1e factuur betaald')
         : H.pill('neutral', 'Nog niet');
-      const shareCell = s.is_cash_traject
+      // Geannuleerd (12 nov 2026): "dit was een sale, dit was je commissie,
+      // de klant heeft geannuleerd" — reden + datum uit het grootboek.
+      const ann = s.status === 'geannuleerd' ? s.annulering : null;
+      const shareCell = ann
+        ? `<s style="color:var(--text-3)">${eur(ann.oorspronkelijk)}</s>${ann.behoud_vrijgegeven ? ` <span class="pill pill-neutral nodot" title="Wat al vrijgegeven werd blijft van jou" style="margin-left:4px">vrij: ${eur(_vrij(s))}</span>` : ''}`
+        : s.is_cash_traject
         ? `${eur(s.traject_total_incl != null ? s.traject_total_incl : s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Reeds vrijgevallen" style="margin-left:4px">vrij: ${eur(s.mentor_share_total)}</span>`
         : (s.schema_unknown
             ? `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Nog niet meegeteld in KPI's tot er een abonnement is" style="margin-left:4px">nog niet in KPI</span>`
@@ -874,7 +879,9 @@
       const summaryRow = `<tr onclick="window.__verdBonusToggle('${esc(s._key)}')" style="cursor:pointer;${isOpen ? 'background:var(--surface-2)' : ''}">
         <td><strong>${esc(s.customer_label || '—')}</strong></td>
         <td>${_bronCel(s)}</td>
-        <td>${s.status_label
+        <td>${ann
+          ? `${H.pill('neutral', 'Geannuleerd')}<div style="font-size:11px;color:var(--text-3);margin-top:3px;max-width:260px">${esc(ann.reden || 'Geannuleerd')}${ann.op ? ' · ' + fmtDate(ann.op) : ''}${ann.behoud_vrijgegeven ? ' · al vrijgegeven blijft van jou' : ''}</div>`
+          : s.status_label
           ? `${H.pill(s.status_label.code === 'regeling' ? 'warn' : (s.status_label.code === 'bij_incasso' ? 'danger' : 'neutral'), s.status_label.tekst)}<div style="font-size:11px;color:var(--text-3);margin-top:3px;max-width:260px" title="${esc(s.status_label.reden || '')}">${esc(s.status_label.verwachting || '')}</div>`
           : (s.incasso
             ? `${H.pill('danger', 'Incasso sinds ' + fmtDate(s.incasso.sinds))}`

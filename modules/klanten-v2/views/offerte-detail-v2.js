@@ -455,6 +455,8 @@
     metaParts.push(`<span>${esc(offNr)}</span>`);
     metaParts.push(`<span>· Aangemaakt ${esc(fmtDate(deal.created_at))}</span>`);
     if (deal.tl_quotation_accepted_at) metaParts.push(`<span>· Getekend ${esc(fmtDate(deal.tl_quotation_accepted_at))}</span>`);
+    const commChip = _odvCommissieChip();
+    if (commChip) metaParts.push(commChip);
 
     return `<div class="odv-head">
       <div class="odv-head-l">
@@ -612,6 +614,8 @@
         </div>
       </div>
 
+      ${_odvCommissieKaart()}
+
       <div class="odv-card" style="margin-bottom:14px">
         <div class="odv-card-h">Producten (${lines.length} regel${lines.length === 1 ? '' : 's'})</div>
         <div class="odv-tbl-wrap">
@@ -668,6 +672,7 @@
       const d = await apiJson('/api/sales-deal-detail?id=' + encodeURIComponent(id));
       if (seq !== _odv.seq) return; // stale
       _odv.data = d;
+      _odvLaadZicht(id);
     } catch (e) {
       if (seq !== _odv.seq) return;
       _odv.error = e?.message || 'load failed';
@@ -676,6 +681,34 @@
       if (seq === _odv.seq) _odv.loading = false;
       try { window.DFO.render(); } catch (_) {}
     }
+  }
+
+  // Mentorcommissie + incasso op deze offerte (12 nov 2026). Los geladen,
+  // zodat de offerte zelf niet wacht. Kaart en chip: views/_commissie-ui.js.
+  async function _odvLaadZicht(id) {
+    _odv.zicht = { laden: true, data: null, fout: null, id };
+    try {
+      const j = await apiJson('/api/commissie-zicht?deal_id=' + encodeURIComponent(id));
+      if (_odv.dealId !== id) return;
+      _odv.zicht = { laden: false, data: j?.zicht || null, fout: null, id };
+    } catch (e) {
+      if (_odv.dealId !== id) return;
+      _odv.zicht = { laden: false, data: null, fout: e?.message || 'laden mislukt', id };
+    }
+    try { window.DFO.render(); } catch (_) {}
+  }
+  function _odvCommissieKaart() {
+    const z = _odv.zicht;
+    if (!window.KV_COMM || !z || z.id !== _odv.dealId) return '';
+    return window.KV_COMM.kaart(z.data, { laden: z.laden, fout: z.fout });
+  }
+  function _odvCommissieChip() {
+    const z = _odv.zicht;
+    if (!window.KV_COMM || !z || !z.data || z.id !== _odv.dealId) return '';
+    const c = z.data.commissie;
+    if (!c || !c.heeft_commissie) return window.KV_COMM.chip(z.data, { bedrag: false });
+    const namen = window.KV_COMM.uniek(window.KV_COMM.mentorNamen(c, c.status !== 'geannuleerd'));
+    return `<span class="odv-badge" style="background:var(--violet-soft);color:var(--violet)" title="${esc(window.KV_COMM.bronTekst(c))}">Commissie · ${esc(namen.join(', '))}${c.status === 'geannuleerd' ? ' (geannuleerd)' : ''}</span>`;
   }
 
   // ── Actie-handlers (identiek aan standalone HTML, 1-op-1 endpoints) ─────

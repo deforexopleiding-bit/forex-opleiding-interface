@@ -97,7 +97,8 @@ export function rekenSale({ parents, kids, facturen, scope, customerId, dealId, 
   const betaald = round2(vanSale.reduce((t, inv) => t + (sinds ? betaaldVoor(inv, betalingen.get(inv.id), sinds) : betaaldBedrag(inv)), 0));
   const afw = new Set();
   if (vanSale.some((inv) => (Number(inv.amount_paid) || 0) > (Number(inv.amount_total) || 0) + 0.005)) afw.add('factuur_te_veel_betaald');
-  if (dealId && scope.zonderSoort(dealId).length) afw.add('soort_ontbreekt');
+  const zonderSoort = dealId ? scope.zonderSoort(dealId) : [];
+  if (zonderSoort.length) afw.add('soort_ontbreekt');
 
   const perMentor = [];
   let commissie = 0, doel = 0, vrij = 0, werkelijk = 0, statusUit = 0, nietInRapport = 0;
@@ -130,6 +131,9 @@ export function rekenSale({ parents, kids, facturen, scope, customerId, dealId, 
     werkelijk_uitbetaald: round2(werkelijk), status_uitbetaald: round2(statusUit),
     verschil_status_werkelijkheid: round2(werkelijk - statusUit), vrijgegeven_niet_in_rapport: round2(nietInRapport),
     verschil, incasso_stop: sinds, afwijkingen: [...afw], per_mentor: perMentor,
+    // Abonnementen van deze sale zonder soort (afwijking soort_ontbreekt):
+    // dezelfde bron voor Finance › Commissie & incasso › Te checken.
+    zonder_soort: zonderSoort.map((x) => ({ id: x.id, deal_id: x.deal_id, start_date: x.start_date || null, status: x.status || null, term_count: x.term_count || null })),
     facturen: vanSale.map((i) => ({ id: i.id, nummer: i.invoice_number || null, bedrag: round2(i.amount_total), betaald: round2(betaaldBedrag(i)), status: i.status, due_date: i.due_date || null,
       betaalmethode: betaalmethodenVan(betalingen.get(i.id) || [], i).label })),
   };
