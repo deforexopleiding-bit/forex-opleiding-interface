@@ -661,7 +661,7 @@ function _hdConfirm(title, bodyHtml, opts) {
     wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
     wrap.innerHTML = `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
       <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600${danger ? ';color:#7f1d1d' : ''}">${esc(title)}</div>
-      <div style="padding:16px 18px;font-size:14px;color:#1f2937">${bodyHtml}</div>
+      <div style="padding:16px 18px;font-size:14px;color:#1f2937">${bodyHtml}${opts?.vinkje ? `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:13px"><input type="checkbox" id="hdVinkje" style="margin-top:3px"><span>${esc(opts.vinkje)}</span></label>` : ''}</div>
       <div style="padding:12px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb">
         ${cancelLabel ? `<button id="hdCancel" class="btn btn-ghost">${cancelLabel}</button>` : ''}
         <button id="hdOk" class="btn ${danger ? 'btn-danger' : ''}" ${danger ? 'style="background:#b91c1c"' : ''}>${okLabel}</button>
@@ -669,8 +669,22 @@ function _hdConfirm(title, bodyHtml, opts) {
     wrap.addEventListener('click', (e) => { if (e.target === wrap) { document.body.removeChild(wrap); resolve(false); } });
     document.body.appendChild(wrap);
     document.getElementById('hdCancel')?.addEventListener('click', () => { document.body.removeChild(wrap); resolve(false); });
-    document.getElementById('hdOk').addEventListener('click', () => { document.body.removeChild(wrap); resolve(true); });
+    const okEl = document.getElementById('hdOk');
+    // Verplicht vinkje (12 nov 2026): OK blijft grijs tot het vinkje staat.
+    const vinkje = document.getElementById('hdVinkje');
+    if (vinkje) {
+      okEl.disabled = true; okEl.style.opacity = '.45';
+      vinkje.addEventListener('change', () => { okEl.disabled = !vinkje.checked; okEl.style.opacity = vinkje.checked ? '' : '.45'; });
+    }
+    okEl.addEventListener('click', () => { if (okEl.disabled) return; document.body.removeChild(wrap); resolve(true); });
   });
+}
+// De onboarding-waarschuwing in het verwijdervenster (12 nov 2026).
+function _hdOnboardingHtml(obW) {
+  if (!obW || !Array.isArray(obW.onboardings) || !obW.onboardings.length) return '';
+  const reden = { lopend: 'lopende onboarding van deze klant', deze_offerte: 'hoort bij deze offerte', beide: 'lopend én hoort bij deze offerte' };
+  const rijen = obW.onboardings.map((o) => `<li style="margin:2px 0"><b>${esc(o.naam || 'Onboarding')}</b> — status <b>${esc(o.status || '—')}</b>, start <b>${esc(o.start_date ? fmtDate(o.start_date) : '—')}</b> <span style="color:#6b7280">(${esc(reden[o.reden] || o.reden || '')})</span></li>`).join('');
+  return `<div data-hd-onboarding style="margin:10px 0;padding:10px 12px;border:1px solid #C2700A;background:#fff7ed;border-radius:8px"><b style="font-size:13px">⚠ Er hangt een onboarding aan deze klant</b><ul style="margin:6px 0 6px 18px;padding:0;font-size:13px">${rijen}</ul><div style="font-size:12.5px">${esc(obW.uitleg || '')}</div></div>`;
 }
 function _hdVerwijderPrompt(dealNaam) {
   return new Promise((resolve) => {
@@ -728,7 +742,9 @@ window.__odvHdRun = async function () {
     + '</div>'
     + (_hdBlockerHtml(pf.blockers) ? `<div style="margin:10px 0"><b style="font-size:13px;color:#7f1d1d">🚫 BLOCKERS — hard-delete geweigerd:</b>${_hdBlockerHtml(pf.blockers)}</div>` : '')
     + (pf.deletable ? `<div style="margin:10px 0"><b style="font-size:13px">📋 Gevolgen bij hard-delete:</b>${_hdGevolgenHtml(pf.cascade, pf.set_null)}</div>` : '')
+    + (pf.deletable ? _hdOnboardingHtml(pf.onboarding_waarschuwing) : '')
     + '</div>';
+  const obW = pf.onboarding_waarschuwing || null;
 
   if (!pf.deletable) {
     await _hdConfirm('Kan niet hard-deleten — blockers open',
@@ -738,7 +754,8 @@ window.__odvHdRun = async function () {
   }
   const ok1 = await _hdConfirm('⚠ Definitief verwijderen — laatste waarschuwing',
     summary + '<p style="margin:12px 0 0;font-size:13.5px"><b>Onherstelbaar.</b> Deze offerte + gekoppelde subs/regels verdwijnen PERMANENT uit de CRM én uit Teamleader.</p>',
-    { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true });
+    { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true,
+      vinkje: obW ? 'Ik begrijp het: dit is geen offertewissel. De onboarding blijft open staan en ik verwijder deze offerte toch.' : null });
   if (!ok1) return;
   const ok2 = await _hdVerwijderPrompt(dealNaam);
   if (!ok2) return;
@@ -746,10 +763,14 @@ window.__odvHdRun = async function () {
   try {
     const r = await apiFetch('/api/sales-hard-delete-quotation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deal_id: dealId, confirm: 'VERWIJDER' }),
+      body: JSON.stringify({ deal_id: dealId, confirm: 'VERWIJDER', onboarding_bevestigd: !!obW }),
     });
     const j = await r.json();
     if (!r.ok) {
+      if (j.error === 'ONBOARDING_BEVESTIGING_NODIG') {
+        toast('Niet verwijderd: er hangt (intussen) een onboarding aan deze klant. Open het venster opnieuw.');
+        return;
+      }
       if (j.partial) {
         await _hdConfirm('⚠ Partial delete — sync-mismatch',
           `<p style="margin:0 0 10px">${esc(j.detail || 'Teamleader is opgeruimd maar lokaal niet.')}</p><p style="margin:0;font-size:13px;color:#7f1d1d">Admin-alarm-mail is verstuurd. Corrigeer handmatig via Supabase Studio.</p>`,
@@ -979,6 +1000,7 @@ async function obSubmit() {
   const payload = { customer_id: _customer.id, traject_id: trajectId };
   if (startDate) payload.start_date = startDate;
   payload.lms_provision = false; // v1 default; UI-checkbox niet in v1-HTML aanwezig.
+  if (dealId) payload.deal_id = dealId; // 12 nov 2026: welke offerte bij de onboarding hoort.
   try {
     const r = await apiFetch('/api/onboarding-create', {
       method: 'POST', body: JSON.stringify(payload),
@@ -986,7 +1008,15 @@ async function obSubmit() {
     let d = null; try { d = await r.json(); } catch (_) {}
     if (r.status === 409) {
       const err = document.getElementById('odvObErr');
-      err.textContent = 'Er bestaat al een (actieve) onboarding voor deze klant.';
+      if (d?.kan_vervangen) {
+        // Offertewissel (12 nov 2026): deze oude losse pagina heeft de vervang-
+        // knop niet; die staat op de offertepagina in het CRM. Niets aangemaakt.
+        err.innerHTML = 'Er loopt al een onboarding voor deze klant. Komt deze aanmelding uit een nieuwe offerte? '
+          + 'Open de offerte in het CRM en kies <b>"Deze offerte vervangt de lopende onboarding"</b>: '
+          + '<a href="' + '/modules/klanten-v2/?v2preview=sales&v2tab=Offertes&deal_id=' + encodeURIComponent(dealId) + '">offerte openen</a>.';
+      } else {
+        err.textContent = 'Er bestaat al een (actieve) onboarding voor deze klant.';
+      }
       err.hidden = false;
       sb.disabled = false; sb.textContent = 'Aanmelden';
       return;

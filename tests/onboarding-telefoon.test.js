@@ -115,5 +115,6 @@ test('SPIEGEL VOOR DE MIGRATIE: een ontbrekende kolom telefoon wordt herkend, ee
 test('STUDENT AANVULLEN: alleen als hlms_student.telefoon leeg is — de voorwaarde zit in de update', async () => {
   const { readFileSync } = await import('node:fs');
   const bron = readFileSync(new URL('../api/_lib/onboarding-spiegel.js', import.meta.url), 'utf8');
-  assert.match(bron, /from\('hlms_student'\)\s*\.update\(\{ telefoon \}\)\s*\.eq\('id', studentId\)\s*\.or\('telefoon\.is\.null,telefoon\.eq\.'\)/);
+  // Sinds 12 nov 2026 via metGewijzigdOp: alleen telefoon + gewijzigd_op.
+  assert.match(bron, /from\('hlms_student'\)\s*\.update\(metGewijzigdOp\(\{ telefoon \}\)\)\s*\.eq\('id', studentId\)\s*\.or\('telefoon\.is\.null,telefoon\.eq\.'\)/);
 });

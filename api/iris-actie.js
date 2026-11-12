@@ -50,6 +50,7 @@ import { STAPTYPES, NIET_VIA_OPDRACHT, verloopRegel } from './_lib/iris/opdracht
 import { voegHandmatigToe } from './_lib/iris/belrij-vullen.js';
 import { haalHerkenningspunten, telefoonVormen, naamUit } from './_lib/iris/doel.js';
 import { bouwOpvolging } from './_lib/iris/opvolging.js';
+import { metGewijzigdOp } from './_lib/hlms-student-gewijzigd.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -675,7 +676,7 @@ async function voerUit(actie, user) {
       const nieuweDatum = nieuw.toISOString().slice(0, 10);
 
       const { error: sFout } = await client
-        .from('hlms_student').update({ eind_datum: nieuweDatum }).eq('id', studentId);
+        .from('hlms_student').update(metGewijzigdOp({ eind_datum: nieuweDatum })).eq('id', studentId);
       if (sFout) throw new Error('einddatum zetten: ' + sFout.message);
 
       return { student_id: studentId, was: student.eind_datum, wordt: nieuweDatum, dagen };

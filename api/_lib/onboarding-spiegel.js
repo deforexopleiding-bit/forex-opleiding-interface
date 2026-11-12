@@ -55,6 +55,7 @@ import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { telefoonVoorOnboarding } from './onboarding-telefoon.js';
 import { antwoordenVoorLms } from './onboarding-antwoorden.js';
 import { vulPortalKolommenAan } from './onboarding-portal-kolommen.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 export const SPIEGEL_TABEL = 'hlms_crm_onboarding';
 // De Autopilot-interesse (28 okt 2026) staat in een EIGEN tabel: alleen de
@@ -422,7 +423,7 @@ async function vulStudentTelefoonAan(lms, studentId, telefoon) {
   if (!studentId || !telefoon) return;
   try {
     const { error } = await lms.from('hlms_student')
-      .update({ telefoon })
+      .update(metGewijzigdOp({ telefoon }))
       .eq('id', studentId)
       .or('telefoon.is.null,telefoon.eq.');
     if (error) console.warn('[onboarding-spiegel] telefoon student aanvullen: ' + error.message);

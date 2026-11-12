@@ -21,6 +21,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getEffectiveRoles, hasAnyRole, computeHighestRole } from './_lib/roles.js';
+import { leesOnboardingsBijVerwijderen, VERWIJDER_ONBOARDING_UITLEG } from './_lib/onboarding-offerte-wissel.js';
 import { commissieVanDeal } from './_lib/commissie-annulering.js';
 
 async function checkAuth(req) {
@@ -225,6 +226,14 @@ export default async function handler(req, res) {
       rijen: eventAttendees.data,
     });
 
+    // 4) ONBOARDING (12 nov 2026) — geen blocker, wel een waarschuwing met
+    //    extra bevestiging: verwijderen is geen offertewissel. Zie
+    //    onboardingsBijVerwijderen in api/_lib/onboarding-offerte-wissel.js.
+    const ob = await leesOnboardingsBijVerwijderen(supabaseAdmin, deal);
+    const onboarding_waarschuwing = ob.onboardings.length
+      ? { onboardings: ob.onboardings, uitleg: VERWIJDER_ONBOARDING_UITLEG, bevestiging_nodig: true }
+      : null;
+
     // Meta over de deal zelf.
     // 2026-09-18 fix: bouw klantnaam in JS uit is_company + company_name /
     // first_name + last_name (customers-tabel heeft géén enkele 'name'-kolom).
@@ -258,6 +267,8 @@ export default async function handler(req, res) {
       commissie_keuze_nodig: !!(commissie && commissie.open),
       cascade,
       set_null,
+      onboarding_waarschuwing,
+      ...(ob.fout ? { onboarding_leesfout: ob.fout } : {}),
       note: deletable
         ? 'Geen blockers. Klaar voor hard-delete met dubbele bevestiging + typ "VERWIJDER".'
         : 'Er staan blockers open. Los die eerst op — daarna wordt de knop actief.',

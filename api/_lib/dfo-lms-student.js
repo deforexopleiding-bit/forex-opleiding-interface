@@ -27,6 +27,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient, isUniqueViolation } from './dfo-lms-db.js';
 import { berekenLmsVenster } from './onboarding-window.js';
 import { verdwenenStudenten, ontkoppelVerwijderdeStudent } from './lms-student-ontkoppelen.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 // Kolommen die we op onboardings lezen/schrijven voor deze koppeling.
 const CRM_KOLOMMEN =
@@ -387,7 +388,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
         await markeerGekoppeld(onboardingId, viaPersoon.id);
         if (!viaPersoon.crm_onboarding_id) {
           const { error } = await lms.from('hlms_student')
-            .update({ crm_onboarding_id: onboardingId })
+            .update(metGewijzigdOp({ crm_onboarding_id: onboardingId }))
             .eq('id', viaPersoon.id).is('crm_onboarding_id', null);
           if (error) throw new Error('hlms_student koppelen: ' + error.message);
         }
@@ -517,7 +518,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
       if (!rij.crm_onboarding_id) patch.crm_onboarding_id = onboardingId;
       if (mentorId && !rij.mentor_id) patch.mentor_id = mentorId;
       if (Object.keys(patch).length > 0) {
-        const { error } = await lms.from('hlms_student').update(patch).eq('id', rij.id);
+        const { error } = await lms.from('hlms_student').update(metGewijzigdOp(patch)).eq('id', rij.id);
         if (error) throw new Error('hlms_student bijwerken: ' + error.message);
       }
 
@@ -573,7 +574,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
           }
           if (!opnieuw.rij.crm_onboarding_id) {
             await lms.from('hlms_student')
-              .update({ crm_onboarding_id: onboardingId })
+              .update(metGewijzigdOp({ crm_onboarding_id: onboardingId }))
               .eq('id', opnieuw.rij.id);
           }
           await markeerGekoppeld(onboardingId, opnieuw.rij.id);
@@ -676,7 +677,7 @@ export async function syncDfoLmsMentor(onboardingId, mentorUserId) {
 
     const { error: updErr } = await lms
       .from('hlms_student')
-      .update({ mentor_id: mentorId })
+      .update(metGewijzigdOp({ mentor_id: mentorId }))
       .eq('id', ob.dfo_lms_student_id);
     if (updErr) throw new Error('hlms_student mentor bijwerken: ' + updErr.message);
 
@@ -741,7 +742,7 @@ export async function koppelBestaandeStudent(onboardingId, studentId) {
       // PRECIES één kolom. Geen naam, geen traject, geen calls, geen mentor.
       const { error } = await lms
         .from('hlms_student')
-        .update({ crm_onboarding_id: onboardingId })
+        .update(metGewijzigdOp({ crm_onboarding_id: onboardingId }))
         .eq('id', studentId)
         // Optimistisch slot: raakt niets als een ander 'm intussen koppelde.
         .is('crm_onboarding_id', null);

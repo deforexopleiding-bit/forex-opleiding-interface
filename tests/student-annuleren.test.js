@@ -225,7 +225,8 @@ test('UITVOEREN MET KEUZES: alleen wat aangevinkt is; mentor krijgt de melding e
   assert.deepEqual(w.spiegel, ['ob-1']);
   // LMS-toegang dicht, account blijft (alleen eind_datum).
   const lmsUpd = w.lms.log.updates.find((u) => u.tabel === 'hlms_student');
-  assert.deepEqual(Object.keys(lmsUpd.patch), ['eind_datum']);
+  // Alleen de einddatum — plus gewijzigd_op (12 nov 2026: elke hlms_student-update zet die).
+  assert.deepEqual(Object.keys(lmsUpd.patch), ['eind_datum', 'gewijzigd_op']);
   assert.equal(body.steps.lms_toegang.vorige_eind_datum, '2027-03-25');
   // LMS-markering via de functie, zonder incasso.
   assert.equal(w.lms.log.rpc[0].naam, 'hlms_student_annuleren');

@@ -39,6 +39,7 @@ import { onboardingAfgesloten } from './onboarding-einde.js';
 import { vulHandmatigAan } from './onboarding-handmatig.js';
 import { vulIncassoAan, inIncasso } from './onboarding-incasso-stand.js';
 import { spiegelNaActie } from './onboarding-spiegel.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -273,6 +274,7 @@ export async function vervangOnboardingDoorOfferte(p) {
     let lmsUit = { bijgewerkt: false };
     let studentVoor = null;
     let studentPatch = null;
+    let gewijzigdVoor = null;
     if (!ob.dfo_lms_student_id) {
       lmsUit = { bijgewerkt: false, reden: 'geen_lms_student' };
       waarschuwingen.push('Er hangt geen LMS-student aan deze onboarding: in het LMS is niets bijgezet. Maak hem aan met "Student aanmaken in LMS" als dat nodig is.');
@@ -280,7 +282,7 @@ export async function vervangOnboardingDoorOfferte(p) {
       return uit(503, { error: 'Het LMS is niet geconfigureerd (DFO_LMS_SUPABASE_URL/KEY). Er is niets gewijzigd.', code: 'lms_niet_geconfigureerd' });
     } else {
       const { data: st, error: sErr } = await lms.from('hlms_student')
-        .select('id, product_soort, traject_maanden, calls_totaal, start_datum, eind_datum, overrides')
+        .select('id, product_soort, traject_maanden, calls_totaal, start_datum, eind_datum, overrides, gewijzigd_op')
         .eq('id', ob.dfo_lms_student_id).maybeSingle();
       if (sErr) return uit(502, { error: 'LMS-student lezen mislukt: ' + sErr.message + '. Er is niets gewijzigd.', code: 'lms_fout' });
       if (!st) {
@@ -291,7 +293,8 @@ export async function vervangOnboardingDoorOfferte(p) {
         if (sp.fout) return uit(422, { error: sp.fout + ' Er is niets gewijzigd.', code: 'traject_onvolledig' });
         studentVoor = kies(st, STUDENT_VELDEN);
         studentPatch = sp.patch;
-        const { error: uErr } = await lms.from('hlms_student').update(studentPatch).eq('id', st.id);
+        gewijzigdVoor = st.gewijzigd_op ?? null;
+        const { error: uErr } = await lms.from('hlms_student').update(metGewijzigdOp(studentPatch, nu)).eq('id', st.id);
         if (uErr) return uit(502, { error: 'LMS-student bijwerken mislukt: ' + uErr.message + '. Er is niets gewijzigd.', code: 'lms_fout' });
         lmsUit = { bijgewerkt: true, student_id: st.id, behouden: sp.behouden };
         for (const v of sp.behouden) {
@@ -317,7 +320,8 @@ export async function vervangOnboardingDoorOfferte(p) {
       if (studentVoor && lms && lmsUit.student_id) {
         const terug = {};
         for (const k of Object.keys(studentPatch || {})) terug[k] = studentVoor[k];
-        const { error: rbErr } = await lms.from('hlms_student').update(terug).eq('id', lmsUit.student_id);
+        // Netto is er niets gewijzigd: ook gewijzigd_op terug naar wat er stond.
+        const { error: rbErr } = await lms.from('hlms_student').update({ ...terug, gewijzigd_op: gewijzigdVoor }).eq('id', lmsUit.student_id);
         if (rbErr) console.error('[offerte-wissel] LMS terugzetten mislukt voor ' + lmsUit.student_id + ': ' + rbErr.message);
       }
       return uit(500, { error: 'Onboarding bijwerken mislukt: ' + upErr.message, code: 'crm_fout' });
@@ -377,5 +381,84 @@ export async function vervangOnboardingDoorOfferte(p) {
   } catch (e) {
     console.error('[offerte-wissel] ' + onboardingId + ': ' + (e?.message || e));
     return uit(500, { error: e?.message || 'Interne fout', code: 'fout' });
+  }
+}
+
+// ── WAARSCHUWING BIJ "DEFINITIEF VERWIJDEREN (TL + CRM)" (12 nov 2026) ───────
+// Aanleiding: op 10 nov werd de oude offerte van Laurens Rasti definitief
+// verwijderd om van offerte te wisselen. De onboarding bleef open staan, er
+// kwam een tweede LMS-account en een tweede uitnodiging. Verwijderen is geen
+// offertewissel: het venster moet dat zeggen, en de server vraagt een extra
+// bevestiging. Geen blocker: verwijderen blijft mogelijk.
+
+/** De uitleg in het venster (één bron voor beide schermen). */
+export const VERWIJDER_ONBOARDING_UITLEG =
+  'Wissel je van offerte? Verwijder deze offerte dan niet, maar open de nieuwe getekende offerte en kies '
+  + '"Deze offerte vervangt de lopende onboarding". Account, uitnodiging en antwoorden blijven dan behouden en de '
+  + 'klant krijgt niets. Verwijderen laat de onboarding gewoon open staan.';
+
+/**
+ * Welke onboardings verdienen een waarschuwing bij het verwijderen van deze
+ * offerte? PURE.
+ *   • een LOPENDE onboarding van dezelfde klant (zelfde regel als de
+ *     vervang-knop: aangemeld/bezig, of wizard voltooid zonder afsluiting);
+ *   • elke onboarding die via `deal_id` aan precies deze offerte hangt
+ *     (behalve gearchiveerd/geannuleerd: daar valt niets meer open te laten).
+ * @returns {{id, naam, status, start_date, reden: 'lopend'|'deze_offerte'|'beide'}[]}
+ */
+export function onboardingsBijVerwijderen(onboardings, deal) {
+  const uit = [];
+  for (const ob of Array.isArray(onboardings) ? onboardings : []) {
+    if (!ob?.id) continue;
+    const s = String(ob.status || '').trim().toLowerCase();
+    const opDeze = !!(deal?.id && ob.deal_id && String(ob.deal_id) === String(deal.id))
+      && !ob.archived_at && s !== 'gearchiveerd' && s !== 'geannuleerd';
+    const loopt = onboardingLoopt(ob)
+      && (!deal?.customer_id || String(ob.customer_id || '') === String(deal.customer_id));
+    if (!opDeze && !loopt) continue;
+    uit.push({
+      id: ob.id,
+      naam: ob.customer_name || null,
+      status: ob.status || null,
+      start_date: ymd(ob.start_date),
+      reden: opDeze && loopt ? 'beide' : (opDeze ? 'deze_offerte' : 'lopend'),
+    });
+  }
+  return uit;
+}
+
+/**
+ * Lees de onboardings van de klant en die op deze offerte, faalzacht: een
+ * leesfout geeft `{ onboardings: [], fout }` (dan geen waarschuwing — het is
+ * geen blocker — maar wel een logregel en de fout in het antwoord).
+ */
+export async function leesOnboardingsBijVerwijderen(db, deal) {
+  const basis = 'id, customer_id, customer_name, status, start_date, archived_at, auto_afgerond_op, auto_afgerond_sessie_id';
+  try {
+    const rijen = new Map();
+    const lees = async (kolom, waarde, metDeal) => {
+      const sel = metDeal ? basis + ', deal_id' : basis;
+      const { data, error } = await db.from('onboardings').select(sel).eq(kolom, waarde);
+      if (error) return { error };
+      for (const r of data || []) rijen.set(r.id, { deal_id: null, ...rijen.get(r.id), ...r });
+      return { error: null };
+    };
+    let dealKolom = true;
+    if (deal?.customer_id) {
+      let r = await lees('customer_id', deal.customer_id, true);
+      if (r.error && isDealKolomOntbreekt(r.error)) { dealKolom = false; r = await lees('customer_id', deal.customer_id, false); }
+      if (r.error) throw new Error(r.error.message);
+    }
+    if (dealKolom && deal?.id) {
+      const r = await lees('deal_id', deal.id, true);
+      if (r.error && !isDealKolomOntbreekt(r.error)) throw new Error(r.error.message);
+    }
+    const lijst = [...rijen.values()];
+    await vulHandmatigAan(db, lijst);
+    await vulIncassoAan(db, lijst);
+    return { onboardings: onboardingsBijVerwijderen(lijst, deal), fout: null };
+  } catch (e) {
+    console.error('[offerte-verwijderen] onboardings lezen: ' + (e?.message || e));
+    return { onboardings: [], fout: e?.message || String(e) };
   }
 }

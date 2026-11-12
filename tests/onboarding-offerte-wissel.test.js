@@ -147,7 +147,7 @@ function scenario({ dealKolom = true, updateFout = null, student } = {}) {
   const ob = lopend({ traject_id: TR_12, start_date: '2027-03-11', deal_id: dealKolom ? OUDE_DEAL : undefined, dfo_lms_student_id: STUDENT, token: 'tok', startcode: 'ABCD2345', answers: { a: 1 } });
   const db = nepCrm({ ob, deal: getekend({ quote_reference: 'OFF-42' }), trajecten: [traject12, traject6], dealKolom, updateFout });
   const lmsStudent = student === undefined
-    ? { id: STUDENT, product_soort: 'mentorship', traject_maanden: 12, calls_totaal: 24, start_datum: '2027-03-11', eind_datum: '2028-03-11', overrides: {} }
+    ? { id: STUDENT, product_soort: 'mentorship', traject_maanden: 12, calls_totaal: 24, start_datum: '2027-03-11', eind_datum: '2028-03-11', overrides: {}, gewijzigd_op: '2026-10-21T09:00:00+00:00' }
     : student;
   const lms = nepLms(lmsStudent);
   const gespiegeld = [];
@@ -171,8 +171,9 @@ test('WISSEL: zet traject/start/deal op de BESTAANDE onboarding, zet het LMS bij
   assert.equal(s.ob.startcode, 'ABCD2345');
   assert.deepEqual(s.ob.answers, { a: 1 });
   assert.equal(s.ob.status, 'aangemeld');
-  // Het LMS.
-  assert.deepEqual(s.lms.log.updates[0], { product_soort: 'mentorship', traject_maanden: 6, start_datum: '2027-03-01', calls_totaal: 12, eind_datum: '2027-09-01' });
+  // Het LMS — met gewijzigd_op = het moment van de wissel (12 nov 2026: bleef
+  // eerst op de oude datum staan, onboarding 3ae3ce0f).
+  assert.deepEqual(s.lms.log.updates[0], { product_soort: 'mentorship', traject_maanden: 6, start_datum: '2027-03-01', calls_totaal: 12, eind_datum: '2027-09-01', gewijzigd_op: NU.toISOString() });
   // Audit met before/after en een tijdlijnregel.
   const audit = s.db.log.inserts.find((i) => i.t === 'audit_log').v;
   assert.equal(audit.action, 'onboarding.offerte_wissel');
@@ -203,6 +204,9 @@ test('WISSEL: CRM-update mislukt → LMS wordt teruggezet', async () => {
   assert.equal(s.lms.log.updates.length, 2);
   assert.equal(s.lmsStudent.calls_totaal, 24);
   assert.equal(s.lmsStudent.eind_datum, '2028-03-11');
+  // Netto niets gewijzigd → ook gewijzigd_op terug op wat er stond.
+  assert.equal(s.lms.log.updates[0].gewijzigd_op, NU.toISOString());
+  assert.equal(s.lmsStudent.gewijzigd_op, '2026-10-21T09:00:00+00:00');
 });
 
 test('WISSEL: geen LMS-student → CRM wel, met waarschuwing; nooit een nieuwe student of uitnodiging', async () => {

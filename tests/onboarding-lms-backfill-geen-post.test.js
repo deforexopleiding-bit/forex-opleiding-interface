@@ -167,7 +167,9 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   //   onboarding die naar een BEWUST verwijderde LMS-student wijst (auditrij)
   //   wordt losgemaakt in plaats van "in orde" te melden. Lezen uit het LMS,
   //   één voorwaardelijke update in het CRM, niets dat verstuurt.
-  assert.ok(AFSLUITING.size <= 26,
+  // 26 → 27 (12 november 2026, Maxim): hlms-student-gewijzigd.js — puur, geen
+  //   imports: elke update op hlms_student zet ook gewijzigd_op.
+  assert.ok(AFSLUITING.size <= 27,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });
@@ -379,7 +381,8 @@ test('KOPPELEN 3: koppelen raakt PRECIES één kolom aan', () => {
   const einde = fn.indexOf('\n}\n');
   const body = fn.slice(0, einde);
   const update = body.slice(body.indexOf('.update('));
-  assert.match(update, /\.update\(\{ crm_onboarding_id: onboardingId \}\)/,
+  // Sinds 12 nov 2026 via metGewijzigdOp: één inhoudskolom + gewijzigd_op.
+  assert.match(update, /\.update\(metGewijzigdOp\(\{ crm_onboarding_id: onboardingId \}\)\)/,
     'koppelen schrijft meer dan crm_onboarding_id');
   for (const verboden of ['voornaam', 'achternaam', 'traject_maanden', 'calls_totaal',
                           'mentor_id', 'product_soort', 'start_datum', 'eind_datum']) {

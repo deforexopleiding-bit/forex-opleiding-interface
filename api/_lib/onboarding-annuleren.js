@@ -70,6 +70,7 @@ import { crmMentorVoorLmsId } from './lms-mentor-brug.js';
 import { zoekKlantKandidaten, kiesKlant } from './factuurstand-spiegel.js';
 import { customerDisplayName } from './customer-name.js';
 import { accountStand } from './lms-account-verwijderen.js';
+import { metGewijzigdOp } from './hlms-student-gewijzigd.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function tlCall(path, body, attempt = 0) {
@@ -931,7 +932,7 @@ export async function voerAnnuleringUit({ onboardingId = null, studentId = null,
             } else if (!moetToegangDicht(st.eind_datum, gisteren)) {
               steps.lms_toegang = { ok: true, skipped: true, reason: 'al-verlopen', eind_datum: st.eind_datum };
             } else {
-              const { error: upErr } = await lms.from('hlms_student').update({ eind_datum: gisteren }).eq('id', lmsStudentId);
+              const { error: upErr } = await lms.from('hlms_student').update(metGewijzigdOp({ eind_datum: gisteren })).eq('id', lmsStudentId);
               if (upErr) throw new Error(upErr.message);
               steps.lms_toegang = { ok: true, student_id: lmsStudentId, eind_datum: gisteren, vorige_eind_datum: st.eind_datum || null };
             }

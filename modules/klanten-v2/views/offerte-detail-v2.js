@@ -127,7 +127,7 @@
       wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
       wrap.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600">${_escOdv(title)}</div>
-        <div style="padding:14px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${bodyHtml}</div>
+        <div style="padding:14px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${bodyHtml}${opts?.vinkje ? `<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:13px;color:var(--text-1)"><input type="checkbox" data-vinkje style="margin-top:3px"><span>${_escOdv(opts.vinkje)}</span></label>` : ''}</div>
         <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
           <button type="button" data-cancel style="padding:6px 14px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-1);border-radius:6px;font-size:12.5px;cursor:pointer">${cancelLabel}</button>
           <button type="button" data-ok style="padding:6px 14px;border:0;background:${danger ? 'var(--rose)' : 'var(--brand,#0A7490)'};color:#fff;border-radius:6px;font-size:12.5px;cursor:pointer;font-weight:600">${okLabel}</button>
@@ -141,7 +141,19 @@
       const onKey = (e) => { if (e.key === 'Escape') close(false); };
       wrap.addEventListener('click', () => close(false));
       wrap.querySelector('[data-cancel]').addEventListener('click', () => close(false));
-      wrap.querySelector('[data-ok]').addEventListener('click', () => close(true));
+      const okEl = wrap.querySelector('[data-ok]');
+      // Verplicht vinkje (12 nov 2026, onboarding bij definitief verwijderen):
+      // de OK-knop blijft grijs tot het vinkje staat.
+      const vinkje = wrap.querySelector('[data-vinkje]');
+      if (vinkje) {
+        okEl.disabled = true; okEl.style.opacity = '.45'; okEl.style.cursor = 'not-allowed';
+        vinkje.addEventListener('change', () => {
+          okEl.disabled = !vinkje.checked;
+          okEl.style.opacity = vinkje.checked ? '' : '.45';
+          okEl.style.cursor = vinkje.checked ? 'pointer' : 'not-allowed';
+        });
+      }
+      okEl.addEventListener('click', () => { if (!okEl.disabled) close(true); });
       document.addEventListener('keydown', onKey);
       document.body.appendChild(wrap);
       setTimeout(() => wrap.querySelector('[data-ok]').focus(), 0);
@@ -855,6 +867,20 @@
     });
   }
 
+  // De onboarding-waarschuwing in het verwijdervenster (12 nov 2026).
+  // Verwijderen is geen offertewissel: naam, status, startdatum + uitleg.
+  function _odvOnboardingWaarschuwingHtml(obW) {
+    if (!obW || !Array.isArray(obW.onboardings) || !obW.onboardings.length) return '';
+    const reden = { lopend: 'lopende onboarding van deze klant', deze_offerte: 'hoort bij deze offerte', beide: 'lopend én hoort bij deze offerte' };
+    const rijen = obW.onboardings.map((o) => '<li style="margin:2px 0"><b>' + _escOdv(o.naam || 'Onboarding') + '</b> — status <b>'
+      + _escOdv(o.status || '—') + '</b>, start <b>' + _escOdv(o.start_date ? fmtDate(o.start_date) : '—') + '</b>'
+      + ' <span style="color:#6b7280">(' + _escOdv(reden[o.reden] || o.reden || '') + ')</span></li>').join('');
+    return '<div data-odv-hd-onboarding style="margin:10px 0;padding:10px 12px;border:1px solid #C2700A;background:rgba(194,112,10,.08);border-radius:8px;color:var(--text-1)">'
+      + '<b style="font-size:13px">⚠ Er hangt een onboarding aan deze klant</b>'
+      + '<ul style="margin:6px 0 6px 18px;padding:0;font-size:13px">' + rijen + '</ul>'
+      + '<div style="font-size:12.5px">' + _escOdv(obW.uitleg || '') + '</div></div>';
+  }
+
   window.__odvDoHardDelete = async function () {
     if (!_odv.dealId) return;
     if (!_odvCanHardDelete()) { toast('Alleen super_admin en sales mogen hard-deleten'); return; }
@@ -876,6 +902,9 @@
     const blockersHtml = _odvBlockerHtml(preflight.blockers);
     const gevolgenHtml = _odvGevolgenHtml(preflight.cascade, preflight.set_null);
     const isDeletable  = preflight.deletable === true;
+    // Onboarding (12 nov 2026): geen blocker, wel een waarschuwing + vinkje.
+    const obW = preflight.onboarding_waarschuwing || null;
+    const onboardingHtml = _odvOnboardingWaarschuwingHtml(obW);
 
     const summary = '<div style="max-height:60vh;overflow:auto">'
       + '<div style="font-size:14px;margin-bottom:10px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">'
@@ -887,6 +916,7 @@
       + (window.KV_COMM && preflight.commissie ? window.KV_COMM.waarschuwingHtml(preflight.commissie) : '')
       + (blockersHtml ? '<div style="margin:10px 0"><b style="font-size:13px;color:#7f1d1d">🚫 BLOCKERS — hard-delete geweigerd:</b>' + blockersHtml + '</div>' : '')
       + (isDeletable ? '<div style="margin:10px 0"><b style="font-size:13px">📋 Gevolgen bij hard-delete:</b>' + gevolgenHtml + '</div>' : '')
+      + (isDeletable ? onboardingHtml : '')
       + '</div>';
 
     if (!isDeletable) {
@@ -902,7 +932,8 @@
     const ok1 = await _odvConfirm(
       '⚠ Definitief verwijderen — laatste waarschuwing',
       summary + '<p style="margin:12px 0 0;font-size:13.5px"><b>Onherstelbaar.</b> Deze offerte + gekoppelde subs/regels verdwijnen PERMANENT uit de CRM én uit Teamleader.</p>',
-      { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true }
+      { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true,
+        vinkje: obW ? 'Ik begrijp het: dit is geen offertewissel. De onboarding blijft open staan en ik verwijder deze offerte toch.' : null }
     );
     if (!ok1) return;
 
@@ -933,10 +964,15 @@
     try {
       const r = await apiFetch('/api/sales-hard-delete-quotation', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deal_id: _odv.dealId, confirm: 'VERWIJDER', commissie_keuze: commissieKeuze }),
+        body: JSON.stringify({ deal_id: _odv.dealId, confirm: 'VERWIJDER', onboarding_bevestigd: !!obW, commissie_keuze: commissieKeuze }),
       });
       const d = await r.json();
       if (!r.ok) {
+        if (d.error === 'ONBOARDING_BEVESTIGING_NODIG') {
+          // Race: de onboarding verscheen na de preflight. Niets verwijderd.
+          toast('Niet verwijderd: er hangt (intussen) een onboarding aan deze klant. Open het venster opnieuw.');
+          return;
+        }
         if (d.partial) {
           await _odvConfirm(
             '⚠ Partial delete — sync-mismatch',
