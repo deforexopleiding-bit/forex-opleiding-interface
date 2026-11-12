@@ -754,6 +754,7 @@ async function submitObCreate(){
   // expliciet aanvinkte. Server default = false wanneer afwezig.
   const lmsEl = document.getElementById('obLmsProvision');
   payload.lms_provision = !!(lmsEl && lmsEl.checked);
+  if (dealId) payload.deal_id = dealId; // 12 nov 2026: welke offerte bij de onboarding hoort.
   try {
     const r = await window.AgentShared.apiFetch('/api/onboarding-create', {
       method  : 'POST',
@@ -762,7 +763,17 @@ async function submitObCreate(){
     });
     let d = null; try { d = await r.json(); } catch {}
     if (r.status === 409) {
-      _showObError('Er bestaat al een (actieve) onboarding voor deze klant.');
+      if (d?.kan_vervangen) {
+        // Offertewissel (12 nov 2026): deze oude pagina heeft de vervang-knop
+        // niet; die staat op de offertepagina in het CRM. Niets aangemaakt.
+        const el = document.getElementById('obError');
+        el.innerHTML = 'Er loopt al een onboarding voor deze klant. Komt deze aanmelding uit een nieuwe offerte? '
+          + 'Open de offerte in het CRM en kies <b>"Deze offerte vervangt de lopende onboarding"</b>: '
+          + '<a href="' + '/modules/klanten-v2/?v2preview=sales&v2tab=Offertes&deal_id=' + encodeURIComponent(dealId) + '">offerte openen</a>.';
+        el.hidden = false;
+      } else {
+        _showObError('Er bestaat al een (actieve) onboarding voor deze klant.');
+      }
       sb.disabled = false;
       sb.textContent = 'Aanmelden';
       return;

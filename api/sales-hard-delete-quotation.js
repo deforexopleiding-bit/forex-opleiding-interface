@@ -1,6 +1,6 @@
 // api/sales-hard-delete-quotation.js
 //
-// POST { deal_id, confirm: 'VERWIJDER' } → definitieve, onherstelbare hard-
+// POST { deal_id, confirm: 'VERWIJDER', onboarding_bevestigd? } → definitieve, onherstelbare hard-
 // delete van een getekende offerte. Zowel TL als lokale CRM.
 //
 // FLOW:
@@ -11,6 +11,11 @@
 //      * payment_arrangements met matchende invoice_ids + levend           → 409
 //      * bonuses met deze deal_id                                          → 409
 //      * setter_ledger_entries met deze deal_id (elke status = geld)       → 409
+//   3b. ONBOARDING (12 nov 2026, geen blocker): een lopende onboarding van de
+//       klant, of een onboarding met deal_id = deze offerte → 409
+//       ONBOARDING_BEVESTIGING_NODIG tenzij body.onboarding_bevestigd === true.
+//       Verwijderen laat de onboarding open staan; een offertewissel loopt
+//       via "Deze offerte vervangt de lopende onboarding".
 //   4. TL-hard-delete (blocking, geen best-effort meer):
 //      a. quotations.delete → 200? klaar met TL.
 //      b. Anders: deals.delete → 200? klaar met TL.
@@ -35,6 +40,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { sendMail, wrapEmailHtml } from './mailer.js';
 import { getEffectiveRoles, hasAnyRole, computeHighestRole } from './_lib/roles.js';
+import { leesOnboardingsBijVerwijderen, VERWIJDER_ONBOARDING_UITLEG } from './_lib/onboarding-offerte-wissel.js';
 
 const CONFIRM_TOKEN = 'VERWIJDER'; // case-sensitive
 const DEFAULT_ALARM_EMAIL = 'biemoldjeffrey@gmail.com';
@@ -228,7 +234,7 @@ export default async function handler(req, res) {
   const auth = await checkAuth(req);
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
-  const { deal_id, confirm } = req.body || {};
+  const { deal_id, confirm, onboarding_bevestigd } = req.body || {};
   if (!deal_id) return res.status(400).json({ error: 'deal_id (uuid) vereist' });
   if (confirm !== CONFIRM_TOKEN) {
     return res.status(400).json({
@@ -263,6 +269,20 @@ export default async function handler(req, res) {
         error: 'INCASSO_KOPPELING',
         detail: `Er hangt een blocker aan deze offerte (${blocker.type}, ${blocker.count} rij(en)). Handel dit eerst af — de hard-delete-tool raakt incasso/bonus/setter-commissie NIET aan.`,
         blocker,
+      });
+    }
+
+    // 2b. ONBOARDING (12 nov 2026): hangt er een lopende onboarding aan deze
+    //     klant, of via deal_id aan deze offerte, dan eerst een uitdrukkelijke
+    //     bevestiging — vóór er iets naar Teamleader gaat. Geen blocker.
+    //     Een leesfout houdt het verwijderen niet tegen (het is geen geld).
+    const obCheck = await leesOnboardingsBijVerwijderen(supabaseAdmin, deal);
+    if (obCheck.onboardings.length && onboarding_bevestigd !== true) {
+      return res.status(409).json({
+        error: 'ONBOARDING_BEVESTIGING_NODIG',
+        detail: 'Er hangt een onboarding aan deze klant of offerte. ' + VERWIJDER_ONBOARDING_UITLEG
+          + ' Bevestig uitdrukkelijk om toch te verwijderen.',
+        onboardings: obCheck.onboardings,
       });
     }
 
@@ -316,6 +336,7 @@ export default async function handler(req, res) {
       action  : 'quotation.hard_delete',
       payload : { deal_id, tl_deal_id: deal.tl_deal_id, tl_quotation_id: deal.tl_quotation_id,
                   quote_reference: deal.quote_reference, customer_id: deal.customer_id,
+                  onboardings_open_gelaten: obCheck.onboardings.length ? obCheck.onboardings : undefined,
                   actor: { user_id: auth.user.id, email: auth.profile.email, role: auth.profile.role } },
       result  : { tl: tlResult, lokaal_verwijderd: true },
       status  : 'success',
