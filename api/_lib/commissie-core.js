@@ -73,7 +73,7 @@ async function alle(q, wat) {
 // klanten (welke factuur hoort bij welke sale — zelfde regel als de
 // vrijgave-engine, zie factuurVanSale), facturen, betalingen, bestaande
 // event-bonussen en toewijzingen.
-async function dealContext(deals) {
+async function dealContext(deals, { bekekenAlsSale = true } = {}) {
   const dealIds = [...new Set(deals.map((d) => d.id))];
   const custIds = [...new Set(deals.map((d) => d.customer_id).filter(Boolean))];
   if (!dealIds.length) return null;
@@ -109,7 +109,7 @@ async function dealContext(deals) {
   // commissie-sale: zo toont de preview wat er na toewijzen gebeurt.
   const salesPerKlant = commissieSalesVan(klantParents, [
     ...(attrs.list || []),
-    ...deals.map((d) => ({ customer_id: d.customer_id, deal_id: d.id, status: 'actief' })),
+    ...(bekekenAlsSale ? deals.map((d) => ({ customer_id: d.customer_id, deal_id: d.id, status: 'actief' })) : []),
   ]);
   const saleScope = maakSaleScope({ deals: [...alleDeals.values()], subs, commissieSales: salesPerKlant });
 
@@ -230,6 +230,38 @@ function bestaandeCommissie(dealId, ctx, eventTitles = new Map()) {
       aantal_mentoren: new Set(parents.filter((e) => attributionIdOf(e) === toewijzing.id).map((e) => e.mentor_user_id)).size,
     } : null,
   };
+}
+
+/**
+ * Facturen + abonnementen per sale, met DEZELFDE koppelregel als de
+ * factuurmotor (factuurVanSale / subsVan). Voor de zichtbaarheid (offerte-
+ * pagina, lijsten, Finance › Commissie & incasso). Rekent geen commissie.
+ * @returns {Map<dealId, { subs, facturen, betaald, open, achterstallig, achterstallig_aantal, basis_incl, basis_excl }>}
+ */
+export async function saleFacturenVoorDeals(deals) {
+  const out = new Map();
+  const lijst = (deals || []).filter((d) => d && d.id);
+  if (!lijst.length) return out;
+  const ctx = await dealContext(lijst, { bekekenAlsSale: false });
+  const vandaagIso = vandaag();
+  for (const d of lijst) {
+    const facturen = factuurenVanDeal(d, ctx).filter((i) => !isVolledigGecrediteerd(i));
+    const b = dealBasis(d, ctx);
+    let betaald = 0; let open = 0; let achter = 0; let achterN = 0;
+    for (const i of facturen) {
+      const bet = betaaldBedrag(i);
+      const rest = Math.max(0, (Number(i.amount_total) || 0) - bet);
+      betaald += bet; open += rest;
+      if (rest > 0.004 && i.due_date && String(i.due_date).slice(0, 10) < vandaagIso) { achter += rest; achterN += 1; }
+    }
+    out.set(d.id, {
+      subs: subsVanDeal(d.id, ctx),
+      facturen: facturen.map((i) => ({ id: i.id, invoice_number: i.invoice_number, amount_total: i.amount_total, betaald: round2(betaaldBedrag(i)), status: i.status, due_date: i.due_date, paid_date: i.paid_date })),
+      betaald: round2(betaald), open: round2(open), achterstallig: round2(achter), achterstallig_aantal: achterN,
+      basis_incl: round2(b.incl), basis_excl: round2(b.excl),
+    });
+  }
+  return out;
 }
 
 // ── Zoeken ────────────────────────────────────────────────────────────────────

@@ -668,9 +668,98 @@
     const st = F('fin-sub-st', 'active');
     const p = new URLSearchParams();
     if (st && st !== 'all') p.set('status', st);
+    const so = F('fin-sub-soort', 'all');
+    if (so && so !== 'all') p.set('soort', so);
     p.set('page', String(_sub.page || 1));
     p.set('page_size', String(_sub.pageSize || 50));
     return p.toString();
+  }
+
+  // ── Soort + "Hangt aan" + stamboom (mentorcommissie, 12 nov 2026) ─────
+  // Soort komt uit subscriptions.soort; de sale = sale_deal_id, anders de
+  // eigen deal. Commissie per sale licht via /api/commissie-zicht.
+  const SOORT_KORT = { origineel: ['blue', 'Origineel'], aanpassing: ['violet', 'Aanpassing'], incasso_regeling: ['rose', 'Incasso-regeling'], nieuwe_offerte: ['teal', 'Nieuwe offerte'] };
+  const AANP_KORT = { uitstel: 'uitstel', lager_bedrag: 'lager bedrag', regeling: 'regeling' };
+  const saleVan = (s) => (s.soort && s.soort !== 'nieuwe_offerte' ? (s.sale_deal_id || null) : (s.sale_deal_id || s.deal_id || null)) || s.deal_id || null;
+  function soortChip(s) {
+    if (!s.soort) return `<span style="font-size:11.5px;color:var(--amber)" title="Soort abonnement niet aangeduid">Niet aangeduid</span>`;
+    const [c, l] = SOORT_KORT[s.soort] || ['neutral', s.soort];
+    return `<span style="display:inline-flex;padding:2px 8px;border-radius:999px;background:var(--${c}-soft);color:var(--${c});font-size:11.5px;white-space:nowrap">${l}${s.aanpassing_type ? ' · ' + (AANP_KORT[s.aanpassing_type] || s.aanpassing_type) : ''}</span>`;
+  }
+  const _subZicht = { map: new Map(), bezig: false, mislukt: new Set() };
+  function _subZichtLaad(items) {
+    if (_subZicht.bezig || !window.KV?.authedJson) return;
+    const ids = [...new Set((items || []).map(saleVan).filter(Boolean))].filter((id) => !_subZicht.map.has(id) && !_subZicht.mislukt.has(id));
+    if (!ids.length) return;
+    _subZicht.bezig = true;
+    queueMicrotask(async () => {
+      try {
+        for (let i = 0; i < ids.length; i += 150) {
+          const deel = ids.slice(i, i + 150);
+          try {
+            const j = await window.KV.authedJson('/api/commissie-zicht?deal_ids=' + deel.join(','));
+            for (const [id, z] of Object.entries(j?.per_deal || {})) _subZicht.map.set(id, z);
+          } catch (e) { console.warn('[finance-v2] commissie-zicht:', e?.message || e); deel.forEach((id) => _subZicht.mislukt.add(id)); }
+        }
+      } finally { _subZicht.bezig = false; window.DFO.render(); }
+    });
+  }
+  function hangtAanCel(s) {
+    const sale = saleVan(s);
+    if (!sale) return '<span style="color:var(--text-3)">—</span>';
+    const z = _subZicht.map.get(sale);
+    if (!z) return `<span style="font-size:11.5px;color:var(--text-3)">${_subZicht.mislukt.has(sale) ? '?' : '…'}</span>`;
+    const nr = z.offerte || (z.bestaat ? '#' + String(sale).slice(0, 8) : 'offerte verwijderd');
+    const chip = window.KV_COMM ? window.KV_COMM.chip(z) : '';
+    return `<a href="javascript:void(0)" onclick="event.stopPropagation();__finStamboom('${esc(sale)}')" title="Stamboom van de sale" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;text-decoration:none;color:inherit"><span class="mono" style="font-size:12px">${esc(nr)}</span>${chip}</a>`;
+  }
+  // Zijpaneel: offerte → alle abonnementen in volgorde, met status, commissie, incasso.
+  const _stam = { id: null, laden: false, data: null, fout: null };
+  window.__finStamboom = async (dealId) => {
+    _stam.id = dealId; _stam.laden = true; _stam.data = null; _stam.fout = null; window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/commissie-zicht?deal_id=' + encodeURIComponent(dealId));
+      if (_stam.id !== dealId) return;
+      _stam.data = j?.zicht || null;
+    } catch (e) { _stam.fout = e?.message || 'laden mislukt'; }
+    _stam.laden = false; window.DFO.render();
+  };
+  window.__finStamboomSluit = () => { _stam.id = null; window.DFO.render(); };
+  const SUBST = { active: ['ok', 'Actief'], paused: ['warn', 'Gepauzeerd'], cancelled: ['neutral', 'Gestopt'], completed: ['neutral', 'Afgerond'] };
+  function stamboomPaneel() {
+    if (!_stam.id) return '';
+    const z = _stam.data;
+    let body = '';
+    if (_stam.laden) body = '<div style="color:var(--text-3);font-size:12.5px">Laden…</div>';
+    else if (_stam.fout || !z) body = `<div style="color:var(--rose);font-size:12.5px">${esc(_stam.fout || 'Niet gevonden')}</div>`;
+    else {
+      const subs = (z.abonnementen || []).slice().sort((a, b) => String(a.start_date || '').localeCompare(String(b.start_date || '')));
+      const rij = (s) => { const [c, l] = SUBST[s.status] || ['neutral', s.status || '—']; return `<div style="padding:9px 0 9px 14px;border-left:2px solid var(--border);margin-left:6px;position:relative">
+          <span style="position:absolute;left:-6px;top:13px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--${s.soort === 'incasso_regeling' ? 'rose' : s.soort === 'aanpassing' ? 'violet' : 'blue'})"></span>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${soortChip(s)} ${H.pill(c, l)}</div>
+          <div style="font-size:12.5px;margin-top:3px">${esc(s.description || 'Abonnement')}</div>
+          <div style="font-size:11.5px;color:var(--text-3)">${s.term_count ? s.term_count + ' termijn' + (s.term_count === 1 ? '' : 'en') : ''}${s.start_date ? ' · vanaf ' + dstr(s.start_date) : ''}</div></div>`; };
+      body = `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Offerte</div>
+          <div style="font-weight:600">${esc(z.offerte || (z.bestaat ? '#' + String(z.deal_id).slice(0, 8) : 'verwijderd'))}${z.klant ? ' · ' + esc(z.klant) : ''}</div>
+          <div style="font-size:12px;color:var(--text-3)">${z.getekend ? 'Getekend' : 'Niet getekend'}${z.gearchiveerd ? ' · gearchiveerd' : ''}${z.basis_incl != null ? ' · ' + eur(z.basis_incl) : ''}</div>
+          ${z.bestaat && typeof window.__odvOpen === 'function' ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="__finStamboomSluit();window.__odvOpen('${esc(z.deal_id)}')">Open offerte ›</button>` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Abonnementen (${subs.length})</div>
+        ${subs.length ? subs.map(rij).join('') : '<div style="font-size:12.5px;color:var(--text-3)">Geen abonnementen gekoppeld.</div>'}
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px">Commissie</div>
+        ${window.KV_COMM ? (window.KV_COMM.chip(z) || '<span style="font-size:12.5px;color:var(--text-3)">Geen mentorcommissie</span>') : ''}
+        ${z.commissie?.heeft_commissie ? `<div style="font-size:12px;margin-top:6px">${esc((z.commissie.mentoren || []).filter((m) => !m.geannuleerd).map((m) => m.naam + ' ' + eur(m.bedrag)).join(' · ') || '')}</div>
+          <div style="font-size:12px;color:var(--text-3)">Vrijgegeven ${eur(z.commissie.vrijgegeven)} van ${eur(z.commissie.status === 'geannuleerd' ? z.commissie.totaal_oorspronkelijk : z.commissie.totaal)}${z.commissie.annulering ? ' · geannuleerd: ' + esc(z.commissie.annulering.reden || '') : ''}</div>` : ''}
+        <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 4px">Incasso</div>
+        <div style="font-size:12.5px">${z.incasso ? esc(z.incasso.label) + (z.incasso.sinds ? ' sinds ' + dstr(z.incasso.sinds) : '') : 'Nee'}</div>
+        ${z.facturen ? `<div style="font-size:12px;color:var(--text-3);margin-top:8px">Facturen van deze sale: ${z.facturen.aantal} · betaald ${eur(z.facturen.betaald)}${z.facturen.achterstallig > 0 ? ' · <span style="color:var(--rose)">achterstallig ' + eur(z.facturen.achterstallig) + '</span>' : ''}</div>` : ''}`;
+    }
+    return `<div style="position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--surface);color:var(--text);box-shadow:-12px 0 40px rgba(0,0,0,.22);z-index:1900;display:flex;flex-direction:column">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <div style="font-size:15px;font-weight:600;flex:1">Stamboom van de sale</div>
+        <button class="icon-btn" aria-label="Sluiten" onclick="__finStamboomSluit()" style="width:28px;height:28px">✕</button></div>
+      <div style="padding:14px 18px;overflow-y:auto;flex:1">${body}</div></div>`;
   }
   window.__finSubSort = (by) => {
     if (_sub.sortBy === by) _sub.sortDir = _sub.sortDir === 'asc' ? 'desc' : 'asc';
@@ -832,6 +921,14 @@
           { l: 'Gepauzeerd', v: 'paused' },
           { l: 'Beëindigd',  v: 'cancelled' },
         ], st),
+        H.chips('fin-sub-soort', [
+          { l: 'Soort: alle',      v: 'all' },
+          { l: 'Origineel',        v: 'origineel' },
+          { l: 'Aanpassing',       v: 'aanpassing' },
+          { l: 'Incasso-regeling', v: 'incasso_regeling' },
+          { l: 'Nieuwe offerte',   v: 'nieuwe_offerte' },
+          { l: 'Niet aangeduid',   v: 'leeg' },
+        ], F('fin-sub-soort', 'all')),
         fnSearch(_sub, 'Zoek klant / beschrijving / entiteit…', fetchSubs),
         `<div class="tb-right">
           <button class="btn ${_sub.filterExpiring ? 'btn-primary' : ''}" onclick="__finSubExpiring()">${svg(I.warn)}Loopt af &lt;30d</button>
@@ -839,7 +936,7 @@
         </div>`,
       ])}
       ${fnPager(_sub, total, fetchSubs)}
-      ${(() => { window.__finSubShown = items; return ''; })()}
+      ${(() => { window.__finSubShown = items; _subZichtLaad(items); return ''; })()}
       ${(() => {
         // Sortable header helper — label + arrow + click-handler naar
         // __finSubSort. Cursor:pointer + subtiele hover-hint via title.
@@ -855,6 +952,8 @@
             { l: sh('end_date',    'Eind'),         cls: 'r optional' },
             { l: sh('created_at',  'Toegevoegd'),   cls: 'r optional' },
             { l: sh('status',      'Status') },
+            { l: 'Soort' },
+            { l: 'Hangt aan' },
           ],
           items.map(s => {
             const cName = String(s?.customer?.name ?? s?.customer_name ?? '—');
@@ -871,13 +970,16 @@
               `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.end_date)}</span>`,
               `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(s.created_at)}</span>`,
               H.pill(c, l),
+              soortChip(s),
+              hangtAanCel(s),
             ];
           }),
           '__finSubRowClick'
         );
       })()}
       ${fnPager(_sub, total, fetchSubs)}
-      ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}`;
+      ${!items.length && !_sub.loading ? `<div class="sv-empty">${_sub.error || 'Geen abonnementen met deze filter.'}</div>` : ''}
+      ${stamboomPaneel()}`;
   }
 
   // ── CREDITNOTA'S ─────────────────────────────────────────────────────

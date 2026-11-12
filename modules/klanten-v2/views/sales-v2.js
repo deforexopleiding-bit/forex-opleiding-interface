@@ -322,7 +322,9 @@
   };
   // Row-click handler voor H.table: resolvet index → deal_id → __svOfferteOpen.
   window.__svOfferteRowClick = (i) => {
-    const q = (_off.data && _off.data.quotations && _off.data.quotations[i]) || null;
+    // De rijen zijn gefilterd (status + commissie): index op de getoonde lijst.
+    const lijst = _off.zichtbaar || (_off.data && _off.data.quotations) || [];
+    const q = lijst[i] || null;
     if (q && q.deal_id) window.__svOfferteOpen(q.deal_id);
   };
 
@@ -423,7 +425,12 @@
     // hier filteren we op de chip. Totaal = filtered.length zodat de "N offertes"
     // teller klopt met wat de user ziet.
     const raw = _off.data?.quotations || [];
-    const items = st && st !== 'all' ? raw.filter(q => deriveOfferteStatus(q) === st) : raw;
+    const items0 = st && st !== 'all' ? raw.filter(q => deriveOfferteStatus(q) === st) : raw;
+    // Mentorcommissie per getekende offerte (12 nov 2026): /api/commissie-zicht.
+    _offZichtLaad(raw);
+    const cf = F('sv-off-comm', 'all');
+    const items = cf === 'all' ? items0 : items0.filter((q) => _offCommFilter(q, cf));
+    _off.zichtbaar = items;
     const total = items.length;
     return `${previewHeader('Offertes', _off)}
       ${H.toolbar([
@@ -434,6 +441,13 @@
           { l: 'Geaccepteerd', v: 'accepted' },
           { l: 'Afgewezen',    v: 'declined' },
         ], st),
+        H.chips('sv-off-comm', [
+          { l: 'Commissie: alle', v: 'all' },
+          { l: 'Met commissie',   v: 'met' },
+          { l: 'Te checken',      v: 'check' },
+          { l: 'Incasso',         v: 'incasso' },
+          { l: 'Geannuleerd',     v: 'geannuleerd' },
+        ], cf),
         H.chips('sv-off-mine', [
           { l: 'Mijn offertes', v: '1' },
           { l: 'Alle',          v: '0' },
@@ -447,7 +461,7 @@
       ])}
       <div class="sv-total">${_off.loading ? 'Laden…' : (total != null ? `${total} offerte${total === 1 ? '' : 's'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Abbo' }, { l: 'Onboarding' }],
+        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Commissie' }, { l: 'Abbo' }, { l: 'Onboarding' }],
         items.map(q => [
           `<span class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
@@ -456,6 +470,7 @@
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           (() => { const ds = deriveOfferteStatus(q); const p = OST_TO_PILL[ds] || ['neutral', ds]; return H.pill(p[0], p[1]); })(),
+          _offCommCel(q),
           svStatusIcon(q.has_subscription, 'Abbo ingevoerd', 'Nog geen abbo'),
           svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld'),
         ]),
@@ -467,6 +482,55 @@
           : `<div class="sv-empty">Geen offertes met deze filters.</div>`
       ) : ''}`;
   }
+  // ── Commissie-kolom (12 nov 2026) ──────────────────────────────────────
+  // Alleen getekende offertes kunnen commissie dragen. Licht geladen (grootboek
+  // + incasso + verkoper), in stukken van 150, één keer per offerte.
+  const _offZicht = { map: new Map(), bezig: false, mislukt: new Set() };
+  function _offZichtLaad(raw) {
+    if (_offZicht.bezig || !window.KV?.authedJson) return;
+    const ids = (raw || []).filter((q) => q.deal_id && deriveOfferteStatus(q) === 'accepted'
+      && !_offZicht.map.has(q.deal_id) && !_offZicht.mislukt.has(q.deal_id)).map((q) => q.deal_id);
+    if (!ids.length) return;
+    _offZicht.bezig = true;
+    queueMicrotask(async () => {
+      try {
+        for (let i = 0; i < ids.length; i += 150) {
+          const deel = ids.slice(i, i + 150);
+          try {
+            const j = await window.KV.authedJson('/api/commissie-zicht?deal_ids=' + deel.join(','));
+            for (const [id, z] of Object.entries(j?.per_deal || {})) _offZicht.map.set(id, z);
+          } catch (e) {
+            console.warn('[sales-v2] commissie-zicht:', e?.message || e);
+            deel.forEach((id) => _offZicht.mislukt.add(id));
+          }
+        }
+      } finally {
+        _offZicht.bezig = false;
+        if (window.DFO?.render) window.DFO.render();
+      }
+    });
+  }
+  function _offCommFilter(q, f) {
+    const z = _offZicht.map.get(q.deal_id);
+    if (!z) return false;
+    const c = z.commissie || {};
+    if (f === 'met') return !!c.heeft_commissie && c.status !== 'geannuleerd';
+    if (f === 'check') return (z.te_checken || []).length > 0;
+    if (f === 'incasso') return !!z.incasso && z.incasso.status !== 'afgesloten';
+    if (f === 'geannuleerd') return c.status === 'geannuleerd';
+    return true;
+  }
+  function _offCommCel(q) {
+    if (deriveOfferteStatus(q) !== 'accepted') return '<span style="color:var(--text-3)">—</span>';
+    const z = _offZicht.map.get(q.deal_id);
+    if (!z) return `<span style="font-size:11.5px;color:var(--text-3)">${_offZicht.mislukt.has(q.deal_id) ? '?' : '…'}</span>`;
+    const chip = window.KV_COMM ? window.KV_COMM.chip(z) : '';
+    const toewijzen = window.KV_COMM && window.KV_COMM.magToewijzen() && (z.te_checken || []).includes('verkoper_mentor_geen_commissie')
+      ? ` <a href="javascript:void(0)" style="font-size:11.5px" onclick="event.stopPropagation();window.__kvCommToewijzen('${esc(z.deal_id)}')">Toewijzen</a>` : '';
+    if (window.KV_COMM) window.KV_COMM.onthoud(z);
+    return (chip || '<span style="font-size:11.5px;color:var(--text-3)">—</span>') + toewijzen;
+  }
+
   window.__svRetryOff = () => { _off.error = null; _off.data = null; _off.params = ''; queueMicrotask(fetchOffertes); if (window.DFO?.render) window.DFO.render(); };
   window.__svRetryRet = () => { _ret.error = null; _ret.data = null; _ret.params = ''; queueMicrotask(fetchRetentie); if (window.DFO?.render) window.DFO.render(); };
   window.__svRetryRep = () => { _rep.error = null; _rep.data = null; _rep.accepted = null; _rep.params = ''; queueMicrotask(fetchReports); if (window.DFO?.render) window.DFO.render(); };
