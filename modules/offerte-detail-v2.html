@@ -256,6 +256,8 @@
 </style>
 
 <script src="./shared/supabase-client.js"></script>
+<!-- Mentorcommissie bij definitief verwijderen: hetzelfde onderdeel als de shell-offertepagina (13 nov 2026). -->
+<script src="./klanten-v2/views/_commissie-ui.js?v=5"></script>
 <script>
 'use strict';
 
@@ -740,6 +742,7 @@ window.__odvHdRun = async function () {
     + (d.tl_quotation_id ? `<div style="font-size:12px;color:#6b7280"><b>TL-quotation:</b> ${esc(d.tl_quotation_id)}</div>` : '')
     + (d.tl_deal_id ? `<div style="font-size:12px;color:#6b7280"><b>TL-deal:</b> ${esc(d.tl_deal_id)}</div>` : '')
     + '</div>'
+    + (window.KV_COMM && pf.commissie ? window.KV_COMM.waarschuwingHtml(pf.commissie) : '')
     + (_hdBlockerHtml(pf.blockers) ? `<div style="margin:10px 0"><b style="font-size:13px;color:#7f1d1d">🚫 BLOCKERS — hard-delete geweigerd:</b>${_hdBlockerHtml(pf.blockers)}</div>` : '')
     + (pf.deletable ? `<div style="margin:10px 0"><b style="font-size:13px">📋 Gevolgen bij hard-delete:</b>${_hdGevolgenHtml(pf.cascade, pf.set_null)}</div>` : '')
     + (pf.deletable ? _hdOnboardingHtml(pf.onboarding_waarschuwing) : '')
@@ -757,13 +760,22 @@ window.__odvHdRun = async function () {
     { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true,
       vinkje: obW ? 'Ik begrijp het: dit is geen offertewissel. De onboarding blijft open staan en ik verwijder deze offerte toch.' : null });
   if (!ok1) return;
+  // Mentorcommissie (regel B, #1982) — exact zoals de shell-offertepagina:
+  // open commissie → kiezen. Zonder keuze weigert de server
+  // (COMMISSIE_KEUZE_VEREIST); dat doodlopertje bestaat hier niet meer.
+  let commissieKeuze = null;
+  if (pf.commissie_keuze_nodig) {
+    if (!window.KV_COMM) { toast('Commissie-venster niet geladen — herlaad de pagina'); return; }
+    commissieKeuze = await window.KV_COMM.keuzeBijVerwijderen(pf.commissie);
+    if (!commissieKeuze) return;
+  }
   const ok2 = await _hdVerwijderPrompt(dealNaam);
   if (!ok2) return;
 
   try {
     const r = await apiFetch('/api/sales-hard-delete-quotation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deal_id: dealId, confirm: 'VERWIJDER', onboarding_bevestigd: !!obW }),
+      body: JSON.stringify({ deal_id: dealId, confirm: 'VERWIJDER', onboarding_bevestigd: !!obW, commissie_keuze: commissieKeuze }),
     });
     const j = await r.json();
     if (!r.ok) {
@@ -781,6 +793,7 @@ window.__odvHdRun = async function () {
       return;
     }
     toast('Offerte definitief verwijderd (TL + CRM)');
+    if (j.commissie && window.KV_COMM) await window.KV_COMM.meldingNaVerwijderen(j.commissie);
     setTimeout(() => { _odvNav('/modules/klanten-v2/?v2preview=sales'); }, 900);
   } catch (e) { toast('Hard-delete mislukt: ' + e.message); }
 };
