@@ -255,5 +255,32 @@
       </div></div></div>`;
   }
 
-  window.KV_COMM = { esc, eur, eur0, datum, kortDatum, bronTekst, mentorNamen, uniek, waarschuwingHtml, keuze, melding, openToewijzen, status, chip, kaart, pil, prefillVoor, magToewijzen, onthoud: (z) => { if (z?.deal_id) _cache.set(z.deal_id, z); } };
+  // ── DEFINITIEF VERWIJDEREN (TL + CRM) — regel B (12 nov 2026) ──────────
+  // Eén bron voor de shell-offertepagina én de losse modules/offerte-detail-
+  // v2.html (13 nov 2026): dezelfde vraag, dezelfde teksten, dezelfde melding.
+  // De server weigert zonder keuze (COMMISSIE_KEUZE_VEREIST).
+  const VERWIJDER_OPTIES = Object.freeze([
+    { v: 'klant_annuleert', l: 'Klant annuleert', d: 'Commissie → Geannuleerd, reden "Klant geannuleerd". De mentor ziet het in Mijn verdiensten › Geannuleerd.' },
+    { v: 'vervangen', l: 'Er komt een nieuwe offerte', d: 'Commissie → Geannuleerd, reden "Vervangen door nieuwe offerte". Link daarna de nieuwe offerte via "Sale toewijzen" (de nieuwe offerte toont een banner).' },
+  ]);
+  /** De keuze bij een open mentorcommissie. Geeft 'klant_annuleert' | 'vervangen' | null (afgebroken). */
+  function keuzeBijVerwijderen(commissie) {
+    return keuze({
+      titel: 'Mentorcommissie op deze offerte',
+      intro: '<p style="margin:0 0 6px">Waarom verdwijnt deze offerte? De commissie krijgt een eindstatus; wat al vrijgegeven of uitbetaald is, blijft staan.</p>',
+      commissie,
+      opties: VERWIJDER_OPTIES,
+      okLabel: 'Verder naar bevestigen',
+    });
+  }
+  /** Na een geslaagde verwijdering: wat er met de commissie gebeurde (niets als er geen was). */
+  function meldingNaVerwijderen(c) {
+    if (!c) return Promise.resolve(false);
+    return melding('Mentorcommissie geannuleerd',
+      '<p style="margin:0 0 8px">Reden: <b>' + esc(c.reden) + '</b> · ' + (c.geannuleerd_regels || 0) + ' regel(s).</p>'
+      + (c.al_vrijgegeven > 0 ? '<p style="margin:0 0 8px">Al vrijgegeven (blijft staan): <b>' + esc(eur(c.al_vrijgegeven)) + '</b></p>' : '')
+      + (c.melding ? '<p style="margin:0;padding:8px 10px;background:var(--blue-soft,#eff6ff);border-radius:6px">' + esc(c.melding) + ' De nieuwe getekende offerte van deze klant toont daarvoor een knop.</p>' : ''));
+  }
+
+  window.KV_COMM = { keuzeBijVerwijderen, meldingNaVerwijderen, VERWIJDER_OPTIES, esc, eur, eur0, datum, kortDatum, bronTekst, mentorNamen, uniek, waarschuwingHtml, keuze, melding, openToewijzen, status, chip, kaart, pil, prefillVoor, magToewijzen, onthoud: (z) => { if (z?.deal_id) _cache.set(z.deal_id, z); } };
 })();
