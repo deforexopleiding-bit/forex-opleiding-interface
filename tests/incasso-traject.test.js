@@ -403,3 +403,76 @@ test('status zonder traject (met de hand gezet): de eerste opvolgactie maakt het
   ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
   assert.equal(ov.rijen[0].fase, 'doorgezet');
 });
+
+// ── Status corrigeren (13 nov 2026): een verkeerde klik terugzetten ─────────
+test('corrigeren: Regeling per ongeluk → terug naar Bij incasso, niets gewist, met logboekregel', async () => {
+  const db = maakNepDb();
+  //  Zoals Alexandre: met de hand op bij incasso (19/10), geen traject.
+  db.reset(basis({
+    onboardings: [],
+    mentor_commissie_incasso: [{ id: 'm1', customer_id: K, deal_id: null, status: 'bij_incasso', sinds: '2026-10-19', incasso_sinds: '2026-10-19', reden: 'Overgedragen', bron: 'handmatig', opgeheven_op: null, gezet_op: '2026-11-01T10:00:00Z' }],
+  }));
+  const d = deps(db);
+  let u = await actie(db, { actie: 'regeling', customer_id: K, notitie: 'klik', actor: ADMIN }, d);
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  let ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'regeling');
+
+  //  Reden verplicht; een mentor mag niet; de hoofdmentor en Seppe wel.
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'oei', actor: ADMIN }, d);
+  assert.equal(u.status, 400);
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'Regeling per ongeluk', actor: { email: 'm@x', naam: 'M', rollen: ['mentor'] } }, d);
+  assert.equal(u.status, 403);
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'Regeling per ongeluk aangeklikt', actor: SEPPE }, d);
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+
+  ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'bij_incasso');
+  assert.equal(ov.rijen[0].status.status, 'bij_incasso');
+  //  Niets gewist: drie statusrijen (bij incasso → regeling → bij incasso), één actief, terug vanaf 19/10.
+  const st = db.rows('mentor_commissie_incasso');
+  assert.equal(st.length, 3);
+  const actiefRij = st.filter((r) => !r.opgeheven_op);
+  assert.equal(actiefRij.length, 1);
+  assert.equal(actiefRij[0].sinds, '2026-10-19');
+  const t = db.rows('incasso_trajecten')[0];
+  assert.ok(t.checklist.dossier_verstuurd, 'Bij incasso = dossier verstuurd');
+  assert.match(t.logboek.at(-1).tekst, /Status gecorrigeerd: Regeling → Bij incasso\. Regeling per ongeluk aangeklikt/);
+  assert.deepEqual(d.pijp.at(-1), [K, 'incasso']);
+  //  Nog eens dezelfde fase = niets te doen.
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'nog eens', actor: SEPPE }, d);
+  assert.equal(u.status, 409);
+});
+
+test('corrigeren: te vroeg afgesloten → terug naar Doorgezet heropent het traject; Bij incasso → Doorgezet haalt het vinkje weg', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [] }));
+  await actie(db, { actie: 'voorstel', customer_id: K, actor: SEPPE });
+  await actie(db, { actie: 'doorzetten', customer_id: K, actor: ADMIN });
+  let u = await actie(db, { actie: 'afsluiten', customer_id: K, als: 'oninbaar', notitie: 'verkeerde knop', actor: SEPPE });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'doorgezet', notitie: 'Oninbaar per ongeluk', actor: HM });
+  assert.equal(u.status, 200, JSON.stringify(u.body));
+  let ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'doorgezet');
+  assert.equal(db.rows('incasso_trajecten')[0].gesloten_op, null);
+
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'ligt al bij het bureau', actor: ADMIN });
+  assert.equal(u.status, 200);
+  u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'doorgezet', notitie: 'toch nog niet verstuurd', actor: ADMIN });
+  assert.equal(u.status, 200);
+  ov = await laadIncassoOverzicht({ crm: db.client, lms: null, nu: NU });
+  assert.equal(ov.rijen[0].fase, 'doorgezet');
+  assert.equal(db.rows('incasso_trajecten')[0].checklist.dossier_verstuurd, undefined);
+  //  Nooit Teamleader of facturen aangeraakt.
+  assert.equal(db.log.filter((l) => l.op !== 'select' && ['invoices', 'subscriptions', 'deals'].includes(l.tabel)).length, 0);
+});
+
+test('corrigeren: minderjarig kan enkel naar Afgesloten; zonder fase geen correctie', async () => {
+  const db = maakNepDb();
+  db.reset(basis({ onboardings: [] }));
+  let u = await actie(db, { actie: 'corrigeer', customer_id: K, fase: 'bij_incasso', notitie: 'geen traject', actor: ADMIN });
+  assert.equal(u.status, 409, 'Nog te bepalen: kies daar de fase');
+  u = await actie(db, { actie: 'corrigeer', customer_id: K2, fase: 'doorgezet', notitie: 'proef jong', actor: ADMIN });
+  assert.equal(u.status, 422);
+});
