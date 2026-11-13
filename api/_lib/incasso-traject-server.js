@@ -402,8 +402,12 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
   //  STATUS ZONDER TRAJECT (gemeten 9 nov: 22 klanten, met de hand gezet in
   //  klanten-v2 vóór dit overzicht bestond). De status is de beslissing; het
   //  traject ontstaat bij de eerste opvolgactie, zonder de status te raken.
-  const OPVOLG = ['vink', 'gecheckt', 'notitie', 'doorschuiven', 'regeling', 'afsluiten'];
-  if (!traject && status.status !== 'actief' && OPVOLG.includes(actie)) {
+  const OPVOLG = ['vink', 'gecheckt', 'notitie', 'doorschuiven', 'regeling', 'afsluiten', 'corrigeer'];
+  //  Corrigeren heropent liever een (te vroeg) gesloten traject dan een nieuw te maken.
+  const heeftOud = actie === 'corrigeer' && !traject
+    ? ((await crm.from('incasso_trajecten').select('id').eq('customer_id', customerId).limit(1)).data || []).length > 0
+    : false;
+  if (!traject && !heeftOud && status.status !== 'actief' && OPVOLG.includes(actie)) {
     const { data: nieuw, error } = await crm.from('incasso_trajecten').insert({
       customer_id: customerId, onboarding_id: invoer.crm_onboarding_id || null, lms_student_id: invoer.lms_student_id || null,
       naam: String(invoer.naam || '').slice(0, 200) || null, herkomst: 'bestaand', voorgesteld_door: 'Incassostatus in het CRM',
@@ -583,6 +587,62 @@ export async function voerIncassoActieUit(deps, invoer = {}) {
         await bewaar(crm, traject.id, { volgende_check: null, logboek: metLog(traject, regel(`Regeling.${notitie ? ` ${notitie}` : ''}`)) });
         await pipeline(deps, customerId, 'regeling', 'Incasso-overzicht: regeling', door);
         return goed('Regeling. Crediteer de bureaufactuur en voer het incasso-abonnement in het CRM in.', { fase: 'regeling' });
+      }
+
+      // ── Status corrigeren (13 nov 2026): een verkeerde klik terugzetten ───
+      //  Kies de juiste fase, met reden. Er wordt niets gewist: de vorige
+      //  status blijft als historiek staan (zetStatus), het logboek krijgt
+      //  een regel "Status gecorrigeerd: X → Y", en de afvinklijst volgt de
+      //  fase (Bij incasso = dossier verstuurd; terug naar Doorgezet of Mag
+      //  naar incasso = dat vinkje weg, het logboek houdt bij dat het er was).
+      case 'corrigeer': {
+        const doel = String(invoer.fase || '');
+        if (!['mag_naar_incasso', 'doorgezet', 'bij_incasso', 'regeling', 'afgesloten'].includes(doel)) return fout(400, 'fase', 'Kies de juiste fase.');
+        if (notitie.length < 5) return fout(400, 'notitie', 'Schrijf kort waarom je corrigeert.');
+        const als = doel === 'afgesloten' ? String(invoer.als || '') : null;
+        if (doel === 'afgesloten' && !GESLOTEN_ALS.includes(als)) return fout(400, 'als', 'Kies: betaald, oninbaar, teruggekomen of niet naar incasso.');
+        if (minderjarig && doel !== 'afgesloten') return fout(422, 'minderjarig', 'Minderjarig: geen incasso. Kies Afgesloten.');
+        //  Het open traject, of het laatste gesloten (een te vroeg afgesloten dossier).
+        let t = traject;
+        if (!t) {
+          const { data } = await crm.from('incasso_trajecten').select('*').eq('customer_id', customerId).order('aangemaakt_op', { ascending: false }).limit(1);
+          t = data?.[0] || null;
+        }
+        if (!t) return fout(409, 'geen_traject', 'Deze klant heeft nog geen fase: kies ze in Nog te bepalen.');
+        const van = faseVan({ traject: t, status: status.status });
+        if (van === doel && (doel !== 'afgesloten' || t.gesloten_als === als)) return fout(409, 'zelfde_fase', `Staat al op "${FASE_LABEL[doel]}".`);
+
+        const checklist = { ...(t.checklist && typeof t.checklist === 'object' ? t.checklist : {}) };
+        if (doel === 'bij_incasso' && !checklist.dossier_verstuurd) checklist.dossier_verstuurd = { op: datum, door, correctie: true };
+        if ((doel === 'doorgezet' || doel === 'mag_naar_incasso') && checklist.dossier_verstuurd) delete checklist.dossier_verstuurd;
+        const tekst = `Status gecorrigeerd: ${FASE_LABEL[van]} → ${FASE_LABEL[doel]}${als ? ` (${GESLOTEN_LABEL[als]})` : ''}. ${notitie}`;
+        const wijziging = { checklist, logboek: metLog(t, regel(tekst, 'correctie')) };
+        if (doel === 'afgesloten') Object.assign(wijziging, { gesloten_op: nu.toISOString(), gesloten_als: als, gesloten_door: door, gesloten_reden: notitie, volgende_check: null });
+        else Object.assign(wijziging, { gesloten_op: null, gesloten_als: null, gesloten_door: null, gesloten_reden: null });
+        if (doel === 'bij_incasso' || doel === 'doorgezet') wijziging.volgende_check = t.volgende_check && t.volgende_check >= vandaag ? t.volgende_check : plusDagen(vandaag, OPVOLG_DAGEN);
+        if (doel === 'regeling') wijziging.volgende_check = null;
+
+        //  De status volgt de fase. Terug naar bij incasso = vanaf het begin van
+        //  de incassoketen (de tussenstap was een vergissing); anders vandaag.
+        const wil = { mag_naar_incasso: 'actief', doorgezet: 'bij_incasso', bij_incasso: 'bij_incasso', regeling: 'incasso_regeling' }[doel]
+          || (als === 'betaald' || als === 'oninbaar' ? 'afgesloten' : 'actief');
+        const moet = wil !== status.status || (wil === 'afgesloten' && status.afgesloten_als !== als);
+        const sinds = invoer.datum ? datum : (wil === 'bij_incasso' && status.incasso_sinds ? status.incasso_sinds : vandaag);
+        const oud = { checklist: t.checklist, logboek: t.logboek, gesloten_op: t.gesloten_op, gesloten_als: t.gesloten_als, gesloten_door: t.gesloten_door, gesloten_reden: t.gesloten_reden, volgende_check: t.volgende_check };
+        await bewaar(crm, t.id, wijziging);
+        if (moet) {
+          try {
+            await wijzigStatus(deps, { customerId, status: wil, afgeslotenAls: wil === 'afgesloten' ? als : null, sinds, reden: `Status gecorrigeerd naar ${FASE_LABEL[doel]}: ${notitie}`, actorId });
+          } catch (e) {
+            //  Herstel: het traject zoals het was (eigen rij, zelfde verzoek).
+            await bewaar(crm, t.id, oud);
+            throw e;
+          }
+        }
+        const pijp = { doorgezet: 'incasso', bij_incasso: 'incasso', regeling: 'regeling' }[doel]
+          || (als === 'betaald' ? 'opgelost' : als === 'oninbaar' ? 'afschrijven' : null);
+        if (pijp) await pipeline(deps, customerId, pijp, `Incasso-overzicht: gecorrigeerd naar ${FASE_LABEL[doel]}`, door);
+        return goed(`Gecorrigeerd: ${FASE_LABEL[doel]}.`, { fase: doel });
       }
 
       // ── Afgesloten ─────────────────────────────────────────────────────────

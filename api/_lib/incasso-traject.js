@@ -72,6 +72,8 @@ export const RECHTEN = {
   voorstel: ['admin', 'administratie', 'hoofdmentor'],
   selecteren: ['admin', 'hoofdmentor'],      // doorzetten · niet naar incasso · fase kiezen (Nog te bepalen)
   opvolgen: ['admin', 'administratie'],      // afvinken · gecheckt · notitie · regeling · afsluiten
+  //  Status corrigeren (13 nov 2026): een verkeerde klik terugzetten. Met reden en logboekregel.
+  corrigeren: ['admin', 'administratie', 'hoofdmentor'],
 };
 
 export const ACTIE_RECHT = {
@@ -85,6 +87,7 @@ export const ACTIE_RECHT = {
   notitie: 'opvolgen',
   regeling: 'opvolgen',
   afsluiten: 'opvolgen',
+  corrigeer: 'corrigeren',
 };
 
 export function magActie(rollen = [], actie) {

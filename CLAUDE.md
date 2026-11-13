@@ -702,6 +702,11 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   payments/transactions.readonly; null = niet gelezen). Bestaande klanten: NIETS automatisch; ze staan in Nog te bepalen
   tot Maxim kiest. Onboarding op incasso (zetNaarIncasso) = voorstel (`stelVoorVanuitOnboarding`); terug actief vóór
   doorzetten sluit het voorstel. Teamleader nooit, geen mail/brief. Migratie docs/sql-migrations/2026-11-03-incasso-trajecten.sql.
+  STATUS CORRIGEREN (13 nov 2026): actie `corrigeer` (recht `corrigeren` = admin/administratie/hoofdmentor) zet een
+  verkeerde klik terug: doelfase + reden (≥5) verplicht. Niets gewist: zetStatus houdt de historiek, logboekregel
+  "Status gecorrigeerd: X → Y. reden", afvinklijst volgt (Bij incasso = dossier_verstuurd gezet; terug naar Doorgezet/Mag
+  naar incasso = dat vinkje weg). Terug naar bij_incasso = sinds incasso_sinds (de tussenstap was een vergissing). Een
+  (te vroeg) gesloten traject wordt heropend, nooit een tweede gemaakt. Pipeline volgt zoals kies_fase.
 - REKENREGEL MENTORCOMMISSIE (9 nov 2026, Maxim) — één berekening voor rapport, grootboek, mentorzicht en
   controlescherm: `api/_lib/commissie-rekenregel.js` (puur). Elke betaalde factuur van de sale (per betaling met datum:
   payments, anders paid_date) = commissie × betaald / basis, nooit meer dan commissie − max(bevroren rapporten, oud
