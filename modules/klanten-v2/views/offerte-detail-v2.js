@@ -943,16 +943,8 @@
     let commissieKeuze = null;
     if (preflight.commissie_keuze_nodig) {
       if (!window.KV_COMM) { toast('Commissie-venster niet geladen — herlaad de pagina'); return; }
-      commissieKeuze = await window.KV_COMM.keuze({
-        titel: 'Mentorcommissie op deze offerte',
-        intro: '<p style="margin:0 0 6px">Waarom verdwijnt deze offerte? De commissie krijgt een eindstatus; wat al vrijgegeven of uitbetaald is, blijft staan.</p>',
-        commissie: preflight.commissie,
-        opties: [
-          { v: 'klant_annuleert', l: 'Klant annuleert', d: 'Commissie → Geannuleerd, reden "Klant geannuleerd". De mentor ziet het in Mijn verdiensten › Geannuleerd.' },
-          { v: 'vervangen', l: 'Er komt een nieuwe offerte', d: 'Commissie → Geannuleerd, reden "Vervangen door nieuwe offerte". Link daarna de nieuwe offerte via "Sale toewijzen" (de nieuwe offerte toont een banner).' },
-        ],
-        okLabel: 'Verder naar bevestigen',
-      });
+      // Gedeeld met modules/offerte-detail-v2.html (views/_commissie-ui.js).
+      commissieKeuze = await window.KV_COMM.keuzeBijVerwijderen(preflight.commissie);
       if (!commissieKeuze) return;
     }
 
@@ -985,13 +977,7 @@
         return;
       }
       toast('Offerte definitief verwijderd (TL + CRM)');
-      if (d.commissie && window.KV_COMM) {
-        const c = d.commissie;
-        await window.KV_COMM.melding('Mentorcommissie geannuleerd',
-          '<p style="margin:0 0 8px">Reden: <b>' + _escOdv(c.reden) + '</b> · ' + (c.geannuleerd_regels || 0) + ' regel(s).</p>'
-          + (c.al_vrijgegeven > 0 ? '<p style="margin:0 0 8px">Al vrijgegeven (blijft staan): <b>' + _escOdv(window.KV_COMM.eur(c.al_vrijgegeven)) + '</b></p>' : '')
-          + (c.melding ? '<p style="margin:0;padding:8px 10px;background:var(--blue-soft,#eff6ff);border-radius:6px">' + _escOdv(c.melding) + ' De nieuwe getekende offerte van deze klant toont daarvoor een knop.</p>' : ''));
-      }
+      if (d.commissie && window.KV_COMM) await window.KV_COMM.meldingNaVerwijderen(d.commissie);
       setTimeout(() => window.__odvBack(), 900);
     } catch (e) {
       toast('Hard-delete mislukt: ' + e.message);
