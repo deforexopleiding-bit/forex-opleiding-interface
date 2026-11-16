@@ -29,14 +29,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { supabaseAdmin } from '../supabase.js';
-import { customerDisplayName } from './customer-name.js';
 import { resolveVariables } from './template-variables.js';
 import { sanitizeForPdf } from './incasso-pdf.js';
 import { parseBoldSegments } from './brief-markdown.js';
+import { briefAdresRegels } from './brief-adres.js';
 import {
   validateCustomerAddress,
   buildAddressBlockPosition,
-  buildAddressBlockLines,
   bepaalLand,
   mmToPt,
 } from './wik-brief-layout.js';
@@ -201,10 +200,8 @@ function renderBriefPdf({ customer, resolvedSubject, resolvedBody, land = null }
 
       // ── Geadresseerde in C5-vensterenvelop-slot ──────────────────────────
       const adrPos = buildAddressBlockPosition();
-      const geadresseerdeRaw = customer.is_company
-        ? (customer.company_name || customerDisplayName(customer, ''))
-        : customerDisplayName(customer, '');
-      const addrLines = buildAddressBlockLines(customer, geadresseerdeRaw, land);
+      // Gedeeld met de adreslabels (api/dunning-briefs-labels.js).
+      const addrLines = briefAdresRegels(customer, land);
       doc.font('Helvetica').fontSize(10).fillColor('#0f172a');
       let addrY = adrPos.y;
       const lineHeight = 12; // pt
