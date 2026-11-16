@@ -449,6 +449,15 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   info@). Endpoints `api/esign.js` (CRM) + `api/esign-teken.js` (publiek, rate limit open 30/min, teken 10/10 min).
   Env optioneel `ESIGN_BASIS_URL` (links in de mail; anders preview-URL of crm.deforexopleiding.nl). Migraties
   docs/sql-migrations/2026-11-09-e-handtekening-fase1-tabellen.sql + -bucket.sql.
+- Trustpilot-reviews "Kerst 2026" (2026-11-16) — het LMS (dfo-lms) toont studenten een wegklikbare pop-up + banner
+  (pas na de voorwaarden én de verplichte check-in); data in het LMS: `hlms_trustpilot_campagne` (slug
+  `trustpilot-kerst-2026`, concept = enkel `test_emails`, live = doelgroep, venster start_op..einde_op) +
+  `hlms_trustpilot_status` (nog_niet_gezien/later/niet_meer_tonen/geplaatst + trustpilot_naam; geplaatst en
+  niet_meer_tonen = eindtoestand; schrijven enkel via `hlms_trustpilot_actie`). Migratie dfo-lms-prototype
+  supabase/hlms_trustpilot.sql. CRM: MODS-item "Trustpilot-reviews" (Leren & Events, permKey `checkin.view`, geen
+  tabs) = `views/trustpilot-v2.js` + `GET /api/trustpilot-reviews` [?csv=1] (rekenkern `api/_lib/trustpilot-overzicht.js`):
+  tegels, te verloten = floor(geplaatst / per_aantal), "Kopieer namen voor de loting" (enkel geplaatst, geen test),
+  CSV. Enige schrijfactie: testrij wissen (`checkin.run`, is_test in de WHERE). GEEN loting, mails of Trustpilot-API.
 - /modules/open-acties.html — Centraal Open Acties-dashboard (F1) voor alle
   handmatige verificaties. Gescheiden van Takenbeheer (taken.html / kanban).
   Toont 2 task-categorieën uit `pending_actions`:
