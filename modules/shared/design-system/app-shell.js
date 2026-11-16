@@ -150,6 +150,10 @@
     // studenten (LMS-pop-up + balk → deforexopleiding.nl/checkin). GEEN rollen:
     // alleen wie checkin.view heeft (admin/manager + de hoofdmentor-profielen,
     // super_admin via '*'). Run en de andere knoppen vragen checkin.run.
+    // Trustpilot-reviews (2026-11-16) — campagne "Kerst 2026" in het LMS: wie
+    // bevestigde een review + export voor de loting. Zelfde rechten als
+    // Studentencheck-in (GEEN rollen, permKey checkin.view).
+    { g: 'Leren & Events',         id: 'trustpilot',       naam: 'Trustpilot-reviews', icon: I.chat,    color: 'emerald', roles: [], permKey: 'checkin.view', tabs: [] },
     { g: 'Leren & Events',         id: 'checkin',          naam: 'Studentencheck-in', icon: I.chat,     color: 'emerald', roles: [], permKey: 'checkin.view', tabs: ['Overzicht', 'Inzichten', 'Payouts', 'Per mentor', 'Mails'] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM, permKey: 'onboarding.admin', tabs: ['Actief', 'Inbox', 'Archief', 'Herinneringen'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Commissies', 'Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
