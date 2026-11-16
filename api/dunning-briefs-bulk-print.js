@@ -33,10 +33,10 @@
 import { PDFDocument } from 'pdf-lib';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+// Selectie + volgorde gedeeld met api/dunning-briefs-labels.js (labels = zelfde volgorde).
+import { leesBriefIds, laadGeordendeBrieven } from './_lib/dunning-briefs-selectie.js';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'dunning-briefs';
-const MAX_BRIEFS = 100;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -56,41 +56,21 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (finance.incasso.manage)' });
   }
 
-  let body = req.body;
-  if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
-  body = body || {};
-
-  const rawIds = Array.isArray(body.brief_ids) ? body.brief_ids : [];
-  const briefIds = Array.from(new Set(rawIds.map((s) => String(s || '').trim()).filter(Boolean)));
-  if (briefIds.length === 0) {
+  const sel = leesBriefIds(req.body);
+  if (!sel.ok) {
     res.setHeader('Content-Type', 'application/json');
-    return res.status(400).json({ error: 'brief_ids (array) verplicht', code: 'MISSING_BRIEF_IDS' });
+    return res.status(sel.status).json({ error: sel.error, code: sel.code });
   }
-  if (briefIds.length > MAX_BRIEFS) {
-    res.setHeader('Content-Type', 'application/json');
-    return res.status(400).json({ error: `Max ${MAX_BRIEFS} brieven per print-batch`, code: 'TOO_MANY' });
-  }
-  for (const id of briefIds) {
-    if (!UUID_RE.test(id)) {
-      res.setHeader('Content-Type', 'application/json');
-      return res.status(400).json({ error: `Ongeldige uuid: ${id}`, code: 'INVALID_UUID' });
-    }
-  }
+  const briefIds = sel.ids;
 
   try {
     // 1) Rijen ophalen — behoud volgorde van request (nieuwste eerst zoals UI vraagt).
-    const { data: rows, error: selErr } = await supabaseAdmin
-      .from('dunning_briefs')
-      .select('id, customer_id, pdf_path, generated_at')
-      .in('id', briefIds);
-    if (selErr) throw new Error('select failed: ' + selErr.message);
-    if (!rows || rows.length === 0) {
+    // Sorteer op volgorde van briefIds-array (UI-consistent) — gedeelde helper.
+    const ordered = await laadGeordendeBrieven(supabaseAdmin, briefIds, 'id, customer_id, pdf_path, generated_at');
+    if (ordered.length === 0) {
       res.setHeader('Content-Type', 'application/json');
       return res.status(404).json({ error: 'Geen brieven gevonden voor de opgegeven IDs', code: 'NO_BRIEFS_FOUND' });
     }
-    // Sorteer op volgorde van briefIds-array (UI-consistent).
-    const rowById = new Map(rows.map((r) => [r.id, r]));
-    const ordered = briefIds.map((id) => rowById.get(id)).filter(Boolean);
 
     // 2) Voor elke brief: fetch PDF bytes uit Storage → merge in nieuw doc.
     // Fail-soft per brief: als één PDF niet ophaalbaar is, tellen we 'em als

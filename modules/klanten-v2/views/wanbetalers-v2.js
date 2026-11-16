@@ -788,6 +788,28 @@
     } catch (e) { _toast('Bulk-print netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
   };
 
+  // Adreslabels voor de labelprinter — zelfde selectie + volgorde als de bundel.
+  // Puur lezen: de endpoint wijzigt geen status (geen downloaded_at/sent_at).
+  window.__wbxBriefLabels = async () => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    const ids = _selBriefIds();
+    if (!ids.length) return;
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/dunning-briefs-labels', { method: 'POST', headers, body: JSON.stringify({ brief_ids: ids }) });
+      if (!resp.ok) { _toast('Labels faalden: HTTP ' + resp.status, 'error'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      const n = Number(resp.headers.get('X-Labels-Count') || 0);
+      const skip = Number(resp.headers.get('X-Labels-Skipped') || 0);
+      _toast(`Adreslabels: ${n} adres${n === 1 ? '' : 'sen'}${skip ? ` (${skip} overgeslagen)` : ''}.`, skip ? 'warning' : 'success');
+    } catch (e) { _toast('Labels netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
+  };
+
   // ── Gesprekken: belpoging loggen ───────────────────────────────────
   function _callFormState(cid) {
     if (!_ui.callForm[cid]) _ui.callForm[cid] = { outcome: '', note: '', callback_at: '', saving: false, error: null };
@@ -3055,6 +3077,7 @@
     const bulkBar = selIds.length ? `<div style="padding:10px 14px;background:var(--brand-soft,#E2F1F5);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12.5px">
       <b>${selIds.length} geselecteerd</b>
       <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkPrint()">🖨 Bulk-print PDF-bundel</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefLabels()" title="Adreslabels (4×6 inch, 3 per label) in dezelfde volgorde als de PDF-bundel. Wijzigt geen status.">🏷 Labels</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkMarkSent()">✓ Markeer verstuurd</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="__wbxBriefBulkDelete()">🗑 Verwijderen</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxBriefClearSel()">Wissen</button>
