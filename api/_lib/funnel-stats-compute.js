@@ -75,6 +75,11 @@ export const FUNNEL_VARIANTEN = Object.freeze([
   // 2026-11-02: A/B-paar via /go/event-3-4 — /event-3 donker ("vaardigheid"), /event-4 licht ("meekijken").
   'event-3',
   'event-4',
+  // 2026-11-17: 3-weg-test via /go/event-5-6-7 — /event-5 "direct" (donker, formulier bovenaan),
+  // /event-6 "uitnodiging" (licht, ticket), /event-7 "roadmap" (donker, tijdlijn).
+  'event-5',
+  'event-6',
+  'event-7',
 ]);
 
 export const VARIANT_INFO = Object.freeze({
@@ -112,6 +117,9 @@ export const VARIANT_INFO = Object.freeze({
   'event-forex-1':          { label: 'Event · event-forex-1', groep: 'events' },
   'event-3':                { label: 'Event · event-3 (donker, vaardigheid)', groep: 'events' },
   'event-4':                { label: 'Event · event-4 (licht, meekijken)', groep: 'events' },
+  'event-5':                { label: 'Event · event-5 (donker, direct)', groep: 'events' },
+  'event-6':                { label: 'Event · event-6 (licht, uitnodiging)', groep: 'events' },
+  'event-7':                { label: 'Event · event-7 (donker, roadmap)', groep: 'events' },
 });
 
 /**
@@ -121,7 +129,7 @@ export const VARIANT_INFO = Object.freeze({
  *                     (uniek op e-mail; toegelaten wint van afgewezen);
  *   Geboekt         = event_attendees met source = variant (uniek op e-mail).
  */
-export const EVENT_VARIANTEN = Object.freeze(['event-1', 'event-2', 'event-forex-1', 'event-3', 'event-4']);
+export const EVENT_VARIANTEN = Object.freeze(['event-1', 'event-2', 'event-forex-1', 'event-3', 'event-4', 'event-5', 'event-6', 'event-7']);
 const EVENT_FUNNEL_SET = new Set(EVENT_VARIANTEN);
 
 /**

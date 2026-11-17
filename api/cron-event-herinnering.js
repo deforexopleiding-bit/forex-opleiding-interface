@@ -36,7 +36,7 @@ const MAX_POGINGEN = 5;       // na zoveel mislukte sends: opgeven (gaveup)
 const BATCH_LIMIET = 500;
 
 // Event-funnels met een eigen landingspad op de site (zie funnel-stats-compute.js).
-const EVENT_FUNNEL_PADEN = new Set(['event-1', 'event-2', 'event-3', 'event-4', 'event-forex-1']);
+const EVENT_FUNNEL_PADEN = new Set(['event-1', 'event-2', 'event-3', 'event-4', 'event-5', 'event-6', 'event-7', 'event-forex-1']);
 const DFO_BASE = (process.env.DFO_WEBSITE_BASE_URL || 'https://www.deforexopleiding.nl').replace(/\/+$/, '');
 
 // Test-adressen tellen niet (zelfde markers als funnel-stats-compute.js).
