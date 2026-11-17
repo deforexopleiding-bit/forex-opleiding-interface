@@ -4544,6 +4544,10 @@
     // 2026-11-02: A/B-paar via /go/event-3-4 (Funnels koppelen), zelfde aanmeldflow als event-1/event-2.
     { bron: 'event-3',               naam: 'Event · event-3 (donker, vaardigheid)', product: 'events', route: 'https://deforexopleiding.nl/event-3', status: 'actief' },
     { bron: 'event-4',               naam: 'Event · event-4 (licht, meekijken)',    product: 'events', route: 'https://deforexopleiding.nl/event-4', status: 'actief' },
+    // 2026-11-17: 3-weg-test via /go/event-5-6-7 (Funnels koppelen), zelfde aanmeldflow als event-1 … event-4.
+    { bron: 'event-5',               naam: 'Event · event-5 (donker, direct)',       product: 'events', route: 'https://deforexopleiding.nl/event-5', status: 'actief' },
+    { bron: 'event-6',               naam: 'Event · event-6 (licht, uitnodiging)',   product: 'events', route: 'https://deforexopleiding.nl/event-6', status: 'actief' },
+    { bron: 'event-7',               naam: 'Event · event-7 (donker, roadmap)',      product: 'events', route: 'https://deforexopleiding.nl/event-7', status: 'actief' },
     { bron: 'website',               naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
   ];
   async function fetchFunnels(force) {
