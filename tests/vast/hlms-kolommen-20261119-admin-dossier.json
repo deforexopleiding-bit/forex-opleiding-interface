@@ -1,0 +1,4 @@
+{
+  "_bron": "information_schema.columns in het LMS (absicpdidnoblirngiia), gemeten 19 nov 2026 na hlms_admin_brief_crm.sql — de brieven van het bord (api/_lib/brieven-lms.js, api/lms-brieven.js).",
+  "hlms_admin_dossier": "id,student_id,crm_onboarding_id,naam,spoor,fase,fase_sinds,volgende_check,bespreken,bespreken_sinds,nieuw_binnen_op,laatste_actie_op,eigenaar,belofte_tot,regeling,minderjarig,checklist,bron,geopend_op,gesloten_op,gesloten_reden,gesloten_door,mentor_wacht,gemeld_door,gemeld_op,gemeld_reden,brieven"
+}

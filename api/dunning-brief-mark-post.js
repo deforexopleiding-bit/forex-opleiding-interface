@@ -16,6 +16,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { spiegelBrieven } from './_lib/brieven-lms.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -96,7 +97,11 @@ export default async function handler(req, res) {
       });
     } catch (_) {}
 
-    return res.status(200).json({ ok: true, sent_via: 'post', sent_at: sentAtIso });
+    //  Het bord in het LMS volgt (16 nov 2026): verstuurd met deze datum. Fail-soft.
+    let lms = null;
+    try { lms = (await spiegelBrieven([briefId]))[0] || null; } catch (e) { console.error('[dunning-brief-mark-post] lms:', e?.message || e); }
+
+    return res.status(200).json({ ok: true, sent_via: 'post', sent_at: sentAtIso, lms });
   } catch (e) {
     console.error('[dunning-brief-mark-post]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

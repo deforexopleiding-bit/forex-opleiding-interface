@@ -15,6 +15,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { spiegelVerwijderd } from './_lib/brieven-lms.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'dunning-briefs';
@@ -64,6 +65,14 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'Geen brieven gevonden', code: 'NOT_FOUND' });
     }
     const foundIds = found.map((r) => r.id);
+    //  Het bord in het LMS (16 nov 2026): welke van deze brieven hangen aan een dossier?
+    //  Apart gelezen en fail-soft, zodat verwijderen nooit op de spiegel wacht.
+    let gekoppeld = [];
+    try {
+      const { data: lk } = await supabaseAdmin.from('dunning_briefs')
+        .select('id, lms_dossier_id, lms_brief_nr').in('id', foundIds).not('lms_dossier_id', 'is', null);
+      gekoppeld = lk || [];
+    } catch (_) { gekoppeld = []; }
 
     // 2) Rijen verwijderen.
     const { error: delErr } = await supabaseAdmin
@@ -96,8 +105,13 @@ export default async function handler(req, res) {
       }
     }
 
+    //  4) Het bord volgt: de brief ligt daar weer te versturen (fail-soft).
+    let lms = [];
+    try { lms = await spiegelVerwijderd(gekoppeld); } catch (e) { console.error('[dunning-brief-delete] lms:', e?.message || e); }
+
     return res.status(200).json({
       ok: true,
+      lms,
       deleted: foundIds.length,
       storage_removed: storageRemoved,
       storage_failed: storageFailed,

@@ -3003,6 +3003,11 @@
 
     // BROK WB-POLISH-1: init zoek-state.
     _ui.brSearchQ = _ui.brSearchQ || '';
+    // Het bord in het LMS linkt hierheen met ?brzoek=<naam> (16 nov 2026): één keer invullen.
+    if (!_ui.brZoekUitUrl) {
+      _ui.brZoekUitUrl = true;
+      try { const z = new URLSearchParams(window.location.search).get('brzoek'); if (z && !_ui.brSearchQ) { _ui.brSearchQ = String(z).slice(0, 80); _ui.brStatusFilter = 'all'; } } catch (_) { /* geen URL */ }
+    }
     const items = asArr(_live.briefs.items);
     const categorize = (b) => {
       if (b.sent_at || b.status === 'sent' || b.sent_via) return 'sent';

@@ -43,6 +43,7 @@ import {
 // wik-brief-logo.js waarom dit patroon nodig is (img/ wordt niet meegebundeld
 // door Vercel; alleen JS-modules geïmporteerd vanuit een function komen mee).
 import { WIK_LOGO_BUFFER } from './wik-brief-logo.js';
+import { koppelEnSpiegel } from './brieven-lms.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const BUCKET = 'dunning-briefs';
@@ -327,6 +328,10 @@ export async function generatePreBriefForCustomer({
   runId = null,
   stepId = null,
   db = supabaseAdmin,
+  // Het bord in het LMS (16 nov 2026): { dossierId, nr, bron: 'lms', aangemaaktDoorEmail }
+  // als Seppe "Brief N mag weg" klikte. Zonder: automatisch koppelen als de klant
+  // precies één open betalingsdossier heeft (api/_lib/brieven-lms.js).
+  lmsKoppeling = null,
 } = {}) {
   // 1) Klant ophalen (altijd nodig: adres + naam + land-afleiding).
   const { data: customer, error: cErr } = await db
@@ -480,8 +485,24 @@ export async function generatePreBriefForCustomer({
     console.warn('[incasso-pre-brief-core] dunning_log insert soft-fail', e?.message || e);
   }
 
+  // 10) Het bord in het LMS volgt (Administratie). Fail-soft: een mislukte spiegel
+  //     laat de brief NOOIT mislukken; de uurlijkse verzoening haalt het in.
+  let lms = null;
+  try {
+    lms = await koppelEnSpiegel(brief.id, {
+      bron: lmsKoppeling?.bron === 'lms' ? 'lms' : 'crm',
+      dossierId: lmsKoppeling?.dossierId || null,
+      nr: lmsKoppeling?.nr || null,
+      aangemaaktDoorEmail: lmsKoppeling?.aangemaaktDoorEmail || null,
+    }, { crm: db });
+  } catch (e) {
+    console.error('[incasso-pre-brief-core] spiegel naar het LMS:', e?.message || e);
+    lms = { status: 'mislukt', fout: e?.message || String(e) };
+  }
+
   return {
     ok: true,
+    lms,
     brief_id: brief.id,
     pdf_path: brief.pdf_path,
     pdf_size_bytes: buffer.length,

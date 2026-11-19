@@ -49,6 +49,8 @@ const DUMP = {
   ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261027-akkoord.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
   // Account verwijderen: de auditrij (lms-account-verwijderen.js, lms-student-ontkoppelen.js, 2 nov).
   ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261102-verwijderd.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
+  // De brieven van het bord: het betalingsdossier (brieven-lms.js, lms-brieven.js, 19 nov).
+  ...Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(HIER, 'vast/hlms-kolommen-20261119-admin-dossier.json'), 'utf8'))).filter(([t]) => !t.startsWith('_'))),
 };
 
 // VERWACHT, NIET GEMETEN — tabellen die nog niet in de meting staan (nieuw uit
