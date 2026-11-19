@@ -23,6 +23,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendMail } from './mailer.js';
+import { spiegelBrieven } from './_lib/brieven-lms.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUCKET = 'dunning-briefs';
@@ -192,8 +193,13 @@ export default async function handler(req, res) {
       });
     } catch (_) {}
 
+    //  Het bord in het LMS volgt (16 nov 2026): verstuurd vandaag. Fail-soft.
+    let lms = null;
+    try { lms = (await spiegelBrieven([briefId]))[0] || null; } catch (e) { console.error('[dunning-brief-email-send] lms:', e?.message || e); }
+
     return res.status(200).json({
       ok: true,
+      lms,
       sent_at: sentAtIso,
       sent_to_email: to,
       message_id: sendRes.messageId,

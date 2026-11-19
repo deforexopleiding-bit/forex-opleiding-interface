@@ -716,6 +716,17 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   "Status gecorrigeerd: X → Y. reden", afvinklijst volgt (Bij incasso = dossier_verstuurd gezet; terug naar Doorgezet/Mag
   naar incasso = dat vinkje weg). Terug naar bij_incasso = sinds incasso_sinds (de tussenstap was een vergissing). Een
   (te vroeg) gesloten traject wordt heropend, nooit een tweede gemaakt. Pipeline volgt zoals kies_fase.
+- Brieven van het bord ↔ Wanbetalers › Brieven (16 nov 2026, Maxim) — het CRM maakt de brieven (dunning_briefs,
+  `generatePreBriefForCustomer`) en is de ENIGE bron voor "verstuurd". Brief 1 = tussenbrief (incasso_tussen_*), brief 2 =
+  pre-incassobrief (incasso_pre_*). Koppeling = `dunning_briefs.lms_dossier_id` + `lms_brief_nr` (migratie
+  docs/sql-migrations/2026-11-17-dunning-briefs-lms-koppeling.sql, gedraaid 17 nov). Enige schrijver naar het LMS =
+  `api/_lib/brieven-lms.js` via de LMS-functie `hlms_admin_brief_crm` (service role, idempotent): bij aanmaken (hook in de
+  generator: klant met precies één open betalingsdossier → automatisch, enkel brieven vanaf AUTOKOPPEL_VANAF 2026-11-16),
+  bij mark-post / bulk-mark-sent / mail en bij verwijderen; elk uur verzoening `api/cron/brieven-lms-spiegel.js` (:20,
+  ?dry=1). Seppe klikt "Brief N mag weg" op het bord → machine-route `api/lms-brieven.js` (x-dfo-secret; actie 'maak' met
+  actor, rollen admin/administratie/hoofdmentor; validate-first via `magBriefMaken`; GET ?pdf= = signed URL 5 min). Het
+  LMS-vinkje Verstuurd weigert een CRM-brief. "Open in CRM Brieven" = ?v2preview=wanbetalers&v2tab=Brieven&brzoek=<naam>.
+  Oudere pre-brieven (aug/sep) worden NOOIT omgezet. Geen mail/WA/post naar de student vanuit deze stappen.
 - REKENREGEL MENTORCOMMISSIE (9 nov 2026, Maxim) — één berekening voor rapport, grootboek, mentorzicht en
   controlescherm: `api/_lib/commissie-rekenregel.js` (puur). Elke betaalde factuur van de sale (per betaling met datum:
   payments, anders paid_date) = commissie × betaald / basis, nooit meer dan commissie − max(bevroren rapporten, oud
