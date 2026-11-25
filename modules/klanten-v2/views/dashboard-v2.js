@@ -545,6 +545,25 @@
       if (input) input.focus();
     }
   }
+  // Dashboardtegel Event-aanmeldingen → lijst van de afgewezen aanmelders, in
+  // hetzelfde venster als het getal (zelfde period/from/to als leads-per-traject-count).
+  function _magAfgewezenZien() {
+    try {
+      const D = window.DFO;
+      const m = D && (D.MODS || []).find((x) => x.id === 'events');
+      return !!(m && typeof D.roleTabs === 'function' && D.roleTabs(m).includes('Inschrijvingen'));
+    } catch (_) { return false; }
+  }
+  window.DFO_openAfgewezen = function () {
+    if (typeof window.__evOpenAfgewezen !== 'function') return;
+    const label = _live.period || 'Maand';
+    if (label === 'Custom' && _custom.from && _custom.to) {
+      window.__evOpenAfgewezen({ from: _custom.from, to: _custom.to });
+      return;
+    }
+    const p = PERIOD_LABEL_TO_PARAM[label] || 'month';
+    window.__evOpenAfgewezen({ period: p === 'year' ? 'all' : p });
+  };
   window.DFO_aiAsk  = function (question) {
     const input = document.getElementById('dfoAiInput');
     if (input) input.value = question;
@@ -780,7 +799,14 @@
                   const T = am.tegels;
                   const tg = (k) => T[k] || { totaal: 0, toegelaten: 0, afgewezen: 0 };
                   const sp = (k) => ({ toegelaten: tg(k).toegelaten, afgewezen: tg(k).afgewezen });
-                  const evExtra = `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px"><span style="color:var(--emerald);font-weight:600">${tg('event').toegelaten}</span> aangemeld · <span style="color:var(--rose);font-weight:600">${tg('event').afgewezen}</span> afgewezen</div>`;
+                  // "X afgewezen" klikbaar (2026-11-25) → Events › Inschrijvingen › Afgewezen,
+                  // zelfde venster als dit getal. Alleen als de gebruiker die tab mag zien.
+                  const evAfgN = tg('event').afgewezen;
+                  const evAfgKlik = evAfgN > 0 && typeof window.__evOpenAfgewezen === 'function' && _magAfgewezenZien();
+                  const evAfgHtml = `<span style="color:var(--rose);font-weight:600">${evAfgN}</span> afgewezen`;
+                  const evExtra = `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px"><span style="color:var(--emerald);font-weight:600">${tg('event').toegelaten}</span> aangemeld · ${evAfgKlik
+                    ? `<a href="#" onclick="event.preventDefault();event.stopPropagation();DFO_openAfgewezen()" title="Bekijk wie er afgewezen is en waarom" style="color:inherit;text-decoration:underline;text-decoration-color:var(--rose-line, var(--border));text-underline-offset:2px">${evAfgHtml}</a>`
+                    : evAfgHtml}</div>`;
                   const OL = am.overig_labels || {};
                   const delen = Object.entries(tg('overig').delen || {}).filter(([, n]) => n > 0)
                     .map(([k, n]) => esc(OL[k] || k) + ' ' + n).join(' · ');

@@ -166,9 +166,12 @@ test('bedrading: endpoint, v2-dashboard (tegels + Overig + kop), tv-bord', () =>
   const d = lees('modules/klanten-v2/views/dashboard-v2.js');
   assert.match(d, /const am = lp && lp\.aanmeldingen && lp\.aanmeldingen\.tegels \? lp\.aanmeldingen : null;/);
   for (const t of ["'7-daagse'", "'Event-aanmeldingen'", "'Webinar'", "'Mini cursus'", "'Overig'"]) assert.ok(d.includes('tiles.push([' + t), t);
-  assert.match(d, /aangemeld · <span style="color:var\(--rose\);font-weight:600">\$\{tg\('event'\)\.afgewezen\}<\/span> afgewezen/);
+  // "X afgewezen" (sinds 2026-11-25 klikbaar → Events › Inschrijvingen › Afgewezen).
+  assert.match(d, /const evAfgN = tg\('event'\)\.afgewezen;/);
+  assert.match(d, /<span style="color:var\(--rose\);font-weight:600">\$\{evAfgN\}<\/span> afgewezen/);
+  assert.match(d, /aangemeld · \$\{evAfgKlik/);
   assert.match(d, /\$\{am\.totaal\}<\/b> aanmeldingen · \$\{per\}/);
-  assert.match(lees('modules/klanten-v2/index.html'), /views\/dashboard-v2\.js\?v=36"/);
+  assert.match(lees('modules/klanten-v2/index.html'), /views\/dashboard-v2\.js\?v=37"/);
   const dm = lees('api/display-metrics.js');
   assert.match(dm, /computeAanmeldingenPerFunnel\(\{ supabaseAdmin, range: \{ start: dayStart, endExclusive: dayEnd \} \}\)/);
   assert.match(dm, /const aanmeldingen\s+= pick\(30, null\);/);
