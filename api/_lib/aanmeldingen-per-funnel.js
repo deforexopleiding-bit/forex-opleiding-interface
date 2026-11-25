@@ -99,6 +99,33 @@ function telUnie(sessieMap, variantFn, leads, leadFn) {
   return { totaal: sleutels.size, toegelaten: sleutels.size - afgewezen, afgewezen };
 }
 
+/** event_attendees die als aanmelding tellen: geen test, niet 'verplaatst'. */
+export function echteEventAanmeldingen(eventAanmeldingen) {
+  return (eventAanmeldingen || []).filter((a) => a && !a.is_test && a.status !== 'switched_to_other_event' && !isTestEmail(a.email));
+}
+
+/**
+ * De afgewezen event-aanmelders van het venster: e-mailadressen met een
+ * 'afgewezen' inzending van de kwalificatievragenlijst, ZONDER toegelaten
+ * inzending of echte aanmelding in hetzelfde venster. Eén definitie voor de
+ * tegel ("X afgewezen") en de lijst (api/_lib/event-afgewezen.js).
+ * @returns {Set<string>} genormaliseerde e-mailadressen
+ */
+export function afgewezenEventMails({ eventAanmeldingen = [], eventInzendingen = [] } = {}) {
+  const evMails = new Set(echteEventAanmeldingen(eventAanmeldingen).map((a) => mail(a.email)).filter(Boolean));
+  const toegelatenMails = new Set();
+  const afgewezenMails = new Set();
+  for (const s of eventInzendingen || []) {
+    const m = mail(s && s.email);
+    if (!m || isTestEmail(m)) continue;
+    if (laag(s.resultaat) === 'toegelaten') toegelatenMails.add(m);
+    else if (laag(s.resultaat) === 'afgewezen') afgewezenMails.add(m);
+  }
+  const uit = new Set();
+  for (const m of afgewezenMails) if (!toegelatenMails.has(m) && !evMails.has(m)) uit.add(m);
+  return uit;
+}
+
 /**
  * Pure telling. Alle rijen zijn al op het venster gefilterd door de lezer.
  * @param {object} p
@@ -123,18 +150,8 @@ export function telAanmeldingen({
   }
 
   // Event: aanmeldingen + apart de afgewezen aanmelders.
-  const ev = (eventAanmeldingen || []).filter((a) => a && !a.is_test && a.status !== 'switched_to_other_event' && !isTestEmail(a.email));
-  const evMails = new Set(ev.map((a) => mail(a.email)).filter(Boolean));
-  const toegelatenMails = new Set();
-  const afgewezenMails = new Set();
-  for (const s of eventInzendingen || []) {
-    const m = mail(s && s.email);
-    if (!m || isTestEmail(m)) continue;
-    if (laag(s.resultaat) === 'toegelaten') toegelatenMails.add(m);
-    else if (laag(s.resultaat) === 'afgewezen') afgewezenMails.add(m);
-  }
-  let evAfgewezen = 0;
-  for (const m of afgewezenMails) if (!toegelatenMails.has(m) && !evMails.has(m)) evAfgewezen += 1;
+  const ev = echteEventAanmeldingen(eventAanmeldingen);
+  const evAfgewezen = afgewezenEventMails({ eventAanmeldingen, eventInzendingen }).size;
   tegels.event = { totaal: ev.length + evAfgewezen, toegelaten: ev.length, afgewezen: evAfgewezen };
 
   const web = (webinarAanmeldingen || []).filter((w) => w && !w.is_test && !isTestEmail(w.email));

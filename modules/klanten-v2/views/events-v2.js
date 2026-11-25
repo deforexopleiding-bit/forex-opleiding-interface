@@ -51,6 +51,9 @@
     events:      { loading: false, error: null, data: null, filter: 'published' },
     completed:   { loading: false, error: null, data: null },
     signups:     { loading: false, error: null, data: null, filter: '' },
+    // Inschrijvingen › Afgewezen (2026-11-25): eigen bron /api/events-afgewezen,
+    // venster = period (today|week|month|all) of from/to (YYYY-MM-DD, t/m).
+    afgewezen:   { loading: false, error: null, data: null, period: 'month', from: '', to: '', key: '' },
     niveaus:     { loading: false, error: null, data: null },
     detail:      { loading: {}, error: {}, data: {} },       // per event_id
     attendees:   { loading: {}, error: {}, data: {} },
@@ -224,6 +227,26 @@
     st.loading = false;
     if (hadError) st.error = 'Kon inschrijvingen niet laden';
     else st.data = { rows: allRows, counts: firstCounts || {} };
+    if (window.DFO?.render) window.DFO.render();
+  }
+  function _afgewezenQuery() {
+    const st = _live.afgewezen;
+    const p = new URLSearchParams();
+    if (st.from && st.to) { p.set('from', st.from); p.set('to', st.to); }
+    else p.set('period', st.period || 'month');
+    return p.toString();
+  }
+  async function fetchAfgewezen() {
+    const st = _live.afgewezen;
+    const key = _afgewezenQuery();
+    if (st.data && st.key === key) return;
+    if (st.loading && st.key === key) return;
+    st.loading = true; st.error = null; st.data = null; st.key = key;
+    const j = await tryFetch('afgewezen', '/api/events-afgewezen?' + key, undefined, 20000);
+    if (st.key !== key) return;   // intussen ander venster gekozen
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { rows: asArr(j?.rows), samenvatting: j?.samenvatting || null, periode: j?.periode || null, bronfouten: asArr(j?.bronfouten) };
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchNiveaus() {
@@ -534,6 +557,7 @@
     else if (block === 'events')    { _live.events.data = null; _live.events.error = null; fetchEvents(); }
     else if (block === 'completed') { _live.completed.data = null; _live.completed.error = null; fetchCompleted(); }
     else if (block === 'signups')   { _live.signups.data = null; _live.signups.error = null; fetchSignups(); }
+    else if (block === 'afgewezen') { _live.afgewezen.data = null; _live.afgewezen.error = null; _live.afgewezen.loading = false; _live.afgewezen.key = ''; fetchAfgewezen(); }
     else if (block === 'inboxMsgs' && id) { _live.inboxMsgs.data[id] = null; _live.inboxMsgs.error[id] = null; fetchInboxMsgs(id); }
     if (window.DFO?.render) window.DFO.render();
   };
@@ -4356,8 +4380,20 @@
   // ═══════════════════════════════════════════════════════════════════════
   // INSCHRIJVINGEN-tab (behouden)
   // ═══════════════════════════════════════════════════════════════════════
+  function _signupChips(status, counts) {
+    const afg = _live.afgewezen;
+    // Teller van Afgewezen = het gekozen venster (standaard deze maand), net als de dashboardtegel.
+    const afgCnt = afg.data ? `<span class="cnt">${afg.data.rows.length}</span>` : '';
+    return [['','Alles','total'],['matched','Matched','matched'],['ambiguous','Ambigu','ambiguous'],['no_match','Geen match','no_match'],['invalid_payload','Ongeldig','invalid_payload']].map(([v, l, k]) =>
+        `<button class="chip ${status === v ? 'on' : ''}" onclick="window.__evSetSignupStatus('${v}')">${esc(l)}${counts ? `<span class="cnt">${Number(counts[k] || 0)}</span>` : ''}</button>`
+      ).join('')
+      + `<button class="chip ${status === 'afgewezen' ? 'on' : ''}" onclick="window.__evSetSignupStatus('afgewezen')" title="Afgewezen door de kwalificatievragenlijst" style="${status === 'afgewezen' ? '' : 'color:var(--rose)'}">Afgewezen${afgCnt}</button>`;
+  }
+
   function inschrijvingenView() {
     const status = _live.signups.filter;
+    if (status === 'afgewezen') return afgewezenView();
+    if (!_live.afgewezen.data && !_live.afgewezen.loading && !_live.afgewezen.error) queueMicrotask(fetchAfgewezen);
     if (!_live.signups.data && !_live.signups.loading && !_live.signups.error) queueMicrotask(() => fetchSignups(status));
     if (_live.signups.error && !_live.signups.data) return errBlk('signups', _live.signups.error);
     if (_live.signups.loading && !_live.signups.data) return skel();
@@ -4397,9 +4433,7 @@
     rows.sort((a, b) => String(b.received_at || '').localeCompare(String(a.received_at || '')));
     const counts = _live.signups.data?.counts || {};
     return `<div class="toolbar" style="padding:12px 20px;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
-      ${[['','Alles','total'],['matched','Matched','matched'],['ambiguous','Ambigu','ambiguous'],['no_match','Geen match','no_match'],['invalid_payload','Ongeldig','invalid_payload']].map(([v, l, k]) =>
-        `<button class="chip ${status === v ? 'on' : ''}" onclick="window.__evSetSignupStatus('${v}')">${esc(l)}<span class="cnt">${Number(counts[k] || 0)}</span></button>`
-      ).join('')}
+      ${_signupChips(status, counts)}
       <div class="tb-right"><button class="btn btn-ghost btn-sm" onclick="__evRetry('signups')">${svg(I.refresh || I.tick)}</button></div>
     </div>
     ${rows.length === 0
@@ -4463,7 +4497,149 @@
           })
         )}${_globalOverlays()}`;
   }
-  window.__evSetSignupStatus = (v) => { _live.signups.data = null; _live.signups.error = null; fetchSignups(v); };
+  window.__evSetSignupStatus = (v) => {
+    if (v === 'afgewezen') {
+      _live.signups.filter = 'afgewezen';
+      fetchAfgewezen();
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    _live.signups.data = null; _live.signups.error = null; fetchSignups(v);
+  };
+
+  // ── AFGEWEZEN (2026-11-25) ────────────────────────────────────────────────
+  // Wie de kwalificatievragenlijst afwees, met de reden. Alleen lezen. Zelfde
+  // definitie + venster als "X afgewezen" in de dashboardtegel Event-aanmeldingen
+  // (api/events-afgewezen.js → api/_lib/event-afgewezen.js).
+  const AFG_PERIODES = [['month', 'Deze maand'], ['vorige', 'Vorige maand'], ['week', 'Deze week'], ['today', 'Vandaag'], ['all', 'Alles']];
+  function _nlDatum(d) {
+    // YYYY-MM-DD van een kalenderdag in Europe/Amsterdam.
+    return new Intl.DateTimeFormat('en-CA', { timeZone: EV_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  }
+  function _vorigeMaand() {
+    const [y, m] = _nlDatum(new Date()).split('-').map(Number);
+    const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+    const laatste = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+    const mm = String(pm).padStart(2, '0');
+    return { from: `${py}-${mm}-01`, to: `${py}-${mm}-${String(laatste).padStart(2, '0')}` };
+  }
+  function _afgPeriodeKeuze() {
+    const st = _live.afgewezen;
+    if (!st.from) return st.period || 'month';
+    const v = _vorigeMaand();
+    return (st.from === v.from && st.to === v.to) ? 'vorige' : 'custom';
+  }
+  window.__evAfgPeriode = (p) => {
+    const st = _live.afgewezen;
+    if (p === 'vorige') { const v = _vorigeMaand(); st.from = v.from; st.to = v.to; st.period = 'month'; }
+    else { st.from = ''; st.to = ''; st.period = p; }
+    fetchAfgewezen();
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evAfgEigen = () => {
+    const van = document.getElementById('evAfgVan')?.value || '';
+    const tot = document.getElementById('evAfgTot')?.value || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot) || tot < van) {
+      if (typeof _showToast === 'function') _showToast('Kies een geldige van- en tot-datum.');
+      return;
+    }
+    const st = _live.afgewezen; st.from = van; st.to = tot;
+    fetchAfgewezen();
+    if (window.DFO?.render) window.DFO.render();
+  };
+  // Vanuit de dashboardtegel: { period } of { from, to } — hetzelfde venster als het getal.
+  window.__evOpenAfgewezen = (venster) => {
+    const st = _live.afgewezen;
+    const v = venster || {};
+    if (v.from && v.to) { st.from = v.from; st.to = v.to; st.period = 'month'; }
+    else { st.from = ''; st.to = ''; st.period = ['today', 'week', 'month', 'all'].includes(v.period) ? v.period : 'month'; }
+    _live.signups.filter = 'afgewezen';
+    fetchAfgewezen();
+    const D = window.DFO;
+    if (!D) return;
+    D.goMod('events');
+    const m = (D.MODS || []).find((x) => x.id === 'events');
+    if (m && typeof D.roleTabs === 'function' && D.roleTabs(m).includes('Inschrijvingen')) D.goTab('Inschrijvingen');
+  };
+
+  function _afgReden(r) {
+    const delen = (r.knockouts || []).map((k) =>
+      `<div style="display:flex;gap:6px;align-items:baseline;line-height:1.35"><span style="color:var(--rose);font-weight:700;font-size:11px">✕</span><span><span style="color:var(--text-3)">${esc(k.vraag)}</span> → <b style="color:var(--text)">${esc(k.antwoord)}</b></span></div>`);
+    if (r.onder_drempel) {
+      delen.push(`<div style="display:flex;gap:6px;align-items:baseline;line-height:1.35"><span style="color:var(--amber);font-weight:700;font-size:11px">▼</span><span>Onder de drempel <span class="mono">(${esc(String(r.score))} van min. ${esc(String(r.drempel))})</span></span></div>`);
+    }
+    if (!delen.length) delen.push(`<span style="color:var(--text-3)">Geen reden opgeslagen</span>`);
+    return `<div style="font-size:12px;display:flex;flex-direction:column;gap:3px">${delen.join('')}</div>`;
+  }
+  function _afgEerdere(r) {
+    if (!(r.pogingen > 1)) return '';
+    const regels = (r.eerdere || []).map((x) => {
+      const red = (x.knockouts || []).map((k) => k.vraag + ' → ' + k.antwoord);
+      if (x.onder_drempel) red.push('onder de drempel (' + x.score + '/' + x.drempel + ')');
+      return _fmtDateTime(x.op) + ' · ' + x.bron_label + ' · ' + (red.join('; ') || 'geen reden');
+    }).join('\n');
+    return `<span title="${esc('Eerdere afgewezen pogingen in deze periode:\n' + regels)}" style="display:inline-flex;align-items:center;padding:1px 7px;border-radius:10px;background:var(--amber-soft);color:var(--amber);font-size:10px;font-weight:600;margin-left:6px;cursor:help">× ${r.pogingen}</span>`;
+  }
+  function _afgSamenvatting(sv) {
+    if (!sv || !sv.totaal) return '';
+    const items = (sv.knockouts || []).map((k) => `<span class="chip" style="cursor:default;font-size:11.5px">${esc(k.label)}<span class="cnt">${k.aantal}</span></span>`);
+    if (sv.alleen_drempel) items.push(`<span class="chip" style="cursor:default;font-size:11.5px">Alleen onder de drempel<span class="cnt">${sv.alleen_drempel}</span></span>`);
+    const bron = (sv.per_bron || []).map((b) => `${esc(b.label)} <b class="mono">${b.aantal}</b>`).join(' · ');
+    return `<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:11.5px;color:var(--text-3);margin-right:4px">Redenen</span>${items.join('')}</div>
+      ${bron ? `<div style="font-size:12px;color:var(--text-2)"><span style="color:var(--text-3);margin-right:6px">Per bron</span>${bron}</div>` : ''}
+    </div>`;
+  }
+
+  function afgewezenView() {
+    const st = _live.afgewezen;
+    if (!st.data && !st.loading && !st.error) queueMicrotask(fetchAfgewezen);
+    const sCounts = _live.signups.data?.counts || null;   // niet geladen → chips zonder teller
+    const keuze = _afgPeriodeKeuze();
+    const dateStijl = 'height:28px;font-size:12px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:inherit';
+    const toolbar = `<div class="toolbar" style="padding:12px 20px;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+      ${_signupChips('afgewezen', sCounts)}
+      <div class="tb-right"><button class="btn btn-ghost btn-sm" onclick="__evRetry('afgewezen')">${svg(I.refresh || I.tick)}</button></div>
+    </div>
+    <div style="padding:10px 20px;gap:6px;display:flex;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border)">
+      <span style="font-size:11.5px;color:var(--text-3);margin-right:4px">Periode</span>
+      ${AFG_PERIODES.map(([v, l]) => `<button class="chip ${keuze === v ? 'on' : ''}" onclick="window.__evAfgPeriode('${v}')">${esc(l)}</button>`).join('')}
+      <span style="display:inline-flex;gap:6px;align-items:center;margin-left:8px;flex-wrap:wrap">
+        <input type="date" id="evAfgVan" value="${esc(st.from || '')}" style="${dateStijl}" aria-label="Van">
+        <span style="color:var(--text-3);font-size:12px">t/m</span>
+        <input type="date" id="evAfgTot" value="${esc(st.to || '')}" style="${dateStijl}" aria-label="Tot en met">
+        <button class="chip ${keuze === 'custom' ? 'on' : ''}" onclick="window.__evAfgEigen()">Toon</button>
+      </span>
+    </div>`;
+    if (st.error && !st.data) return toolbar + errBlk('afgewezen', st.error);
+    if (!st.data) return toolbar + skel();
+    const rows = st.data.rows;
+    const fout = st.data.bronfouten && st.data.bronfouten.length
+      ? `<div style="margin:10px 20px 0;padding:8px 12px;border:1px solid var(--amber-line);background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12px">Niet alles kon gelezen worden (${esc(st.data.bronfouten.join(', '))}); de lijst kan onvolledig zijn.</div>`
+      : '';
+    const uitleg = `<div style="padding:10px 20px 4px;font-size:12px;color:var(--text-3);line-height:1.5">Afgewezen door de kwalificatievragenlijst, zonder toegelaten poging of aanmelding in deze periode: dezelfde telling als "afgewezen" op het dashboard. De reden is die van de vragenlijst zoals die gold op het moment van invullen.</div>`;
+    if (!rows.length) return toolbar + fout + uitleg + emptyBlk('Geen afgewezen aanmeldingen', 'Niemand werd in deze periode door de vragenlijst afgewezen.');
+    return toolbar + fout + _afgSamenvatting(st.data.samenvatting) + uitleg + H.table(
+      [{l:'Naam'},{l:'Contact'},{l:'Aangemeld',cls:'optional'},{l:'Bron',cls:'optional'},{l:'Score',cls:'r'},{l:'Reden van afwijzing'}],
+      rows.map((r) => {
+        const naam = r.naam || r.email || '—';
+        const wa = r.whatsapp
+          ? `<a href="https://wa.me/${esc(r.whatsapp)}" target="_blank" rel="noopener" style="color:var(--emerald);text-decoration:none" title="Open in WhatsApp">${esc(r.telefoon)}</a>`
+          : `<span style="color:var(--text-3)">${esc(r.telefoon || 'geen nummer')}</span>`;
+        const evTitel = r.event && r.event.title ? r.event.title : '';
+        const evDatum = r.event && r.event.starts_at ? _fmtDate(r.event.starts_at) : '';
+        const scoreKleur = r.onder_drempel ? 'var(--rose)' : 'var(--text-2)';
+        return [
+          `<div class="row-avatar" style="cursor:default">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}${_afgEerdere(r)}</span></div>`,
+          `<div style="min-width:0;font-size:12.5px"><div style="color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="mailto:${esc(r.email)}" style="color:inherit;text-decoration:none">${esc(r.email)}</a></div><div class="mono" style="font-size:11.5px">${wa}</div></div>`,
+          `<div><div class="mono" style="font-size:12.5px;color:var(--text-2)">${esc(_fmtDate(r.op))}</div><div class="mono" style="font-size:11px;color:var(--text-3)">${esc(_fmtTime(r.op))}</div></div>`,
+          `<div style="min-width:0"><div style="font-size:12.5px;color:var(--text-2)">${esc(r.bron_label)}</div>${evTitel ? `<div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(evTitel + (evDatum ? ' · ' + evDatum : ''))}">${esc(evTitel)}${evDatum ? ' · ' + esc(evDatum) : ''}</div>` : ''}</div>`,
+          `<div style="text-align:right" class="mono"><span style="color:${scoreKleur};font-weight:600">${esc(r.score == null ? '—' : String(r.score))}</span><span style="color:var(--text-3);font-size:11px"> / ${esc(r.drempel == null ? '—' : String(r.drempel))}</span></div>`,
+          _afgReden(r),
+        ];
+      })
+    ) + _globalOverlays();
+  }
   // Bug 1A: subtiele melding voor niet-gematchte inschrijvingen (geen dode klik).
   window.__evSignupNoMatch = () => {
     if (typeof _showToast === 'function') _showToast('Nog geen gekoppelde deelnemer — wacht op auto-match of match handmatig.');
