@@ -846,6 +846,48 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
+    // ── Rol-drift-fix (2026-11-25) ───────────────────────────────────────────
+    // De legacy role-PATCH zette tot nu toe ALLEEN profiles.role en liet
+    // user_roles ongemoeid. Maar permission-checks (user_has_permission) lezen
+    // uitsluitend user_roles, dus een rol die alleen in profiles.role belandde
+    // gaf 0 permissies (de offerte-wizard-403 bij sales/mentor). create,
+    // reactivate, set_canonical_role en add/remove_role syncten user_roles al;
+    // dit pad was de laatste bron van drift.
+    //
+    // Zelfde model als set_canonical_role, maar bewust ADDITIEF-veilig: we zetten
+    // de nieuwe rol erbij (idempotent) en ruimen alleen de VÓRIGE canonieke rol
+    // op. Overige user_roles-rijen (multi-rol, bv. mentor + super_admin-weergave)
+    // blijven onaangeroerd, zodat we nooit een tweede rol of een hogere rol
+    // slopen. Re-save van dezelfde rol self-healt bestaande drift via de upsert.
+    if (role !== undefined) {
+      const vorigeRol = _targetProfile?.role || null;
+      const { error: urUpsertErr } = await supabaseAdmin
+        .from('user_roles')
+        .upsert({ user_id: userId, role, assigned_by: admin.user.id }, { onConflict: 'user_id,role' });
+      if (urUpsertErr) {
+        // Hard: zonder deze rij klopt de permission-union niet → meld het i.p.v.
+        // stil door te driften. profiles.role is al gezet; de admin ziet de fout
+        // en kan opnieuw opslaan (upsert is idempotent).
+        await logAudit({
+          action:        'update_user_role',
+          payload:       { target_id: userId, admin_email: admin.profile.email, role, user_roles_sync: 'failed' },
+          status:        'error',
+          error_message: urUpsertErr.message,
+          triggered_by:  admin.profile.email,
+        });
+        return res.status(500).json({ error: 'user_roles sync: ' + urUpsertErr.message });
+      }
+      if (vorigeRol && vorigeRol !== role) {
+        // Ruim de vórige canonieke rol op zodat een verlaging (bv. sales → viewer)
+        // de oude permissies echt intrekt. Soft: een restje schaadt de nieuwe rol
+        // niet, en de volgende save ruimt het alsnog op.
+        const { error: urDelErr } = await supabaseAdmin
+          .from('user_roles')
+          .delete().eq('user_id', userId).eq('role', vorigeRol);
+        if (urDelErr) console.warn('[admin-users] vorige rol opruimen (soft):', urDelErr.message);
+      }
+    }
+
     // Detecteer reactivate_user vs update_user
     const auditAction = (is_active === true)  ? 'reactivate_user'
                       : (is_active === false) ? 'deactivate_user'
