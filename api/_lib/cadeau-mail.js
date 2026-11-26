@@ -80,7 +80,9 @@ export function bouwCadeauMail(cadeau, { voornaam, score }) {
     cta: { label: m.knop, url: SITE + m.knopPad },
     voetnoot: `${esc(m.naKnop)}<br><br>${esc(DISCLAIMER)}`,
   };
-  return { subject: m.onderwerp, html: renderAfspraakMail(args), text: platteTekstAfspraak(args) };
+  // Platte tekst: witregels i.p.v. <br> (stripHtml laat geen regeleinde achter).
+  const tekstArgs = { ...args, inleiding: args.inleiding.replace(/<br><br>/g, '\n\n'), voetnoot: args.voetnoot.replace(/<br><br>/g, '\n\n') };
+  return { subject: m.onderwerp, html: renderAfspraakMail(args), text: platteTekstAfspraak(tekstArgs) };
 }
 
 export const LOG_SOORT = (cadeau) => `cadeau-${cadeau}`;

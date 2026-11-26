@@ -29,6 +29,8 @@ test('mail: onderwerp, de zes regels (met het gecorrigeerde order block), score,
   assert.match(m.text, /Hoi Jan, hier is de checklist die wij bij elke trade openhouden\. Je had er 4 van de 5 in één keer juist\./);
   assert.match(m.text, /Bespreek je resultaat met Dave: https:\/\/www\.deforexopleiding\.nl\/agenda\/strategiescan\?cadeau=checklist/);
   assert.ok(m.text.includes(DISCLAIMER));
+  assert.match(m.text, /in één keer juist\.\n\nEén leeg vakje betekent: geen trade\./, 'witregel in de platte tekst');
+  assert.match(m.text, /eerst moet oefenen\.\n\nGeen garantie/);
   assert.equal(DISCLAIMER, 'Geen garantie op resultaat; traden brengt risico op verlies mee.');
   assert.match(m.html, /href="https:\/\/www\.deforexopleiding\.nl\/agenda\/strategiescan\?cadeau=checklist"/);
   // Geen verkooptaal, beloftes of schaarste.
