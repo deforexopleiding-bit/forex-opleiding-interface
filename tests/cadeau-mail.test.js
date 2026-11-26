@@ -27,14 +27,16 @@ test('mail: onderwerp, de zes regels (met het gecorrigeerde order block), score,
   }
   assert.ok(m.text.includes('Order block: De kaars net voor het gat is gemarkeerd.'));
   assert.match(m.text, /Hoi Jan, hier is de checklist die wij bij elke trade openhouden\. Je had er 4 van de 5 in één keer juist\./);
-  assert.match(m.text, /Bespreek je resultaat met Dave: https:\/\/www\.deforexopleiding\.nl\/agenda\/strategiescan\?cadeau=checklist/);
+  assert.match(m.text, /Plan een open gesprek met Dave: https:\/\/www\.deforexopleiding\.nl\/agenda\/strategiescan\?cadeau=checklist/);
   assert.ok(m.text.includes(DISCLAIMER));
   assert.match(m.text, /in één keer juist\.\n\nEén leeg vakje betekent: geen trade\./, 'witregel in de platte tekst');
-  assert.match(m.text, /eerst moet oefenen\.\n\nGeen garantie/);
+  assert.match(m.text, /Twintig minuten via Zoom\.\n\nGeen garantie/);
   assert.equal(DISCLAIMER, 'Geen garantie op resultaat; traden brengt risico op verlies mee.');
   assert.match(m.html, /href="https:\/\/www\.deforexopleiding\.nl\/agenda\/strategiescan\?cadeau=checklist"/);
-  // Geen verkooptaal, beloftes of schaarste.
+  // Geen verkooptaal of schaarste.
   assert.doesNotMatch(m.text, /gratis|t\.w\.v|€|plekken|beperkt|laatste kans|garandeer|winst|nu nog|snel/i);
+  // De oude knoptekst en zin zijn weg.
+  assert.doesNotMatch(m.text + m.html, /Bespreek je resultaat|grafiek door|eerst moet oefenen/);
 });
 
 test('voornaam uit de lead: alleen letters (geen links of opmaak in de aanhef)', () => {
@@ -65,4 +67,30 @@ test('route: intern geheim, lead uit de DB (campagne = cadeau), logboek bij de l
   assert.match(src, /from\('berichten_log'\)\.insert\(\{/);
   assert.match(src, /status: r\?\.ok \? 'verstuurd' : 'mislukt'/);
   assert.match(src, /to: lead\.email/, 'altijd naar het adres van de lead');
+});
+
+test('gespreksblok (26 nov, Maxim): letterlijke tekst, onder de checklist, vóór de knop; disclaimer onderaan', () => {
+  const G = {
+    kop: 'Je bent al verder dan je denkt.',
+    a1: 'Je herkent nu de vijf criteria. Maar laat ons eerlijk zijn: bij traden komt veel meer kijken, en het is niet voor iedereen.',
+    a2: 'Daarom zijn wij selectief met wie we samenwerken. Traden moet haalbaar zijn, en niet ieders dagindeling, werk of financiële situatie laat toe om de identiteit van een trader op te bouwen.',
+    a3: 'Wil je een open gesprek met ons team, om te kijken of traden iets voor jou kan zijn en waarom wij wel resultaat behalen?',
+    knop: 'Plan een open gesprek met Dave', onder: 'Twintig minuten via Zoom.',
+  };
+  assert.deepEqual(CADEAU_MAILS.checklist.gesprek, { kop: G.kop, alineas: [G.a1, G.a2, G.a3] });
+  assert.equal(CADEAU_MAILS.checklist.knop, G.knop);
+  assert.equal(CADEAU_MAILS.checklist.naKnop, G.onder);
+  const m = bouwCadeauMail('checklist', { voornaam: 'Jan', score: 4 });
+  // Platte tekst: volgorde checklist → blok → knop → onder de knop → disclaimer.
+  const t = m.text;
+  const pos = [t.indexOf('Risico: '), t.indexOf(G.kop), t.indexOf(G.a1), t.indexOf(G.a2), t.indexOf(G.a3), t.indexOf(G.knop + ': '), t.indexOf(G.onder), t.indexOf(DISCLAIMER)];
+  assert.ok(pos.every((p) => p >= 0), JSON.stringify(pos));
+  assert.deepEqual([...pos].sort((a, b) => a - b), pos, 'volgorde');
+  assert.match(t, new RegExp(G.kop.replace('.', '\\.') + '\\n\\n'));
+  // HTML: zelfde volgorde, kop als h2, knoplabel op de link.
+  const h = m.html;
+  const hpos = [h.indexOf('Risico</td>'), h.indexOf('>' + G.kop + '</h2>'), h.indexOf(G.a1), h.indexOf(G.a2), h.indexOf(G.a3), h.indexOf('>' + G.knop + '</a>'), h.indexOf(G.onder), h.indexOf(DISCLAIMER)];
+  assert.ok(hpos.every((p) => p >= 0), JSON.stringify(hpos));
+  assert.deepEqual([...hpos].sort((a, b) => a - b), hpos, 'volgorde html');
+  assert.ok(h.includes('financiële situatie'), 'trema');
 });

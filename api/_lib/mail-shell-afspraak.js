@@ -5,7 +5,8 @@
 // de footer. Volledig inline-CSS + table-layout (mailclient-proof). Géén
 // generieke email-handtekening — deze shell heeft z'n eigen footer.
 //
-// renderAfspraakMail({ titel, inleiding, details:[{label,waarde}], cta:{label,url}, voetnoot })
+// renderAfspraakMail({ titel, inleiding, details:[{label,waarde}], blok?:{kop,alineas[]}, cta:{label,url}, voetnoot })
+//   blok (optioneel, 2026-11-26): kop + alinea's tussen de details en de knop (cadeaumail).
 //   → volledige HTML-string (één <table>-kaart binnen een navy achtergrond).
 // platteTekstAfspraak({ titel, inleiding, details, cta, voetnoot })
 //   → platte-tekst-fallback (sendEmailViaSmtp vereist `text`).
@@ -27,7 +28,7 @@ function esc(s) {
   ));
 }
 
-export function renderAfspraakMail({ titel, inleiding = '', details = [], cta = null, voetnoot = '' } = {}) {
+export function renderAfspraakMail({ titel, inleiding = '', details = [], blok = null, cta = null, voetnoot = '' } = {}) {
   const detailRows = (details || []).map((d) => `
     <tr>
       <td style="padding:5px 0;color:#5b6b7d;font-size:13px;white-space:nowrap;vertical-align:top">${esc(d.label)}</td>
@@ -42,6 +43,12 @@ export function renderAfspraakMail({ titel, inleiding = '', details = [], cta = 
     ? `<table role="presentation" cellpadding="0" cellspacing="0"><tr><td style="padding:20px 0 4px">
          <a href="${esc(cta.url)}" style="display:inline-block;background:${GEEL};color:${NAVY};text-decoration:none;font-weight:700;font-size:15px;line-height:1;padding:13px 28px;border-radius:8px">${esc(cta.label)}</a>
        </td></tr></table>`
+    : '';
+
+  // Optioneel blok vóór de knop: kop + alinea's (platte tekst, wordt ge-escaped).
+  const extraBlok = blok && blok.kop
+    ? `<h2 style="margin:22px 0 8px;color:${NAVY};font-size:17px;line-height:1.35">${esc(blok.kop)}</h2>`
+      + (blok.alineas || []).map((a) => `<p style="margin:0 0 10px;color:#2b3a4a;font-size:15px;line-height:1.6">${esc(a)}</p>`).join('')
     : '';
 
   const inleidingBlok = inleiding
@@ -66,6 +73,7 @@ export function renderAfspraakMail({ titel, inleiding = '', details = [], cta = 
           <h1 style="margin:0 0 12px;color:${NAVY};font-size:20px;line-height:1.3">${esc(titel)}</h1>
           ${inleidingBlok}
           ${detailBlok}
+          ${extraBlok}
           ${ctaBlok}
           ${voetnootBlok}
         </td></tr>
@@ -79,12 +87,13 @@ export function renderAfspraakMail({ titel, inleiding = '', details = [], cta = 
 </div>`;
 }
 
-export function platteTekstAfspraak({ titel, inleiding = '', details = [], cta = null, voetnoot = '' } = {}) {
+export function platteTekstAfspraak({ titel, inleiding = '', details = [], blok = null, cta = null, voetnoot = '' } = {}) {
   const regels = [];
   if (titel) regels.push(titel, '');
   if (inleiding) regels.push(stripHtml(inleiding), '');
   for (const d of (details || [])) regels.push(`${d.label}: ${stripHtml(String(d.waarde))}`);
   if (details && details.length) regels.push('');
+  if (blok && blok.kop) regels.push(blok.kop, '', ...(blok.alineas || []).flatMap((a) => [a, '']));
   if (cta && cta.url) regels.push(`${cta.label}: ${cta.url}`, '');
   if (voetnoot) regels.push(stripHtml(voetnoot));
   regels.push('', '— De Forex Opleiding');

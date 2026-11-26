@@ -38,9 +38,20 @@ export const CADEAU_MAILS = Object.freeze({
     ]),
     inleiding: (voornaam, score, max) =>
       `Hoi ${voornaam}, hier is de checklist die wij bij elke trade openhouden. Je had er ${score} van de ${max} in één keer juist.<br><br>Eén leeg vakje betekent: geen trade.`,
-    knop: 'Bespreek je resultaat met Dave',
+    // Blok rond het gesprek met Dave (26 nov 2026, Maxim): LETTERLIJK dezelfde
+    // tekst als het eindscherm van /checklist (dfo-website lib/checklist-oefening.ts,
+    // GESPREK_BLOK). De zin over resultaat is een bewuste keuze: niet afzwakken.
+    gesprek: Object.freeze({
+      kop: 'Je bent al verder dan je denkt.',
+      alineas: Object.freeze([
+        'Je herkent nu de vijf criteria. Maar laat ons eerlijk zijn: bij traden komt veel meer kijken, en het is niet voor iedereen.',
+        'Daarom zijn wij selectief met wie we samenwerken. Traden moet haalbaar zijn, en niet ieders dagindeling, werk of financiële situatie laat toe om de identiteit van een trader op te bouwen.',
+        'Wil je een open gesprek met ons team, om te kijken of traden iets voor jou kan zijn en waarom wij wel resultaat behalen?',
+      ]),
+    }),
+    knop: 'Plan een open gesprek met Dave',
     knopPad: '/agenda/strategiescan?cadeau=checklist',
-    naKnop: 'Twintig minuten via Zoom. Je loopt samen je grafiek door en je weet wat je eerst moet oefenen.',
+    naKnop: 'Twintig minuten via Zoom.',
   }),
 });
 
@@ -77,6 +88,7 @@ export function bouwCadeauMail(cadeau, { voornaam, score }) {
     titel: m.titel,
     inleiding: m.inleiding(esc(veiligeVoornaam(voornaam)), score, m.maxScore),
     details: m.regels.map(([label, tekst]) => ({ label, waarde: esc(tekst) })),
+    blok: m.gesprek || null, // ge-escaped door de shell
     cta: { label: m.knop, url: SITE + m.knopPad },
     voetnoot: `${esc(m.naKnop)}<br><br>${esc(DISCLAIMER)}`,
   };
